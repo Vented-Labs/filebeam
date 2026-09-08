@@ -32,7 +32,7 @@
         "@types/node": "^22.13.5",
         "concurrently": "^10.0.3",
         "vite-plus": "0.3.0",
-        "vue-tsc": "^2.2.4"
+        "vue-tsc": "^3.3.11"
     },
     "optionalDependencies": {
         "@laravel/multiplex": "^0.4.1"
