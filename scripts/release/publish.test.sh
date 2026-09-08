@@ -11,8 +11,9 @@ bucket=filebeam-releases
 endpoint="https://$account.r2.cloudflarestorage.com"
 
 [[ $(php "$root/scripts/release/r2-endpoint.php" "$endpoint/$bucket/" "$bucket") == "$endpoint" ]]
-[[ $(php "$root/scripts/release/r2-endpoint.php" "${endpoint}/filebeam%2Dreleases" "$bucket") == "$endpoint" ]]
-for invalid_endpoint in "$endpoint/not-the-bucket" "$endpoint/$bucket/extra" "$endpoint?query=value" "https://user@$account.r2.cloudflarestorage.com"; do
+[[ $(php "$root/scripts/release/r2-endpoint.php" "$endpoint" "$bucket") == "$endpoint" ]]
+[[ $(php "$root/scripts/release/r2-endpoint.php" "$endpoint/" "$bucket") == "$endpoint" ]]
+for invalid_endpoint in "$endpoint/not-the-bucket" "$endpoint/$bucket/extra" "${endpoint}/filebeam%2Dreleases" "${endpoint}/$bucket%2F" "$endpoint?query=value" "${endpoint}#fragment" "${endpoint}:443" "https://user@$account.r2.cloudflarestorage.com"; do
     if php "$root/scripts/release/r2-endpoint.php" "$invalid_endpoint" "$bucket" >/dev/null 2>&1; then
         printf 'Expected invalid R2 endpoint to be rejected: %s\n' "$invalid_endpoint" >&2
         exit 1

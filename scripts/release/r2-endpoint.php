@@ -24,11 +24,10 @@ if ($parts === false
 }
 
 $path = $parts['path'] ?? '';
-$bucketPath = '/'.rawurlencode($bucket);
-$decodedPath = rawurldecode($path);
+$bucketPath = '/'.$bucket;
 if ($path !== '' && $path !== '/'
-    && $decodedPath !== $bucketPath
-    && $decodedPath !== $bucketPath.'/') {
+    && $path !== $bucketPath
+    && $path !== $bucketPath.'/') {
     fwrite(STDERR, "R2_ENDPOINT_URL path must be empty, /, or exactly the configured R2_BUCKET.\n");
     exit(1);
 }

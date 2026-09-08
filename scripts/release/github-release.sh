@@ -34,6 +34,7 @@ read -r expected_sha expected_size < <(php -r '
 ' "$metadata" "$tag")
 [[ $(sha256sum "$zip" | cut -d' ' -f1) == "$expected_sha" ]] || { printf 'Release ZIP digest does not match release.json.\n' >&2; exit 1; }
 [[ $(stat --format=%s "$zip") == "$expected_size" ]] || { printf 'Release ZIP size does not match release.json.\n' >&2; exit 1; }
+metadata_sha=$(sha256sum "$metadata" | cut -d' ' -f1)
 
 remote_tag_commit() {
     local direct='' peeled='' object ref
@@ -60,8 +61,11 @@ if release=$(gh release view "$tag" --json isDraft 2>"$error"); then
         download_dir=$(mktemp -d "${TMPDIR:-/tmp}/filebeam-github-release-asset.XXXXXX")
         trap 'rm -f "$error"; rm -rf "$download_dir"' EXIT
         gh release download "$tag" --pattern "filebeam-$tag.zip" --dir "$download_dir"
+        gh release download "$tag" --pattern release.json --dir "$download_dir"
         [[ -f "$download_dir/filebeam-$tag.zip" ]] || { printf 'Published release is missing its ZIP asset.\n' >&2; exit 1; }
         [[ $(sha256sum "$download_dir/filebeam-$tag.zip" | cut -d' ' -f1) == "$expected_sha" ]] || { printf 'Published release ZIP digest differs from the verified artifact.\n' >&2; exit 1; }
+        [[ -f "$download_dir/release.json" ]] || { printf 'Published release is missing its metadata asset.\n' >&2; exit 1; }
+        [[ $(sha256sum "$download_dir/release.json" | cut -d' ' -f1) == "$metadata_sha" ]] || { printf 'Published release metadata differs from the verified artifact.\n' >&2; exit 1; }
         exit 0
     fi
     [[ $release =~ \"isDraft\"[[:space:]]*:[[:space:]]*true ]] || { printf 'Could not determine GitHub release draft state.\n' >&2; exit 1; }

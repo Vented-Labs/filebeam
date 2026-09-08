@@ -382,7 +382,7 @@ fn nonce(prefix: &[u8], index: u64) -> ApiResult<XNonce> {
     nonce[..NONCE_PREFIX_BYTES].copy_from_slice(prefix);
     nonce[NONCE_PREFIX_BYTES..].copy_from_slice(&index.to_be_bytes());
 
-    Ok(*XNonce::from_slice(&nonce))
+    XNonce::try_from(nonce.as_slice()).map_err(|_| error("nonce must be 24 bytes"))
 }
 
 fn validate_key(key: &[u8], label: &str) -> ApiResult<()> {
