@@ -194,6 +194,7 @@ start_omnibus() {
             return 1
         }
     else
+        umask 077
         /usr/local/bin/php -r '$path = $argv[1]; $file = @fopen($path, "x"); if ($file === false) { fwrite(STDERR, "Could not create persisted Valkey password.\n"); exit(1); } fwrite($file, bin2hex(random_bytes(32))); fclose($file);' "$password"
         [ ! -L "$password" ] && [ -f "$password" ] || { printf '%s\n' 'Persisted Valkey password must be a regular file.' >&2; return 1; }
         chown -h root:filebeam "$password"
