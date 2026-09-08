@@ -54,10 +54,25 @@ async function transferConfig(page: Page, smallChunks = true): Promise<Config> {
     return config;
 }
 
+async function fastLinkMeasurements(page: Page): Promise<void> {
+    // The 1 KiB fixture plus route latency otherwise measures a genuinely slow link.
+    // Compress elapsed measurements, not timers, to exercise adaptive parallelism deterministically.
+    await page.addInitScript(() => {
+        const now = performance.now.bind(performance);
+        Object.defineProperty(performance, 'now', { value: () => now() / 1_000 });
+    });
+}
+
 async function concurrencyProbe(page: Page, method: 'PUT' | 'GET', outOfOrder = false) {
     let active = 0;
     let maximum = 0;
     let requests = 0;
+    const completed: number[] = [];
+    page.on('response', (response) => {
+        const match = response.url().match(chunkPath);
+        if (match && response.ok() && response.request().method() === method)
+            completed.push(Number(match[1]));
+    });
     const firstAttempt = new Set<string>();
     await page.route('**/api/v1/transfers/*/items/*/chunks/*', async (route) => {
         if (route.request().method() !== method) return route.continue();
@@ -66,7 +81,8 @@ async function concurrencyProbe(page: Page, method: 'PUT' | 'GET', outOfOrder = 
         requests++;
         active++;
         maximum = Math.max(maximum, active);
-        await new Promise((resolve) => setTimeout(resolve, outOfOrder && index === 0 ? 200 : 50));
+        // The first two requests establish the baseline; delay a chunk in the subsequent probe.
+        await new Promise((resolve) => setTimeout(resolve, outOfOrder && index === 2 ? 250 : 50));
         const key = route.request().url();
         if (method === 'PUT' && !firstAttempt.has(key)) {
             firstAttempt.add(key);
@@ -76,7 +92,7 @@ async function concurrencyProbe(page: Page, method: 'PUT' | 'GET', outOfOrder = 
         active--;
         return route.continue();
     });
-    return { maximum: () => maximum, requests: () => requests };
+    return { maximum: () => maximum, requests: () => requests, completed };
 }
 
 async function uploadChunked(
@@ -272,6 +288,7 @@ test(
     'uses bounded parallel PUTs with retries and never sends the plaintext SHA-256',
     { tag: '@small-chunks' },
     async ({ page }) => {
+        await fastLinkMeasurements(page);
         const config = await transferConfig(page);
         const probe = await concurrencyProbe(page, 'PUT');
         await uploadChunked(page, config, true);
@@ -293,6 +310,7 @@ test(
         const metadata = await (await request.get(`/api/v1/transfers/${uploaded.id}`)).text();
         expect(metadata).not.toContain(uploaded.digest);
         const download = await recipient(browser);
+        await fastLinkMeasurements(download);
         const probe = await concurrencyProbe(download, 'GET', true);
         await download.goto(uploaded.link);
         await expect(download.getByText('parallel-private.bin')).toBeVisible();
@@ -309,6 +327,7 @@ test(
             ),
         ).toEqual(uploaded.content);
         expect(probe.maximum()).toBeGreaterThanOrEqual(2);
+        expect(probe.completed.indexOf(3)).toBeLessThan(probe.completed.indexOf(2));
         expect(probe.maximum()).toBeLessThanOrEqual(
             Math.max(1, Math.min(8, config.download_concurrency ?? 4)),
         );
@@ -359,10 +378,11 @@ test(
         expect(await cancelled.evaluate(() => (window as any).__chunkUnhandled)).toEqual([]);
 
         const failedFuture = await recipient(browser);
+        await fastLinkMeasurements(failedFuture);
         await failedFuture.route('**/api/v1/transfers/*/items/*/chunks/*', async (route) => {
             if (route.request().method() !== 'GET') return route.continue();
             const index = Number(route.request().url().match(chunkPath)?.[1]);
-            await new Promise((resolve) => setTimeout(resolve, index === 0 ? 500 : 50));
+            await new Promise((resolve) => setTimeout(resolve, index === 2 ? 500 : 50));
             if (index === 3) return route.fulfill({ status: 404, body: 'future chunk failed' });
             return route.continue();
         });
@@ -374,5 +394,17 @@ test(
             aborted: true,
         });
         expect(await failedFuture.evaluate(() => (window as any).__chunkUnhandled)).toEqual([]);
+    },
+);
+
+test(
+    'keeps a measured slow upload serial while retrying failed chunks',
+    { tag: '@small-chunks' },
+    async ({ page }) => {
+        const config = await transferConfig(page);
+        const probe = await concurrencyProbe(page, 'PUT');
+        await uploadChunked(page, config, true);
+        expect(probe.maximum()).toBe(1);
+        expect(probe.requests()).toBeGreaterThanOrEqual(10);
     },
 );

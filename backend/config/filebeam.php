@@ -20,6 +20,8 @@ if (! is_string($chunkMaxSizeValue) || ! ctype_digit($chunkMaxSizeValue)) {
 }
 
 $chunkMaxSize = (int) $chunkMaxSizeValue;
+$stagingRequestTargetMs = max(1_000, (int) env('FILEBEAM_STAGING_REQUEST_TARGET_MS', 20_000));
+$stagingRequestBudgetMs = max((int) ceil($stagingRequestTargetMs * 1.25), (int) env('FILEBEAM_STAGING_REQUEST_BUDGET_MS', 120_000));
 
 if ($chunkMaxSize < 17 || $chunkMaxSize > 25_000_000) {
     throw new InvalidArgumentException('CHUNK_MAX_SIZE must be between 17 and 25000000 bytes.');
@@ -105,6 +107,21 @@ return [
         'session_limit' => (int) env('FILEBEAM_DOWNLOAD_SESSION_LIMIT', 32),
         'session_idle_minutes' => (int) env('FILEBEAM_DOWNLOAD_SESSION_IDLE_MINUTES', 20),
         'session_terminal_minutes' => (int) env('FILEBEAM_DOWNLOAD_SESSION_TERMINAL_MINUTES', 10),
+    ],
+
+    'staging' => [
+        // This is always a private local path; do not point it at an object-store mount.
+        'root' => env('FILEBEAM_STAGING_ROOT', storage_path('app/transfer-staging')),
+        'ttl_seconds' => max(60, (int) env('FILEBEAM_STAGING_TTL_SECONDS', 3600)),
+        'global_bytes' => max(0, (int) env('FILEBEAM_STAGING_GLOBAL_BYTES', 2 * 1024 * 1024 * 1024)),
+        'transfer_bytes' => max(0, (int) env('FILEBEAM_STAGING_TRANSFER_BYTES', 512 * 1024 * 1024)),
+        'global_max_rows' => max(1, (int) env('FILEBEAM_STAGING_GLOBAL_MAX_ROWS', 4096)),
+        'transfer_max_rows' => max(1, (int) env('FILEBEAM_STAGING_TRANSFER_MAX_ROWS', 512)),
+        'part_min_bytes' => 65_536,
+        'part_max_bytes' => min($chunkMaxSize, max(65_536, (int) env('FILEBEAM_STAGING_PART_MAX_BYTES', 4 * 1024 * 1024))),
+        'part_max_count' => max(1, (int) env('FILEBEAM_STAGING_PART_MAX_COUNT', 512)),
+        'request_target_ms' => $stagingRequestTargetMs,
+        'request_budget_ms' => $stagingRequestBudgetMs,
     ],
 
     'filesystems' => [

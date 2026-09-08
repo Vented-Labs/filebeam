@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\Api\V1\DownloadSessionController;
 use App\Http\Controllers\Api\V1\TransferChunkController;
+use App\Http\Controllers\Api\V1\TransferChunkStageController;
 use App\Http\Controllers\Api\V1\TransferController;
 use App\Http\Controllers\Api\V1\TurboTransferController;
 use App\Http\Middleware\EnsureAnonymousTransferUploadsAreEnabled;
@@ -50,6 +51,13 @@ Route::prefix('v1')->group(function (): void {
         ->middleware(['throttle:transfer-writing', EnsureAnonymousTransferUploadsAreEnabled::class])
         ->scopeBindings()
         ->name('api.transfer-chunks.store');
+    Route::prefix('/transfers/{transfer}/items/{item}/chunks/{position}/uploads/{upload}')->whereNumber('position')->scopeBindings()->middleware(['throttle:transfer-writing', EnsureAnonymousTransferUploadsAreEnabled::class])->group(function (): void {
+        Route::put('/', [TransferChunkStageController::class, 'begin'])->name('api.transfer-chunk-stages.begin');
+        Route::get('/', [TransferChunkStageController::class, 'show'])->name('api.transfer-chunk-stages.show');
+        Route::delete('/', [TransferChunkStageController::class, 'destroy'])->name('api.transfer-chunk-stages.destroy');
+        Route::put('/parts/{offset}', [TransferChunkStageController::class, 'part'])->whereNumber('offset')->name('api.transfer-chunk-stages.part');
+        Route::post('/complete', [TransferChunkStageController::class, 'complete'])->name('api.transfer-chunk-stages.complete');
+    });
     Route::get('/transfers/{transfer}/items/{item}/chunks/{position}', [TransferChunkController::class, 'show'])
         ->whereNumber('position')
         ->middleware('throttle:transfer-reading')

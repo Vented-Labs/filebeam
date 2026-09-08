@@ -9,6 +9,13 @@ export type FilebeamConfig = {
     chunk_bytes: number;
     upload_concurrency?: number;
     download_concurrency?: number;
+    upload_transport?: {
+        version: 1;
+        part_min_bytes: number;
+        part_max_bytes: number;
+        request_target_ms: number;
+        request_budget_ms: number;
+    };
     registration_enabled?: boolean;
     anonymous_uploads_enabled: boolean;
     file_retention_options?: number[];

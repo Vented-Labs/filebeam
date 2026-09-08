@@ -1,7 +1,13 @@
 import { computed, onBeforeUnmount, ref, shallowRef } from 'vue';
 import type { RecipientKey } from '../lib/account-crypto';
 import { decodeBase64Url } from '../lib/base64url';
-import { fetchChunkWithRetry, transferConcurrency } from '../lib/transfer';
+import {
+    AdaptiveConcurrency,
+    fetchChunkWithRetry,
+    readChunkWithRetry,
+    retryAfterMilliseconds,
+    transferConcurrency,
+} from '../lib/transfer';
 import { waitForWorkerMessage, type WorkerMessage } from '../lib/worker-request';
 import { progress as transferProgress } from '../../../backend/resources/js/actions/App/Http/Controllers/Api/V1/TurboTransferController';
 import {
@@ -212,7 +218,9 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
     let availabilityError: Error | undefined;
     let activityController: AbortController | undefined;
     let activityTimer: number | undefined;
+    let availabilityOnlineListener: (() => void) | undefined;
     const availabilityWaiters = new Set<() => void>();
+    let availabilityGeneration = 0;
     let reporter: SessionReporter | undefined;
     const note = ref('');
     const burned = ref(false);
@@ -234,7 +242,14 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
             ),
     );
 
-    function startAvailability(): void {
+    function wakeAvailability(): void {
+        availabilityGeneration++;
+        for (const wake of availabilityWaiters) wake();
+    }
+
+    function startAvailability(retry = false): void {
+        if (retry) availabilityError = undefined;
+        if (availabilityError) return;
         activityController?.abort();
         window.clearTimeout(activityTimer);
         const activity = new AbortController();
@@ -248,19 +263,38 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
                     cache: 'no-store',
                     signal: AbortSignal.any([activity.signal, AbortSignal.timeout(8_000)]),
                 });
+                if (activity.signal.aborted || activityController !== activity) return;
                 if (response.status === 404) {
                     availabilityError = new Error(
                         'The sender cancelled this transfer, or it has expired.',
                     );
                     uploaderStatus.value = 'unavailable';
                     if (!isDownloading.value) error.value = availabilityError.message;
+                    wakeAvailability();
                     return;
                 }
-                retryAfter =
-                    Math.min(60_000, Number(response.headers.get('Retry-After')) * 1_000) || 0;
+                retryAfter = retryAfterMilliseconds(response.headers.get('Retry-After')) ?? 0;
                 if (!response.ok) throw new Error('Unable to check upload progress.');
                 const payload = (await response.json()) as { data: Availability };
-                if (activity.signal.aborted) return;
+                if (activity.signal.aborted || activityController !== activity) return;
+                if (
+                    !payload?.data ||
+                    !['pending', 'available'].includes(payload.data.status) ||
+                    !Number.isFinite(payload.data.progress) ||
+                    !['uploading', 'stalled', 'completed', 'unavailable'].includes(
+                        payload.data.uploader_status,
+                    ) ||
+                    !Array.isArray(payload.data.items) ||
+                    payload.data.items.some(
+                        (item) =>
+                            typeof item.id !== 'string' ||
+                            !Number.isSafeInteger(item.ready_chunks) ||
+                            item.ready_chunks < 0 ||
+                            !Number.isSafeInteger(item.uploaded_chunks) ||
+                            item.uploaded_chunks < 0,
+                    )
+                )
+                    throw new Error('Invalid upload progress response.');
                 availability = payload.data;
                 uploadProgress.value = Math.max(uploadProgress.value, payload.data.progress);
                 uploaderStatus.value = payload.data.uploader_status;
@@ -268,30 +302,34 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
                 failures = 0;
             } catch {
                 if (activity.signal.aborted) return;
+                // Transient progress failures must not strand a Turbo receiver.
                 uploaderStatus.value = 'unavailable';
-                if (++failures >= 8)
-                    availabilityError = new Error(
-                        'Connection to the transfer was lost. Please try the download again.',
-                    );
+                failures++;
             } finally {
-                for (const wake of availabilityWaiters) wake();
-                if (
-                    !activity.signal.aborted &&
-                    !availabilityError &&
-                    availability?.status !== 'available'
-                )
-                    activityTimer = window.setTimeout(
-                        poll,
-                        Math.max(retryAfter, Math.min(15_000, 2_000 * 2 ** failures)) +
-                            Math.random() * 250,
-                    );
+                if (!activity.signal.aborted && activityController === activity) {
+                    wakeAvailability();
+                    if (!availabilityError && availability?.status !== 'available')
+                        activityTimer = window.setTimeout(
+                            poll,
+                            Math.max(
+                                retryAfter,
+                                Math.min(
+                                    15_000,
+                                    (isDownloading.value ? 1_000 : 2_000) * 2 ** failures,
+                                ),
+                            ) +
+                                Math.random() * 250,
+                        );
+                }
             }
         };
         void poll();
     }
 
-    function nextAvailability(signal: AbortSignal): Promise<void> {
+    function nextAvailability(signal: AbortSignal, predicate: () => boolean): Promise<void> {
         signal.throwIfAborted();
+        if (predicate()) return Promise.resolve();
+        const generation = availabilityGeneration;
         return new Promise((resolve, reject) => {
             const cleanup = () => {
                 availabilityWaiters.delete(wake);
@@ -307,21 +345,32 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
             };
             availabilityWaiters.add(wake);
             signal.addEventListener('abort', abort, { once: true });
+            // Register first, then synchronously recheck so a completed poll cannot be missed.
+            if (predicate() || availabilityGeneration !== generation) wake();
         });
+    }
+
+    function nextAvailabilityGeneration(signal: AbortSignal): Promise<void> {
+        const generation = availabilityGeneration;
+        return nextAvailability(signal, () =>
+            Boolean(availabilityError || availabilityGeneration !== generation),
+        );
     }
 
     async function waitUntilAvailable(jobId: string, itemId?: string, index = 0): Promise<void> {
         while (turbo.value && transfer.value?.status === 'pending') {
             ensureActive(jobId);
             if (availabilityError) throw availabilityError;
-            if (
-                availability?.status === 'available' ||
-                (itemId &&
+            const ready = () =>
+                Boolean(availability?.status === 'available') ||
+                Boolean(
+                    itemId &&
                     (availability?.items.find((item) => item.id === itemId)?.ready_chunks ?? 0) >
-                        index)
-            )
-                return;
-            await nextAvailability(controller!.signal);
+                        index,
+                );
+            if (ready()) return;
+            await nextAvailability(controller!.signal, () => ready() || Boolean(availabilityError));
+            // A wake can be caused by a transient polling failure; retain the loop and its predicate.
         }
         ensureActive(jobId);
     }
@@ -477,8 +526,14 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
                 throw new Error('Unsupported transfer protocol.');
             transfer.value = payload.data;
             if (turbo.value) {
-                if (payload.data.status === 'pending') startAvailability();
-                else {
+                if (payload.data.status === 'pending') {
+                    startAvailability();
+                    availabilityOnlineListener ??= () => {
+                        if (turbo.value && transfer.value?.status === 'pending')
+                            startAvailability();
+                    };
+                    window.addEventListener('online', availabilityOnlineListener);
+                } else {
                     uploadProgress.value = 100;
                     uploaderStatus.value = 'completed';
                 }
@@ -569,25 +624,39 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
         }
     }
 
-    async function fetchChunk(itemId: string, index: number, jobId: string): Promise<ArrayBuffer> {
+    async function fetchChunk(
+        itemId: string,
+        index: number,
+        expectedBytes: number,
+        jobId: string,
+        onProgress: (loaded: number) => void,
+        onRetry: () => void,
+        onReady?: () => void,
+        onWaiting?: () => void,
+    ): Promise<ArrayBuffer> {
         if (!transfer.value) throw new Error('Transfer unavailable.');
         while (true) {
             await waitUntilAvailable(jobId, itemId, index);
-            const result = await fetchChunkWithRetry(
+            onReady?.();
+            const result = await readChunkWithRetry(
                 `${inbox ? '/account/inbox' : '/api/v1/transfers'}/${transfer.value.id}/items/${itemId}/chunks/${index}`,
                 {},
                 controller!.signal,
-                (response) =>
-                    response.status === 202 ? Promise.resolve(null) : response.arrayBuffer(),
+                expectedBytes,
+                onProgress,
+                onRetry,
             );
             if (result !== null) return result;
+            onWaiting?.();
             if (
                 !turbo.value ||
                 transfer.value.status !== 'pending' ||
                 availability?.status === 'available'
             )
                 throw new Error('The completed transfer is missing a chunk.');
-            await nextAvailability(controller!.signal);
+            // A 202 can contradict stale readiness. Wait for a new poll, never re-GET immediately.
+            await nextAvailabilityGeneration(controller!.signal);
+            if (availabilityError) throw availabilityError;
         }
     }
 
@@ -702,28 +771,90 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
         item: ManifestItem,
         jobId: string,
         onChunk: (plaintext: Uint8Array) => Promise<void> | void,
+        onProgress?: (bytes: number) => void,
     ): Promise<void> {
         if (!transfer.value?.chunk_bytes) throw new Error('Transfer unavailable.');
+        const downloadController = controller!;
         const hashId = crypto.randomUUID();
         const verifyDigest = Boolean(item.digest || turbo.value);
         if (verifyDigest) await hash('hash-start', jobId, hashId);
-        const concurrency = transferConcurrency(
+        const maximum = transferConcurrency(
             transfer.value.download_concurrency,
             transfer.value.chunk_bytes,
         );
         const pending = new Map<number, Promise<{ plaintext?: Uint8Array; reason?: unknown }>>();
         let pipelineFailure: unknown;
         let nextFetch = 0;
-        const queue = () => {
-            while (nextFetch < item.chunk_count && pending.size < concurrency) {
+        let written = 0;
+        const buffered = new Map<number, number>();
+        const reportProgress = () => {
+            if (activeJob !== jobId || controller?.signal.aborted) return;
+            onProgress?.(
+                written + [...buffered.values()].reduce((total, bytes) => total + bytes, 0),
+            );
+        };
+        const ready = (index: number) => {
+            if (!turbo.value || transfer.value?.status !== 'pending') return true;
+            if (!availability) return index === 0 && pending.size === 0;
+            if (availability.status === 'available') return true;
+            return (
+                (availability.items.find((entry) => entry.id === item.id)?.ready_chunks ?? 0) >
+                index
+            );
+        };
+        let queue = () => undefined;
+        const concurrency = new AdaptiveConcurrency(maximum, () => queue());
+        queue = () => {
+            while (
+                nextFetch < item.chunk_count &&
+                pending.size < concurrency.limit &&
+                ready(nextFetch)
+            ) {
                 const index = nextFetch++;
                 const expected =
                     index === item.chunk_count - 1
                         ? item.size - index * transfer.value!.chunk_bytes!
                         : transfer.value!.chunk_bytes!;
-                const task = fetchChunk(item.id, index, jobId)
+                const expectedCiphertext = expected + 16;
+                const sampleKey = `${item.id}:${index}`;
+                let requestStartedAt = 0;
+                buffered.set(index, 0);
+                const task = fetchChunk(
+                    item.id,
+                    index,
+                    expectedCiphertext,
+                    jobId,
+                    (loaded) => {
+                        if (activeJob !== jobId || controller?.signal.aborted) return;
+                        concurrency.sample(sampleKey, loaded);
+                        buffered.set(
+                            index,
+                            Math.min(expected, (loaded / expectedCiphertext) * expected),
+                        );
+                        reportProgress();
+                    },
+                    () => {
+                        concurrency.forget(sampleKey);
+                        concurrency.congested();
+                        if (activeJob !== jobId || controller?.signal.aborted) return;
+                        buffered.set(index, 0);
+                        reportProgress();
+                    },
+                    () => {
+                        requestStartedAt = performance.now();
+                        concurrency.sample(sampleKey, 0);
+                        queue();
+                    },
+                    () => concurrency.forget(sampleKey),
+                )
                     .then(async (ciphertext) => {
-                        if (ciphertext.byteLength !== expected + 16)
+                        concurrency.forget(sampleKey);
+                        if (requestStartedAt)
+                            concurrency.observe(
+                                expectedCiphertext,
+                                performance.now() - requestStartedAt,
+                            );
+                        if (ciphertext.byteLength !== expectedCiphertext)
                             throw new Error('The download ciphertext was truncated.');
                         const plaintext = await decryptChunk(item, index, ciphertext, jobId);
                         if (plaintext.byteLength !== expected)
@@ -733,8 +864,9 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
                     .then(
                         (plaintext) => ({ plaintext }),
                         (reason) => {
+                            concurrency.forget(sampleKey);
                             pipelineFailure ??= reason;
-                            controller?.abort();
+                            downloadController.abort(reason);
                             return { reason };
                         },
                     );
@@ -746,6 +878,11 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
             for (let index = 0; index < item.chunk_count; index++) {
                 if (pipelineFailure) throw pipelineFailure;
                 ensureActive(jobId);
+                if (!pending.has(index)) {
+                    downloadPhase.value = 'waiting';
+                    await waitUntilAvailable(jobId, item.id, index);
+                    queue();
+                }
                 downloadPhase.value =
                     turbo.value &&
                     transfer.value?.status === 'pending' &&
@@ -755,7 +892,6 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
                         ? 'waiting'
                         : 'downloading';
                 const result = await pending.get(index)!;
-                pending.delete(index);
                 if (result.reason) throw result.reason;
                 let plaintext = result.plaintext!;
                 downloadPhase.value = 'downloading';
@@ -764,8 +900,12 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
                     plaintext = new Uint8Array(hashed.bytes as ArrayBuffer);
                 }
                 await onChunk(plaintext);
+                written += plaintext.byteLength;
+                buffered.delete(index);
+                reportProgress();
                 ensureActive(jobId);
-                // Refill only after the next sequential write, bounding out-of-order plaintext.
+                // A task remains counted until its sequential write bounds ready plaintext buffers.
+                pending.delete(index);
                 queue();
             }
             if (verifyDigest) {
@@ -780,7 +920,7 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
                     throw new Error('The downloaded file failed its integrity check.');
             }
         } catch (reason) {
-            controller?.abort();
+            downloadController.abort(reason);
             await Promise.all(pending.values());
             if (verifyDigest && worker)
                 worker.postMessage({
@@ -813,10 +953,19 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
         const item = manifest.value.items[0];
         try {
             const chunks: Uint8Array[] = [];
-            await decryptItem(item, jobId, (plaintext) => {
-                chunks.push(plaintext);
-                progress.value = Math.min(99, Math.round((chunks.length / item.chunk_count) * 100));
-            });
+            await decryptItem(
+                item,
+                jobId,
+                (plaintext) => {
+                    chunks.push(plaintext);
+                },
+                (bytes) => {
+                    progress.value = Math.max(
+                        progress.value,
+                        item.size ? Math.min(99, (bytes / item.size) * 100) : 99,
+                    );
+                },
+            );
             ensureActive(jobId);
             note.value = new TextDecoder('utf-8', { fatal: true }).decode(
                 await new Blob(chunks.map((chunk) => chunk.slice().buffer)).arrayBuffer(),
@@ -876,9 +1025,8 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
         state.value = 'downloading';
         progress.value = 0;
         downloadPhase.value = 'downloading';
-        if (turbo.value && transfer.value.status === 'pending' && availabilityError) {
-            availabilityError = undefined;
-            startAvailability();
+        if (turbo.value && transfer.value.status === 'pending') {
+            startAvailability(true);
         }
         let activeWritable: WritableFile | undefined;
         let downloadSession: SessionReporter | undefined;
@@ -912,12 +1060,24 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
                     void startSession(items, jobId, downloadSession);
                 }
                 const chunks: Uint8Array[] = [];
-                await decryptItem(item, jobId, async (plaintext) => {
-                    if (activeWritable) await activeWritable.write(plaintext);
-                    else chunks.push(plaintext);
-                    complete += plaintext.byteLength;
-                    progress.value = total ? Math.min(99, (complete / total) * 100) : 99;
-                });
+                let itemWritten = 0;
+                await decryptItem(
+                    item,
+                    jobId,
+                    async (plaintext) => {
+                        if (activeWritable) await activeWritable.write(plaintext);
+                        else chunks.push(plaintext);
+                        complete += plaintext.byteLength;
+                        itemWritten += plaintext.byteLength;
+                    },
+                    (bytes) => {
+                        const estimated = complete - itemWritten + bytes;
+                        progress.value = Math.max(
+                            progress.value,
+                            total ? Math.min(99, (estimated / total) * 100) : 99,
+                        );
+                    },
+                );
                 ensureActive(jobId);
                 if (activeWritable) {
                     await activeWritable.close();
@@ -975,6 +1135,8 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
         cancel();
         activityController?.abort();
         window.clearTimeout(activityTimer);
+        if (availabilityOnlineListener)
+            window.removeEventListener('online', availabilityOnlineListener);
         clearMasterKey();
         discardWorker();
     });

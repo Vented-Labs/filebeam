@@ -10,6 +10,7 @@ const { Sha256Hasher } = wasm;
 const waiting = new Map<string, { resolve: () => void; reject: (reason: Error) => void }>();
 const cancelled = new Set<string>();
 const hashers = new Map<string, CryptoHasher>();
+const windows = new Map<string, { limit: number; wake?: () => void }>();
 let initialized: ReturnType<typeof initialize> | undefined;
 const context = self as unknown as {
     onmessage: (event: MessageEvent) => Promise<void>;
@@ -59,6 +60,8 @@ context.onmessage = async (event: MessageEvent) => {
     }
     if (message.type === 'cancel') {
         cancelled.add(message.jobId);
+        windows.get(message.jobId)?.wake?.();
+        windows.delete(message.jobId);
         for (const hasher of hashers.values()) hasher.free?.();
         hashers.clear();
         for (const [token, waiter] of waiting) {
@@ -67,6 +70,13 @@ context.onmessage = async (event: MessageEvent) => {
                 waiting.delete(token);
             }
         }
+        return;
+    }
+    if (message.type === 'window') {
+        const state = windows.get(message.jobId) ?? { limit: 1 };
+        state.limit = Math.max(1, Math.min(8, Number(message.limit) || 1));
+        state.wake?.();
+        windows.set(message.jobId, state);
         return;
     }
 
@@ -158,6 +168,8 @@ context.onmessage = async (event: MessageEvent) => {
             const entries = message.items as EncryptionItem[];
             const serverItems = message.serverItems as UploadItem[];
             const concurrency = Math.max(1, Math.min(8, Number(message.uploadConcurrency) || 4));
+            const windowState: { limit: number; wake?: () => void } = { limit: concurrency };
+            windows.set(message.jobId, windowState);
             const items: Array<{
                 entry: EncryptionItem;
                 itemId: string;
@@ -216,19 +228,9 @@ context.onmessage = async (event: MessageEvent) => {
                 );
                 const token = `${message.jobId}:descriptor`;
                 const uploaded = new Promise<void>((resolve, reject) => {
-                    const timer = setTimeout(() => {
-                        waiting.delete(token);
-                        reject(new Error('Descriptor upload acknowledgement timed out.'));
-                    }, 120_000);
                     waiting.set(token, {
-                        resolve: () => {
-                            clearTimeout(timer);
-                            resolve();
-                        },
-                        reject: (reason) => {
-                            clearTimeout(timer);
-                            reject(reason);
-                        },
+                        resolve,
+                        reject,
                     });
                 });
                 reply({
@@ -264,7 +266,15 @@ context.onmessage = async (event: MessageEvent) => {
                     if (index >= item.chunkCount) continue;
                     if (cancelled.has(message.jobId)) throw new Error('Upload cancelled.');
                     if (failure) throw failure;
-                    while (inFlight.size >= concurrency) await Promise.race(inFlight);
+                    while (inFlight.size >= windowState.limit) {
+                        await Promise.race([
+                            Promise.race(inFlight),
+                            new Promise<void>((resolve) => {
+                                windowState.wake = resolve;
+                            }),
+                        ]);
+                        windowState.wake = undefined;
+                    }
                     const start = index * message.chunkBytes;
                     const plaintext = new Uint8Array(
                         await item.entry.file
@@ -283,19 +293,9 @@ context.onmessage = async (event: MessageEvent) => {
                         .slice();
                     const token = `${message.jobId}:${item.itemId}:${index}`;
                     const uploaded = new Promise<void>((resolve, reject) => {
-                        const timer = setTimeout(() => {
-                            waiting.delete(token);
-                            reject(new Error('Chunk upload acknowledgement timed out.'));
-                        }, 900_000);
                         waiting.set(token, {
-                            resolve: () => {
-                                clearTimeout(timer);
-                                resolve();
-                            },
-                            reject: (reason) => {
-                                clearTimeout(timer);
-                                reject(reason);
-                            },
+                            resolve,
+                            reject,
                         });
                     });
                     reply(
@@ -321,6 +321,7 @@ context.onmessage = async (event: MessageEvent) => {
                 }
             }
             await Promise.all(inFlight);
+            windows.delete(message.jobId);
             if (failure) throw failure;
             for (let position = 0; position < manifestItems.length; position++) {
                 const digest = items[position].hasher.finalize() as Uint8Array;

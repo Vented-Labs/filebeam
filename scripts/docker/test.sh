@@ -61,20 +61,6 @@ wait_healthy() {
     return 1
 }
 
-wait_worker_ready() {
-    local deadline=$((SECONDS + 60))
-    while ((SECONDS < deadline)); do
-        # shellcheck disable=SC2016 # The process probe needs literal PHP variables and NULs.
-        if docker exec "$container" sh -ec 'curl -fsS http://127.0.0.1:2019/config/ | grep -Fq /opt/filebeam/backend/public/frankenphp-worker.php' \
-            && php_in_app 'foreach (glob("/proc/[0-9]*/cmdline") as $path) { $command = file_get_contents($path); if (str_contains($command, "\0artisan\0queue:work\0")) $queue = true; if (str_contains($command, "\0artisan\0schedule:work\0")) $scheduler = true; } exit(($queue ?? false) && ($scheduler ?? false) ? 0 : 1);' \
-            && docker exec "$container" /usr/local/bin/filebeam-healthcheck; then
-            return 0
-        fi
-        sleep 2
-    done
-    printf '%s\n' 'Application did not transition to the worker configuration' >&2
-    return 1
-}
 php_in_app() { docker exec --user 10001:10001 "$container" php -d display_errors=0 -r "$1"; }
 php_client() { docker exec -i --user 10001:10001 -e FILEBEAM_ACCEPTANCE_VISIBILITY="$test_visibility" "$container" php /dev/stdin "$@" < "$root/tests/docker/acceptance.php"; }
 http_status() { php_client status "$1" "$2"; }
@@ -105,7 +91,7 @@ install_local() {
     docker exec --user 10001:10001 "$container" sh -ec 'test -d /storage/primary; test ! -w /opt/filebeam/backend; touch /storage/primary/.persistence-fixture'
     # shellcheck disable=SC2016 # The PHP client needs literal $ variables.
     php_in_app 'require "/opt/filebeam/backend/vendor/autoload.php"; $app = require "/opt/filebeam/backend/bootstrap/app.php"; $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap(); exit(App\Models\User::query()->where("username", "acceptance")->exists() ? 0 : 1);'
-    wait_worker_ready
+    wait_worker_ready "$container"
     docker exec --user 10001:10001 "$container" sh -ec 'cd /opt/filebeam/backend && php artisan schedule:list --no-interaction >/dev/null'
 }
 

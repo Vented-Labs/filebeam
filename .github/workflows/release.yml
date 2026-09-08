@@ -96,6 +96,8 @@ jobs:
       - run: rustup toolchain install 1.98.0 --profile minimal && rustup default 1.98.0 && rustup target add wasm32-unknown-unknown && cargo install wasm-pack --version 0.15.0 --locked
       - run: sudo apt-get update && sudo apt-get install --yes zip unzip
       - run: npm ci
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
       - name: Prepare Laravel writable directories
         working-directory: backend
         run: mkdir -p bootstrap/cache storage/app/private storage/app/public storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs

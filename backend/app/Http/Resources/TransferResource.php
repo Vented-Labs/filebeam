@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Resources;
 
 use App\Models\Transfer;
+use App\Support\ChunkStaging;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -26,6 +27,7 @@ class TransferResource extends JsonResource
             'status' => $this->resource->status->value,
             'protocol_version' => $this->resource->protocol_version,
             'chunk_bytes' => $this->resource->chunk_bytes,
+            'upload_transport' => app(ChunkStaging::class)->transport($this->resource->chunk_bytes),
             'download_concurrency' => config('filebeam.transfers.download_concurrency'),
             'retention_hours' => $this->resource->retention_hours,
             'burn_on_read' => $this->resource->burn_on_read,

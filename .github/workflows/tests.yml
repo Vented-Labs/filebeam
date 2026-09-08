@@ -98,9 +98,18 @@ jobs:
       - name: Install JavaScript dependencies
         run: npm ci
 
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
       # The backend build consumes the generated WASM package, so do not parallelize these.
       - name: Build frontend assets
-        run: npm run build && test -f backend/public/build/manifest.json
+        run: |
+          npm run build
+          test -f backend/public/build/manifest.json
+          php scripts/release/validate-og.php backend/public/build/og
+
+      - name: Test social card rendering
+        run: npm run test:og
 
       - name: Check JavaScript
         run: npm run check
@@ -158,9 +167,6 @@ jobs:
         run: |
           bash scripts/release/package.sh v0.0.0 "$RUNNER_TEMP/filebeam-package" --skip-build --allow-unsigned-local
           bash scripts/release/smoke.sh "$RUNNER_TEMP/filebeam-package/filebeam-v0.0.0.zip"
-
-      - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
 
       - name: Run small-chunk browser tests
         env:

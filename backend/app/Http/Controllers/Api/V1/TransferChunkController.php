@@ -45,147 +45,159 @@ class TransferChunkController extends Controller
         [$temporaryStream, $ciphertextBytes, $checksum] = self::spoolCiphertext($request, $transfer->chunk_bytes + 16);
 
         try {
-            $attempts = DB::transaction(function () use ($request, $transfer, $item, $position, $ciphertextBytes, $checksum): array {
-                $lockedTransfer = Transfer::query()->lockForUpdate()->findOrFail($transfer->id);
-                $this->authorizeUpload($lockedTransfer, $request->header('X-Filebeam-Upload-Token'));
-                abort_unless($lockedTransfer->status === TransferStatus::Pending && $lockedTransfer->expires_at->isFuture(), 404);
-                $lockedItem = TransferItem::query()->lockForUpdate()->findOrFail($item->id);
-                abort_unless($position < $lockedItem->chunk_count, 404);
-                abort_unless($ciphertextBytes === $this->expectedCiphertextBytes($lockedItem, $lockedTransfer, $position), 422, 'Invalid ciphertext chunk size.');
-
-                $chunk = $lockedItem->chunks()->atPosition($position)->first();
-                if ($chunk !== null) {
-                    abort_unless(hash_equals($chunk->checksum, $checksum), 409, 'Chunk position already contains different ciphertext.');
-                }
-
-                $storedIds = $chunk?->locations()->pluck('filestore_id')->all() ?? [];
-                if ($lockedTransfer->placement_mode === 'distribute' && $storedIds !== []) {
-                    return [];
-                }
-
-                $selectedIds = $lockedTransfer->filestore_ids ?? [];
-                $missingIds = array_values(array_diff($selectedIds, $storedIds));
-                $stores = Filestore::query()->whereKey($missingIds)->orderBy('id')->lockForUpdate()->get();
-                abort_unless($selectedIds !== [] && $stores->count() === count($missingIds), 503, 'The selected filestores are unavailable.');
-
-                if ($lockedTransfer->placement_mode === 'distribute') {
-                    // Concurrent attempts use separate objects, but retain the first reserved destination.
-                    $reservedId = TransferChunkUpload::query()->where('transfer_item_id', $item->id)
-                        ->atPosition($position)->orderBy('id')->value('filestore_id');
-                    $eligible = $stores->filter(fn (Filestore $store): bool => $this->stores->placementEnabled($store));
-                    $store = $reservedId !== null ? $stores->firstWhere('id', $reservedId) : ($eligible->isEmpty() ? null : $eligible->random());
-                    abort_unless($store !== null && $this->stores->placementEnabled($store), 503, 'No selected filestore accepts new placement.');
-                    $stores = $stores->where('id', $store->id);
-                }
-
-                $attempts = [];
-                foreach ($stores as $store) {
-                    abort_unless($this->stores->placementEnabled($store), 503, 'A required filestore is not accepting new placement.');
-                    $attemptId = (string) Str::ulid();
-                    $attempts[] = TransferChunkUpload::query()->create([
-                        'id' => $attemptId,
-                        'transfer_id' => $lockedTransfer->id,
-                        'transfer_item_id' => $lockedItem->id,
-                        'position' => $position,
-                        'filestore_id' => $store->id,
-                        'storage_path' => 'transfers/'.$lockedTransfer->id.'/attempts/'.$attemptId.'.bin',
-                        'ciphertext_bytes' => $ciphertextBytes,
-                        'checksum' => $checksum,
-                        // Cover all sequential replica writes, each bounded by the provider timeout.
-                        'valid_until' => now()->addSeconds(
-                            (int) config('filebeam.transfers.upload_attempt_lease_seconds') * $stores->count()
-                            + (int) config('filebeam.transfers.upload_attempt_cleanup_grace_seconds'),
-                        ),
-                    ]);
-                }
-
-                return $attempts;
-            });
-
-            foreach ($attempts as $attempt) {
-                rewind($temporaryStream);
-                try {
-                    $written = $this->stores->disk($attempt->filestore)->put($attempt->storage_path, $temporaryStream);
-                } catch (Throwable) {
-                    abort(503, 'Unable to store a required ciphertext copy. Retry the chunk upload.');
-                }
-                abort_unless($written === true, 503, 'Unable to store a required ciphertext copy. Retry the chunk upload.');
-
-                try {
-                    $result = DB::transaction(function () use ($transfer, $item, $position, $attempt, $checksum): string {
-                        $lockedTransfer = Transfer::query()->lockForUpdate()->find($transfer->id);
-                        $lockedItem = TransferItem::query()->lockForUpdate()->find($item->id);
-                        $lockedAttempt = TransferChunkUpload::query()->lockForUpdate()->find($attempt->id);
-
-                        if ($lockedAttempt === null || $lockedTransfer === null || $lockedItem === null
-                            || ! $lockedAttempt->valid_until->isFuture()
-                            || $lockedTransfer->status !== TransferStatus::Pending || ! $lockedTransfer->expires_at->isFuture()) {
-                            return 'unavailable';
-                        }
-
-                        if ($lockedAttempt->is_reaping) {
-                            return 'reaping';
-                        }
-
-                        $chunk = $lockedItem->chunks()->atPosition($position)->first();
-                        if ($chunk !== null && ! hash_equals($chunk->checksum, $checksum)) {
-                            return 'conflict';
-                        }
-
-                        if ($chunk !== null && ($lockedTransfer->placement_mode === 'distribute'
-                            ? $chunk->locations()->exists()
-                            : $chunk->locations()->where('filestore_id', $lockedAttempt->filestore_id)->exists())) {
-                            return 'duplicate';
-                        }
-
-                        if ($chunk === null) {
-                            $chunk = $lockedItem->chunks()->create([
-                                'position' => $position,
-                                'ciphertext_bytes' => $lockedAttempt->ciphertext_bytes,
-                                'checksum' => $checksum,
-                            ]);
-                            $lockedItem->increment('ciphertext_bytes', $lockedAttempt->ciphertext_bytes);
-                            if ($lockedTransfer->isPublishedTurbo()) {
-                                $maximumExpiry = $lockedTransfer->created_at->addHours((int) config('filebeam.transfers.pending_max_lifetime_hours'));
-                                $extendedExpiry = now()->addHours((int) config('filebeam.transfers.incomplete_expiry_hours'));
-                                $lockedTransfer->update(['expires_at' => $extendedExpiry->lessThan($maximumExpiry) ? $extendedExpiry : $maximumExpiry]);
-                            }
-                        }
-                        $chunk->locations()->create([
-                            'filestore_id' => $lockedAttempt->filestore_id,
-                            'storage_path' => $lockedAttempt->storage_path,
-                            'ciphertext_bytes' => $lockedAttempt->ciphertext_bytes,
-                        ]);
-                        $lockedAttempt->delete();
-
-                        return 'accepted';
-                    });
-                } catch (Throwable $exception) {
-                    $this->removeAttempt($attempt);
-
-                    throw $exception;
-                }
-
-                if ($result === 'accepted') {
-                    continue;
-                }
-
-                if ($result === 'reaping') {
-                    abort(503, 'Chunk upload cleanup is in progress.');
-                }
-                $this->removeAttempt($attempt);
-                if ($result === 'unavailable') {
-                    abort(404);
-                }
-                if ($result === 'conflict') {
-                    abort(409, 'Chunk position already contains different ciphertext.');
-                }
-            }
-
-            return response()->json(['checksum' => $checksum], 201);
+            return $this->publish($request, $transfer, $item, $position, $temporaryStream, $ciphertextBytes, $checksum);
         } finally {
             fclose($temporaryStream);
         }
+    }
+
+    /**
+     * Publish an already verified, seekable ciphertext stream. The caller owns the stream.
+     *
+     * @param  resource  $temporaryStream
+     *
+     * @throws Throwable
+     */
+    public function publish(Request $request, Transfer $transfer, TransferItem $item, int $position, $temporaryStream, int $ciphertextBytes, string $checksum): JsonResponse
+    {
+        $attempts = DB::transaction(function () use ($request, $transfer, $item, $position, $ciphertextBytes, $checksum): array {
+            $lockedTransfer = Transfer::query()->lockForUpdate()->findOrFail($transfer->id);
+            $this->authorizeUpload($lockedTransfer, $request->header('X-Filebeam-Upload-Token'));
+            abort_unless($lockedTransfer->status === TransferStatus::Pending && $lockedTransfer->expires_at->isFuture(), 404);
+            $lockedItem = TransferItem::query()->lockForUpdate()->findOrFail($item->id);
+            abort_unless($position < $lockedItem->chunk_count, 404);
+            abort_unless($ciphertextBytes === $this->expectedCiphertextBytes($lockedItem, $lockedTransfer, $position), 422, 'Invalid ciphertext chunk size.');
+
+            $chunk = $lockedItem->chunks()->atPosition($position)->first();
+            if ($chunk !== null) {
+                abort_unless(hash_equals($chunk->checksum, $checksum), 409, 'Chunk position already contains different ciphertext.');
+            }
+
+            $storedIds = $chunk?->locations()->pluck('filestore_id')->all() ?? [];
+            if ($lockedTransfer->placement_mode === 'distribute' && $storedIds !== []) {
+                return [];
+            }
+
+            $selectedIds = $lockedTransfer->filestore_ids ?? [];
+            $missingIds = array_values(array_diff($selectedIds, $storedIds));
+            $stores = Filestore::query()->whereKey($missingIds)->orderBy('id')->lockForUpdate()->get();
+            abort_unless($selectedIds !== [] && $stores->count() === count($missingIds), 503, 'The selected filestores are unavailable.');
+
+            if ($lockedTransfer->placement_mode === 'distribute') {
+                // Concurrent attempts use separate objects, but retain the first reserved destination.
+                $reservedId = TransferChunkUpload::query()->where('transfer_item_id', $item->id)
+                    ->atPosition($position)->orderBy('id')->value('filestore_id');
+                $eligible = $stores->filter(fn (Filestore $store): bool => $this->stores->placementEnabled($store));
+                $store = $reservedId !== null ? $stores->firstWhere('id', $reservedId) : ($eligible->isEmpty() ? null : $eligible->random());
+                abort_unless($store !== null && $this->stores->placementEnabled($store), 503, 'No selected filestore accepts new placement.');
+                $stores = $stores->where('id', $store->id);
+            }
+
+            $attempts = [];
+            foreach ($stores as $store) {
+                abort_unless($this->stores->placementEnabled($store), 503, 'A required filestore is not accepting new placement.');
+                $attemptId = (string) Str::ulid();
+                $attempts[] = TransferChunkUpload::query()->create([
+                    'id' => $attemptId,
+                    'transfer_id' => $lockedTransfer->id,
+                    'transfer_item_id' => $lockedItem->id,
+                    'position' => $position,
+                    'filestore_id' => $store->id,
+                    'storage_path' => 'transfers/'.$lockedTransfer->id.'/attempts/'.$attemptId.'.bin',
+                    'ciphertext_bytes' => $ciphertextBytes,
+                    'checksum' => $checksum,
+                    // Cover all sequential replica writes, each bounded by the provider timeout.
+                    'valid_until' => now()->addSeconds(
+                        (int) config('filebeam.transfers.upload_attempt_lease_seconds') * $stores->count()
+                        + (int) config('filebeam.transfers.upload_attempt_cleanup_grace_seconds'),
+                    ),
+                ]);
+            }
+
+            return $attempts;
+        });
+
+        foreach ($attempts as $attempt) {
+            rewind($temporaryStream);
+            try {
+                $written = $this->stores->disk($attempt->filestore)->put($attempt->storage_path, $temporaryStream);
+            } catch (Throwable) {
+                abort(503, 'Unable to store a required ciphertext copy. Retry the chunk upload.');
+            }
+            abort_unless($written === true, 503, 'Unable to store a required ciphertext copy. Retry the chunk upload.');
+
+            try {
+                $result = DB::transaction(function () use ($transfer, $item, $position, $attempt, $checksum): string {
+                    $lockedTransfer = Transfer::query()->lockForUpdate()->find($transfer->id);
+                    $lockedItem = TransferItem::query()->lockForUpdate()->find($item->id);
+                    $lockedAttempt = TransferChunkUpload::query()->lockForUpdate()->find($attempt->id);
+
+                    if ($lockedAttempt === null || $lockedTransfer === null || $lockedItem === null
+                        || ! $lockedAttempt->valid_until->isFuture()
+                        || $lockedTransfer->status !== TransferStatus::Pending || ! $lockedTransfer->expires_at->isFuture()) {
+                        return 'unavailable';
+                    }
+
+                    if ($lockedAttempt->is_reaping) {
+                        return 'reaping';
+                    }
+
+                    $chunk = $lockedItem->chunks()->atPosition($position)->first();
+                    if ($chunk !== null && ! hash_equals($chunk->checksum, $checksum)) {
+                        return 'conflict';
+                    }
+
+                    if ($chunk !== null && ($lockedTransfer->placement_mode === 'distribute'
+                        ? $chunk->locations()->exists()
+                        : $chunk->locations()->where('filestore_id', $lockedAttempt->filestore_id)->exists())) {
+                        return 'duplicate';
+                    }
+
+                    if ($chunk === null) {
+                        $chunk = $lockedItem->chunks()->create([
+                            'position' => $position,
+                            'ciphertext_bytes' => $lockedAttempt->ciphertext_bytes,
+                            'checksum' => $checksum,
+                        ]);
+                        $lockedItem->increment('ciphertext_bytes', $lockedAttempt->ciphertext_bytes);
+                        if ($lockedTransfer->isPublishedTurbo()) {
+                            $maximumExpiry = $lockedTransfer->created_at->addHours((int) config('filebeam.transfers.pending_max_lifetime_hours'));
+                            $extendedExpiry = now()->addHours((int) config('filebeam.transfers.incomplete_expiry_hours'));
+                            $lockedTransfer->update(['expires_at' => $extendedExpiry->lessThan($maximumExpiry) ? $extendedExpiry : $maximumExpiry]);
+                        }
+                    }
+                    $chunk->locations()->create([
+                        'filestore_id' => $lockedAttempt->filestore_id,
+                        'storage_path' => $lockedAttempt->storage_path,
+                        'ciphertext_bytes' => $lockedAttempt->ciphertext_bytes,
+                    ]);
+                    $lockedAttempt->delete();
+
+                    return 'accepted';
+                });
+            } catch (Throwable $exception) {
+                $this->removeAttempt($attempt);
+
+                throw $exception;
+            }
+
+            if ($result === 'accepted') {
+                continue;
+            }
+
+            if ($result === 'reaping') {
+                abort(503, 'Chunk upload cleanup is in progress.');
+            }
+            $this->removeAttempt($attempt);
+            if ($result === 'unavailable') {
+                abort(404);
+            }
+            if ($result === 'conflict') {
+                abort(409, 'Chunk position already contains different ciphertext.');
+            }
+        }
+
+        return response()->json(['checksum' => $checksum], 201);
     }
 
     private function authorizeUpload(Transfer $transfer, ?string $token): void
@@ -236,7 +248,6 @@ class TransferChunkController extends Controller
 
             throw $exception;
         } finally {
-            // Symfony creates an input resource for string request content too.
             fclose($input);
         }
 

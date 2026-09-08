@@ -1,0 +1,16 @@
+html,
+body {
+    margin: 0;
+    background: #0b0914;
+}
+
+#app {
+    width: 100%;
+    container-type: inline-size;
+}
+
+@media (width < 1200px) {
+    .og-card {
+        zoom: calc(100cqw / 1200px);
+    }
+}

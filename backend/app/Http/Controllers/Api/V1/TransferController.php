@@ -21,6 +21,7 @@ use App\Models\TransferKeyEnvelope;
 use App\Models\User;
 use App\Notifications\InboxTransferCompleted;
 use App\Support\Capability;
+use App\Support\ChunkStaging;
 use App\Support\EffectivePlan;
 use App\Support\FilestoreRegistry;
 use App\Support\InstanceSettings;
@@ -175,6 +176,7 @@ class TransferController extends Controller
                 'share_url' => route('transfers.show', ['transferId' => $transfer->id], absolute: false),
                 'expires_at' => $transfer->expires_at->toIso8601String(),
                 'chunk_bytes' => $transfer->chunk_bytes,
+                'upload_transport' => app(ChunkStaging::class)->transport($transfer->chunk_bytes),
                 'items' => $transfer->items->map(fn (TransferItem $item): array => [
                     'id' => $item->id,
                     'position' => $item->position,

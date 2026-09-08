@@ -147,12 +147,18 @@ test('publishes a Turbo files link before completion and reports anonymous waiti
 }) => {
     const { chunk_bytes } = await config(page);
     const content = Buffer.alloc(chunk_bytes + 37, 0x5a);
+    let releaseFirst!: () => void;
+    const firstChunk = new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+    });
     let releaseLater!: () => void;
     const laterChunks = new Promise<void>((resolve) => {
         releaseLater = resolve;
     });
     const order: string[] = [];
     const monitorTokens: string[] = [];
+    let laterChunkResponses = 0;
+    let completionRequests = 0;
     page.on('request', (outgoing) => {
         if (outgoing.method() === 'PUT' && outgoing.url().endsWith('/descriptor'))
             order.push('descriptor');
@@ -160,9 +166,22 @@ test('publishes a Turbo files link before completion and reports anonymous waiti
         if (outgoing.url().endsWith('/monitor'))
             monitorTokens.push(outgoing.headers()['x-filebeam-monitor-token'] ?? '');
     });
+    page.on('response', (response) => {
+        if (
+            response.request().method() === 'PUT' &&
+            Number(response.url().match(chunkPath)?.[1]) >= 1
+        )
+            laterChunkResponses++;
+        if (
+            response.request().method() === 'POST' &&
+            new URL(response.url()).pathname.includes('/complete')
+        )
+            completionRequests++;
+    });
     await page.route('**/api/v1/transfers/*/items/*/chunks/*', async (route) => {
         if (route.request().method() !== 'PUT') return route.continue();
-        if (Number(route.request().url().match(chunkPath)?.[1]) >= 1) await laterChunks;
+        if (Number(route.request().url().match(chunkPath)?.[1]) === 0) await firstChunk;
+        else await laterChunks;
         await route.continue();
     });
 
@@ -174,14 +193,67 @@ test('publishes a Turbo files link before completion and reports anonymous waiti
                 response.url().match(chunkPath)?.[1] === '0',
             { timeout: 60_000 },
         );
-        const [transfer, firstChunk] = await Promise.all([
-            startTurbo(page, content),
-            firstChunkUploaded,
-        ]);
-        expect(firstChunk.status()).toBe(201);
+        const firstChunkRequested = page.waitForRequest(
+            (request) => request.method() === 'PUT' && request.url().match(chunkPath)?.[1] === '0',
+            { timeout: 60_000 },
+        );
+        const transfer = await startTurbo(page, content);
+        await firstChunkRequested;
         expect(order).toContain('chunk');
         expect(order.indexOf('descriptor')).toBeGreaterThanOrEqual(0);
         expect(order.indexOf('descriptor')).toBeLessThan(order.indexOf('chunk'));
+        const readiness = await request.get(`/api/v1/transfers/${transfer.id}/progress`);
+        expect(readiness.ok()).toBe(true);
+        expect(await readiness.json()).toMatchObject({
+            data: { status: 'pending', progress: expect.any(Number), items: [{ ready_chunks: 0 }] },
+        });
+
+        const cancelled = await receiver(browser);
+        await cancelled.goto(transfer.link);
+        let forcedUnavailable = false;
+        let receiverChunkGets = 0;
+        await cancelled.route('**/api/v1/transfers/*/items/*/chunks/*', async (route) => {
+            if (
+                route.request().method() === 'GET' &&
+                route.request().url().match(chunkPath)?.[1] === '0'
+            ) {
+                receiverChunkGets++;
+                if (!forcedUnavailable) {
+                    forcedUnavailable = true;
+                    await route.fulfill({ status: 202 });
+                    return;
+                }
+            }
+            await route.continue();
+        });
+        await expect(cancelled.getByText('turbo-stream.bin')).toBeVisible();
+        await expect(
+            cancelled.getByRole('heading', { name: '1 file ready to download' }),
+        ).toBeVisible();
+        for (const width of [1280, 375]) {
+            await cancelled.setViewportSize({ width, height: 812 });
+            const senderLabel = await cancelled
+                .getByText('Sender is still uploading', { exact: true })
+                .boundingBox();
+            const receiverLabel = await cancelled
+                .getByText('Ready to download', { exact: true })
+                .boundingBox();
+            expect(Math.abs(senderLabel!.x - receiverLabel!.x)).toBeLessThan(1);
+        }
+        await cancelled.getByRole('button', { name: 'Download files' }).click();
+        await expect(cancelled.getByRole('heading', { name: '1 file downloading' })).toBeVisible();
+        // The link is usable at availability zero; only now permit its first ciphertext chunk.
+        releaseFirst();
+        expect((await firstChunkUploaded).status()).toBe(201);
+        await expect
+            .poll(() => cancelled.evaluate(() => (window as any).__turboWritable.chunks.length), {
+                timeout: 60_000,
+            })
+            .toBeGreaterThan(0);
+        expect(laterChunkResponses).toBe(0);
+        expect(completionRequests).toBe(0);
+        // A stale ready count followed by 202 waits for polling rather than spinning GET requests.
+        expect(receiverChunkGets).toBe(2);
         const uploadProgress = page.getByRole('progressbar', { name: 'Turbo Transfer upload' });
         await expect
             .poll(async () => Number(await uploadProgress.getAttribute('aria-valuenow')))
@@ -232,35 +304,6 @@ test('publishes a Turbo files link before completion and reports anonymous waiti
         const reduced = await scale();
         await page.waitForTimeout(120);
         expect(await scale()).toBe(reduced);
-        const readiness = await request.get(`/api/v1/transfers/${transfer.id}/progress`);
-        expect(readiness.ok()).toBe(true);
-        expect(await readiness.json()).toMatchObject({
-            data: { status: 'pending', progress: expect.any(Number), items: [{ ready_chunks: 1 }] },
-        });
-
-        const cancelled = await receiver(browser);
-        await cancelled.goto(transfer.link);
-        await expect(cancelled.getByText('turbo-stream.bin')).toBeVisible();
-        await expect(
-            cancelled.getByRole('heading', { name: '1 file ready to download' }),
-        ).toBeVisible();
-        for (const width of [1280, 375]) {
-            await cancelled.setViewportSize({ width, height: 812 });
-            const senderLabel = await cancelled
-                .getByText('Sender is still uploading', { exact: true })
-                .boundingBox();
-            const receiverLabel = await cancelled
-                .getByText('Ready to download', { exact: true })
-                .boundingBox();
-            expect(Math.abs(senderLabel!.x - receiverLabel!.x)).toBeLessThan(1);
-        }
-        await cancelled.getByRole('button', { name: 'Download files' }).click();
-        await expect(cancelled.getByRole('heading', { name: '1 file downloading' })).toBeVisible();
-        await expect
-            .poll(() => cancelled.evaluate(() => (window as any).__turboWritable.chunks.length), {
-                timeout: 60_000,
-            })
-            .toBeGreaterThan(0);
         await expect(cancelled.getByText(/Waiting to resume/i)).toBeVisible();
         await expect(page.getByText('Download 1', { exact: true })).toBeVisible({
             timeout: 15_000,

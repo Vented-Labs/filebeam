@@ -44,6 +44,7 @@ const activeStatus = computed(() => activeUpload.value.status.value);
 const activeShare = computed(() => activeUpload.value.share.value);
 const activeError = computed(() => activeUpload.value.error.value);
 const activeProgress = computed(() => activeUpload.value.progress.value);
+const activeActivity = computed(() => activeUpload.value.activity.value);
 const activeIsUploading = computed(() => activeUpload.value.isUploading.value);
 const activeSessions = computed(() => activeUpload.value.sessions.value);
 const activeMonitoringUnavailable = computed(() => activeUpload.value.monitoringUnavailable.value);
@@ -286,6 +287,7 @@ onBeforeUnmount(() => {
                                     :deleting="deleting"
                                     :uploading="activeIsUploading"
                                     :progress="activeProgress"
+                                    :activity="activeActivity"
                                     :sessions="activeSessions"
                                     :monitoring-unavailable="activeMonitoringUnavailable"
                                     @reset="resetActive"
@@ -384,7 +386,7 @@ onBeforeUnmount(() => {
                                     >
                                         <template #label="{ percentage }">
                                             <p class="mb-2 text-sm text-[var(--fb-text-muted)]">
-                                                Encrypting and uploading
+                                                {{ activeActivity }}
                                                 <span class="tabular-nums">{{ percentage }}%</span>
                                             </p>
                                         </template>

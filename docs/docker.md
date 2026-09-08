@@ -9,6 +9,8 @@ Use a published version tag in strict SemVer form, with its current build revisi
 
 Mount `/data` for configuration, application state (including updates), Caddy state, and Omnibus database/cache data. Mount `/storage` for local ciphertext storage, or configure S3-compatible storage. Back up `/data`, storage (or every configured bucket), and the database as one matching set. Restore PostgreSQL from a consistent `pg_dump` archive with `pg_restore`, not by copying live data files.
 
+Adaptive-upload staging is private local disk data, not ciphertext storage and not an S3/object-store path. The default `storage/app/transfer-staging` resolves to `/data/app/transfer-staging`, so it is persistent when `/data` is mounted. When setting `FILEBEAM_STAGING_ROOT`, mount that exact private path and make it writable by UID/GID `10001:10001`; never place it under a web-served mount. A tmpfs is an optional external mount only when its loss on restart is acceptable. See [Adaptive transfers](adaptive-transfers.md).
+
 ## Startup And Roles
 
 `FILEBEAM_ROLE` selects one role per `light` container:
@@ -20,6 +22,8 @@ Mount `/data` for configuration, application state (including updates), Caddy st
 `FILEBEAM_MIGRATE_ON_START` accepts `auto` (default), `true`, or `false`. `auto` prepares only the `all` role; `true` prepares every long-lived role; `false` disables startup preparation. Preparation and the explicit `migrate` role take an exclusive `flock` at `/data/app/installation/runtime.lock`.
 
 For split web, queue, and scheduler deployments, run the `migrate` role as a one-shot deployment step before starting the long-lived roles, then use `FILEBEAM_MIGRATE_ON_START=false`.
+
+Multiple web or queue nodes require a single shared staging directory at the same `FILEBEAM_STAGING_ROOT` path, with working cross-node `flock` semantics. The implementation has no owner routing; do not use node-local staging behind a load balancer. On shared hosting, use an ordinary private directory with correct runtime permissions, not a RAM mount or a web root.
 
 During initial setup, Filebeam uses regular PHP requests. Once setup completes, it switches to persistent FrankenPHP/Octane workers. The installation token is written only to Docker logs while installation is pending; it is removed from `/data/config/.env` on completion. Treat initial logs as sensitive. No application, database, cache, or storage passwords are passed as process arguments or written to logs.
 

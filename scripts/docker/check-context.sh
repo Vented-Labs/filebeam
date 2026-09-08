@@ -52,6 +52,7 @@ cat > "$tmp/Dockerfile.context-check" <<'EOF'
 FROM alpine:3.22 AS copied-context
 COPY package.json package-lock.json vite.config.ts LICENSE SECURITY.md /context/
 COPY docker/production /context/docker/production
+COPY scripts/og /context/scripts/og
 COPY backend/artisan backend/composer.json backend/composer.lock backend/package.json backend/vite.config.ts backend/tsconfig.json /context/backend/
 COPY backend/app /context/backend/app
 COPY backend/bootstrap /context/backend/bootstrap
@@ -168,6 +169,7 @@ require_present 'package.json'
 require_present 'package-lock.json'
 require_present 'LICENSE'
 require_present 'SECURITY.md'
+require_prefix 'scripts/og'
 require_present 'backend/artisan'
 require_present 'backend/composer.json'
 require_present 'backend/composer.lock'
