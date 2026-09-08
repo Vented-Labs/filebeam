@@ -12,8 +12,9 @@ git init --bare --initial-branch=master "$remote" >/dev/null
 git clone "$remote" "$repo" >/dev/null 2>&1
 export GIT_AUTHOR_NAME=test GIT_COMMITTER_NAME=test
 export GIT_AUTHOR_EMAIL=test@example.invalid GIT_COMMITTER_EMAIL=test@example.invalid
-mkdir -p "$repo/scripts/release"
+mkdir -p "$repo/scripts/release" "$repo/updater"
 cp "$root/scripts/release/validate-ref.sh" "$root/scripts/release/semver.php" "$repo/scripts/release/"
+cp "$root"/updater/*.php "$repo/updater/"
 chmod +x "$repo/scripts/release/validate-ref.sh"
 touch "$repo/initial"
 git -C "$repo" add .

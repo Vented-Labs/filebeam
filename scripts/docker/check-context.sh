@@ -7,7 +7,12 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-tmp_parent="${TMPDIR:-/tmp/opencode}"
+tmp_parent="${TMPDIR:-/tmp}"
+
+if [[ ! -d "$tmp_parent" ]]; then
+    tmp_parent=/tmp
+    unset TMPDIR
+fi
 
 if [[ ! -d "$tmp_parent" ]]; then
     printf 'Temporary directory parent does not exist: %s\n' "$tmp_parent" >&2
