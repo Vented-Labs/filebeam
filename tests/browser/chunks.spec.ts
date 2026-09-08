@@ -227,15 +227,32 @@ test('round-trips a full-size encrypted chunk and its final tail', async ({ page
         mimeType: 'application/octet-stream',
         buffer: content,
     });
-    const creation = page.waitForResponse(
+    const creation = page
+        .waitForResponse(
+            (response) =>
+                response.request().method() === 'POST' &&
+                response.url().endsWith('/api/v1/transfers'),
+        )
+        .then(async (response) => {
+            expect(response.status()).toBe(201);
+            const { data } = await response.json();
+            transfers.push({ id: data.id, deleteToken: data.delete_token });
+            return data;
+        });
+    // Creating the transfer does not mean the 25 MB upload has completed.
+    const completion = page.waitForResponse(
         (response) =>
-            response.status() === 201 &&
             response.request().method() === 'POST' &&
-            response.url().endsWith('/api/v1/transfers'),
+            /^\/api\/v1\/transfers\/[^/]+\/complete$/.test(new URL(response.url()).pathname),
+        { timeout: 90_000 },
     );
-    await page.getByRole('button', { name: 'Encrypt and share' }).click();
-    const data = (await (await creation).json()).data;
-    transfers.push({ id: data.id, deleteToken: data.delete_token });
+    const [data, completed] = await Promise.all([
+        creation,
+        completion,
+        page.getByRole('button', { name: 'Encrypt and share' }).click(),
+    ]);
+    expect(completed.status()).toBe(200);
+    expect(new URL(completed.url()).pathname).toBe(`/api/v1/transfers/${data.id}/complete`);
     await expect(page.getByRole('heading', { name: 'Your encrypted link is ready' })).toBeVisible();
     expect(lengths.sort((a, b) => a - b)).toEqual([153, config.chunk_bytes + 16]);
     const context = await browser.newContext();

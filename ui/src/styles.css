@@ -571,10 +571,22 @@ textarea.fb-input {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    flex-wrap: wrap;
     gap: 1rem;
     border-top: 1px solid var(--fb-border);
     color: var(--fb-text-muted);
     font-size: 0.82rem;
+}
+.fb-footer > * {
+    min-width: 0;
+    max-width: 100%;
+}
+.fb-footer__identity {
+    min-width: 0;
+}
+.fb-footer__version {
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 :where(.fb-shell, .auth-drawer, .fb-report-dialog)
     :focus-visible:not([contenteditable]):not([role='dialog']),

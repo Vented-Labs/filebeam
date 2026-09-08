@@ -211,6 +211,24 @@ test('does not overflow on a mobile viewport', async ({ page }, testInfo) => {
     await page.screenshot({ path: testInfo.outputPath('mobile.png'), fullPage: true });
 });
 
+test('does not overflow with the CI version label on a mobile viewport', async ({ page }) => {
+    const version = 'dev-bf540ae3addd2eae42188a128b8d1c030f35245e';
+    await page.route(/\/$/, async (route) => {
+        const response = await route.fetch();
+        const body = await response.text();
+        await route.fulfill({
+            response,
+            body: body.replace(/"version":"[^"]+"/, `"version":"${version}"`),
+        });
+    });
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('/');
+    await expect(page.locator('.fb-footer')).toContainText(`v${version}`);
+    expect(
+        await page.locator('body').evaluate((body) => body.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+});
+
 test('retention and burn-on-read protect a titled note until successful decryption', async ({
     page,
     browser,
