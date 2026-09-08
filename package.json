@@ -14,15 +14,23 @@
     "scripts": {
         "build:encryption": "wasm-pack build encryption --target web --release --no-opt",
         "build": "npm run build:encryption && npm run build --workspace=backend",
-        "check": "npm run check --workspace=backend && vp check ui/src tests/browser playwright.config.ts vite.config.ts && npm run types:check --workspace=backend",
-        "format": "npm run format --workspace=backend && vp fmt ui/src tests/browser playwright.config.ts vite.config.ts",
+        "build:og": "node scripts/og/render.mjs",
+        "preview:og": "vite --config scripts/og/vite.config.mjs",
+        "test:og": "playwright test --config scripts/og/playwright.config.ts",
+        "check": "npm run check --workspace=backend && vp check ui/src tests/browser scripts/og playwright.config.ts vite.config.ts && npm run types:check --workspace=backend && vue-tsc --project scripts/og/tsconfig.json",
+        "format": "npm run format --workspace=backend && vp fmt ui/src tests/browser scripts/og playwright.config.ts vite.config.ts",
         "test:browser": "playwright test",
         "dev": "npm run dev --workspace=backend",
         "test:encryption": "cargo test --manifest-path encryption/Cargo.toml"
     },
     "devDependencies": {
+        "@fontsource-variable/inter": "^5.3.0",
         "@playwright/test": "^1.63.0",
+        "@vitejs/plugin-vue": "^6.0.8",
         "typescript": "^6.0.3",
-        "vite-plus": "^0.3.0"
+        "vite": "^8.2.2",
+        "vite-plus": "^0.3.0",
+        "vue": "^3.5.42",
+        "vue-tsc": "^3.3.11"
     }
 }

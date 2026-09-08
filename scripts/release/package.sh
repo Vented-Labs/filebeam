@@ -40,6 +40,8 @@ if [[ $skip_build == false ]]; then
     (cd "$root" && npm run build)
 fi
 
+php "$root/scripts/release/validate-og.php" "$root/backend/public/build/og"
+
 [[ -f "$root/update.php" && -d "$root/updater" ]] || { printf 'update.php and updater/ must exist before packaging.\n' >&2; exit 1; }
 for entry in LICENSE SECURITY.md README.md docs/deployment.md; do
     [[ -f "$root/$entry" ]] || { printf 'Required release file is missing: %s\n' "$entry" >&2; exit 1; }
@@ -59,7 +61,7 @@ trap cleanup EXIT
 mkdir -p "$stage/backend"
 cp -a "$root/LICENSE" "$root/SECURITY.md" "$root/README.md" "$stage/"
 mkdir -p "$stage/docs"
-cp -a "$root/docs/deployment.md" "$stage/docs/deployment.md"
+cp -a "$root/docs/deployment.md" "$root/docs/social-previews.md" "$stage/docs/"
 
 copy_entry() {
     local entry=$1

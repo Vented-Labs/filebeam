@@ -45,8 +45,11 @@ RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 COPY package.json package-lock.json ./
 COPY ui ui
+COPY scripts/og scripts/og
 COPY vite.config.ts ./
-RUN --mount=type=cache,target=/root/.npm npm ci
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci \
+    && npx playwright install --with-deps chromium
 COPY --from=wasm /src/encryption/pkg /opt/filebeam/encryption/pkg
 RUN npm run build --workspace=backend
 
