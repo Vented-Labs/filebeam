@@ -11,6 +11,8 @@ encryption/pkg/
 backend/database/*.sqlite*
 # Generated Laravel views and published Filament assets.
 /backend/storage/framework/views/
+!/backend/storage/framework/views/
+!/backend/storage/framework/views/.gitignore
 /backend/public/js/filament/
 /backend/public/css/filament/
 /backend/public/fonts/filament/

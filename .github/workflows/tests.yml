@@ -81,6 +81,10 @@ jobs:
           rustup target add wasm32-unknown-unknown
           cargo install wasm-pack --version 0.15.0 --locked
 
+      - name: Prepare Laravel writable directories
+        working-directory: backend
+        run: mkdir -p bootstrap/cache storage/app/private storage/app/public storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs
+
       - name: Install PHP dependencies
         working-directory: backend
         run: composer install --no-interaction --prefer-dist --no-progress
