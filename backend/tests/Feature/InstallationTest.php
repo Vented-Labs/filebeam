@@ -92,6 +92,34 @@ test('bootstrap rejects cross-origin and missing challenges without writing conf
     expect(file_exists($this->installationDirectory.'/.env'))->toBeFalse();
 });
 
+test('production setup accepts its unconfigured hostname and restores host restrictions after installation', function (): void {
+    $environment = app('env');
+    app()->instance('env', 'production');
+
+    try {
+        $this->get('http://setup.example.test/install')->assertForbidden();
+        $page = $this->get('https://setup.example.test/install')->assertOk();
+        $challenge = $page->viewData('page')['props']['challenge'];
+
+        $this->withHeader('Origin', 'https://attacker.example.test')
+            ->withHeader('X-Installation-Challenge', $challenge)
+            ->postJson('https://setup.example.test/install/bootstrap')->assertForbidden();
+        $this->withHeader('Origin', 'https://setup.example.test')
+            ->postJson('https://setup.example.test/install/bootstrap')->assertOk();
+        $values = Dotenv::createArrayBacked($this->installationDirectory)->load();
+        $this->withHeader('X-Installation-Token', $values['FILEBEAM_INSTALL_TOKEN'])
+            ->postJson('https://setup.example.test/install/configuration')->assertOk();
+
+        app(InstallationState::class)->write(['id' => (string) Str::uuid(), 'status' => 'completed']);
+        config()->set('app.url', 'https://setup.example.test');
+        $this->get('https://setup.example.test/up')->assertOk();
+        $this->get('https://attacker.example.test/up')->assertStatus(400);
+    } finally {
+        app()->instance('env', $environment);
+        Request::setTrustedHosts([]);
+    }
+});
+
 test('installed and inconsistent state keep every installer endpoint closed even without env or database', function (string $status): void {
     app(InstallationState::class)->write(['id' => (string) Str::uuid(), 'status' => $status]);
     config()->set('app.key', null);

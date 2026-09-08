@@ -8,6 +8,7 @@ use App\Http\Middleware\RequireInstallation;
 use App\Http\Middleware\SecurityHeaders;
 use App\Http\Middleware\TrackUpdateActivity;
 use App\Support\Installation\EnvironmentSettings;
+use App\Support\Installation\InstallationState;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -36,6 +37,11 @@ $application = Application::configure(basePath: dirname(__DIR__))
         $middleware->append(TrackUpdateActivity::class);
         $middleware->trimStrings(except: [fn (Request $request): bool => $request->is('install/*')]);
         $middleware->trustHosts(function (): array {
+            $installation = app(InstallationState::class);
+            if ($installation->isPending() || $installation->canBootstrap()) {
+                // Setup chooses the canonical host; its HTTPS, origin and token checks still apply.
+                return [];
+            }
             $applicationHost = parse_url((string) config('app.url'), PHP_URL_HOST);
             $usernameDomain = config('filebeam.username_domain');
 
