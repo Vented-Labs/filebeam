@@ -1,0 +1,24 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 5
+    groups:
+      github-actions:
+        patterns:
+          - '*'
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: composer
+    directory: /backend
+    schedule:
+      interval: weekly
+  - package-ecosystem: cargo
+    directory: /encryption
+    schedule:
+      interval: weekly

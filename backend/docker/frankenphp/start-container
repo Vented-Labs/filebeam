@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "$1" = '/usr/bin/supervisord' ]; then
+    exec "$@"
+fi
+
+exec gosu sail "$@"

@@ -1,0 +1,288 @@
+<script setup lang="ts">
+import {
+    DialogClose,
+    DialogContent,
+    DialogDescription,
+    DialogOverlay,
+    DialogPortal,
+    DialogRoot,
+    DialogTitle,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuPortal,
+    DropdownMenuRoot,
+    DropdownMenuTrigger,
+} from 'reka-ui';
+import BrandLogo from '../brand/BrandLogo.vue';
+import AppLink from '../primitives/AppLink.vue';
+import FilebeamIcon from '../primitives/FilebeamIcon.vue';
+import { computed, nextTick, ref } from 'vue';
+import { useBranding } from '../../lib/branding';
+
+type User = { name: string; username?: string | null; unread_inbox_notifications?: number };
+const props = withDefaults(
+    defineProps<{
+        githubUrl?: string;
+        copyrightHolder?: string;
+        user?: User | null;
+        homeAction?: () => void;
+        registrationEnabled?: boolean;
+    }>(),
+    { user: null, registrationEnabled: true },
+);
+const branding = useBranding();
+const githubUrl = computed(() => props.githubUrl ?? branding.value.github_url);
+const copyrightHolder = computed(() => props.copyrightHolder ?? branding.value.copyright_holder);
+
+const information = [
+    {
+        title: 'About',
+        description: 'Share end-to-end encrypted files and notes with temporary links.',
+    },
+    {
+        title: 'Privacy',
+        description:
+            'Files are encrypted in your browser. The decryption key remains with the people you choose to share it with.',
+    },
+    {
+        title: 'Help',
+        description:
+            'Choose files or write a note, then share the generated link with its intended recipient.',
+    },
+];
+
+type Information = (typeof information)[number];
+
+const activeInformation = ref<Information | null>(null);
+const informationOpen = ref(false);
+const informationReturnFocus = ref<HTMLElement | null>(null);
+const mobileNavigationTrigger = ref<HTMLElement | null>(null);
+
+function openInformation(item: Information, returnFocus: HTMLElement | null): void {
+    activeInformation.value = item;
+    informationReturnFocus.value = returnFocus;
+    nextTick(() => {
+        informationOpen.value = true;
+    });
+}
+
+function openDesktopInformation(item: Information, event: MouseEvent): void {
+    openInformation(item, event.currentTarget as HTMLElement);
+}
+
+function openMobileInformation(item: Information): void {
+    openInformation(item, mobileNavigationTrigger.value);
+}
+
+function restoreInformationFocus(event: Event): void {
+    event.preventDefault();
+    nextTick(() => informationReturnFocus.value?.focus());
+}
+
+function goHome(event: MouseEvent): void {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
+        return;
+    event.preventDefault();
+    props.homeAction?.();
+}
+</script>
+
+<template>
+    <div class="fb-shell">
+        <header class="fb-header">
+            <a
+                v-if="homeAction"
+                href="/"
+                class="fb-header__brand"
+                :aria-label="`${branding.name} home`"
+                @click="goHome"
+                ><BrandLogo
+            /></a>
+            <AppLink v-else href="/" class="fb-header__brand" :aria-label="`${branding.name} home`"
+                ><BrandLogo
+            /></AppLink>
+            <nav class="fb-header__nav fb-desktop-nav" aria-label="Primary navigation">
+                <button
+                    v-for="item in information"
+                    :key="item.title"
+                    class="fb-nav-link"
+                    @click="openDesktopInformation(item, $event)"
+                >
+                    {{ item.title }}
+                </button>
+                <a
+                    class="fb-nav-link fb-nav-link--github"
+                    :href="githubUrl"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    ><FilebeamIcon name="github" :size="17" /><span>GitHub</span
+                    ><FilebeamIcon name="arrow-up-right" :size="14"
+                /></a>
+            </nav>
+            <div class="fb-header__actions">
+                <AppLink
+                    v-if="user?.unread_inbox_notifications"
+                    href="/account/inbox"
+                    class="fb-button fb-button--ghost"
+                    :aria-label="`${user.unread_inbox_notifications} new inbox notifications`"
+                    ><FilebeamIcon name="folder" :size="18" />{{
+                        user.unread_inbox_notifications
+                    }}</AppLink
+                >
+                <AppLink
+                    v-if="user"
+                    class="fb-button fb-button--ghost fb-account-link"
+                    href="/account"
+                    >{{ user.username || user.name }}</AppLink
+                >
+                <template v-else
+                    ><AppLink class="fb-button fb-button--ghost" href="/login">Sign in</AppLink
+                    ><AppLink
+                        v-if="registrationEnabled"
+                        class="fb-button fb-button--secondary"
+                        href="/register"
+                        >Register</AppLink
+                    ></template
+                >
+            </div>
+            <DropdownMenuRoot :modal="false">
+                <DropdownMenuTrigger as-child>
+                    <button
+                        ref="mobileNavigationTrigger"
+                        class="fb-button fb-button--ghost fb-button--icon fb-mobile-nav"
+                        aria-label="Open navigation"
+                    >
+                        <svg
+                            width="20"
+                            height="20"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="1.8"
+                            stroke-linecap="round"
+                            aria-hidden="true"
+                        >
+                            <path d="M4 7h16M4 12h16M4 17h16" />
+                        </svg>
+                    </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuPortal>
+                    <DropdownMenuContent
+                        class="fb-select-content fb-mobile-nav__content"
+                        :side-offset="8"
+                        align="end"
+                    >
+                        <DropdownMenuItem v-if="!user" as-child>
+                            <AppLink href="/login" class="fb-select-item fb-mobile-nav__item"
+                                >Sign in</AppLink
+                            >
+                        </DropdownMenuItem>
+                        <DropdownMenuItem v-if="!user && registrationEnabled" as-child>
+                            <AppLink href="/register" class="fb-select-item fb-mobile-nav__item"
+                                >Register</AppLink
+                            >
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                            v-for="item in information"
+                            :key="item.title"
+                            class="fb-select-item fb-mobile-nav__item"
+                            @select="openMobileInformation(item)"
+                        >
+                            {{ item.title }}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem as-child>
+                            <a
+                                class="fb-select-item fb-mobile-nav__item"
+                                :href="githubUrl"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                            >
+                                <FilebeamIcon name="github" :size="17" /><span>GitHub</span>
+                            </a>
+                        </DropdownMenuItem>
+                    </DropdownMenuContent>
+                </DropdownMenuPortal>
+            </DropdownMenuRoot>
+        </header>
+        <DialogRoot v-model:open="informationOpen">
+            <DialogPortal>
+                <DialogOverlay class="fb-dialog__overlay" />
+                <DialogContent
+                    v-if="activeInformation"
+                    class="fb-dialog__content"
+                    @close-auto-focus="restoreInformationFocus"
+                >
+                    <DialogTitle class="fb-dialog__title">{{
+                        activeInformation.title
+                    }}</DialogTitle>
+                    <DialogDescription class="fb-dialog__description">{{
+                        activeInformation.description
+                    }}</DialogDescription>
+                    <DialogClose class="fb-dialog__close" aria-label="Close dialog"
+                        ><FilebeamIcon name="x" :size="18"
+                    /></DialogClose>
+                </DialogContent>
+            </DialogPortal>
+        </DialogRoot>
+        <main class="fb-shell__content"><slot /></main>
+        <footer class="fb-footer">
+            <div class="flex items-center gap-3">
+                <BrandLogo /><span class="text-xs font-normal text-[var(--fb-text-muted)]"
+                    >v{{ branding.version }}</span
+                >
+            </div>
+            <span>&copy; {{ branding.copyright_year }} {{ copyrightHolder }}</span>
+        </footer>
+    </div>
+</template>
+
+<style scoped>
+.fb-mobile-nav {
+    display: none;
+}
+
+@media (max-width: 720px) {
+    .fb-header {
+        flex-wrap: nowrap;
+    }
+
+    .fb-header .fb-desktop-nav {
+        display: none;
+    }
+
+    .fb-header .fb-header__actions {
+        margin-left: auto;
+    }
+    .fb-header__actions > a[href='/login'] {
+        display: none;
+    }
+    .fb-header__actions .fb-account-link {
+        max-width: 7rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        display: block;
+    }
+
+    .fb-header .fb-mobile-nav {
+        display: inline-flex;
+        flex: none;
+    }
+}
+
+.fb-mobile-nav__content {
+    min-width: 10rem;
+}
+
+.fb-mobile-nav__item {
+    width: 100%;
+    box-sizing: border-box;
+    color: var(--fb-text-muted);
+    text-decoration: none;
+}
+
+.fb-mobile-nav__item:hover,
+.fb-mobile-nav__item[data-highlighted] {
+    color: var(--fb-text);
+}
+</style>

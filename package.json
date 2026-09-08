@@ -1,0 +1,27 @@
+{
+    "$schema": "https://www.schemastore.org/package.json",
+    "name": "filebeam",
+    "description": "End-to-end encrypted file and note sharing by Vented.",
+    "license": "MIT",
+    "private": true,
+    "engines": {
+        "node": ">=24"
+    },
+    "workspaces": [
+        "backend",
+        "ui"
+    ],
+    "scripts": {
+        "build:encryption": "wasm-pack build encryption --target web --release --no-opt",
+        "build": "npm run build:encryption && npm run build --workspace=backend",
+        "check": "npm run check --workspace=backend && vp check ui/src tests/browser playwright.config.ts vite.config.ts && npm run types:check --workspace=backend",
+        "format": "npm run format --workspace=backend && vp fmt ui/src tests/browser playwright.config.ts vite.config.ts",
+        "test:browser": "playwright test",
+        "dev": "npm run dev --workspace=backend",
+        "test:encryption": "cargo test --manifest-path encryption/Cargo.toml"
+    },
+    "devDependencies": {
+        "@playwright/test": "^1.63.0",
+        "vite-plus": "^0.3.0"
+    }
+}

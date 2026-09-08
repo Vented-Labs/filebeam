@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="Filebeam" >
+  <title>Filebeam</title>
+  <desc>Filebeam small-size icon on a dark rounded tile.</desc>
+  <rect width="64" height="64" rx="14" fill="#0B0914"/>
+  <g transform="translate(15.2 7.6) scale(.2)"><path fill="#8B35FF" d="M 14 65 L 140 3 C 153 -3 168 5 168 20 L 168 42 C 168 57 165 63 153 69 L 81 105 L 145 134 L 79 166 C 90 171 93 178 93 191 L 93 225 C 93 239 84 248 70 242 L 16 216 C 5 211 0 203 0 191 L 0 87 C 0 77 5 69 14 65 Z"/>
+    <path data-part="fold" fill="#D795FF" d="M 14 65 C 5 69 0 77 0 87 L 0 158 C 0 150 4 145 12 141 L 81 105 L 14 73 C 8 70 8 68 14 65 Z"/>
+    <path data-part="top" fill="#A855F7" d="M 14 65 L 140 3 C 153 -3 168 5 168 20 L 168 42 C 168 57 165 63 153 69 L 81 105 L 14 73 C 8 70 8 68 14 65 Z"/>
+    <path data-part="beam" fill="#7C3AED" d="M 12 141 L 81 105 L 145 134 L 79 166 Z"/>
+    <path data-part="stem" fill="#A855F7" d="M 12 141 L 79 166 C 90 171 93 178 93 191 L 93 225 C 93 239 84 248 70 242 L 16 216 C 5 211 0 203 0 191 L 0 158 C 0 150 4 145 12 141 Z"/></g>
+</svg>

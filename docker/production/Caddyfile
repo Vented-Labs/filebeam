@@ -1,0 +1,39 @@
+{
+    admin 127.0.0.1:2019
+    skip_install_trust
+    persist_config off
+    {$FILEBEAM_AUTO_HTTPS}
+    http_port 8080
+    https_port 8443
+    # Caddy labels even successful /stop requests as warnings. Keep control-API
+    # errors, while leaving HTTP/PHP warnings and errors at their normal levels.
+    log {
+        exclude admin.api
+    }
+    log control {
+        include admin.api
+        level ERROR
+    }
+    servers :8080 {
+        protocols h1
+    }
+    frankenphp {
+        num_threads {$FILEBEAM_THREADS:4}
+        import /run/filebeam/worker.caddy
+    }
+    storage file_system {
+        root {$FILEBEAM_CADDY_STORAGE}
+    }
+}
+
+{$FILEBEAM_HTTP_REDIRECT}
+
+{$FILEBEAM_SITE} {
+    root * /opt/filebeam/backend/public
+    encode zstd gzip
+    request_body {
+        max_size {$FILEBEAM_MAX_REQUEST_BYTES:25000000}
+    }
+    import /run/filebeam/php-server.caddy
+    file_server
+}

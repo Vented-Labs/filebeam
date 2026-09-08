@@ -1,0 +1,8 @@
+{
+    "mcpServers": {
+        "laravel-boost": {
+            "command": "/home/mason/.config/herd-lite/bin/php",
+            "args": ["/home/mason/dev/laravel/filebeam/backend/artisan", "boost:mcp"]
+        }
+    }
+}

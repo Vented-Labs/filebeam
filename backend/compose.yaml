@@ -1,0 +1,112 @@
+name: filebeam
+
+services:
+    laravel.test:
+        build:
+            context: ./docker/frankenphp
+            args:
+                WWWUSER: '${WWWUSER:-1000}'
+                WWWGROUP: '${WWWGROUP:-1000}'
+        image: filebeam-sail-php85/app
+        ports:
+            - '127.0.0.1:${APP_PORT:-8000}:8080'
+            - '127.0.0.1:${VITE_PORT:-5173}:5173'
+        environment:
+            LARAVEL_SAIL: 1
+            FILEBEAM_CREATIONS_PER_HOUR: '${FILEBEAM_CREATIONS_PER_HOUR:-600}'
+            APP_NAME: Filebeam
+            APP_URL: '${SAIL_APP_URL:-http://localhost:8000}'
+            DB_CONNECTION: pgsql
+            DB_HOST: pgsql
+            DB_PORT: 5432
+            DB_DATABASE: '${SAIL_DB_DATABASE:-filebeam}'
+            DB_USERNAME: '${SAIL_DB_USERNAME:-sail}'
+            DB_PASSWORD: '${SAIL_DB_PASSWORD:-password}'
+            DB_URL: ''
+            REDIS_HOST: redis
+            REDIS_PORT: 6379
+            REDIS_PASSWORD: 'null'
+            CACHE_STORE: redis
+            SESSION_DRIVER: '${SESSION_DRIVER:-cookie}'
+            QUEUE_CONNECTION: redis
+            REDIS_QUEUE_RETRY_AFTER: 150
+            MAIL_MAILER: smtp
+            MAIL_URL: 'null'
+            MAIL_SCHEME: 'null'
+            MAIL_HOST: mailpit
+            MAIL_PORT: 1025
+            MAIL_USERNAME: 'null'
+            MAIL_PASSWORD: 'null'
+            VITE_APP_NAME: Filebeam
+            VITE_HMR_HOST: '${VITE_HMR_HOST:-localhost}'
+            VITE_HMR_PORT: '${VITE_PORT:-5173}'
+        volumes:
+            - '..:/var/www/html'
+        extra_hosts:
+            - 'host.docker.internal:host-gateway'
+        depends_on:
+            pgsql:
+                condition: service_healthy
+            redis:
+                condition: service_healthy
+            mailpit:
+                condition: service_started
+        healthcheck:
+            test: ['CMD', 'curl', '--fail', '--silent', 'http://localhost:8080/up']
+            interval: 10s
+            timeout: 5s
+            retries: 5
+            start_period: 30s
+        networks:
+            - sail
+
+    pgsql:
+        image: postgres:17-alpine
+        ports:
+            - '127.0.0.1:${FORWARD_DB_PORT:-5432}:5432'
+        environment:
+            POSTGRES_DB: '${SAIL_DB_DATABASE:-filebeam}'
+            POSTGRES_USER: '${SAIL_DB_USERNAME:-sail}'
+            POSTGRES_PASSWORD: '${SAIL_DB_PASSWORD:-password}'
+            PGPASSWORD: '${SAIL_DB_PASSWORD:-password}'
+        volumes:
+            - sail-pgsql:/var/lib/postgresql/data
+            - './docker/pgsql/create-testing-database.sh:/docker-entrypoint-initdb.d/10-create-testing-database.sh:ro'
+        healthcheck:
+            test: ['CMD-SHELL', 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+            interval: 5s
+            timeout: 5s
+            retries: 10
+        networks:
+            - sail
+
+    redis:
+        image: redis:7.4-alpine
+        ports:
+            - '127.0.0.1:${FORWARD_REDIS_PORT:-6379}:6379'
+        command: ['redis-server', '--appendonly', 'yes']
+        volumes:
+            - sail-redis:/data
+        healthcheck:
+            test: ['CMD', 'redis-cli', 'ping']
+            interval: 5s
+            timeout: 5s
+            retries: 10
+        networks:
+            - sail
+
+    mailpit:
+        image: axllent/mailpit:latest
+        ports:
+            - '127.0.0.1:${FORWARD_MAILPIT_PORT:-1025}:1025'
+            - '127.0.0.1:${FORWARD_MAILPIT_DASHBOARD_PORT:-8025}:8025'
+        networks:
+            - sail
+
+networks:
+    sail:
+        driver: bridge
+
+volumes:
+    sail-pgsql:
+    sail-redis:

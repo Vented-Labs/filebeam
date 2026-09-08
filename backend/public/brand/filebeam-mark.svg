@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="280" viewBox="0 0 200 280" role="img" aria-label="Filebeam" >
+  <title>Filebeam</title>
+  <desc>Filebeam folded F and outgoing beam. Transparent background.</desc>
+  <defs>
+    <linearGradient id="fb-filebeam-mark-top" x1="24" y1="94" x2="166" y2="23" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6421D8"/><stop offset=".52" stop-color="#8B35FF"/><stop offset="1" stop-color="#C75BFA"/>
+    </linearGradient>
+    <linearGradient id="fb-filebeam-mark-fold" x1="0" y1="109" x2="81" y2="105" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#C568F5"/><stop offset="1" stop-color="#E7A1FF"/>
+    </linearGradient>
+    <linearGradient id="fb-filebeam-mark-beam" x1="29" y1="153" x2="132" y2="124" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5020B5"/><stop offset=".55" stop-color="#7228E8"/><stop offset="1" stop-color="#9D3AFF"/>
+    </linearGradient>
+    <linearGradient id="fb-filebeam-mark-stem" x1="8" y1="147" x2="79" y2="234" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8B35FF"/><stop offset="1" stop-color="#963BFF"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(16 18)"><path fill="#8B35FF" d="M 14 65 L 140 3 C 153 -3 168 5 168 20 L 168 42 C 168 57 165 63 153 69 L 81 105 L 145 134 L 79 166 C 90 171 93 178 93 191 L 93 225 C 93 239 84 248 70 242 L 16 216 C 5 211 0 203 0 191 L 0 87 C 0 77 5 69 14 65 Z"/>
+    <path data-part="fold" fill="url(#fb-filebeam-mark-fold)" d="M 14 65 C 5 69 0 77 0 87 L 0 158 C 0 150 4 145 12 141 L 81 105 L 14 73 C 8 70 8 68 14 65 Z"/>
+    <path data-part="top" fill="url(#fb-filebeam-mark-top)" d="M 14 65 L 140 3 C 153 -3 168 5 168 20 L 168 42 C 168 57 165 63 153 69 L 81 105 L 14 73 C 8 70 8 68 14 65 Z"/>
+    <path data-part="beam" fill="url(#fb-filebeam-mark-beam)" d="M 12 141 L 81 105 L 145 134 L 79 166 Z"/>
+    <path data-part="stem" fill="url(#fb-filebeam-mark-stem)" d="M 12 141 L 79 166 C 90 171 93 178 93 191 L 93 225 C 93 239 84 248 70 242 L 16 216 C 5 211 0 203 0 191 L 0 158 C 0 150 4 145 12 141 Z"/></g>
+</svg>

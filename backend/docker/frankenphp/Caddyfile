@@ -1,0 +1,16 @@
+{
+    admin off
+    auto_https off
+    frankenphp
+}
+
+:8080 {
+    root * /var/www/html/backend/public
+
+    # Match the application's maximum ciphertext chunk size in bytes.
+    request_body {
+        max_size 25000000
+    }
+
+    php_server
+}

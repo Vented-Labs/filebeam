@@ -1,0 +1,15 @@
+# Release and update trust boundaries require review by the maintainer team.
+/.github/ @Vented-Labs/vented
+/scripts/release/ @Vented-Labs/vented
+/update.php @Vented-Labs/vented
+/updater/ @Vented-Labs/vented
+/backend/app/Services/ReleaseChecker.php @Vented-Labs/vented
+/backend/app/Filament/Pages/Updates.php @Vented-Labs/vented
+/backend/app/Console/Commands/ @Vented-Labs/vented
+/backend/config/version.php @Vented-Labs/vented
+/backend/routes/ @Vented-Labs/vented
+/backend/bootstrap/ @Vented-Labs/vented
+/backend/composer.json @Vented-Labs/vented
+/backend/composer.lock @Vented-Labs/vented
+/package.json @Vented-Labs/vented
+/package-lock.json @Vented-Labs/vented

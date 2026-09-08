@@ -1,0 +1,29 @@
+[package]
+name = "filebeam-encryption"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Browser-side encryption primitives for Filebeam"
+repository = "https://github.com/Vented-Labs/filebeam"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+argon2 = { version = "0.5.3", default-features = false, features = ["alloc"] }
+chacha20poly1305 = "0.10.1"
+getrandom = { version = "0.2.16", features = ["js"] }
+# HPKE currently brings getrandom 0.4; this enables its browser backend too.
+getrandom_04 = { package = "getrandom", version = "0.4.3", features = ["wasm_js"] }
+hkdf = "0.12.4"
+hpke = "0.14.1"
+sha2 = "0.10.9"
+wasm-bindgen = "0.2.100"
+x25519-dalek = { version = "2.0.1", features = ["static_secrets"] }
+zeroize = "1.8.1"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

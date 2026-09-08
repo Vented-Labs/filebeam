@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="280" viewBox="0 0 200 280" role="img" aria-label="Filebeam" >
+  <title>Filebeam</title>
+  <desc>Filebeam folded F and outgoing beam. Transparent background.</desc>
+  
+  <g transform="translate(16 18)"><path fill="currentColor" d="M 14 65 L 140 3 C 153 -3 168 5 168 20 L 168 42 C 168 57 165 63 153 69 L 81 105 L 145 134 L 79 166 C 90 171 93 178 93 191 L 93 225 C 93 239 84 248 70 242 L 16 216 C 5 211 0 203 0 191 L 0 87 C 0 77 5 69 14 65 Z"/></g>
+</svg>

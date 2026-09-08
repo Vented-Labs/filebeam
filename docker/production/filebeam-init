@@ -1,0 +1,53 @@
+#!/bin/sh
+# shellcheck disable=SC2016
+set -eu
+
+data=${FILEBEAM_DATA_DIR:-/data}
+tls=${FILEBEAM_TLS:-proxy}
+name=${FILEBEAM_SERVER_NAME:-}
+
+if [ -z "$name" ] && [ -n "${APP_URL:-}" ]; then
+    name=${APP_URL#*://}; name=${name%%/*}; name=${name%%:*}
+fi
+mkdir -p "$data/app/framework/cache/data" "$data/app/framework/sessions" "$data/app/framework/views" "$data/app/logs" "$data/config" "$data/database" "$data/caddy" /run/filebeam/cache /run/filebeam/views /tmp
+[ "$(id -u)" = 0 ] && chmod 1777 /tmp
+
+if [ "$(id -u)" = 0 ]; then
+    chown root:root /run/filebeam
+    chmod 0755 /run/filebeam
+    chown filebeam:filebeam "$data/app" "$data/app/framework" "$data/app/framework/cache" "$data/app/framework/cache/data" "$data/app/framework/sessions" "$data/app/framework/views" "$data/app/logs" "$data/config" "$data/database" "$data/caddy" /run/filebeam/cache /run/filebeam/views
+    if mountpoint -q /storage; then chown filebeam:filebeam /storage; fi
+    if [ "$tls" = auto ]; then [ -n "$name" ] || { printf '%s\n' 'FILEBEAM_TLS=auto requires FILEBEAM_SERVER_NAME or APP_URL.' >&2; exit 64; }; fi
+    if [ "${FILEBEAM_VARIANT:-light}" = omnibus ]; then
+        mkdir -p "$data/postgresql/18/docker" "$data/valkey" /run/filebeam/postgresql /run/filebeam/valkey
+        chown filebeampg:filebeampg "$data/postgresql" "$data/postgresql/18" "$data/postgresql/18/docker" /run/filebeam/postgresql
+        chown filebeamvalkey:filebeamvalkey "$data/valkey" /run/filebeam/valkey
+        chmod 0770 /run/filebeam/postgresql /run/filebeam/valkey
+    fi
+fi
+
+case "$tls" in
+    proxy) auto_https='    auto_https off'; redirect='' ;;
+    auto) auto_https='    auto_https disable_redirects'; redirect="
+http://:8080 {
+    route {
+        @health path /up
+        handle @health {
+            root * /opt/filebeam/backend/public
+            import /run/filebeam/php-server.caddy
+        }
+        redir https://$name{uri} 308
+    }
+}" ;;
+    *) printf '%s\n' 'FILEBEAM_TLS must be proxy or auto.' >&2; exit 64 ;;
+esac
+site=${name:+$name:8443}
+[ "$tls" = proxy ] && site=':8080'
+# Setup uses ordinary request PHP. The supervisor swaps this fragment for the
+# persistent Octane worker only after the installer has completed.
+printf '%s\n' 'php_server' >/run/filebeam/php-server.caddy
+printf '%s\n' '# Workers start after installation.' >/run/filebeam/worker.caddy
+export FILEBEAM_AUTO_HTTPS="$auto_https" FILEBEAM_HTTP_REDIRECT="$redirect" FILEBEAM_SITE="$site" FILEBEAM_CADDY_STORAGE="$data/caddy"
+cp /etc/filebeam/Caddyfile /run/filebeam/Caddyfile
+/usr/local/bin/frankenphp fmt --overwrite /run/filebeam/Caddyfile
+exec "$@"

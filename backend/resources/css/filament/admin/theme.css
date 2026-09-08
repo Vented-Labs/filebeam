@@ -1,0 +1,63 @@
+@import '@fontsource-variable/inter/wght.css';
+@import '@fontsource-variable/jetbrains-mono/wght.css';
+@import '../../../../vendor/filament/filament/resources/css/theme.css';
+
+@source '../../../../app/Filament/**/*';
+@source '../../../../app/Livewire/**/*';
+@source '../../../../resources/views/components/**/*';
+@source '../../../../resources/views/filament/**/*';
+@source '../../../../resources/views/livewire/**/*';
+
+html.fi {
+    --font-family: 'Inter Variable', 'Inter', ui-sans-serif, system-ui, sans-serif;
+    --mono-font-family: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, monospace;
+}
+
+.fb-admin-brand {
+    display: inline-flex;
+    height: 100%;
+    align-items: center;
+    gap: 0.625rem;
+}
+
+.fb-admin-brand img {
+    display: block;
+    max-width: 100%;
+    object-fit: contain;
+}
+
+.fb-admin-brand__lockup {
+    height: 100%;
+    width: auto;
+}
+
+.fb-admin-brand__mark,
+.fb-admin-brand__collapsed-mark {
+    height: 2rem;
+    width: 2rem;
+}
+
+.fb-admin-brand__collapsed-mark {
+    display: none !important;
+}
+
+.fb-admin-brand__name {
+    font-size: 1.125rem;
+    font-weight: 800;
+    letter-spacing: -0.04em;
+    line-height: 1;
+}
+
+@media (min-width: 1024px) {
+    .fi-body-has-sidebar-collapsible-on-desktop:has(.fi-sidebar:not(.fi-sidebar-open))
+        .fi-topbar
+        .fb-admin-brand__lockup {
+        display: none;
+    }
+
+    .fi-body-has-sidebar-collapsible-on-desktop:has(.fi-sidebar:not(.fi-sidebar-open))
+        .fi-topbar
+        .fb-admin-brand__collapsed-mark {
+        display: block !important;
+    }
+}

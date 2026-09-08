@@ -1,0 +1,60 @@
+name: Docker
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.variant }} (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: light
+            platform: linux/amd64
+            arch: amd64
+            runner: ubuntu-latest
+          - variant: light
+            platform: linux/arm64
+            arch: arm64
+            runner: ubuntu-24.04-arm
+          - variant: omnibus
+            platform: linux/amd64
+            arch: amd64
+            runner: ubuntu-latest
+          - variant: omnibus
+            platform: linux/arm64
+            arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+      - name: Validate build context
+        run: scripts/docker/check-context.sh
+      - name: Build image
+        env:
+          FILEBEAM_IMAGE: filebeam-${{ matrix.variant }}:ci-${{ github.sha }}-${{ matrix.arch }}
+          FILEBEAM_VERSION: dev-${{ github.sha }}
+          FILEBEAM_COMMIT: ${{ github.sha }}
+          FILEBEAM_BUILD_METADATA: ci-${{ github.run_number }}.${{ github.run_attempt }}
+        run: |
+          scripts/docker/build.sh --variant "${{ matrix.variant }}" --platform "${{ matrix.platform }}"
+          [[ $(docker image inspect "$FILEBEAM_IMAGE" --format '{{ index .Config.Labels "org.opencontainers.image.source" }}') == https://github.com/Vented-Labs/filebeam ]]
+          [[ $(docker image inspect "$FILEBEAM_IMAGE" --format '{{ index .Config.Labels "org.opencontainers.image.version" }}') == "$FILEBEAM_VERSION" ]]
+          [[ $(docker image inspect "$FILEBEAM_IMAGE" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}') == "$FILEBEAM_COMMIT" ]]
+      - name: Prepare ephemeral Omnibus runner
+        if: matrix.variant == 'omnibus'
+        run: sudo sysctl -w vm.overcommit_memory=1
+      - name: Test image
+        env:
+          FILEBEAM_IMAGE: filebeam-${{ matrix.variant }}:ci-${{ github.sha }}-${{ matrix.arch }}
+        run: |
+          scripts/docker/test.sh --variant "${{ matrix.variant }}" --suite full

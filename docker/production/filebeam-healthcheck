@@ -1,0 +1,93 @@
+#!/bin/sh
+# shellcheck disable=SC1091,SC2016
+set -eu
+
+# Generated application configuration must never be evaluated with root rights.
+if [ "$(id -u)" = 0 ]; then
+    exec setpriv --reuid=filebeam --regid=filebeam --init-groups -- "$0" "$@"
+fi
+role=${FILEBEAM_ROLE:-all}
+variant=${FILEBEAM_VARIANT:-light}
+data=${FILEBEAM_DATA_DIR:-/data}
+environment="$data/config/.env"
+host=${FILEBEAM_SERVER_NAME:-localhost}
+. /run/filebeam/app.env 2>/dev/null || true
+app_php() {
+    if [ "$(id -u)" = 0 ]; then
+        setpriv --reuid=filebeam --regid=filebeam --init-groups -- /usr/local/bin/php "$@"
+    else
+        /usr/local/bin/php "$@"
+    fi
+}
+dotenv_value() {
+    app_php -r 'require "/opt/filebeam/backend/vendor/autoload.php"; $v = Dotenv\Dotenv::parse(file_get_contents($argv[1])); echo $v[$argv[2]] ?? "";' "$1" "$2"
+}
+if [ -z "${FILEBEAM_SERVER_NAME:-}" ] && [ -f "$environment" ]; then
+    app_url=$(dotenv_value "$environment" APP_URL 2>/dev/null || true)
+    [ -n "$app_url" ] && host=${app_url#*://} && host=${host%%/*} && host=${host%%:*}
+fi
+
+if [ "$role" = all ] || [ "$role" = web ]; then
+    curl --silent --show-error --max-time 5 -H "Host: $host" -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/up | grep -qx 200
+    if [ "${FILEBEAM_TLS:-proxy}" = auto ]; then
+        ca=/etc/ssl/certs/ca-certificates.crt
+        local_ca="$data/caddy/pki/authorities/local/root.crt"
+        if [ -f "$local_ca" ]; then
+            ca=/run/filebeam/cache/health-ca.pem
+            if [ ! -f "$ca" ] || [ "$local_ca" -nt "$ca" ]; then
+                temporary=$(mktemp /run/filebeam/cache/health-ca.XXXXXX)
+                cat /etc/ssl/certs/ca-certificates.crt "$local_ca" >"$temporary"
+                mv "$temporary" "$ca"
+            fi
+        fi
+        curl --silent --show-error --max-time 5 --cacert "$ca" --resolve "$host:8443:127.0.0.1" -o /dev/null -w '%{http_code}' "https://$host:8443/up" | grep -qx 200
+    fi
+fi
+if [ "$variant" = omnibus ] && [ "$role" = all ]; then
+    /usr/bin/psql -X -w -h /run/filebeam/postgresql -p 5432 -U filebeam -d filebeam -Atqc 'SELECT 1' | grep -qx 1
+    REDISCLI_AUTH="$(cat "$data/config/valkey-password")" /usr/local/bin/valkey-cli -s /run/filebeam/valkey/valkey.sock --no-auth-warning ping | grep -qx PONG
+fi
+installation_status=0
+app_php -r '
+require "/opt/filebeam/backend/vendor/autoload.php";
+$app = require "/opt/filebeam/backend/bootstrap/app.php";
+$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+exit($app->make(App\Support\Installation\InstallationState::class)->requiresSetup() ? 2 : 0);
+' 2>/dev/null || installation_status=$?
+[ "$installation_status" -eq 0 ] || [ "$installation_status" -eq 2 ] || exit 1
+if [ "$installation_status" -eq 0 ]; then
+    case "$role" in
+        all) pgrep -f 'artisan queue:work' >/dev/null && pgrep -f 'artisan schedule:work' >/dev/null ;;
+        queue) pgrep -f 'artisan queue:work' >/dev/null ;;
+        scheduler) pgrep -f 'artisan schedule:work' >/dev/null ;;
+    esac
+    case "$role" in
+        all|scheduler) app_php -r '
+require "/opt/filebeam/backend/vendor/autoload.php";
+$app = require "/opt/filebeam/backend/bootstrap/app.php";
+$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+if ($app->make(App\Support\Installation\InstallationState::class)->requiresSetup()) { exit(0); }
+$last = Illuminate\Support\Facades\DB::table("scheduler_heartbeats")->where("name", "scheduler")->value("last_run_at");
+exit($last !== null && Illuminate\Support\Carbon::parse($last)->greaterThanOrEqualTo(now()->subMinutes(3)) ? 0 : 1);
+' 2>/dev/null ;;
+    esac
+    app_php -r '
+require "/opt/filebeam/backend/vendor/autoload.php";
+$app = require "/opt/filebeam/backend/bootstrap/app.php";
+$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+if ($app->make(App\Support\Installation\InstallationState::class)->requiresSetup()) { exit(0); }
+pcntl_async_signals(true);
+pcntl_signal(SIGALRM, static fn () => exit(1));
+pcntl_alarm(5);
+try {
+    Illuminate\Support\Facades\DB::select("SELECT 1");
+    $key = "filebeam-health-".bin2hex(random_bytes(8));
+    Illuminate\Support\Facades\Cache::put($key, "ok", 10);
+    $healthy = Illuminate\Support\Facades\Cache::get($key) === "ok";
+    Illuminate\Support\Facades\Cache::forget($key);
+    exit($healthy ? 0 : 1);
+} finally {
+    pcntl_alarm(0);
+}
+' 2>/dev/null
+fi

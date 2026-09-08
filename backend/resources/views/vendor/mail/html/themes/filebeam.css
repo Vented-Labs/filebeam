@@ -1,0 +1,292 @@
+/* Email-safe subset of the Filebeam design language. */
+body,
+body *:not(html):not(style):not(br):not(tr):not(code) {
+    box-sizing: border-box;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+    position: relative;
+}
+
+body {
+    -webkit-text-size-adjust: none;
+    background-color: #0b0914;
+    color: #51485f;
+    height: 100%;
+    line-height: 1.5;
+    margin: 0;
+    padding: 0;
+    width: 100% !important;
+}
+
+p,
+ul,
+ol,
+blockquote {
+    line-height: 1.5;
+    text-align: left;
+}
+
+a {
+    color: #6d28d9;
+}
+
+a img {
+    border: none;
+}
+
+h1 {
+    color: #171022;
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1.35;
+    margin-top: 0;
+    text-align: left;
+}
+
+h2 {
+    color: #171022;
+    font-size: 18px;
+    font-weight: 700;
+    margin-top: 0;
+    text-align: left;
+}
+
+h3 {
+    color: #171022;
+    font-size: 16px;
+    font-weight: 700;
+    margin-top: 0;
+    text-align: left;
+}
+
+p {
+    font-size: 16px;
+    line-height: 1.6;
+    margin-top: 0;
+    text-align: left;
+}
+
+p.sub {
+    font-size: 12px;
+}
+
+img {
+    max-width: 100%;
+}
+
+.wrapper {
+    -premailer-cellpadding: 0;
+    -premailer-cellspacing: 0;
+    -premailer-width: 100%;
+    background-color: #0b0914;
+    margin: 0;
+    padding: 0;
+    width: 100%;
+}
+
+.content {
+    -premailer-cellpadding: 0;
+    -premailer-cellspacing: 0;
+    -premailer-width: 100%;
+    margin: 0;
+    padding: 0;
+    width: 100%;
+}
+
+.header {
+    background-color: #0b0914;
+    padding: 30px 16px 24px;
+    text-align: center;
+}
+
+.brand-link {
+    color: #f7f5ff;
+    display: inline-block;
+    font-size: 21px;
+    font-weight: 800;
+    line-height: 32px;
+    text-decoration: none;
+}
+
+.brand-name {
+    color: #f7f5ff;
+    display: inline-block;
+    line-height: 32px;
+    vertical-align: top;
+}
+
+.logo {
+    display: inline-block;
+    height: 32px;
+    margin-right: 9px;
+    max-height: 32px;
+    vertical-align: top;
+    width: 32px;
+}
+
+.body {
+    -premailer-cellpadding: 0;
+    -premailer-cellspacing: 0;
+    -premailer-width: 100%;
+    background-color: #0b0914;
+    border: 0;
+    margin: 0;
+    padding: 0 16px;
+    width: 100%;
+}
+
+.inner-body {
+    -premailer-cellpadding: 0;
+    -premailer-cellspacing: 0;
+    -premailer-width: 600px;
+    background-color: #ffffff;
+    border: 1px solid #352747;
+    border-radius: 12px;
+    margin: 0 auto;
+    padding: 0;
+    width: 600px;
+}
+
+.inner-body a {
+    word-break: break-word;
+}
+
+.subcopy {
+    border-top: 1px solid #e6e1ec;
+    margin-top: 28px;
+    padding-top: 24px;
+}
+
+.subcopy p {
+    color: #746a80;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.footer {
+    -premailer-cellpadding: 0;
+    -premailer-cellspacing: 0;
+    -premailer-width: 600px;
+    margin: 0 auto;
+    padding: 0;
+    text-align: center;
+    width: 600px;
+}
+
+.footer .content-cell {
+    padding: 24px 32px 32px;
+}
+
+.footer p {
+    color: #aaa0c0;
+    font-size: 12px;
+    text-align: center;
+}
+
+.footer a {
+    color: #c084fc;
+    text-decoration: underline;
+}
+
+.table table {
+    -premailer-cellpadding: 0;
+    -premailer-cellspacing: 0;
+    -premailer-width: 100%;
+    margin: 30px auto;
+    width: 100%;
+}
+
+.table th {
+    border-bottom: 1px solid #e6e1ec;
+    margin: 0;
+    padding-bottom: 8px;
+}
+
+.table td {
+    color: #51485f;
+    font-size: 15px;
+    line-height: 18px;
+    margin: 0;
+    padding: 10px 0;
+}
+
+.content-cell {
+    max-width: 100vw;
+    padding: 38px 40px;
+}
+
+.action {
+    -premailer-cellpadding: 0;
+    -premailer-cellspacing: 0;
+    -premailer-width: 100%;
+    float: none;
+    margin: 30px auto;
+    padding: 0;
+    text-align: center;
+    width: 100%;
+}
+
+.button {
+    -webkit-text-size-adjust: none;
+    border-radius: 8px;
+    color: #ffffff;
+    display: inline-block;
+    font-size: 15px;
+    font-weight: 700;
+    overflow: hidden;
+    text-decoration: none;
+}
+
+.button-blue,
+.button-primary {
+    background-color: #7c3aed;
+    border-bottom: 11px solid #7c3aed;
+    border-left: 22px solid #7c3aed;
+    border-right: 22px solid #7c3aed;
+    border-top: 11px solid #7c3aed;
+}
+
+.button-green,
+.button-success {
+    background-color: #047857;
+    border-bottom: 11px solid #047857;
+    border-left: 22px solid #047857;
+    border-right: 22px solid #047857;
+    border-top: 11px solid #047857;
+}
+
+.button-red,
+.button-error {
+    background-color: #be123c;
+    border-bottom: 11px solid #be123c;
+    border-left: 22px solid #be123c;
+    border-right: 22px solid #be123c;
+    border-top: 11px solid #be123c;
+}
+
+.panel {
+    border-left: #7c3aed solid 4px;
+    margin: 21px 0;
+}
+
+.panel-content {
+    background-color: #f7f5ff;
+    color: #51485f;
+    padding: 16px;
+}
+
+.panel-content p {
+    color: #51485f;
+}
+
+.panel-item {
+    padding: 0;
+}
+
+.panel-item p:last-of-type {
+    margin-bottom: 0;
+    padding-bottom: 0;
+}
+
+.break-all {
+    word-break: break-all;
+}

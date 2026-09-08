@@ -1,0 +1,300 @@
+#!/bin/sh
+# shellcheck disable=SC2016
+set -eu
+
+root=/opt/filebeam/backend
+data=${FILEBEAM_DATA_DIR:-/data}
+role=${FILEBEAM_ROLE:-all}
+variant=${FILEBEAM_VARIANT:-light}
+cd "$root"
+app_pids=''
+web_pid=''
+queue_pid=''
+scheduler_pid=''
+postgres_pid=''
+valkey_pid=''
+stopping=0
+shutdown_started=0
+prepared=''
+last_checkpoint=''
+token_reported=''
+
+run_filebeam() {
+    if [ "$(id -u)" = 0 ]; then
+        setpriv --reuid=filebeam --regid=filebeam --init-groups -- "$@"
+    else
+        "$@"
+    fi
+}
+
+spawn_app() {
+    # app.env is mode 0600 and contains only process environment, never shell code.
+    kind=$1
+    shift
+    if [ "$(id -u)" = 0 ]; then
+        setpriv --reuid=filebeam --regid=filebeam --init-groups -- /bin/sh -ceu \
+            '. /run/filebeam/app.env; cd /opt/filebeam/backend; exec "$@"' filebeam "$@" &
+    else
+        /bin/sh -ceu '. /run/filebeam/app.env; cd /opt/filebeam/backend; exec "$@"' filebeam "$@" &
+    fi
+    pid=$!
+    app_pids="$app_pids $!"
+    case "$kind" in web) web_pid=$pid ;; queue) queue_pid=$pid ;; scheduler) scheduler_pid=$pid ;; esac
+}
+
+installed() {
+    run_filebeam /usr/local/bin/php -r '
+require "vendor/autoload.php";
+$app = require "bootstrap/app.php";
+$app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+exit($app->make(App\Support\Installation\InstallationState::class)->requiresSetup() ? 1 : 0);
+' 2>/dev/null
+}
+
+checkpoint() {
+    [ -f "$data/config/.env" ] || return 1
+    [ -f "$data/app/installation/state.json" ] || return 1
+    /usr/local/bin/php -r '$s = json_decode(file_get_contents($argv[1]), true); exit(is_array($s) && ($s["status"] ?? null) === "completed" ? 0 : 1);' "$data/app/installation/state.json" || return 1
+    if [ -f "$data/app/installation/runtime.generation" ]; then
+        cksum "$data/config/.env" "$data/app/installation/state.json" "$data/app/installation/runtime.generation"
+    else
+        cksum "$data/config/.env" "$data/app/installation/state.json"
+    fi
+}
+
+write_php_server_mode() {
+    if installed; then
+        printf '%s\n' 'worker /opt/filebeam/backend/public/frankenphp-worker.php {$FILEBEAM_WORKERS:2}' >/run/filebeam/worker.caddy
+        printf '%s\n' 'php_server {' '    index frankenphp-worker.php' '    try_files {path} frankenphp-worker.php' '}' >/run/filebeam/php-server.caddy
+    else
+        printf '%s\n' '# Setup uses regular request PHP; no persistent worker.' >/run/filebeam/worker.caddy
+        printf '%s\n' 'php_server' >/run/filebeam/php-server.caddy
+    fi
+    if [ "$(id -u)" = 0 ]; then
+        chown root:filebeam /run/filebeam/worker.caddy /run/filebeam/php-server.caddy
+    fi
+    chmod 0644 /run/filebeam/worker.caddy /run/filebeam/php-server.caddy
+}
+
+dotenv_value() {
+    /usr/local/bin/php -r 'require "/opt/filebeam/backend/vendor/autoload.php"; $v = Dotenv\Dotenv::parse(file_get_contents($argv[1])); echo $v[$argv[2]] ?? "";' "$1" "$2"
+}
+
+write_app_environment() {
+    umask 077
+    {
+        printf '%s\n' 'export FILEBEAM_CRON_QUEUE_ENABLED=false'
+        if [ "$variant" = omnibus ]; then
+            printf '%s\n' 'export DB_CONNECTION=pgsql DB_HOST=/run/filebeam/postgresql DB_PORT=5432 DB_DATABASE=filebeam DB_USERNAME=filebeam'
+            printf '%s\n' 'export REDIS_HOST=/run/filebeam/valkey/valkey.sock REDIS_PORT=0 REDIS_DB=0 REDIS_CACHE_DB=1'
+        fi
+    } >/run/filebeam/app.env
+    if [ "$(id -u)" = 0 ]; then
+        chown root:filebeam /run/filebeam/app.env
+        chmod 0640 /run/filebeam/app.env
+    else
+        chmod 0600 /run/filebeam/app.env
+    fi
+}
+
+emit_installation_token() {
+    [ -f "$data/app/installation/state.json" ] || return 0
+    checkpoint >/dev/null 2>&1 && return 0
+    [ -f "$data/config/.env" ] || return 0
+    token=$(dotenv_value "$data/config/.env" FILEBEAM_INSTALL_TOKEN 2>/dev/null || true)
+    [ "${#token}" -eq 64 ] || return 0
+    case "$token" in
+        *[!a-f0-9]*|'') return 0 ;;
+        *) [ "$token_reported" = "$token" ] || printf 'Filebeam installation token: %s\n' "$token"; token_reported=$token ;;
+    esac
+}
+
+stop_applications() {
+    [ -n "$app_pids" ] || return 0
+    # Caddy's control endpoint drains HTTP without its SIGTERM warning banner.
+    if [ -n "$web_pid" ] && kill -0 "$web_pid" 2>/dev/null; then
+        run_filebeam /usr/local/bin/frankenphp stop --address 127.0.0.1:2019 >/dev/null 2>&1 || kill -TERM "$web_pid" 2>/dev/null || true
+    fi
+    for pid in "$queue_pid" "$scheduler_pid"; do
+        [ -z "$pid" ] || kill -TERM "$pid" 2>/dev/null || true
+    done
+    deadline=$(( $(date +%s) + 90 ))
+    for pid in $app_pids; do
+        while kill -0 "$pid" 2>/dev/null && [ "$(date +%s)" -lt "$deadline" ]; do sleep 1; done
+        kill -KILL "$pid" 2>/dev/null || true
+        wait "$pid" 2>/dev/null || true
+    done
+    app_pids=''
+    web_pid=''; queue_pid=''; scheduler_pid=''
+}
+
+shutdown() {
+    status=${1:-0}
+    [ "$shutdown_started" -eq 0 ] || exit "$status"
+    shutdown_started=1
+    trap - EXIT INT TERM QUIT
+    stopping=1
+    stop_applications
+    [ -n "$valkey_pid" ] && kill -TERM "$valkey_pid" 2>/dev/null || true
+    [ -n "$postgres_pid" ] && kill -INT "$postgres_pid" 2>/dev/null || true
+    deadline=$(( $(date +%s) + 60 ))
+    for pid in "$valkey_pid" "$postgres_pid"; do
+        [ -n "$pid" ] || continue
+        while kill -0 "$pid" 2>/dev/null && [ "$(date +%s)" -lt "$deadline" ]; do sleep 1; done
+        kill -KILL "$pid" 2>/dev/null || true
+        wait "$pid" 2>/dev/null || true
+    done
+    exit "$status"
+}
+on_exit() {
+    status=$?
+    [ "$shutdown_started" -eq 1 ] || shutdown "$status"
+}
+trap on_exit EXIT
+trap 'shutdown 0' INT TERM QUIT
+
+start_omnibus() {
+    case "$role" in all|migrate) ;; *) return 0 ;; esac
+    pgdata="$data/postgresql/18/docker"
+    if [ ! -f "$pgdata/PG_VERSION" ]; then
+        setpriv --reuid=filebeampg --regid=filebeampg --init-groups -- /usr/lib/postgresql/18/bin/initdb --pgdata="$pgdata" --auth-local=peer --auth-host=reject --username=filebeampg
+    fi
+    setpriv --reuid=filebeampg --regid=filebeampg --init-groups -- /usr/lib/postgresql/18/bin/postgres -D "$pgdata" -k /run/filebeam/postgresql -p 5432 -c listen_addresses='' -c unix_socket_permissions=0770 -c "shared_buffers=${FILEBEAM_PG_SHARED_BUFFERS:-128MB}" -c "max_connections=${FILEBEAM_PG_MAX_CONNECTIONS:-100}" &
+    postgres_pid=$!
+    attempts=0
+    until setpriv --reuid=filebeampg --regid=filebeampg --init-groups -- /usr/bin/psql -X -w -h /run/filebeam/postgresql -p 5432 -U filebeampg -d postgres -Atqc 'SELECT 1' >/dev/null 2>&1; do
+        attempts=$((attempts + 1)); [ "$attempts" -lt 60 ] || { printf '%s\n' 'PostgreSQL did not become ready.' >&2; return 1; }; sleep 1
+    done
+    # The daemon retains owner write access; group filebeam also supports an
+    # explicit uid:gid application invocation without supplemental groups.
+    chgrp filebeam /run/filebeam/postgresql /run/filebeam/postgresql/.s.PGSQL.5432
+    chmod 0770 /run/filebeam/postgresql /run/filebeam/postgresql/.s.PGSQL.5432
+    setpriv --reuid=filebeampg --regid=filebeampg --init-groups -- /usr/bin/psql -X -w -h /run/filebeam/postgresql -p 5432 -U filebeampg -d postgres -v ON_ERROR_STOP=1 -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'filebeam') THEN CREATE ROLE filebeam LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT; END IF; END \$\$;"
+    if ! setpriv --reuid=filebeampg --regid=filebeampg --init-groups -- /usr/bin/psql -X -w -h /run/filebeam/postgresql -p 5432 -U filebeampg -d postgres -Atqc "SELECT 1 FROM pg_database WHERE datname = 'filebeam'" | grep -qx 1; then
+        setpriv --reuid=filebeampg --regid=filebeampg --init-groups -- /usr/bin/createdb -h /run/filebeam/postgresql -p 5432 -U filebeampg -O filebeam filebeam
+    fi
+
+    password="$data/config/valkey-password"
+    if [ ! -f "$password" ]; then umask 077; /usr/local/bin/php -r 'echo bin2hex(random_bytes(32));' >"$password"; fi
+    valkey_password=$(cat "$password")
+    if [ "${#valkey_password}" -ne 64 ]; then printf '%s\n' 'Invalid persisted Valkey password.' >&2; return 1; fi
+    case "$valkey_password" in *[!a-f0-9]*) printf '%s\n' 'Invalid persisted Valkey password.' >&2; return 1 ;; esac
+    chown root:filebeam "$password"
+    chmod 0640 "$password"
+    umask 077
+    printf '%s\n' "requirepass $valkey_password" 'port 0' 'protected-mode yes' 'unixsocket /run/filebeam/valkey/valkey.sock' 'unixsocketperm 0770' "dir $data/valkey" 'appendonly yes' 'appendfsync everysec' "maxmemory ${FILEBEAM_VALKEY_MAXMEMORY:-256mb}" 'maxmemory-policy noeviction' >/run/filebeam/valkey/valkey.conf
+    chown filebeamvalkey:filebeamvalkey /run/filebeam/valkey/valkey.conf
+    setpriv --reuid=filebeamvalkey --regid=filebeamvalkey --init-groups -- /usr/local/bin/valkey-server /run/filebeam/valkey/valkey.conf &
+    valkey_pid=$!
+    attempts=0
+    until [ -S /run/filebeam/valkey/valkey.sock ]; do
+        attempts=$((attempts + 1)); [ "$attempts" -lt 30 ] || { printf '%s\n' 'Valkey did not create its socket.' >&2; return 1; }; sleep 1
+    done
+    chgrp filebeam /run/filebeam/valkey /run/filebeam/valkey/valkey.sock
+    chmod 0770 /run/filebeam/valkey /run/filebeam/valkey/valkey.sock
+    write_app_environment
+}
+
+prepare_installed() {
+    current=$(checkpoint) || return 0
+    [ "$prepared" = "$current" ] && return 0
+    if mountpoint -q /storage && ! run_filebeam test -w /storage; then
+        printf '%s\n' 'Mounted local filestore is not writable by filebeam.' >&2
+        return 1
+    fi
+    run_filebeam /bin/sh -ceu '. /run/filebeam/app.env; cd /opt/filebeam/backend; exec 9>/data/app/installation/runtime.lock; flock -x 9; php artisan migrate --force --no-interaction; php artisan optimize --no-interaction'
+    prepared=$current
+}
+
+should_prepare() {
+    case "${FILEBEAM_MIGRATE_ON_START:-auto}" in
+        true) return 0 ;;
+        false) return 1 ;;
+        auto) [ "$role" = all ] ;;
+        *) printf '%s\n' 'FILEBEAM_MIGRATE_ON_START must be auto, true, or false.' >&2; return 2 ;;
+    esac
+}
+
+refresh_app_pids() {
+    app_pids=''
+    for pid in "$web_pid" "$queue_pid" "$scheduler_pid"; do
+        [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && app_pids="$app_pids $pid"
+    done
+    return 0
+}
+
+start_applications() {
+    app_pids=''
+    write_app_environment
+    is_installed=0
+    if installed; then
+        if should_prepare; then prepare_installed; fi
+        is_installed=1
+    fi
+    write_php_server_mode
+    case "$role" in
+        all|web)
+            /usr/local/bin/frankenphp adapt --config /run/filebeam/Caddyfile --adapter caddyfile >/run/filebeam/caddy.json
+            # Caddyfile has no per-server automatic HTTPS switch. The explicit
+            # HTTP health/redirect listener must not participate in TLS automation.
+            /usr/local/bin/php -r '
+$path = "/run/filebeam/caddy.json";
+$config = json_decode(file_get_contents($path), flags: JSON_THROW_ON_ERROR);
+foreach ($config->apps->http->servers as $server) {
+    if (in_array(":8080", $server->listen, true)) {
+        $server->automatic_https ??= new stdClass;
+        $server->automatic_https->disable = true;
+    }
+}
+file_put_contents($path, json_encode($config, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES));
+'
+            if [ "$(id -u)" = 0 ]; then chown root:filebeam /run/filebeam/caddy.json; fi
+            chmod 0640 /run/filebeam/caddy.json
+            spawn_app web /usr/local/bin/frankenphp run --config /run/filebeam/caddy.json
+            ;;
+    esac
+    if [ "$is_installed" -eq 1 ]; then
+        case "$role" in all|queue) spawn_app queue /usr/local/bin/php artisan queue:work --sleep=3 --tries=5 --timeout=60 --max-time=3600 --no-interaction ;; esac
+        case "$role" in all|scheduler) spawn_app scheduler /usr/local/bin/php artisan schedule:work --no-interaction ;; esac
+    fi
+}
+
+case "$role" in all|web|queue|scheduler|migrate) ;; *) exit 64 ;; esac
+case "${FILEBEAM_MIGRATE_ON_START:-auto}" in auto|true|false) ;; *) exit 64 ;; esac
+if [ "$variant" = omnibus ]; then start_omnibus; fi
+if [ "$role" = migrate ]; then
+    write_app_environment
+    set +e
+    if [ "$(id -u)" = 0 ]; then
+        setpriv --reuid=filebeam --regid=filebeam --init-groups -- /bin/sh -ceu '. /run/filebeam/app.env; cd /opt/filebeam/backend; exec 9>/data/app/installation/runtime.lock; flock -x 9; exec php artisan migrate --force --no-interaction'
+    else
+        /bin/sh -ceu '. /run/filebeam/app.env; cd /opt/filebeam/backend; exec 9>/data/app/installation/runtime.lock; flock -x 9; exec php artisan migrate --force --no-interaction'
+    fi
+    status=$?
+    set -e
+    shutdown "$status"
+fi
+emit_installation_token
+start_applications
+last_checkpoint=$(checkpoint || true)
+while [ "$stopping" -eq 0 ]; do
+    sleep 5
+    emit_installation_token
+    current=$(checkpoint || true)
+    if [ -n "$current" ] && [ "$current" != "$last_checkpoint" ]; then
+        stop_applications
+        start_applications
+        last_checkpoint=$current
+    fi
+    if [ -n "$web_pid" ] && ! kill -0 "$web_pid" 2>/dev/null; then shutdown 1; fi
+    if [ -n "$queue_pid" ] && ! kill -0 "$queue_pid" 2>/dev/null; then wait "$queue_pid" 2>/dev/null || true; queue_pid=''; refresh_app_pids; installed && spawn_app queue /usr/local/bin/php artisan queue:work --sleep=3 --tries=5 --timeout=60 --max-time=3600 --no-interaction; fi
+    if [ -n "$scheduler_pid" ] && ! kill -0 "$scheduler_pid" 2>/dev/null; then wait "$scheduler_pid" 2>/dev/null || true; scheduler_pid=''; refresh_app_pids; installed && spawn_app scheduler /usr/local/bin/php artisan schedule:work --no-interaction; fi
+    [ -n "$postgres_pid" ] && ! kill -0 "$postgres_pid" 2>/dev/null && shutdown 1
+    [ -n "$valkey_pid" ] && ! kill -0 "$valkey_pid" 2>/dev/null && shutdown 1
+    if [ -n "$postgres_pid" ] && ! run_filebeam /usr/bin/pg_isready -h /run/filebeam/postgresql -p 5432 -U filebeam -d filebeam -t 2 >/dev/null 2>&1; then
+        shutdown 1
+    fi
+    if [ -n "$valkey_pid" ] && ! REDISCLI_AUTH="$(cat "$data/config/valkey-password")" timeout 2 /usr/local/bin/valkey-cli -s /run/filebeam/valkey/valkey.sock --no-auth-warning ping | grep -qx PONG; then
+        shutdown 1
+    fi
+done

@@ -1,0 +1,8 @@
+{
+    "preset": "laravel",
+    "exclude": ["bootstrap/cache", "vendor"],
+    "rules": {
+        "declare_strict_types": true,
+        "no_empty_phpdoc": true
+    }
+}

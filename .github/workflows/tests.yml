@@ -1,0 +1,258 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+  workflow_call:
+    inputs:
+      ref:
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # Keep this name in sync with the required GitHub Actions check on master.
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: filebeam_testing
+          MYSQL_USER: sail
+          MYSQL_PASSWORD: password
+          MYSQL_ROOT_PASSWORD: password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -u sail -ppassword"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Start disposable MinIO
+        run: |
+          docker run --detach --name filebeam-minio --publish 127.0.0.1:9000:9000 \
+            --env MINIO_ROOT_USER=filebeam-test \
+            --env MINIO_ROOT_PASSWORD=filebeam-test-secret \
+            minio/minio:RELEASE.2025-04-22T22-12-26Z server /data --console-address :9001
+          for _ in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:9000/minio/health/live; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs filebeam-minio
+          exit 1
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240
+        with:
+          php-version: '8.5'
+          extensions: mbstring, dom, curl, sodium, zip, pdo_sqlite, pdo_mysql, pdo_pgsql, redis
+          coverage: none
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Set up Rust and wasm-pack
+        run: |
+          rustup toolchain install 1.98.0 --profile minimal
+          rustup default 1.98.0
+          rustup component add rustfmt clippy
+          rustup target add wasm32-unknown-unknown
+          cargo install wasm-pack --version 0.15.0 --locked
+
+      - name: Install PHP dependencies
+        working-directory: backend
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: Prepare Laravel environment
+        working-directory: backend
+        run: |
+          cp .env.example .env
+          php artisan key:generate --force --no-interaction
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      # The backend build consumes the generated WASM package, so do not parallelize these.
+      - name: Build frontend assets
+        run: npm run build && test -f backend/public/build/manifest.json
+
+      - name: Check JavaScript
+        run: npm run check
+
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path encryption/Cargo.toml --check
+
+      - name: Lint Rust
+        run: cargo clippy --manifest-path encryption/Cargo.toml --all-targets -- -D warnings
+
+      - name: Test Rust
+        run: cargo test --manifest-path encryption/Cargo.toml
+
+      - name: Check PHP formatting
+        working-directory: backend
+        run: composer lint:check
+
+      - name: Analyze PHP
+        working-directory: backend
+        run: vendor/bin/phpstan analyse --memory-limit=512M
+
+      - name: Test PHP with SQLite
+        working-directory: backend
+        env:
+          FILEBEAM_TEST_S3_ENDPOINT: http://127.0.0.1:9000
+          FILEBEAM_TEST_S3_KEY: filebeam-test
+          FILEBEAM_TEST_S3_SECRET: filebeam-test-secret
+          FILEBEAM_TEST_S3_BUCKET: filebeam-test
+        run: vendor/bin/pest --configuration phpunit.xml
+
+      - name: Test PHP with MySQL
+        working-directory: backend
+        env:
+          FILEBEAM_TEST_S3_ENDPOINT: http://127.0.0.1:9000
+          FILEBEAM_TEST_S3_KEY: filebeam-test
+          FILEBEAM_TEST_S3_SECRET: filebeam-test-secret
+          FILEBEAM_TEST_S3_BUCKET: filebeam-test
+        run: vendor/bin/pest --configuration phpunit.mysql.xml
+
+      - name: Test updater harness
+        run: php tests/updater/run.php
+
+      - name: Test release reference validation
+        run: bash scripts/release/validate-ref.test.sh
+
+      - name: Test distribution package
+        run: |
+          bash scripts/release/package.sh v0.0.0 "$RUNNER_TEMP/filebeam-package" --skip-build --allow-unsigned-local
+          bash scripts/release/smoke.sh "$RUNNER_TEMP/filebeam-package/filebeam-v0.0.0.zip"
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run small-chunk browser tests
+        env:
+          APP_ENV: testing
+          APP_URL: http://127.0.0.1:8010
+          CHUNK_MAX_SIZE: '1040'
+          FILEBEAM_CREATIONS_PER_HOUR: '600'
+          DB_CONNECTION: sqlite
+          DB_DATABASE: ${{ runner.temp }}/filebeam-chunks.sqlite
+          CACHE_STORE: array
+          SESSION_DRIVER: cookie
+          QUEUE_CONNECTION: sync
+        run: |
+          set -euo pipefail
+          server_pid=''
+          cleanup() {
+            if [[ -n "$server_pid" ]]; then
+              kill "$server_pid" 2>/dev/null || true
+              wait "$server_pid" 2>/dev/null || true
+            fi
+          }
+          trap cleanup EXIT
+          touch "$DB_DATABASE"
+          (
+            cd backend
+            php artisan migrate --seed --force --no-interaction
+            exec php artisan serve --host=127.0.0.1 --port=8010
+          ) > "${RUNNER_TEMP}/filebeam-chunks.log" 2>&1 &
+          server_pid=$!
+          for _ in {1..30}; do curl --fail --silent http://127.0.0.1:8010/up && break; sleep 1; done
+          curl --fail --silent http://127.0.0.1:8010/up
+          BASE_URL=http://127.0.0.1:8010 npx playwright test tests/browser/chunks.spec.ts --config=playwright.config.ts --grep @small-chunks
+
+      - name: Validate Sail configuration
+        working-directory: backend
+        env:
+          FILEBEAM_CREATIONS_PER_HOUR: '600'
+        run: docker compose config --quiet
+
+      - name: Match container permissions to runner
+        run: |
+          printf 'WWWUSER=%s\nWWWGROUP=%s\n' "$(id -u)" "$(id -g)" >> "$GITHUB_ENV"
+
+      - name: Build and start Sail
+        working-directory: backend
+        env:
+          FILEBEAM_CREATIONS_PER_HOUR: '600'
+        run: ./vendor/bin/sail up --build --detach --wait
+
+      - name: Migrate and seed Sail database
+        working-directory: backend
+        env:
+          FILEBEAM_CREATIONS_PER_HOUR: '600'
+        run: ./vendor/bin/sail artisan migrate --seed --force --no-interaction
+
+      - name: Test PHP with PostgreSQL and Redis
+        working-directory: backend
+        env:
+          FILEBEAM_CREATIONS_PER_HOUR: '600'
+        run: |
+          docker network connect filebeam_sail filebeam-minio
+          docker compose exec -T --user sail \
+            -e FILEBEAM_TEST_S3_ENDPOINT=http://filebeam-minio:9000 \
+            -e FILEBEAM_TEST_S3_KEY=filebeam-test \
+            -e FILEBEAM_TEST_S3_SECRET=filebeam-test-secret \
+            -e FILEBEAM_TEST_S3_BUCKET=filebeam-test \
+            laravel.test php artisan test --configuration phpunit.sail.xml
+
+      - name: Test Turbo cache with Redis
+        working-directory: backend
+        env:
+          FILEBEAM_CREATIONS_PER_HOUR: '600'
+        run: docker compose exec -T --user sail -e FILEBEAM_TEST_REDIS_HOST=redis laravel.test vendor/bin/pest --group=redis --configuration phpunit.xml
+
+      - name: Create unhealthy scheduler browser fixture
+        working-directory: backend
+        run: |
+          docker compose exec -T laravel.test php -r 'foreach (glob("/proc/[0-9]*/cmdline") as $file) { $command = file_get_contents($file); if (str_contains($command, "artisan\0schedule:work")) { posix_kill((int) basename(dirname($file)), 19); } }'
+          ./vendor/bin/sail artisan tinker --execute 'Illuminate\Support\Facades\DB::table("scheduler_heartbeats")->delete();'
+
+      - name: Run browser tests
+        env:
+          BASE_URL: http://127.0.0.1:8000
+          BROWSER_TEST_UNHEALTHY_SCHEDULER: 'true'
+          FILEBEAM_CREATIONS_PER_HOUR: '600'
+        run: npm run test:browser -- --grep-invert @small-chunks
+
+      - name: Upload browser failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playwright-artifacts
+          path: |
+            test-results/
+            playwright-report/
+          if-no-files-found: ignore
+
+      - name: Stop Sail
+        if: always()
+        working-directory: backend
+        env:
+          FILEBEAM_CREATIONS_PER_HOUR: '600'
+        run: ./vendor/bin/sail down --volumes --remove-orphans
+
+      - name: Stop disposable MinIO
+        if: always()
+        run: docker rm --force filebeam-minio || true

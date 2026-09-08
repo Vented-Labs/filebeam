@@ -1,0 +1,27 @@
+name: Bug report
+description: Report a reproducible problem in Filebeam.
+title: '[Bug]: '
+labels: [bug]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      placeholder: Include version, deployment method, and the smallest reproducible steps.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: markdown
+    attributes:
+      value: Do not include secrets, share links, decrypted content, or suspected security vulnerabilities. Report vulnerabilities through the private security policy.

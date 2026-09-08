@@ -1,0 +1,53 @@
+/* Filebeam design tokens. */
+:root {
+    --fb-bg: #0b0914;
+    --fb-surface: #131020;
+    --fb-surface-raised: #1b152b;
+    --fb-border: #352747;
+    --fb-control-border: #746184;
+    --fb-text: #f7f5ff;
+    --fb-text-muted: #aaa0c0;
+    --fb-brand: #8b35ff;
+    --fb-brand-bright: #a855f7;
+    --fb-brand-tip: #c75bfa;
+    --fb-brand-fold: #e7a1ff;
+    --fb-action: #7c3aed;
+    --fb-action-hover: #6d28d9;
+    --fb-action-active: #5b21b6;
+    --fb-on-action: #f7f5ff;
+    --fb-accent-text: #c084fc;
+    --fb-focus: #c084fc;
+    --fb-selected-surface: #26163f;
+    --fb-selection: #432466;
+    --fb-editor-bg: #0f0c19;
+    --fb-success: #6ee7b7;
+    --fb-warning: #fcd34d;
+    --fb-danger: #fda4af;
+    --fb-info: #93c5fd;
+    /* Decorative only: use solid --fb-action behind normal-size button labels. */
+    --fb-brand-gradient: linear-gradient(135deg, #7c3aed 0%, #8b35ff 55%, #c75bfa 100%);
+    --fb-ambient-glow: radial-gradient(ellipse at 50% 20%, rgb(139 53 255 / 10%), transparent 65%);
+    --fb-font-ui:
+        'Inter Variable', 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --fb-font-brand: 'Plus Jakarta Sans Variable', 'Plus Jakarta Sans', var(--fb-font-ui);
+    --fb-font-code:
+        'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Consolas,
+        monospace;
+    --fb-font-body: 1rem;
+    --fb-font-small: 0.875rem;
+    --fb-font-code-size: 0.875rem;
+    --fb-line-body: 1.5;
+    --fb-line-code: 1.65;
+    --fb-weight-normal: 400;
+    --fb-weight-medium: 500;
+    --fb-weight-semibold: 600;
+    --fb-weight-bold: 700;
+    --fb-weight-brand: 800;
+    --fb-radius-sm: 0.5rem;
+    --fb-radius-control: 0.75rem;
+    --fb-radius-panel: 1.5rem;
+    --fb-space-unit: 0.25rem;
+    --fb-focus-ring: 0 0 0 3px var(--fb-focus);
+    --fb-duration-fast: 150ms;
+    --fb-duration-normal: 200ms;
+}
