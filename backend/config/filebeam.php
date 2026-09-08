@@ -51,7 +51,9 @@ return [
     'copyright_holder' => $branding['copyright_holder'],
 
     'updates' => [
-        'state_path' => base_path('../.filebeam'),
+        'state_path' => env('FILEBEAM_CONTAINER', false)
+            ? env('FILEBEAM_DATA_DIR', '/data').'/app/updates'
+            : base_path('../.filebeam'),
         'auto_enabled' => ! env('FILEBEAM_CONTAINER', false) && env('FILEBEAM_AUTO_UPDATES_ENABLED', false),
     ],
 

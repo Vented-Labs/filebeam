@@ -96,6 +96,9 @@ jobs:
       - run: rustup toolchain install 1.98.0 --profile minimal && rustup default 1.98.0 && rustup target add wasm32-unknown-unknown && cargo install wasm-pack --version 0.15.0 --locked
       - run: sudo apt-get update && sudo apt-get install --yes zip unzip
       - run: npm ci
+      - name: Prepare Laravel writable directories
+        working-directory: backend
+        run: mkdir -p bootstrap/cache storage/app/private storage/app/public storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs
       - working-directory: backend
         run: composer install --no-interaction --prefer-dist --no-progress
       - run: chmod +x scripts/release/package.sh scripts/release/publish.sh
@@ -271,13 +274,21 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ env.RELEASE_COMMIT }}
-      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
-      - uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: sigstore/cosign-installer@3454372f43399081ed03b604cb2d021dabca52bb # v3.8.2
+      - name: Create ephemeral Buildx builder
+        run: |
+          builder="filebeam-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ matrix.variant }}-${{ matrix.arch }}"
+          docker buildx create --name "$builder" --driver docker-container --use
+          docker buildx inspect --bootstrap
+          printf 'FILEBEAM_BUILDER=%s\n' "$builder" >> "$GITHUB_ENV"
+      - name: Log in to GHCR
+        env:
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '::add-mask::%s\n' "$GHCR_TOKEN"
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GHCR_USERNAME" --password-stdin
+      - name: Install Cosign
+        run: bash scripts/ci/install-release-tools.sh "${{ matrix.arch }}"
       - name: Validate build context
         run: scripts/docker/check-context.sh
       - name: Build immutable platform image
@@ -293,9 +304,12 @@ jobs:
       - name: Prepare ephemeral Omnibus runner
         if: matrix.variant == 'omnibus'
         run: sudo sysctl -w vm.overcommit_memory=1
+      - id: digest
+        name: Resolve tested staging image digest
+        run: printf 'digest=%s\n' "$(docker buildx imagetools inspect "$IMAGE:$IMAGE_TAG" --format '{{.Manifest.Digest}}')" >> "$GITHUB_OUTPUT"
       - name: Test published artifact
         env:
-          FILEBEAM_IMAGE: ${{ env.IMAGE }}:${{ env.IMAGE_TAG }}
+          FILEBEAM_IMAGE: ${{ env.IMAGE }}@${{ steps.digest.outputs.digest }}
           EXPECTED_VERSION: ${{ needs.validate-ref.outputs.tag }}
           EXPECTED_REVISION: ${{ needs.validate-ref.outputs.commit }}
         run: |
@@ -304,19 +318,19 @@ jobs:
           [[ $(docker image inspect "$FILEBEAM_IMAGE" --format '{{ index .Config.Labels "org.opencontainers.image.version" }}') == "$EXPECTED_VERSION" ]]
           [[ $(docker image inspect "$FILEBEAM_IMAGE" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}') == "$EXPECTED_REVISION" ]]
           scripts/docker/test.sh --variant "${{ matrix.variant }}" --suite full
-      - id: digest
-        name: Resolve tested image digest
-        run: printf 'digest=%s\n' "$(docker buildx imagetools inspect "$IMAGE:$IMAGE_TAG" --format '{{.Manifest.Digest}}')" >> "$GITHUB_OUTPUT"
       - name: Scan tested image
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          image-ref: ${{ env.IMAGE }}@${{ steps.digest.outputs.digest }}
-          format: table
-          severity: HIGH,CRITICAL
-          ignore-unfixed: false
-          exit-code: '1'
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "${DOCKER_CONFIG:-$HOME/.docker}:/root/.docker:ro" \
+            aquasec/trivy:0.69.3@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c \
+            image --format table --severity HIGH,CRITICAL --ignore-unfixed=false --exit-code 1 \
+            "$IMAGE@${{ steps.digest.outputs.digest }}"
       - name: Sign platform image
         run: cosign sign --yes "$IMAGE@${{ steps.digest.outputs.digest }}"
+      - name: Remove ephemeral Buildx builder
+        if: always()
+        run: docker buildx rm "$FILEBEAM_BUILDER" || true
 
   docker-publish:
     if: needs.docker-build.result == 'success'
@@ -333,13 +347,25 @@ jobs:
       REVISION: ${{ needs.docker-plan.outputs.revision }}
       ADVANCE_ALIASES: ${{ needs.docker-plan.outputs.advance_aliases }}
     steps:
-      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
-      - uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: sigstore/cosign-installer@3454372f43399081ed03b604cb2d021dabca52bb # v3.8.2
+          persist-credentials: false
+          ref: ${{ needs.validate-ref.outputs.commit }}
+      - name: Create ephemeral Buildx builder
+        run: |
+          builder="filebeam-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-publish"
+          docker buildx create --name "$builder" --driver docker-container --use
+          docker buildx inspect --bootstrap
+          printf 'FILEBEAM_BUILDER=%s\n' "$builder" >> "$GITHUB_ENV"
+      - name: Log in to GHCR
+        env:
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '::add-mask::%s\n' "$GHCR_TOKEN"
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GHCR_USERNAME" --password-stdin
+      - name: Install Cosign
+        run: bash scripts/ci/install-release-tools.sh
       - name: Publish multi-architecture manifests
         run: |
           platform_digest() {
@@ -385,3 +411,6 @@ jobs:
               docker buildx imagetools create --tag "$image:$RELEASE_TAG" --tag "$image:$major_minor" --tag "$image:$major" --tag "$image:latest" "$image:$REVISION"
             fi
           done
+      - name: Remove ephemeral Buildx builder
+        if: always()
+        run: docker buildx rm "$FILEBEAM_BUILDER" || true

@@ -179,7 +179,7 @@ jobs:
           (
             cd backend
             php artisan migrate --seed --force --no-interaction
-            exec php artisan serve --host=127.0.0.1 --port=8010
+            exec php artisan serve --host=127.0.0.1 --port=8010 --no-reload
           ) > "${RUNNER_TEMP}/filebeam-chunks.log" 2>&1 &
           server_pid=$!
           for _ in {1..30}; do curl --fail --silent http://127.0.0.1:8010/up && break; sleep 1; done

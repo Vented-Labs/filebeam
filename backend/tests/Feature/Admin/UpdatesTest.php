@@ -15,9 +15,12 @@ use Livewire\Livewire;
 beforeEach(function (): void {
     Filament::setCurrentPanel(Filament::getPanel('admin'));
     config()->set('filebeam.updates.state_path', storage_path('framework/testing/updates-'.bin2hex(random_bytes(4))));
+    $this->defaultDatabaseConnection = config('database.default');
+    $this->defaultDatabaseDriver = config('database.connections.'.$this->defaultDatabaseConnection.'.driver');
 });
 
 afterEach(function (): void {
+    config()->set('database.connections.'.$this->defaultDatabaseConnection.'.driver', $this->defaultDatabaseDriver);
     File::deleteDirectory(config('filebeam.updates.state_path'));
 });
 
@@ -104,11 +107,19 @@ test('automatic updates install only a checked compatible release when enabled',
 test('PostgreSQL availability requires a successful backup preflight', function () {
     $keypair = sodium_crypto_sign_keypair();
     config()->set('version', [...config('version'), 'distribution' => 'package', 'update_public_key' => base64_encode(sodium_crypto_sign_publickey($keypair))]);
-    config()->set('database.connections.sqlite.driver', 'pgsql');
+    config()->set('database.connections.'.config('database.default').'.driver', 'pgsql');
     Process::preventStrayProcesses();
     Process::fake(['*' => Process::result(exitCode: 1)]);
 
     $availability = app(ReleaseChecker::class)->availability(requireCron: false);
+
+    if (is_file('/.dockerenv')) {
+        expect($availability['available'])->toBeFalse()
+            ->and($availability['reasons'])->toContain('Self-updates are unavailable in containers.');
+        Process::assertNothingRan();
+
+        return;
+    }
 
     expect($availability['available'])->toBeFalse()
         ->and($availability['reasons'])->toContain('PostgreSQL updates require matching pg_dump/pg_restore and a reachable database. Run php update.php --check-backup.');
@@ -122,13 +133,24 @@ test('automatic PostgreSQL updates stop when the backup preflight fails', functi
     $keypair = sodium_crypto_sign_keypair();
     config()->set('filebeam.updates.auto_enabled', true);
     config()->set('version', [...config('version'), 'distribution' => 'package', 'update_public_key' => base64_encode(sodium_crypto_sign_publickey($keypair))]);
-    config()->set('database.connections.sqlite.driver', 'pgsql');
+    config()->set('database.connections.'.config('database.default').'.driver', 'pgsql');
     Http::preventStrayRequests();
     Http::fake(['https://releases.filebeam.io/index.json' => Http::response(signedCatalog($keypair, [release('v0.2.0')]))]);
     Process::preventStrayProcesses();
     Process::fake(['*' => Process::result(exitCode: 1)]);
 
     $state = app(ReleaseChecker::class)->checkAndInstallAutomaticUpdate();
+
+    if (is_file('/.dockerenv')) {
+        $availability = app(ReleaseChecker::class)->availability(requireCron: false);
+
+        expect($state['state'])->toBe('available')
+            ->and($availability['available'])->toBeFalse()
+            ->and($availability['reasons'])->toContain('Self-updates are unavailable in containers.');
+        Process::assertNothingRan();
+
+        return;
+    }
 
     expect($state['state'])->toBe('available');
     Process::assertRan(fn ($process): bool => in_array('--check-backup', $process->command, true));
@@ -139,13 +161,24 @@ test('automatic PostgreSQL updates run a successful backup preflight before the 
     $keypair = sodium_crypto_sign_keypair();
     config()->set('filebeam.updates.auto_enabled', true);
     config()->set('version', [...config('version'), 'distribution' => 'package', 'update_public_key' => base64_encode(sodium_crypto_sign_publickey($keypair))]);
-    config()->set('database.connections.sqlite.driver', 'pgsql');
+    config()->set('database.connections.'.config('database.default').'.driver', 'pgsql');
     Http::preventStrayRequests();
     Http::fake(['https://releases.filebeam.io/index.json' => Http::response(signedCatalog($keypair, [release('v0.2.0')]))]);
     Process::preventStrayProcesses();
     Process::fake();
 
     $state = app(ReleaseChecker::class)->checkAndInstallAutomaticUpdate();
+
+    if (is_file('/.dockerenv')) {
+        $availability = app(ReleaseChecker::class)->availability(requireCron: false);
+
+        expect($state['state'])->toBe('available')
+            ->and($availability['available'])->toBeFalse()
+            ->and($availability['reasons'])->toContain('Self-updates are unavailable in containers.');
+        Process::assertNothingRan();
+
+        return;
+    }
 
     expect($state['latest']['tag'])->toBe('v0.2.0');
     Process::assertRan(fn ($process): bool => $process->path === dirname(base_path())
@@ -202,7 +235,7 @@ test('automatic updates skip source installations and unsupported database drive
     config()->set('filebeam.updates.auto_enabled', true);
     config()->set('version', [...config('version'), 'distribution' => $scenario === 'source' ? 'source' : 'package', 'update_public_key' => base64_encode(sodium_crypto_sign_publickey($keypair))]);
     if ($scenario === 'unsupported driver') {
-        config()->set('database.connections.sqlite.driver', 'sqlsrv');
+        config()->set('database.connections.'.config('database.default').'.driver', 'sqlsrv');
     }
     Http::preventStrayRequests();
     Http::fake(['https://releases.filebeam.io/index.json' => Http::response(signedCatalog($keypair, [release('v0.2.0')]))]);

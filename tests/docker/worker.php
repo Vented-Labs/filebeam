@@ -131,8 +131,23 @@ function isolation(int $iterations): void
     printf("worker-isolation: account_requests=%d identities=3 anonymous=%d\n", $iterations * 4, $iterations);
 }
 
+function runtime(): void
+{
+    bootstrapApp();
+    $updates = app(App\Services\ReleaseChecker::class);
+    $updates->state();
+    $updates->updaterStatus();
+    $updates->updaterHeartbeat();
+    $updates->availability()['available'] === false || fail('container self-updates were enabled');
+    $expected = (getenv('FILEBEAM_DATA_DIR') ?: '/data').'/app/updates';
+    config('filebeam.updates.state_path') === $expected || fail('update state escaped the data volume');
+    is_dir($expected) && is_writable($expected) || fail('update state is not writable on the data volume');
+    fwrite(STDOUT, "worker-runtime: persistent_update_state=ok container_self_updates=blocked\n");
+}
+
 match ($argv[1] ?? '') {
     'seed' => seed(),
+    'runtime' => runtime(),
     'warm' => isolation(100),
     'isolation' => isolation(2000),
     default => fail('usage: worker.php seed|isolation'),

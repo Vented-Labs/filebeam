@@ -36,7 +36,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+      - name: Create ephemeral Buildx builder
+        run: |
+          builder="filebeam-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ matrix.variant }}-${{ matrix.arch }}"
+          docker buildx create --name "$builder" --driver docker-container --use
+          docker buildx inspect --bootstrap
+          printf 'FILEBEAM_BUILDER=%s\n' "$builder" >> "$GITHUB_ENV"
       - name: Validate build context
         run: scripts/docker/check-context.sh
       - name: Build image
@@ -58,3 +63,6 @@ jobs:
           FILEBEAM_IMAGE: filebeam-${{ matrix.variant }}:ci-${{ github.sha }}-${{ matrix.arch }}
         run: |
           scripts/docker/test.sh --variant "${{ matrix.variant }}" --suite full
+      - name: Remove ephemeral Buildx builder
+        if: always()
+        run: docker buildx rm "$FILEBEAM_BUILDER" || true
