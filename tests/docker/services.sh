@@ -38,7 +38,9 @@ caddy_image='caddy:2.10.2-alpine'
 redact() {
     sed -E \
         -e 's/(Filebeam installation token: )[[:graph:]]+/\1[REDACTED]/g' \
-        -e 's/(MINIO_ROOT_PASSWORD=|DB_PASSWORD=|REDIS_PASSWORD=|AWS_SECRET_ACCESS_KEY=|X-Installation-Token: )[[:graph:]]+/\1[REDACTED]/g'
+        -e 's/(MINIO_ROOT_PASSWORD=|DB_PASSWORD=|REDIS_PASSWORD=|AWS_SECRET_ACCESS_KEY=|X-Installation-Token: )[[:graph:]]+/\1[REDACTED]/g' \
+        -e 's/(filebeam-test-secret|filebeam-test-password|Acceptance-password-123!)/[REDACTED]/g' \
+        -e "s#https?://[^[:space:]\\\"']+#URL_REDACTED#g"
 }
 
 logs() {
@@ -53,6 +55,7 @@ logs() {
 cleanup() {
     local status=$?
     if ((status)); then keep=true; fi
+    if ((status)); then logs; fi
     if [[ $keep == true ]]; then
         printf 'Kept owned objects: network=%s containers=%s,%s,%s,%s,%s volumes=%s,%s,%s,%s,%s,%s,%s\n' "$network" "$app" "$tls_app" "$postgres" "$minio" "$proxy" "$data_volume" "$tls_data_volume" "$tls_storage_volume" "$proxy_config_volume" "$proxy_data_volume" "$ca_volume" "$ini_volume" >&2
     else
@@ -166,7 +169,7 @@ PHP
 diagnose_s3() {
     # Do not print request traces: AWS exceptions can include signed URLs. The
     # exception class and message identify TLS, endpoint, and adapter failures.
-    docker exec -i --user 10001:10001 "$app" php /dev/stdin <<'PHP' | redact
+    docker exec -i --user 10001:10001 "$app" php /dev/stdin 2>&1 <<'PHP' | redact >&2
 <?php
 declare(strict_types=1);
 
@@ -266,6 +269,9 @@ docker run -d --name "$proxy" --label com.filebeam.test="$prefix" --network "$ne
 wait_for 'MinIO bucket creation' "docker run --rm --entrypoint /bin/sh --network '$network' '$mc_image' -ec 'mc alias set local http://minio:9000 filebeam-test filebeam-test-secret >/dev/null && mc mb --ignore-existing local/filebeam >/dev/null'"
 wait_for 'S3 proxy CA' "docker run --rm -v '$proxy_data_volume:/data:ro' '$caddy_image' test -f /data/caddy/pki/authorities/local/root.crt"
 docker run --rm --entrypoint sh -v "$proxy_data_volume:/source:ro" -v "$ca_volume:/ca" "$caddy_image" -ec 'cp /source/caddy/pki/authorities/local/root.crt /ca/root.crt && chmod 0644 /ca/root.crt'
+# The CA file is written before Caddy has necessarily loaded its leaf certificate.
+# Verify the actual trusted TLS path before the app's S3 probe can exercise it.
+wait_for 'trusted S3 proxy endpoint' "docker run --rm --network '$network' --entrypoint curl -v '$ca_volume:/test-ca:ro' '$image' --fail --silent --show-error --connect-timeout 3 --max-time 5 --cacert /test-ca/root.crt https://s3-proxy:9443/minio/health/live"
 
 # The image must remain healthy before setup even when no /storage mount exists.
 docker run -d --name "$app" --label com.filebeam.test="$prefix" --network "$network" --read-only --tmpfs /run:rw,nosuid,nodev,size=64m --tmpfs /tmp:rw,nosuid,nodev,size=64m \
