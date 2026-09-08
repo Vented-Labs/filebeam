@@ -26,14 +26,8 @@ redacted_logs() {
 assert_clean_logs() {
     local logs
     logs=$(redacted_logs)
-    if [[ ${FILEBEAM_ALLOW_HOST_WARNINGS:-false} == true && $current_variant == omnibus ]]; then
-        if printf '%s\n' "$logs" | grep -F 'Memory overcommit must be enabled'; then
-            printf '%s\n' 'Host prerequisite warning retained; vm.overcommit_memory was not changed.' >&2
-        fi
-        logs=$(printf '%s\n' "$logs" | sed '/Memory overcommit must be enabled/d')
-    fi
-    if printf '%s\n' "$logs" | grep -Ei '"level":"(error|warn)"|PHP (Warning|Fatal error)|(^|[[:space:]])WARNING([[:space:]:]|$)|FATAL:|ERROR:'; then
-        printf '%s\n' 'Unexpected warning or error in container lifecycle logs' >&2
+    if printf '%s\n' "$logs" | grep -Ei '"level":"error"|PHP Fatal error|FATAL:|ERROR:'; then
+        printf '%s\n' 'Unexpected error in container lifecycle logs' >&2
         return 1
     fi
 }

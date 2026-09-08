@@ -10,7 +10,7 @@ usage() {
 tag=$1
 commit=$2
 release_dir=$3
-root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 zip="$release_dir/filebeam-$tag.zip"
 metadata="$release_dir/release.json"
 
@@ -18,11 +18,12 @@ metadata="$release_dir/release.json"
 [[ $commit =~ ^[0-9a-f]{40}$ ]] || { printf 'Invalid release commit.\n' >&2; exit 64; }
 [[ -f $zip && -f $metadata ]] || { printf 'Release ZIP and metadata are required.\n' >&2; exit 1; }
 command -v gh >/dev/null
-command -v git >/dev/null
 command -v php >/dev/null
-[[ -n ${GH_REPOSITORY:-} ]] || { printf 'GH_REPOSITORY is required.\n' >&2; exit 1; }
+[[ ${GH_REPO:-} =~ ^[^/[:space:]]+/[^/[:space:]]+$ ]] || { printf 'GH_REPO must be an OWNER/REPOSITORY value.\n' >&2; exit 1; }
 
 php "$root/scripts/release/verify-release.php" "$metadata" "$tag" "$commit"
+# The PHP program intentionally contains literal dollar-prefixed variables.
+# shellcheck disable=SC2016
 read -r expected_sha expected_size < <(php -r '
     $release = json_decode(file_get_contents($argv[1]), true, flags: JSON_THROW_ON_ERROR);
     $package = $release["package"] ?? null;
@@ -35,16 +36,39 @@ read -r expected_sha expected_size < <(php -r '
 [[ $(sha256sum "$zip" | cut -d' ' -f1) == "$expected_sha" ]] || { printf 'Release ZIP digest does not match release.json.\n' >&2; exit 1; }
 [[ $(stat --format=%s "$zip") == "$expected_size" ]] || { printf 'Release ZIP size does not match release.json.\n' >&2; exit 1; }
 metadata_sha=$(sha256sum "$metadata" | cut -d' ' -f1)
+error=$(mktemp "${TMPDIR:-/tmp}/filebeam-github-release.XXXXXX")
+trap 'rm -f "$error"' EXIT
 
 remote_tag_commit() {
-    local direct='' peeled='' object ref
-    while IFS=$'\t' read -r object ref; do
-        case $ref in
-            "refs/tags/$tag") direct=$object ;;
-            "refs/tags/$tag^{}") peeled=$object ;;
+    local object object_type object_sha depth
+    object=$(gh api "repos/$GH_REPO/git/ref/tags/$tag" --jq '.object.type + "\t" + .object.sha' 2>"$error") || {
+        cat "$error" >&2
+        exit 1
+    }
+    read -r object_type object_sha <<<"$object"
+
+    for ((depth = 0; depth < 10; depth++)); do
+        case $object_type in
+            commit)
+                printf '%s\n' "$object_sha"
+                return
+                ;;
+            tag)
+                object=$(gh api "repos/$GH_REPO/git/tags/$object_sha" --jq '.object.type + "\t" + .object.sha' 2>"$error") || {
+                    cat "$error" >&2
+                    exit 1
+                }
+                read -r object_type object_sha <<<"$object"
+                ;;
+            *)
+                printf 'Remote tag %s does not resolve to a commit.\n' "$tag" >&2
+                exit 1
+                ;;
         esac
-    done < <(git ls-remote --tags origin "refs/tags/$tag" "refs/tags/$tag^{}")
-    [[ -n $peeled ]] && printf '%s\n' "$peeled" || printf '%s\n' "$direct"
+    done
+
+    printf 'Remote tag %s has too many nested tag objects.\n' "$tag" >&2
+    exit 1
 }
 
 assert_remote_tag() {
@@ -54,8 +78,6 @@ assert_remote_tag() {
 }
 
 assert_remote_tag
-error=$(mktemp "${TMPDIR:-/tmp}/filebeam-github-release.XXXXXX")
-trap 'rm -f "$error"' EXIT
 if release=$(gh release view "$tag" --json isDraft 2>"$error"); then
     if [[ $release =~ \"isDraft\"[[:space:]]*:[[:space:]]*false ]]; then
         download_dir=$(mktemp -d "${TMPDIR:-/tmp}/filebeam-github-release-asset.XXXXXX")
@@ -69,10 +91,10 @@ if release=$(gh release view "$tag" --json isDraft 2>"$error"); then
         exit 0
     fi
     [[ $release =~ \"isDraft\"[[:space:]]*:[[:space:]]*true ]] || { printf 'Could not determine GitHub release draft state.\n' >&2; exit 1; }
-elif [[ $(<"$error") == *'HTTP 404'* ]]; then
+elif [[ $(<"$error") == *'release not found'* || $(<"$error") == *'HTTP 404'* ]]; then
     gh release create "$tag" --draft --verify-tag --target "$commit" --generate-notes --title "$tag"
 else
-    <"$error" >&2
+    cat "$error" >&2
     exit 1
 fi
 

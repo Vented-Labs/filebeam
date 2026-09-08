@@ -68,13 +68,7 @@ The `omnibus` image starts its initializer and supervisor as root, then runs Fil
 
 ## Host And Verification
 
-Omnibus Valkey recommends `vm.overcommit_memory=1`. This remains the host administrator's decision: containers and local scripts do not change it. Set it through normal host configuration for production; ephemeral CI runners configure it before Omnibus checks. On a host deliberately left at `0`, acceptance tests can retain only the known warning:
-
-```sh
-FILEBEAM_ALLOW_HOST_WARNINGS=true scripts/docker/test.sh --variant omnibus --suite full
-```
-
-That flag is for a known host warning only; other warnings and errors still fail. The Docker CI matrix builds and tests `light` and `omnibus` natively on AMD64 and ARM64.
+Omnibus Valkey recommends `vm.overcommit_memory=1`. This remains the host administrator's decision: containers and local scripts do not change it. Set it through normal host configuration for production; ephemeral CI runners configure it before Omnibus checks. Warnings remain diagnostic; functional, health, shutdown, error, and fatal failures still fail the Docker tests. The Docker CI matrix builds and tests `light` and `omnibus` natively on AMD64 and ARM64.
 
 From the repository root:
 

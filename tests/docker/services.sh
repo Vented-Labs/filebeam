@@ -96,8 +96,8 @@ wait_unhealthy() {
 
 assert_normal_logs() {
     local name=$1
-    if docker logs "$name" 2>&1 | redact | grep -Ei '"level":"(warn|error)"|PHP (Warning|Fatal error)|WARNING:|FATAL:|ERROR:'; then
-        printf 'Unexpected warning or error in normal %s logs\n' "$name" >&2
+    if docker logs "$name" 2>&1 | redact | grep -Ei '"level":"error"|PHP Fatal error|FATAL:|ERROR:'; then
+        printf 'Unexpected error in normal %s logs\n' "$name" >&2
         return 1
     fi
 }

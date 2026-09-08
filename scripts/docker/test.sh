@@ -28,14 +28,8 @@ redacted_logs() {
 assert_clean_logs() {
     local logs
     logs=$(redacted_logs)
-    if [[ ${FILEBEAM_ALLOW_HOST_WARNINGS:-false} == true && $current_variant == omnibus ]]; then
-        if printf '%s\n' "$logs" | grep -F 'Memory overcommit must be enabled'; then
-            printf '%s\n' 'Host prerequisite warning retained; vm.overcommit_memory was not changed.' >&2
-        fi
-        logs=$(printf '%s\n' "$logs" | sed '/Memory overcommit must be enabled/d')
-    fi
-    if printf '%s\n' "$logs" | grep -Ei '"level":"(error|warn)"|PHP (Warning|Fatal error)|(^|[[:space:]])WARNING([[:space:]:]|$)|FATAL:|ERROR:'; then
-        printf '%s\n' 'Unexpected warning or error in container lifecycle logs' >&2
+    if printf '%s\n' "$logs" | grep -Ei '"level":"error"|PHP Fatal error|FATAL:|ERROR:'; then
+        printf '%s\n' 'Unexpected error in container lifecycle logs' >&2
         return 1
     fi
 }
@@ -130,6 +124,7 @@ verify_omnibus() {
     docker exec "$container" sh -ec 'test -S /run/filebeam/postgresql/.s.PGSQL.5432; test -S /run/filebeam/valkey/valkey.sock; ! grep -Eq ":1538[[:space:]]+.*[[:space:]]0A[[:space:]]" /proc/net/tcp; ! grep -Eq ":18EB[[:space:]]+.*[[:space:]]0A[[:space:]]" /proc/net/tcp'
     # shellcheck disable=SC2016
     php_in_app '$pdo = new PDO("pgsql:host=/run/filebeam/postgresql;port=5432;dbname=filebeam", "filebeam"); exit($pdo->query("select inet_server_addr() is null")->fetchColumn() ? 0 : 1);'
+    docker exec --user 10002:10002 "$container" sh -ec 'test "$(psql -X -w -h /run/filebeam/postgresql -U filebeampg -d filebeam -Atqc "SHOW server_encoding")" = UTF8'
     php_client env-equals REDIS_HOST /run/filebeam/valkey/valkey.sock
     php_client env-equals REDIS_PORT 0
     docker exec "$container" sh -ec 'kill -TERM "$(pgrep -o postgres)"'

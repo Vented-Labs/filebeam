@@ -35,7 +35,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -n $tag ]]; then
-    php "$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)/scripts/release/semver.php" "$tag" >/dev/null
+    php "$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)/scripts/release/semver.php" "$tag" >/dev/null
 elif [[ $refresh_index == false ]]; then
     usage
 fi
@@ -44,7 +44,7 @@ for variable in R2_ENDPOINT_URL R2_BUCKET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KE
 done
 command -v aws >/dev/null
 command -v php >/dev/null
-root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 R2_ENDPOINT_URL=$(php "$root/scripts/release/r2-endpoint.php" "$R2_ENDPOINT_URL" "$R2_BUCKET")
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/filebeam-publish.XXXXXX")
 cleanup() { rm -rf "$tmp"; }
@@ -70,6 +70,7 @@ head_index="$tmp/head-index.json"
 current_index="$tmp/current-index.json"
 etag=''
 if head_object index.json "$head_index"; then
+    # shellcheck disable=SC2016 # PHP receives literal $argv and array variables.
     etag=$(php -r '$head=json_decode(file_get_contents($argv[1]), true, 512, JSON_THROW_ON_ERROR); echo $head["ETag"];' "$head_index")
     "${aws_r2[@]}" get-object --bucket "$R2_BUCKET" --key index.json "$tmp/index-envelope.json" >/dev/null
     php "$root/scripts/release/verify-index.php" < "$tmp/index-envelope.json" > "$current_index"
@@ -84,17 +85,20 @@ if [[ $metadata_only == false ]]; then
     archive="$output_dir/filebeam-$tag.zip"
     release_path="$output_dir/release.json"
     [[ -f $archive && -f $release_path ]] || { printf 'Expected %s and %s.\n' "$archive" "$release_path" >&2; exit 1; }
+    # shellcheck disable=SC2016 # PHP receives literal $argv and release variables.
     php -r '$release=json_decode(file_get_contents($argv[1]), true, 512, JSON_THROW_ON_ERROR); if (($release["tag"] ?? null) !== $argv[2] || ($release["package"]["sha256"] ?? null) !== hash_file("sha256", $argv[3]) || (int) ($release["package"]["size"] ?? -1) !== filesize($argv[3])) { throw new RuntimeException("release.json does not match its archive"); }' "$release_path" "$tag" "$archive"
     php "$root/scripts/release/verify-archive-key.php" "$archive" "$RELEASE_PUBLIC_KEY"
-    sha256=$(php -r 'echo hash_file("sha256", $argv[1]);' "$archive")
+    # shellcheck disable=SC2016 # PHP receives literal $argv variables.
     size=$(php -r 'echo filesize($argv[1]);' "$archive")
     package_key="versions/$tag/filebeam-$tag.zip"
     release_key="versions/$tag/release.json"
     for key in "$package_key" "$release_key"; do
         source=$archive
         [[ $key == "$release_key" ]] && source=$release_path
+        # shellcheck disable=SC2016 # PHP receives literal $argv variables.
         object_sha=$(php -r 'echo hash_file("sha256", $argv[1]);' "$source")
         if head_object "$key" "$tmp/head.json"; then
+            # shellcheck disable=SC2016 # PHP receives literal $argv and array variables.
             existing=$(php -r '$head=json_decode(file_get_contents($argv[1]), true, 512, JSON_THROW_ON_ERROR); echo $head["Metadata"]["sha256"] ?? "";' "$tmp/head.json")
             [[ $existing == "$object_sha" ]] || { printf 'Immutable object already exists with a different digest: %s\n' "$key" >&2; exit 1; }
         else
@@ -105,6 +109,7 @@ if [[ $metadata_only == false ]]; then
             "${aws_r2[@]}" put-object --bucket "$R2_BUCKET" --key "$key" --body "$source" --metadata "sha256=$object_sha" --cache-control 'public, max-age=31536000, immutable' --if-none-match '*' >/dev/null
         fi
     done
+    # shellcheck disable=SC2016 # PHP receives literal $argv variables.
     [[ $(php -r 'echo filesize($argv[1]);' "$archive") == "$size" ]]
 fi
 
@@ -117,4 +122,5 @@ if [[ -n $etag ]]; then
 else
     "${aws_r2[@]}" put-object --bucket "$R2_BUCKET" --key index.json --body "$tmp/index-envelope.json" --content-type application/json --cache-control 'no-cache, max-age=300' --if-none-match '*' >/dev/null
 fi
+# shellcheck disable=SC2016 # PHP receives literal $argv and index variables.
 printf 'Published signed index generation %s for %s\n' "$(php -r '$i=json_decode(file_get_contents($argv[1]), true); echo $i["generation"];' "$tmp/index-payload.json")" "$tag"
