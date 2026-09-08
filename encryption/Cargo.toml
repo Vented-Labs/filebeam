@@ -19,7 +19,7 @@ hkdf = "0.13.0"
 hpke = "0.14.1"
 sha2 = "0.11.0"
 wasm-bindgen = "0.2.100"
-x25519-dalek = { version = "2.0.1", features = ["static_secrets"] }
+x25519-dalek = { version = "3.0.0", features = ["static_secrets"] }
 zeroize = "1.8.1"
 
 [profile.release]
