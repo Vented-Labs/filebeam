@@ -219,7 +219,7 @@ jobs:
             -e FILEBEAM_TEST_S3_KEY=filebeam-test \
             -e FILEBEAM_TEST_S3_SECRET=filebeam-test-secret \
             -e FILEBEAM_TEST_S3_BUCKET=filebeam-test \
-            laravel.test php artisan test --configuration phpunit.sail.xml
+            laravel.test vendor/bin/pest --configuration phpunit.sail.xml
 
       - name: Test Turbo cache with Redis
         working-directory: backend
