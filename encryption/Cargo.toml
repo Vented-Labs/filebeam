@@ -15,9 +15,9 @@ chacha20poly1305 = "0.10.1"
 getrandom = { version = "0.2.16", features = ["js"] }
 # HPKE currently brings getrandom 0.4; this enables its browser backend too.
 getrandom_04 = { package = "getrandom", version = "0.4.3", features = ["wasm_js"] }
-hkdf = "0.12.4"
+hkdf = "0.13.0"
 hpke = "0.14.1"
-sha2 = "0.10.9"
+sha2 = "0.11.0"
 wasm-bindgen = "0.2.100"
 x25519-dalek = { version = "2.0.1", features = ["static_secrets"] }
 zeroize = "1.8.1"
