@@ -10,6 +10,7 @@ use App\Support\Installation\OptimizeInstallation;
 use Dotenv\Dotenv;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Http\Middleware\TrustHosts;
+use Illuminate\Http\Middleware\TrustProxies;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
@@ -241,6 +242,7 @@ test('forwarded HTTPS is accepted only from explicitly trusted proxies', functio
     $this->withHeader('Origin', 'https://setup.example.test')
         ->withHeader('X-Installation-Challenge', $page->viewData('page')['props']['challenge'])
         ->postJson('/install/bootstrap')->assertOk();
+    app(InstallationState::class)->write(['id' => (string) Str::uuid(), 'status' => 'completed']);
     $application = Mockery::mock(Application::class);
     $application->shouldReceive('environment')->with('local')->andReturnFalse();
     $application->shouldReceive('runningUnitTests')->andReturnFalse();
@@ -251,5 +253,39 @@ test('forwarded HTTPS is accepted only from explicitly trusted proxies', functio
             ->toThrow(SuspiciousOperationException::class);
     } finally {
         Request::setTrustedHosts([]);
+    }
+});
+
+test('proxy trust stays disabled until the environment file exists', function (): void {
+    $environmentPath = app()->environmentPath();
+    $proxies = getenv('FILEBEAM_TRUSTED_PROXIES');
+    app()->useEnvironmentPath($this->installationDirectory);
+    putenv('FILEBEAM_TRUSTED_PROXIES=10.10.0.5');
+    $_ENV['FILEBEAM_TRUSTED_PROXIES'] = $_SERVER['FILEBEAM_TRUSTED_PROXIES'] = '10.10.0.5';
+
+    try {
+        $configuration = require config_path('trustedproxy.php');
+        expect($configuration['proxies'])->toBe([]);
+        config()->set('trustedproxy.proxies', $configuration['proxies']);
+        $request = Request::create('http://setup.example.test/install', server: [
+            'REMOTE_ADDR' => '10.10.0.5', 'HTTP_X_FORWARDED_PROTO' => 'https',
+        ]);
+        $middleware = new TrustProxies;
+        expect($middleware->handle($request, fn (Request $request): bool => $request->isSecure()))->toBeFalse();
+
+        File::put($this->installationDirectory.'/.env', "APP_ENV=production\n");
+        $configuration = require config_path('trustedproxy.php');
+        expect($configuration['proxies'])->toBe('10.10.0.5');
+        config()->set('trustedproxy.proxies', $configuration['proxies']);
+        expect($middleware->handle($request, fn (Request $request): bool => $request->isSecure()))->toBeTrue();
+    } finally {
+        app()->useEnvironmentPath($environmentPath);
+        putenv('FILEBEAM_TRUSTED_PROXIES'.($proxies === false ? '' : '='.$proxies));
+        if ($proxies === false) {
+            unset($_ENV['FILEBEAM_TRUSTED_PROXIES'], $_SERVER['FILEBEAM_TRUSTED_PROXIES']);
+        } else {
+            $_ENV['FILEBEAM_TRUSTED_PROXIES'] = $_SERVER['FILEBEAM_TRUSTED_PROXIES'] = $proxies;
+        }
+        Request::setTrustedProxies([], Request::HEADER_X_FORWARDED_PROTO);
     }
 });
