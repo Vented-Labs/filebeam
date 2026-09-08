@@ -231,7 +231,12 @@ jobs:
         working-directory: backend
         run: |
           docker compose exec -T laravel.test php -r 'foreach (glob("/proc/[0-9]*/cmdline") as $file) { $command = file_get_contents($file); if (str_contains($command, "artisan\0schedule:work")) { posix_kill((int) basename(dirname($file)), 19); } }'
-          ./vendor/bin/sail artisan tinker --execute 'Illuminate\Support\Facades\DB::table("scheduler_heartbeats")->delete();'
+          docker compose exec -T --user sail laravel.test php -r '
+            require "vendor/autoload.php";
+            $app = require "bootstrap/app.php";
+            $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+            Illuminate\Support\Facades\DB::table("scheduler_heartbeats")->delete();
+          '
 
       - name: Run browser tests
         env:
