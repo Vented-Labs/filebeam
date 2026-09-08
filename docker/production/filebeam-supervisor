@@ -210,7 +210,7 @@ start_omnibus() {
     done
     # The daemon retains owner write access; group filebeam also supports an
     # explicit uid:gid application invocation without supplemental groups.
-    chgrp filebeam /run/filebeam/postgresql /run/filebeam/postgresql/.s.PGSQL.5432
+    chgrp -h filebeam /run/filebeam/postgresql /run/filebeam/postgresql/.s.PGSQL.5432
     chmod 0770 /run/filebeam/postgresql /run/filebeam/postgresql/.s.PGSQL.5432
     setpriv --reuid=filebeampg --regid=filebeampg --init-groups -- /usr/bin/psql -X -w -h /run/filebeam/postgresql -p 5432 -U filebeampg -d postgres -v ON_ERROR_STOP=1 -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'filebeam') THEN CREATE ROLE filebeam LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT; END IF; END \$\$;"
     if ! setpriv --reuid=filebeampg --regid=filebeampg --init-groups -- /usr/bin/psql -X -w -h /run/filebeam/postgresql -p 5432 -U filebeampg -d postgres -Atqc "SELECT 1 FROM pg_database WHERE datname = 'filebeam'" | grep -qx 1; then
@@ -230,7 +230,7 @@ start_omnibus() {
     until [ -S /run/filebeam/valkey/valkey.sock ]; do
         attempts=$((attempts + 1)); [ "$attempts" -lt 30 ] || { printf '%s\n' 'Valkey did not create its socket.' >&2; return 1; }; sleep 1
     done
-    chgrp filebeam /run/filebeam/valkey /run/filebeam/valkey/valkey.sock
+    chgrp -h filebeam /run/filebeam/valkey /run/filebeam/valkey/valkey.sock
     chmod 0770 /run/filebeam/valkey /run/filebeam/valkey/valkey.sock
     write_app_environment
 }
@@ -265,6 +265,7 @@ refresh_app_pids() {
 
 start_applications() {
     app_pids=''
+    validate_paths /run/filebeam/caddy.json
     write_app_environment
     is_installed=0
     if installed; then
@@ -288,7 +289,7 @@ foreach ($config->apps->http->servers as $server) {
 }
 file_put_contents($path, json_encode($config, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES));
 '
-    if [ "$(id -u)" = 0 ]; then chown root:filebeam /run/filebeam/caddy.json; fi
+            if [ "$(id -u)" = 0 ]; then chown -h root:filebeam /run/filebeam/caddy.json; fi
             chmod 0640 /run/filebeam/caddy.json
             spawn_app web /usr/local/bin/frankenphp run --config /run/filebeam/caddy.json
             ;;
