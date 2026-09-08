@@ -6,22 +6,49 @@ data=${FILEBEAM_DATA_DIR:-/data}
 tls=${FILEBEAM_TLS:-proxy}
 name=${FILEBEAM_SERVER_NAME:-}
 
+validate_paths() {
+    /usr/local/bin/php -r '
+        foreach (array_slice($argv, 1) as $path) {
+            if ($path === "" || $path[0] !== "/") {
+                fwrite(STDERR, "Managed path must be absolute.\n");
+                exit(1);
+            }
+            $current = "";
+            foreach (explode("/", ltrim($path, "/")) as $component) {
+                if ($component === "" || $component === "." || $component === "..") {
+                    fwrite(STDERR, "Managed path contains an invalid component.\n");
+                    exit(1);
+                }
+                $current .= "/" . $component;
+                if (is_link($current)) {
+                    fwrite(STDERR, "Managed path contains a symbolic link: " . $current . "\n");
+                    exit(1);
+                }
+            }
+        }
+    ' "$@"
+}
+
 if [ -z "$name" ] && [ -n "${APP_URL:-}" ]; then
     name=${APP_URL#*://}; name=${name%%/*}; name=${name%%:*}
+fi
+validate_paths "$data/app/framework/cache/data" "$data/app/framework/sessions" "$data/app/framework/views" "$data/app/logs" "$data/config" "$data/database" "$data/caddy" /run/filebeam/cache /run/filebeam/views /tmp
+if [ "${FILEBEAM_VARIANT:-light}" = omnibus ]; then
+    validate_paths "$data/postgresql/18/docker" "$data/valkey" /run/filebeam/postgresql /run/filebeam/valkey
 fi
 mkdir -p "$data/app/framework/cache/data" "$data/app/framework/sessions" "$data/app/framework/views" "$data/app/logs" "$data/config" "$data/database" "$data/caddy" /run/filebeam/cache /run/filebeam/views /tmp
 [ "$(id -u)" = 0 ] && chmod 1777 /tmp
 
 if [ "$(id -u)" = 0 ]; then
-    chown root:root /run/filebeam
+    chown -h root:root /run/filebeam
     chmod 0755 /run/filebeam
-    chown filebeam:filebeam "$data/app" "$data/app/framework" "$data/app/framework/cache" "$data/app/framework/cache/data" "$data/app/framework/sessions" "$data/app/framework/views" "$data/app/logs" "$data/config" "$data/database" "$data/caddy" /run/filebeam/cache /run/filebeam/views
-    if mountpoint -q /storage; then chown filebeam:filebeam /storage; fi
+    chown -h filebeam:filebeam "$data/app" "$data/app/framework" "$data/app/framework/cache" "$data/app/framework/cache/data" "$data/app/framework/sessions" "$data/app/framework/views" "$data/app/logs" "$data/config" "$data/database" "$data/caddy" /run/filebeam/cache /run/filebeam/views
+    if mountpoint -q /storage; then validate_paths /storage; chown -h filebeam:filebeam /storage; fi
     if [ "$tls" = auto ]; then [ -n "$name" ] || { printf '%s\n' 'FILEBEAM_TLS=auto requires FILEBEAM_SERVER_NAME or APP_URL.' >&2; exit 64; }; fi
     if [ "${FILEBEAM_VARIANT:-light}" = omnibus ]; then
         mkdir -p "$data/postgresql/18/docker" "$data/valkey" /run/filebeam/postgresql /run/filebeam/valkey
-        chown filebeampg:filebeampg "$data/postgresql" "$data/postgresql/18" "$data/postgresql/18/docker" /run/filebeam/postgresql
-        chown filebeamvalkey:filebeamvalkey "$data/valkey" /run/filebeam/valkey
+        chown -h filebeampg:filebeampg "$data/postgresql" "$data/postgresql/18" "$data/postgresql/18/docker" /run/filebeam/postgresql
+        chown -h filebeamvalkey:filebeamvalkey "$data/valkey" /run/filebeam/valkey
         chmod 0770 /run/filebeam/postgresql /run/filebeam/valkey
     fi
 fi
@@ -45,6 +72,7 @@ site=${name:+$name:8443}
 [ "$tls" = proxy ] && site=':8080'
 # Setup uses ordinary request PHP. The supervisor swaps this fragment for the
 # persistent Octane worker only after the installer has completed.
+validate_paths /run/filebeam/php-server.caddy /run/filebeam/worker.caddy /run/filebeam/Caddyfile
 printf '%s\n' 'php_server' >/run/filebeam/php-server.caddy
 printf '%s\n' '# Workers start after installation.' >/run/filebeam/worker.caddy
 export FILEBEAM_AUTO_HTTPS="$auto_https" FILEBEAM_HTTP_REDIRECT="$redirect" FILEBEAM_SITE="$site" FILEBEAM_CADDY_STORAGE="$data/caddy"

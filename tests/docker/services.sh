@@ -52,7 +52,7 @@ logs() {
 
 cleanup() {
     local status=$?
-    if ((status)); then logs; fi
+    if ((status)); then keep=true; fi
     if [[ $keep == true ]]; then
         printf 'Kept owned objects: network=%s containers=%s,%s,%s,%s,%s volumes=%s,%s,%s,%s,%s,%s,%s\n' "$network" "$app" "$tls_app" "$postgres" "$minio" "$proxy" "$data_volume" "$tls_data_volume" "$tls_storage_volume" "$proxy_config_volume" "$proxy_data_volume" "$ca_volume" "$ini_volume" >&2
     else

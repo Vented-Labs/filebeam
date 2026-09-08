@@ -19,6 +19,29 @@ prepared=''
 last_checkpoint=''
 token_reported=''
 
+validate_paths() {
+    /usr/local/bin/php -r '
+        foreach (array_slice($argv, 1) as $path) {
+            if ($path === "" || $path[0] !== "/") {
+                fwrite(STDERR, "Managed path must be absolute.\n");
+                exit(1);
+            }
+            $current = "";
+            foreach (explode("/", ltrim($path, "/")) as $component) {
+                if ($component === "" || $component === "." || $component === "..") {
+                    fwrite(STDERR, "Managed path contains an invalid component.\n");
+                    exit(1);
+                }
+                $current .= "/" . $component;
+                if (is_link($current)) {
+                    fwrite(STDERR, "Managed path contains a symbolic link: " . $current . "\n");
+                    exit(1);
+                }
+            }
+        }
+    ' "$@"
+}
+
 run_filebeam() {
     if [ "$(id -u)" = 0 ]; then
         setpriv --reuid=filebeam --regid=filebeam --init-groups -- "$@"
@@ -63,6 +86,7 @@ checkpoint() {
 }
 
 write_php_server_mode() {
+    validate_paths /run/filebeam/worker.caddy /run/filebeam/php-server.caddy
     if installed; then
         printf '%s\n' 'worker /opt/filebeam/backend/public/frankenphp-worker.php {$FILEBEAM_WORKERS:2}' >/run/filebeam/worker.caddy
         printf '%s\n' 'php_server {' '    index frankenphp-worker.php' '    try_files {path} frankenphp-worker.php' '}' >/run/filebeam/php-server.caddy
@@ -71,7 +95,7 @@ write_php_server_mode() {
         printf '%s\n' 'php_server' >/run/filebeam/php-server.caddy
     fi
     if [ "$(id -u)" = 0 ]; then
-        chown root:filebeam /run/filebeam/worker.caddy /run/filebeam/php-server.caddy
+        chown -h root:filebeam /run/filebeam/worker.caddy /run/filebeam/php-server.caddy
     fi
     chmod 0644 /run/filebeam/worker.caddy /run/filebeam/php-server.caddy
 }
@@ -81,6 +105,7 @@ dotenv_value() {
 }
 
 write_app_environment() {
+    validate_paths /run/filebeam/app.env
     umask 077
     {
         printf '%s\n' 'export FILEBEAM_CRON_QUEUE_ENABLED=false'
@@ -90,7 +115,7 @@ write_app_environment() {
         fi
     } >/run/filebeam/app.env
     if [ "$(id -u)" = 0 ]; then
-        chown root:filebeam /run/filebeam/app.env
+        chown -h root:filebeam /run/filebeam/app.env
         chmod 0640 /run/filebeam/app.env
     else
         chmod 0600 /run/filebeam/app.env
@@ -156,6 +181,24 @@ trap 'shutdown 0' INT TERM QUIT
 start_omnibus() {
     case "$role" in all|migrate) ;; *) return 0 ;; esac
     pgdata="$data/postgresql/18/docker"
+    password="$data/config/valkey-password"
+    validate_paths "$pgdata" "$data/valkey" /run/filebeam/postgresql /run/filebeam/valkey "$password"
+    if [ -L "$password" ] || { [ -e "$password" ] && [ ! -f "$password" ]; }; then
+        printf '%s\n' 'Persisted Valkey password must be a regular file.' >&2
+        return 1
+    fi
+    if [ -f "$password" ]; then
+        expected_password_owner="0:$(id -g filebeam):640"
+        [ "$(stat -c '%u:%g:%a' "$password")" = "$expected_password_owner" ] || {
+            printf '%s\n' 'Persisted Valkey password must be root:filebeam mode 0640.' >&2
+            return 1
+        }
+    else
+        /usr/local/bin/php -r '$path = $argv[1]; $file = @fopen($path, "x"); if ($file === false) { fwrite(STDERR, "Could not create persisted Valkey password.\n"); exit(1); } fwrite($file, bin2hex(random_bytes(32))); fclose($file);' "$password"
+        [ ! -L "$password" ] && [ -f "$password" ] || { printf '%s\n' 'Persisted Valkey password must be a regular file.' >&2; return 1; }
+        chown -h root:filebeam "$password"
+        chmod 0640 "$password"
+    fi
     if [ ! -f "$pgdata/PG_VERSION" ]; then
         setpriv --reuid=filebeampg --regid=filebeampg --init-groups -- /usr/lib/postgresql/18/bin/initdb --pgdata="$pgdata" --auth-local=peer --auth-host=reject --username=filebeampg
     fi
@@ -174,16 +217,13 @@ start_omnibus() {
         setpriv --reuid=filebeampg --regid=filebeampg --init-groups -- /usr/bin/createdb -h /run/filebeam/postgresql -p 5432 -U filebeampg -O filebeam filebeam
     fi
 
-    password="$data/config/valkey-password"
-    if [ ! -f "$password" ]; then umask 077; /usr/local/bin/php -r 'echo bin2hex(random_bytes(32));' >"$password"; fi
     valkey_password=$(cat "$password")
     if [ "${#valkey_password}" -ne 64 ]; then printf '%s\n' 'Invalid persisted Valkey password.' >&2; return 1; fi
     case "$valkey_password" in *[!a-f0-9]*) printf '%s\n' 'Invalid persisted Valkey password.' >&2; return 1 ;; esac
-    chown root:filebeam "$password"
-    chmod 0640 "$password"
     umask 077
+    validate_paths /run/filebeam/valkey/valkey.conf
     printf '%s\n' "requirepass $valkey_password" 'port 0' 'protected-mode yes' 'unixsocket /run/filebeam/valkey/valkey.sock' 'unixsocketperm 0770' "dir $data/valkey" 'appendonly yes' 'appendfsync everysec' "maxmemory ${FILEBEAM_VALKEY_MAXMEMORY:-256mb}" 'maxmemory-policy noeviction' >/run/filebeam/valkey/valkey.conf
-    chown filebeamvalkey:filebeamvalkey /run/filebeam/valkey/valkey.conf
+    chown -h filebeamvalkey:filebeamvalkey /run/filebeam/valkey/valkey.conf
     setpriv --reuid=filebeamvalkey --regid=filebeamvalkey --init-groups -- /usr/local/bin/valkey-server /run/filebeam/valkey/valkey.conf &
     valkey_pid=$!
     attempts=0
@@ -248,7 +288,7 @@ foreach ($config->apps->http->servers as $server) {
 }
 file_put_contents($path, json_encode($config, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES));
 '
-            if [ "$(id -u)" = 0 ]; then chown root:filebeam /run/filebeam/caddy.json; fi
+    if [ "$(id -u)" = 0 ]; then chown root:filebeam /run/filebeam/caddy.json; fi
             chmod 0640 /run/filebeam/caddy.json
             spawn_app web /usr/local/bin/frankenphp run --config /run/filebeam/caddy.json
             ;;

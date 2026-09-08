@@ -969,7 +969,7 @@ final class Env
     }
 
     /** @param array<string, mixed> $configuration
-     * @return array<string, mixed>
+     * @return array<array-key, mixed>
      */
     private static function parseUrl(array $configuration): array
     {
