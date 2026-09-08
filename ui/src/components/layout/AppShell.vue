@@ -226,8 +226,9 @@ function goHome(event: MouseEvent): void {
         </DialogRoot>
         <main class="fb-shell__content"><slot /></main>
         <footer class="fb-footer">
-            <div class="flex items-center gap-3">
-                <BrandLogo /><span class="text-xs font-normal text-[var(--fb-text-muted)]"
+            <div class="fb-footer__identity flex items-center gap-3">
+                <BrandLogo /><span
+                    class="fb-footer__version text-xs font-normal text-[var(--fb-text-muted)]"
                     >v{{ branding.version }}</span
                 >
             </div>
