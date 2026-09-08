@@ -146,6 +146,14 @@ jobs:
       - name: Test release reference validation
         run: bash scripts/release/validate-ref.test.sh
 
+      - name: Test release publishing safeguards
+        run: |
+          bash scripts/release/publish.test.sh
+          bash scripts/release/github-release.test.sh
+
+      - name: Test Docker lifecycle assertions
+        run: bash tests/docker/lifecycle.test.sh
+
       - name: Test distribution package
         run: |
           bash scripts/release/package.sh v0.0.0 "$RUNNER_TEMP/filebeam-package" --skip-build --allow-unsigned-local

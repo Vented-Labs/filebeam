@@ -103,6 +103,7 @@ RUN if [ -e /usr/local/lib/libwatcher-c.so.0.14.5 ]; then ln -sf libwatcher-c.so
 
 RUN export DEBIAN_FRONTEND=noninteractive \
     && apt-get update \
+    && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends curl procps tini util-linux \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 filebeam \

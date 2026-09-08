@@ -3,6 +3,8 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+# shellcheck source=scripts/docker/lifecycle.sh
+source "$root/scripts/docker/lifecycle.sh"
 run_id="filebeam-worker-$(date +%s)-${RANDOM}"
 container="$run_id-app"
 data_volume="$run_id-data"
@@ -42,12 +44,7 @@ cleanup() {
     if [[ $keep == true ]]; then
         printf 'Kept owned objects: container=%s data=%s storage=%s\n' "$container" "$data_volume" "$storage_volume" >&2
     else
-        if ! docker stop -t 120 "$container" >/dev/null; then
-            status=1
-        elif [[ $(docker inspect --format '{{.State.ExitCode}}' "$container") != 0 ]]; then
-            printf '%s\n' 'Container did not exit cleanly' >&2
-            status=1
-        elif ! assert_clean_logs; then
+        if ! stop_after_runtime_log_check 120 "$container"; then
             status=1
         fi
         if ((status)); then

@@ -19,6 +19,8 @@ case "$suite" in smoke|full) ;; *) usage >&2; exit 2 ;; esac
 command -v docker >/dev/null && docker info >/dev/null
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+# shellcheck source=scripts/docker/lifecycle.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lifecycle.sh"
 run_id="filebeam-docker-test-$(date +%s)-$RANDOM"
 container='' data_volume='' storage_volume='' runner_volume=''
 
@@ -108,9 +110,7 @@ install_local() {
 }
 
 verify_recreate_and_shutdown() {
-    docker stop -t 120 "$container" >/dev/null
-    [[ $(docker inspect --format '{{.State.ExitCode}}' "$container") == 0 ]]
-    assert_clean_logs
+    stop_after_runtime_log_check 120 "$container"
     docker rm "$container" >/dev/null
     create_container "$current_image" "$current_variant"
     http_status /install/ 404
@@ -170,9 +170,7 @@ run_variant() {
     fi
     verify_omnibus
     if [[ $current_variant == light ]]; then
-        docker stop -t 120 "$container" >/dev/null
-        [[ $(docker inspect --format '{{.State.ExitCode}}' "$container") == 0 ]]
-        assert_clean_logs
+        stop_after_runtime_log_check 120 "$container"
     fi
     docker rm -f "$container" >/dev/null 2>&1 || true
     docker volume rm "$data_volume" "$storage_volume" >/dev/null
