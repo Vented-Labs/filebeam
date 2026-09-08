@@ -30,6 +30,37 @@ test('cron registers short database batches with an overlap lock', function (): 
     expect(config('queue.connections.database.retry_after'))->toBeGreaterThan(60);
 });
 
+test('cron maintains SQLite nightly without overlapping', function (): void {
+    $event = collect(app(Schedule::class)->events())->first(fn (Event $event): bool => $event->description === 'filebeam:maintain-sqlite');
+
+    expect($event)->not->toBeNull();
+    expect($event->expression)->toBe('0 0 * * *');
+    expect($event->withoutOverlapping)->toBeTrue();
+    expect($event->filtersPass(app()))->toBeTrue();
+
+    DB::shouldReceive('statement')->once()->ordered()->with('PRAGMA optimize');
+    DB::shouldReceive('statement')->once()->ordered()->with('VACUUM');
+
+    $event->run(app());
+});
+
+test('SQLite maintenance cron skips non-SQLite connections', function (): void {
+    $connection = 'non_sqlite_maintenance';
+    config()->set('database.connections.'.$connection, array_replace(config('database.connections.sqlite'), ['driver' => 'mysql']));
+    config()->set('database.default', $connection);
+    DB::purge($connection);
+    $event = collect(app(Schedule::class)->events())->first(fn (Event $event): bool => $event->description === 'filebeam:maintain-sqlite');
+
+    try {
+        expect($event)->not->toBeNull();
+        expect($event->filtersPass(app()))->toBeFalse();
+    } finally {
+        DB::purge($connection);
+        config()->offsetUnset('database.connections.'.$connection);
+        config()->set('database.default', 'sqlite');
+    }
+});
+
 test('cron batches run only for an installed database-queue deployment that opts in', function (bool $enabled, string $connection, bool $pending, bool $runs): void {
     config()->set('queue.cron_enabled', $enabled);
     config()->set('queue.default', $connection);
