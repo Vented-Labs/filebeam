@@ -167,8 +167,19 @@ test('publishes a Turbo files link before completion and reports anonymous waiti
     });
 
     try {
-        const transfer = await startTurbo(page, content);
-        await expect.poll(() => order.includes('chunk')).toBe(true);
+        // A request event is not an upload acknowledgement, especially for a 25 MB body.
+        const firstChunkUploaded = page.waitForResponse(
+            (response) =>
+                response.request().method() === 'PUT' &&
+                response.url().match(chunkPath)?.[1] === '0',
+            { timeout: 60_000 },
+        );
+        const [transfer, firstChunk] = await Promise.all([
+            startTurbo(page, content),
+            firstChunkUploaded,
+        ]);
+        expect(firstChunk.status()).toBe(201);
+        expect(order).toContain('chunk');
         expect(order.indexOf('descriptor')).toBeGreaterThanOrEqual(0);
         expect(order.indexOf('descriptor')).toBeLessThan(order.indexOf('chunk'));
         const uploadProgress = page.getByRole('progressbar', { name: 'Turbo Transfer upload' });
@@ -246,7 +257,9 @@ test('publishes a Turbo files link before completion and reports anonymous waiti
         await cancelled.getByRole('button', { name: 'Download files' }).click();
         await expect(cancelled.getByRole('heading', { name: '1 file downloading' })).toBeVisible();
         await expect
-            .poll(() => cancelled.evaluate(() => (window as any).__turboWritable.chunks.length))
+            .poll(() => cancelled.evaluate(() => (window as any).__turboWritable.chunks.length), {
+                timeout: 60_000,
+            })
             .toBeGreaterThan(0);
         await expect(cancelled.getByText(/Waiting to resume/i)).toBeVisible();
         await expect(page.getByText('Download 1', { exact: true })).toBeVisible({
@@ -274,7 +287,9 @@ test('publishes a Turbo files link before completion and reports anonymous waiti
         await expect(download.getByText('turbo-stream.bin')).toBeVisible();
         await download.getByRole('button', { name: 'Download files' }).click();
         await expect
-            .poll(() => download.evaluate(() => (window as any).__turboWritable.chunks.length))
+            .poll(() => download.evaluate(() => (window as any).__turboWritable.chunks.length), {
+                timeout: 60_000,
+            })
             .toBeGreaterThan(0);
         expect(await download.evaluate(() => (window as any).__turboWritable.closed)).toBe(false);
         await expect(page.getByText('Download 2', { exact: true })).toBeVisible({
@@ -297,9 +312,18 @@ test('publishes a Turbo files link before completion and reports anonymous waiti
             fullPage: true,
         });
 
+        const completion = page.waitForResponse(
+            (response) =>
+                response.request().method() === 'POST' &&
+                new URL(response.url()).pathname === `/api/v1/transfers/${transfer.id}/complete`,
+            { timeout: 60_000 },
+        );
         releaseLater();
+        expect((await completion).status()).toBe(200);
         await expect
-            .poll(() => download.evaluate(() => (window as any).__turboWritable.closed))
+            .poll(() => download.evaluate(() => (window as any).__turboWritable.closed), {
+                timeout: 60_000,
+            })
             .toBe(true);
         await expect(download.getByRole('heading', { name: '1 file downloaded' })).toBeVisible();
         await expect(download.getByText('Download finished and integrity verified.')).toBeVisible();
