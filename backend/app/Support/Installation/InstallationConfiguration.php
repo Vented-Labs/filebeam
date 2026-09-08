@@ -32,7 +32,10 @@ class InstallationConfiguration
             'database' => ['required', 'array:driver,transport,socket,host,port,database,username,password,sslmode'], 'database.driver' => ['required', 'in:sqlite,mysql,mariadb,pgsql'], 'database.transport' => ['sometimes', 'in:tcp,socket'], 'database.socket' => ['nullable', 'string', 'max:4096'], 'database.host' => ['nullable', 'string'], 'database.port' => ['nullable', 'integer', 'between:1,65535'], 'database.database' => ['nullable', 'string'], 'database.username' => ['nullable', 'string'], 'database.password' => ['nullable', 'string'], 'database.sslmode' => ['nullable', 'in:disable,allow,prefer,require,verify-ca,verify-full'],
             'instance' => ['required', 'array:name,url,username_domain,visibility,auto_updates_enabled'], 'instance.name' => ['required', 'string', 'max:255'], 'instance.url' => ['required', 'url'], 'instance.username_domain' => ['nullable', 'string', 'max:253'], 'instance.visibility' => ['required', 'in:public,private'], 'instance.auto_updates_enabled' => ['sometimes', 'boolean'],
             'storage' => ['required', 'array', 'min:1', 'max:'.self::MaxStores], 'storage.*' => ['array:name,driver,root,bucket,key,secret,region,endpoint,use_path_style_endpoint'], 'storage.*.name' => ['required', 'string', 'max:255', 'distinct'], 'storage.*.driver' => ['required', 'in:local,s3'], 'storage.*.root' => ['nullable', 'string'], 'storage.*.bucket' => ['nullable', 'string'], 'storage.*.key' => ['nullable', 'string'], 'storage.*.secret' => ['nullable', 'string'], 'storage.*.region' => ['nullable', 'string'], 'storage.*.endpoint' => ['nullable', 'url'], 'storage.*.use_path_style_endpoint' => ['required', 'boolean'],
-            'placement_mode' => ['required', 'in:replicate,distribute'], 'admin' => ['required', 'array:name,username,email,password,password_confirmation,email_ownership_confirmed'], 'admin.name' => ['required', 'string', 'max:255'], 'admin.username' => ['required', 'string', 'regex:/\A[a-z0-9_]{3,24}\z/', new ReservedUsername], 'admin.email' => ['required', 'email:rfc'], 'admin.password' => ['required', 'confirmed', Password::defaults()], 'admin.email_ownership_confirmed' => ['accepted'], 'chunk_max_size' => ['required', 'integer', 'between:17,25000000'], 'chunk_warning_acknowledged' => ['sometimes', 'boolean'],
+            'placement_mode' => ['required', 'in:replicate,distribute'], 'admin' => ['required', 'array:name,username,email,password,password_confirmation,email_ownership_confirmed'], 'admin.name' => ['required', 'string', 'max:255'], 'admin.username' => ['required', 'string', 'regex:/\A[a-z0-9_]{3,24}\z/', new ReservedUsername], 'admin.email' => ['required', 'email:rfc'], 'admin.password' => ['required', Password::defaults()], 'admin.password_confirmation' => ['required', 'same:admin.password'], 'admin.email_ownership_confirmed' => ['accepted'], 'chunk_max_size' => ['required', 'integer', 'between:17,25000000'], 'chunk_warning_acknowledged' => ['sometimes', 'boolean'],
+        ], [
+            'admin.password_confirmation.same' => 'The passwords do not match.',
+            'admin.password_confirmation.required' => 'Confirm the administrator password.',
         ])->validate();
         $validated['admin']['username'] = mb_strtolower($validated['admin']['username']);
         $validated['cache'] = app(CacheConfiguration::class)->validate($validated['cache'] ?? ['driver' => 'file']);
@@ -135,7 +138,7 @@ class InstallationConfiguration
             throw ValidationException::withMessages(['instance.url' => 'Use a root HTTPS URL, except for localhost or loopback HTTP.']);
         }
         if (($instance['username_domain'] ?? null) !== null && filter_var($instance['username_domain'], FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME) === false) {
-            throw ValidationException::withMessages(['instance.username_domain' => 'Use an exact hostname.']);
+            throw ValidationException::withMessages(['instance.username_domain' => 'Username domain must be a hostname without a scheme or path.']);
         }
     }
 
@@ -262,9 +265,9 @@ class InstallationConfiguration
     /** @param array<string, mixed> $storage
      * @throws RandomException
      */
-    public function testStorage(array $storage): void
+    public function testStorage(array $storage, string $attribute = 'storage'): void
     {
-        $storage = $this->validateStorage($storage, 'storage');
+        $storage = $this->validateStorage($storage, $attribute);
         $store = new Filestore(['source' => 'database', 'driver' => $storage['driver'], 'configuration' => $this->storageConfiguration($storage)]);
         $path = 'installation-probes/'.bin2hex(random_bytes(16));
         $disk = null;
@@ -276,7 +279,7 @@ class InstallationConfiguration
                 throw new InvalidArgumentException('Storage probe failed.');
             }
         } catch (Throwable) {
-            throw ValidationException::withMessages(['storage' => 'The storage write/read/delete probe failed.']);
+            throw ValidationException::withMessages([$attribute => 'The storage write/read/delete probe failed.']);
         } finally {
             try {
                 $cleanupFailed = $disk !== null && (! $disk->delete($path) || $disk->exists($path));
@@ -284,7 +287,7 @@ class InstallationConfiguration
                 $cleanupFailed = true;
             }
             if ($cleanupFailed) {
-                throw ValidationException::withMessages(['storage' => 'The storage probe could not be cleaned up.']);
+                throw ValidationException::withMessages([$attribute => 'The storage probe could not be cleaned up.']);
             }
         }
     }

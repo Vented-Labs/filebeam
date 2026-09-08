@@ -2,9 +2,12 @@
 
 declare(strict_types=1);
 
+use App\Support\FilestoreRegistry;
 use App\Support\Installation\InstallationConfiguration;
 use Illuminate\Support\Facades\File;
 use Illuminate\Validation\ValidationException;
+
+use function Pest\Laravel\mock;
 
 beforeEach(function (): void {
     $this->configurationDirectory = storage_path('framework/testing/configuration-'.bin2hex(random_bytes(8)));
@@ -58,10 +61,93 @@ test('rejects unsafe instance URLs', function (string $url): void {
     }
 })->with(['http://example.com', 'http://127.attacker.example', 'https://example.com/path', 'https://user:pass@example.com/', 'https://example.com/?query=yes', 'https://example.com/#fragment']);
 
+test('accepts valid username domains', function (string $domain): void {
+    $input = installationInput();
+    $input['instance']['username_domain'] = $domain;
+
+    expect(app(InstallationConfiguration::class)->validate($input)['instance']['username_domain'])->toBe($domain);
+})->with(['example.com', 'users.example.com']);
+
+test('rejects username domains with schemes or paths', function (string $domain): void {
+    $input = installationInput();
+    $input['instance']['username_domain'] = $domain;
+
+    try {
+        app(InstallationConfiguration::class)->validate($input);
+        test()->fail('Expected username domain validation to fail.');
+    } catch (ValidationException $exception) {
+        expect($exception->errors())
+            ->toHaveKey('instance.username_domain')
+            ->not->toHaveKey('instance.url');
+        expect($exception->errors()['instance.username_domain'])->toContain('Username domain must be a hostname without a scheme or path.');
+    }
+})->with(['https://users.example.com', 'users.example.com/path']);
+
+test('rejects invalid public URLs separately from username domains', function (): void {
+    $input = installationInput();
+    $input['instance']['url'] = 'https://example.com/path';
+    $input['instance']['username_domain'] = 'users.example.com';
+
+    try {
+        app(InstallationConfiguration::class)->validate($input);
+        test()->fail('Expected public URL validation to fail.');
+    } catch (ValidationException $exception) {
+        expect($exception->errors())
+            ->toHaveKey('instance.url')
+            ->not->toHaveKey('instance.username_domain');
+    }
+});
+
 test('rejects invalid direct database and storage probe candidates', function (): void {
     expect(fn (): mixed => app(InstallationConfiguration::class)->testDatabase(['driver' => 'sqlsrv']))->toThrow(ValidationException::class);
-    expect(fn (): mixed => app(InstallationConfiguration::class)->testStorage(['driver' => 'invalid']))->toThrow(ValidationException::class);
+    try {
+        app(InstallationConfiguration::class)->testStorage(['driver' => 'invalid']);
+        test()->fail('Expected storage validation to fail.');
+    } catch (ValidationException $exception) {
+        expect($exception->errors())->toHaveKey('storage.driver');
+    }
 });
+
+test('attributes direct storage validation errors to the supplied prefix', function (): void {
+    try {
+        app(InstallationConfiguration::class)->testStorage(['driver' => 'invalid'], 'storage.1');
+        test()->fail('Expected storage validation to fail.');
+    } catch (ValidationException $exception) {
+        expect($exception->errors())->toHaveKey('storage.1.driver');
+    }
+});
+
+test('attributes storage probe failures to the supplied prefix', function (): void {
+    $registry = mock(FilestoreRegistry::class);
+    $registry->shouldReceive('normalizeLocalRoot')->times(4)->andReturn('primary');
+    $registry->shouldReceive('localRoot')->times(4)->andReturn($this->configurationDirectory.'/files/primary');
+    $registry->shouldReceive('disk')->twice()->andThrow(new RuntimeException('Probe failed.'));
+    $configuration = app(InstallationConfiguration::class);
+
+    foreach ([['storage.1'], []] as $arguments) {
+        $attribute = $arguments[0] ?? 'storage';
+        try {
+            $configuration->testStorage(['driver' => 'local', 'root' => 'primary'], ...$arguments);
+            test()->fail('Expected storage probe to fail.');
+        } catch (ValidationException $exception) {
+            expect($exception->errors())->toHaveKey($attribute);
+        }
+    }
+});
+
+test('attaches password confirmation failures to the confirmation field', function (string $confirmation): void {
+    $input = installationInput();
+    $input['admin']['password_confirmation'] = $confirmation;
+
+    try {
+        app(InstallationConfiguration::class)->validate($input);
+        test()->fail('Expected password confirmation validation to fail.');
+    } catch (ValidationException $exception) {
+        expect($exception->errors())
+            ->toHaveKey('admin.password_confirmation')
+            ->not->toHaveKey('admin.password');
+    }
+})->with(['different password', '']);
 
 test('Unix socket candidates use the correct connector settings without a TCP host', function (string $driver, string $socket): void {
     $input = installationInput();

@@ -62,8 +62,8 @@ readonly class CompleteInstallation
 
                 return;
             }
-            foreach ($validated['storage'] as $storage) {
-                $this->configuration->testStorage($storage);
+            foreach ($validated['storage'] as $index => $storage) {
+                $this->configuration->testStorage($storage, "storage.{$index}");
             }
             $this->cache->test($validated['cache'] ?? ['driver' => 'file']);
             $createdClaimTable = false;

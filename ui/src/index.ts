@@ -7,3 +7,5 @@ export { default as RouteSurface } from './components/layout/RouteSurface.vue';
 export { default as BrandLogo } from './components/brand/BrandLogo.vue';
 export { default as Tooltip } from './components/primitives/Tooltip.vue';
 export { default as Toast } from './components/primitives/Toast.vue';
+export { default as FormField } from './components/primitives/FormField.vue';
+export { default as Input } from './components/primitives/Input.vue';
