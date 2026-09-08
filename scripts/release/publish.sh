@@ -45,6 +45,7 @@ done
 command -v aws >/dev/null
 command -v php >/dev/null
 root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+R2_ENDPOINT_URL=$(php "$root/scripts/release/r2-endpoint.php" "$R2_ENDPOINT_URL" "$R2_BUCKET")
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/filebeam-publish.XXXXXX")
 cleanup() { rm -rf "$tmp"; }
 trap cleanup EXIT

@@ -56,8 +56,10 @@ FROM valkey/valkey:9.1.2-trixie@sha256:c123e3715db63d06d4ad6964884037aa0d5d4d703
 # Keep PostgreSQL's large LLVM and bitcode payload out of the copied runtime layer.
 FROM postgres AS postgres-runtime
 RUN rm -rf /usr/lib/postgresql/18/lib/bitcode /usr/lib/postgresql/18/lib/llvmjit* \
-    && mkdir -p /runtime-libs \
-    && cp -L /usr/lib/*-linux-gnu/libpq.so.5 /runtime-libs/libpq.so.5.18
+    && libpq_path="$(dpkg-query -L libpq5 | awk '/\/libpq\.so\.5$/ { print; exit }')" \
+    && libpq_dir="$(dirname "$libpq_path")" \
+    && mkdir -p "/runtime-libs${libpq_dir}" \
+    && cp -a "${libpq_path}"* "/runtime-libs${libpq_dir}/"
 
 FROM php-base AS runtime
 ARG FILEBEAM_VARIANT=light
@@ -139,19 +141,49 @@ FROM runtime AS omnibus
 # upstream images. No upstream account or /etc tree is imported.
 COPY --from=postgres-runtime /usr/lib/postgresql /usr/lib/postgresql
 COPY --from=postgres-runtime /usr/share/postgresql /usr/share/postgresql
-# PostgreSQL 18 clients need this matching libpq release, not Debian's libpq 17.
-COPY --from=postgres-runtime /runtime-libs/libpq.so.5.18 /usr/local/lib/libpq.so.5.18
+# PostgreSQL 18 clients need the matching libpq release in Debian's native path.
+COPY --from=postgres-runtime /runtime-libs/usr/lib/ /usr/lib/
 COPY --from=valkey /usr/local/bin/valkey-* /usr/local/bin/
 ENV FILEBEAM_VARIANT=omnibus \
     PATH=/usr/lib/postgresql/18/bin:$PATH
 RUN export DEBIAN_FRONTEND=noninteractive \
-    && ln -sf libpq.so.5.18 /usr/local/lib/libpq.so.5 \
-    && ldconfig \
-    && test -r /usr/local/lib/libpq.so.5.18 \
-    && ldconfig -p | awk '/libpq\.so\.5 .*\/usr\/local\/lib\/libpq\.so\.5$/ { found = 1 } END { exit !found }' \
     && apt-get update \
     && apt-get install -y --no-install-recommends libldap2 liblz4-1 libzstd1 libxml2 libxslt1.1 libpam0g libreadline8t64 libssl3t64 libicu76 libcurl4t64 liburing2 libedit2 libuuid1 libnuma1 libsystemd0 \
     && rm -rf /var/lib/apt/lists/* \
     && for tool in psql pg_isready pg_dump pg_restore createdb createuser; do ln -s "/usr/lib/postgresql/18/bin/$tool" "/usr/bin/$tool"; done \
-    && for binary in /usr/lib/postgresql/18/bin/postgres /usr/lib/postgresql/18/bin/pg_dump /usr/lib/postgresql/18/bin/pg_restore /usr/local/bin/valkey-server; do dependencies="$(ldd "$binary")"; printf '%s\n' "$dependencies"; ! printf '%s\n' "$dependencies" | grep -F 'not found'; done \
-    && postgres --version && pg_dump --version && pg_restore --version && valkey-server --version
+    && expected_libpq="$(dirname "$(readlink -f "$(ldconfig -p | awk '$1 == "libc.so.6" { print $NF; exit }')")")/libpq.so.5" \
+    && expected_libpq="$(readlink -f "$expected_libpq")" \
+    && for binary in /usr/lib/postgresql/18/bin/postgres /usr/lib/postgresql/18/bin/psql /usr/lib/postgresql/18/bin/pg_isready /usr/lib/postgresql/18/bin/pg_dump /usr/lib/postgresql/18/bin/pg_restore /usr/local/bin/valkey-server; do dependencies="$(ldd "$binary")"; printf '%s\n' "$dependencies"; ! printf '%s\n' "$dependencies" | grep -F 'not found'; done \
+    && for tool in psql pg_isready pg_dump pg_restore; do resolved_libpq="$(ldd "$(command -v "$tool")" | awk '$1 == "libpq.so.5" { print $3; exit }')"; test "$(readlink -f "$resolved_libpq")" = "$expected_libpq"; grep -aq 'PQfullProtocolVersion' "$resolved_libpq"; done \
+    && postgres --version && psql --version && pg_isready --version && pg_dump --version && pg_restore --version && valkey-server --version
+
+# --version and ldd do not exercise libpq symbols first used on connection.
+RUN <<'SH'
+set -eu
+directory=$(mktemp -d /tmp/filebeam-pg-check.XXXXXX)
+postgres_pid=''
+cleanup() {
+    status=$?
+    trap - EXIT
+    if [ -n "$postgres_pid" ]; then
+        kill -INT "$postgres_pid" 2>/dev/null || true
+        wait "$postgres_pid" || true
+    fi
+    if [ "$status" -ne 0 ] && [ -f "$directory/server.log" ]; then cat "$directory/server.log" >&2; fi
+    rm -rf "$directory"
+    exit "$status"
+}
+trap cleanup EXIT
+chown filebeampg:filebeampg "$directory"
+setpriv --reuid=filebeampg --regid=filebeampg --init-groups -- initdb -D "$directory/data" --encoding=UTF8 --locale=C.UTF-8 --auth-local=peer --auth-host=reject --username=filebeampg >/dev/null
+setpriv --reuid=filebeampg --regid=filebeampg --init-groups -- postgres -D "$directory/data" -k "$directory" -c listen_addresses='' >"$directory/server.log" 2>&1 &
+postgres_pid=$!
+attempts=0
+until setpriv --reuid=filebeampg --regid=filebeampg --init-groups -- pg_isready -h "$directory" -U filebeampg -d postgres -t 2 -q; do
+    attempts=$((attempts + 1))
+    kill -0 "$postgres_pid"
+    [ "$attempts" -lt 30 ]
+    sleep 1
+done
+setpriv --reuid=filebeampg --regid=filebeampg --init-groups -- psql -X -w -h "$directory" -U filebeampg -d postgres -v ON_ERROR_STOP=1 -Atqc 'SELECT 1'
+SH

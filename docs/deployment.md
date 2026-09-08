@@ -18,6 +18,8 @@ Remove PHP write access to application code and `.env` after setup, while retain
 
 Automatic updates are opt-in (`FILEBEAM_AUTO_UPDATES_ENABLED=false` by default). When enabled, the daily scheduled check installs available compatible signed packages through the existing updater. Keep the package writable by the updater's runtime user, reserve sufficient disk quota for a database backup, and allow enough cron runtime for backup and update work. This updater supports only a single-node package filesystem. Container images remain immutable: deploy a new image instead of enabling package self-updates. After manually changing environment settings, rebuild cached configuration with `php artisan optimize`.
 
+Release publishers must set `R2_ENDPOINT_URL` to the HTTPS Cloudflare R2 account API root (for example, `https://<account-id>.r2.cloudflarestorage.com`) and `R2_BUCKET` to the bucket name. Do not use the public download URL or append the bucket name to the endpoint; publication writes root-relative keys such as `index.json` and `versions/v0.1.0/filebeam-v0.1.0.zip`.
+
 For PostgreSQL, install both `pg_dump` and `pg_restore` in the updater's CLI environment. Their major version must exactly match the PostgreSQL server major version; patch versions need not match. For example, PostgreSQL 16.15 works with PostgreSQL 16 client tools, but PostgreSQL 17 tools fail the preflight. You can check an installed tool with `pg_dump --version`.
 
 ## Runtime

@@ -201,13 +201,23 @@ start_omnibus() {
         chmod 0640 "$password"
     fi
     if [ ! -f "$pgdata/PG_VERSION" ]; then
-        setpriv --reuid=filebeampg --regid=filebeampg --init-groups -- /usr/lib/postgresql/18/bin/initdb --pgdata="$pgdata" --auth-local=peer --auth-host=reject --username=filebeampg
+        setpriv --reuid=filebeampg --regid=filebeampg --init-groups -- /usr/lib/postgresql/18/bin/initdb --pgdata="$pgdata" --encoding=UTF8 --locale=C.UTF-8 --auth-local=peer --auth-host=reject --username=filebeampg
     fi
     setpriv --reuid=filebeampg --regid=filebeampg --init-groups -- /usr/lib/postgresql/18/bin/postgres -D "$pgdata" -k /run/filebeam/postgresql -p 5432 -c listen_addresses='' -c unix_socket_permissions=0770 -c "shared_buffers=${FILEBEAM_PG_SHARED_BUFFERS:-128MB}" -c "max_connections=${FILEBEAM_PG_MAX_CONNECTIONS:-100}" &
     postgres_pid=$!
     attempts=0
-    until setpriv --reuid=filebeampg --regid=filebeampg --init-groups -- /usr/bin/psql -X -w -h /run/filebeam/postgresql -p 5432 -U filebeampg -d postgres -Atqc 'SELECT 1' >/dev/null 2>&1; do
-        attempts=$((attempts + 1)); [ "$attempts" -lt 60 ] || { printf '%s\n' 'PostgreSQL did not become ready.' >&2; return 1; }; sleep 1
+    while true; do
+        if probe_output=$(PGCONNECT_TIMEOUT=2 setpriv --reuid=filebeampg --regid=filebeampg --init-groups -- /usr/bin/psql -X -w -h /run/filebeam/postgresql -p 5432 -U filebeampg -d postgres -Atqc 'SELECT 1' 2>&1); then
+            break
+        else
+            probe_status=$?
+        fi
+        attempts=$((attempts + 1))
+        if [ "$probe_status" -ge 126 ] || ! kill -0 "$postgres_pid" 2>/dev/null || [ "$attempts" -ge 60 ]; then
+            printf 'PostgreSQL readiness probe failed (exit %s):\n%s\n' "$probe_status" "$probe_output" >&2
+            return 1
+        fi
+        sleep 1
     done
     # The daemon retains owner write access; group filebeam also supports an
     # explicit uid:gid application invocation without supplemental groups.
