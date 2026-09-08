@@ -40,6 +40,15 @@ Dedicated servers may optionally run a persistent `php artisan queue:work` inste
 
 Set every PHP server, proxy, and storage-provider request limit to accommodate `CHUNK_MAX_SIZE`. Its default is 25,000,000 encrypted bytes; authenticated encryption adds a 16-byte tag to each plaintext chunk. Storage is private. Keep filesystem definitions and credentials available for stores containing old chunks.
 
+Adaptive uploads also require private, disk-backed staging. By default this is `storage/app/transfer-staging`; set `FILEBEAM_STAGING_ROOT` to a persistent, private local directory when application storage is not persistent. Do not use RAM as the default, a web-served path, or S3/object storage for staging. The runtime user must be able to create files and use `flock` in the directory. See [Adaptive transfers](adaptive-transfers.md) for capacity, multi-instance, and cleanup requirements.
+
+Run the scheduler cron entry above in every deployment. Its 15-minute transfer-pruning task removes expired staging reservations and files; this cleanup is mandatory for staging capacity to recover. After deploying a release that includes database migrations, run the routine deployment migration manually before serving the release:
+
+```sh
+cd /path/to/filebeam/backend
+php artisan migrate --force
+```
+
 ## Backup And Recovery
 
 Back up these items together before upgrades or maintenance:

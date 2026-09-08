@@ -12,6 +12,7 @@ defineProps<{
     deleting: boolean;
     uploading?: boolean;
     progress?: number;
+    activity?: string;
     sessions?: DownloadSession[];
     monitoringUnavailable?: boolean;
 }>();
@@ -62,7 +63,9 @@ const emit = defineEmits<{ reset: []; delete: []; cancel: [] }>();
                     <div
                         class="mb-2 flex items-center justify-between gap-3 text-sm text-[var(--fb-text-muted)]"
                     >
-                        <span>{{ uploading ? 'Encrypting and uploading' : 'Upload complete' }}</span
+                        <span>{{
+                            uploading ? (activity ?? 'Encrypting and uploading') : 'Upload complete'
+                        }}</span
                         ><span class="tabular-nums">{{ percentage }}%</span>
                     </div>
                 </template>

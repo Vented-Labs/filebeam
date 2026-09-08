@@ -8,7 +8,8 @@ import {
     monitor,
 } from '../../../backend/resources/js/actions/App/Http/Controllers/Api/V1/TurboTransferController';
 import { ciphertextBytes } from '../lib/format';
-import { fetchChunkWithRetry, transferConcurrency } from '../lib/transfer';
+import { AdaptiveConcurrency, fetchChunkWithRetry, transferConcurrency } from '../lib/transfer';
+import { uploadCiphertext, type UploadPhase, type UploadTransport } from '../lib/adaptive-upload';
 import { waitForWorkerMessage, type WorkerMessage } from '../lib/worker-request';
 
 type ServerTransfer = {
@@ -20,6 +21,7 @@ type ServerTransfer = {
     monitor_token?: string;
     expires_at?: string;
     read_token?: string;
+    upload_transport?: UploadTransport;
     items: Array<{ id: string; position: number }>;
 };
 const MAX_CIPHERTEXT_CHUNK_BYTES = 25_000_000;
@@ -33,6 +35,7 @@ export function useEncryptedUpload(config: FilebeamConfig) {
     const entries = ref<UploadEntry[]>([]);
     const status = ref<'ready' | 'uploading' | 'complete' | 'error'>('ready');
     const progress = ref(0);
+    const activity = ref('Preparing encryption');
     const error = ref('');
     const share = ref<ShareResult>();
     const sessions = ref<DownloadSession[]>([]);
@@ -215,20 +218,20 @@ export function useEncryptedUpload(config: FilebeamConfig) {
         index: number,
         ciphertext: Uint8Array,
         signal: AbortSignal,
+        adaptive: AdaptiveConcurrency,
+        onProgress: (loaded: number) => void,
+        onPhase: (phase: UploadPhase) => void,
     ): Promise<void> {
-        await fetchChunkWithRetry(
-            `/api/v1/transfers/${transfer.id}/items/${itemId}/chunks/${index}`,
-            {
-                method: 'PUT',
-                body: ciphertext.buffer as ArrayBuffer,
-                headers: {
-                    'Content-Type': 'application/octet-stream',
-                    'X-Filebeam-Upload-Token': transfer.upload_token,
-                },
-            },
+        await uploadCiphertext({
+            chunkUrl: `/api/v1/transfers/${transfer.id}/items/${itemId}/chunks/${index}`,
+            token: transfer.upload_token,
+            ciphertext,
+            transport: transfer.upload_transport ?? config.upload_transport,
             signal,
-            async () => undefined,
-        );
+            controller: adaptive,
+            onProgress,
+            onPhase,
+        });
     }
 
     function addFiles(files: FileList | File[]): void {
@@ -347,6 +350,7 @@ export function useEncryptedUpload(config: FilebeamConfig) {
         const turbo = options.turbo === true && options.mode === 'files' && !options.recipient;
         status.value = 'uploading';
         progress.value = 0;
+        activity.value = 'Preparing encryption';
         const uploadController = new AbortController();
         controller = uploadController;
         const jobId = crypto.randomUUID();
@@ -447,6 +451,52 @@ export function useEncryptedUpload(config: FilebeamConfig) {
             let uploaded = 0;
             const sourceBytes = uploadEntries.reduce((total, entry) => total + entry.file.size, 0);
             const uploadedByItem = new Map<string, number>();
+            const inFlightByChunk = new Map<string, { itemId: string; bytes: number }>();
+            const phases = new Map<string, UploadPhase>();
+            const updateActivity = () => {
+                const values = [...phases.values()];
+                activity.value = values.includes('offline')
+                    ? 'Waiting for a connection'
+                    : values.includes('retrying')
+                      ? 'Retrying interrupted upload'
+                      : values.includes('uploading')
+                        ? 'Encrypting and uploading'
+                        : values.includes('storing')
+                          ? 'Storing encrypted chunks'
+                          : 'Encrypting and uploading';
+            };
+            let progressHighwater = 0;
+            let lastProgressUpdate = 0;
+            const adaptive = new AdaptiveConcurrency(
+                transferConcurrency(config.upload_concurrency, created.data.chunk_bytes),
+                (limit) => {
+                    if (activeJob === jobId && !uploadController.signal.aborted)
+                        activeWorker?.postMessage({ type: 'window', jobId, limit });
+                },
+            );
+            const updateProgress = (force = false) => {
+                const now = performance.now();
+                if (!force && now - lastProgressUpdate < 100) return;
+                lastProgressUpdate = now;
+                let inflight = 0;
+                const itemBytes = new Map(uploadedByItem);
+                for (const part of inFlightByChunk.values()) {
+                    inflight += part.bytes;
+                    itemBytes.set(part.itemId, (itemBytes.get(part.itemId) ?? 0) + part.bytes);
+                }
+                for (const [itemId, bytes] of itemBytes) {
+                    const entry = entryByItemId.get(itemId)!;
+                    entry.progress = Math.max(
+                        entry.progress,
+                        entry.file.size ? Math.min(99, (bytes / entry.file.size) * 100) : 99,
+                    );
+                }
+                progressHighwater = Math.max(
+                    progressHighwater,
+                    sourceBytes ? Math.min(99, ((uploaded + inflight) / sourceBytes) * 100) : 99,
+                );
+                progress.value = progressHighwater;
+            };
             chunkHandler = (event: MessageEvent) => {
                 const message = event.data as WorkerMessage;
                 if (activeJob !== jobId || message.jobId !== jobId) return;
@@ -473,14 +523,14 @@ export function useEncryptedUpload(config: FilebeamConfig) {
                             startMonitoring(created.data);
                             uploadWorker.postMessage({ type: 'uploaded', token: message.token });
                         } catch (reason) {
-                            if (activeJob !== jobId) return;
+                            if (activeJob !== jobId || uploadController.signal.aborted) return;
                             for (const reject of waiters.get(jobId) ?? [])
                                 reject(
                                     reason instanceof Error
                                         ? reason
                                         : new Error('Could not publish this transfer.'),
                                 );
-                            uploadController.abort();
+                            uploadController.abort(reason);
                             discardWorker(uploadWorker);
                         }
                     })();
@@ -502,27 +552,48 @@ export function useEncryptedUpload(config: FilebeamConfig) {
                             Number(message.index),
                             ciphertext,
                             uploadController.signal,
+                            adaptive,
+                            (loaded) => {
+                                if (activeJob !== jobId || uploadController.signal.aborted) return;
+                                // Ciphertext includes the AEAD tag; map transfer bytes to source bytes.
+                                inFlightByChunk.set(String(message.token), {
+                                    itemId: String(message.itemId),
+                                    bytes: Math.min(
+                                        ciphertext.byteLength - 16,
+                                        Math.max(
+                                            0,
+                                            (loaded / ciphertext.byteLength) *
+                                                (ciphertext.byteLength - 16),
+                                        ),
+                                    ),
+                                });
+                                updateProgress();
+                            },
+                            (phase) => {
+                                if (activeJob !== jobId || uploadController.signal.aborted) return;
+                                phases.set(String(message.token), phase);
+                                updateActivity();
+                            },
                         );
                         ensureActive(jobId);
+                        phases.delete(String(message.token));
+                        updateActivity();
+                        inFlightByChunk.delete(String(message.token));
                         uploaded += ciphertext.byteLength - 16;
-                        progress.value = sourceBytes
-                            ? Math.min(99, Math.round((uploaded / sourceBytes) * 100))
-                            : 99;
                         const itemId = String(message.itemId);
                         const itemUploaded =
                             (uploadedByItem.get(itemId) ?? 0) + ciphertext.byteLength - 16;
                         uploadedByItem.set(itemId, itemUploaded);
-                        entry.progress = entry.file.size
-                            ? Math.min(99, Math.round((itemUploaded / entry.file.size) * 100))
-                            : 99;
+                        updateProgress(true);
                         if (itemUploaded === entry.file.size) {
                             entry.state = 'complete';
                             const nextEntry = uploadEntries[uploadEntries.indexOf(entry) + 1];
                             if (nextEntry?.state === 'queued') nextEntry.state = 'encrypting';
                         }
                         uploadWorker.postMessage({ type: 'uploaded', token: message.token });
+                        uploadWorker.postMessage({ type: 'window', jobId, limit: adaptive.limit });
                     } catch (reason) {
-                        if (activeJob !== jobId) return;
+                        if (activeJob !== jobId || uploadController.signal.aborted) return;
                         entry.state = 'error';
                         entry.error =
                             reason instanceof Error ? reason.message : 'Chunk upload failed.';
@@ -532,7 +603,7 @@ export function useEncryptedUpload(config: FilebeamConfig) {
                                     ? reason
                                     : new Error('Chunk upload failed.'),
                             );
-                        uploadController.abort();
+                        uploadController.abort(reason);
                         discardWorker(uploadWorker);
                     }
                 })();
@@ -540,6 +611,7 @@ export function useEncryptedUpload(config: FilebeamConfig) {
             uploadWorker.addEventListener('message', chunkHandler);
             const encryptRequestId = crypto.randomUUID();
             const finishedResult = waitFor('finished', jobId, encryptRequestId);
+            activity.value = 'Encrypting and uploading';
             if (uploadEntries[0]) uploadEntries[0].state = 'encrypting';
             uploadWorker.postMessage({
                 type: 'encrypt',
@@ -549,10 +621,7 @@ export function useEncryptedUpload(config: FilebeamConfig) {
                 serverItems: created.data.items,
                 items: uploadEntries.map(({ file, name, type }) => ({ file, name, type })),
                 chunkBytes: created.data.chunk_bytes,
-                uploadConcurrency: transferConcurrency(
-                    config.upload_concurrency,
-                    created.data.chunk_bytes,
-                ),
+                uploadConcurrency: 1,
                 masterKey,
                 protocolVersion: 1,
                 turbo,
@@ -563,9 +632,9 @@ export function useEncryptedUpload(config: FilebeamConfig) {
             });
             const finished = await finishedResult;
             ensureActive(jobId);
-            const completed = await request<{ data: ServerTransfer }>(
+            activity.value = 'Finalizing encrypted transfer';
+            const completed = await fetchChunkWithRetry<{ data: ServerTransfer }>(
                 `/api/v1/transfers/${created.data.id}/complete`,
-                uploadController.signal,
                 {
                     method: 'POST',
                     headers: {
@@ -577,6 +646,8 @@ export function useEncryptedUpload(config: FilebeamConfig) {
                         ...(encryptedKey ? { encrypted_key: encryptedKey } : {}),
                     }),
                 },
+                uploadController.signal,
+                (response) => response.json() as Promise<{ data: ServerTransfer }>,
             );
             ensureActive(jobId);
             if (!options.recipient) {
@@ -624,6 +695,7 @@ export function useEncryptedUpload(config: FilebeamConfig) {
         entries,
         status,
         progress,
+        activity,
         error,
         share,
         sessions,

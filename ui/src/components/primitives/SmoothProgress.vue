@@ -13,7 +13,9 @@ const props = withDefaults(
 
 const target = computed(() => clamp(props.value));
 const displayed = ref(0);
-const percentage = computed(() => Math.floor(displayed.value));
+const percentage = computed(() =>
+    displayed.value > 0 && displayed.value < 1 ? '<1' : Math.floor(displayed.value),
+);
 const visible = ref(false);
 const allowsMotion = ref(false);
 const shining = computed(

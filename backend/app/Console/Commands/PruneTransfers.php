@@ -8,6 +8,7 @@ use App\Enums\TransferStatus;
 use App\Jobs\DeleteTransfer;
 use App\Models\Transfer;
 use App\Models\TransferChunkUpload;
+use App\Support\ChunkStaging;
 use App\Support\FilestoreRegistry;
 use Filebeam\Updater\ActivityLock;
 use Illuminate\Console\Attributes\Description;
@@ -42,6 +43,7 @@ class PruneTransfers extends Command
 
         try {
             $this->reapUploadAttempts();
+            app(ChunkStaging::class)->prune();
             $now = now();
             $staleDeletingBefore = $now->copy()->subMinutes(15);
             $queued = 0;

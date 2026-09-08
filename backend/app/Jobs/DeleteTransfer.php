@@ -6,6 +6,7 @@ namespace App\Jobs;
 
 use App\Enums\TransferStatus;
 use App\Models\Transfer;
+use App\Support\ChunkStaging;
 use App\Support\FilestoreRegistry;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -38,6 +39,10 @@ class DeleteTransfer implements ShouldQueue
 
         if ($transfer === null) {
             return;
+        }
+
+        if (! app(ChunkStaging::class)->removeTransfer($transfer->id)) {
+            throw new RuntimeException("Staged ciphertext for transfer {$transfer->id} is still active.");
         }
 
         $locations = collect();
