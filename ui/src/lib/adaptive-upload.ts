@@ -487,8 +487,14 @@ export async function uploadCiphertext(options: {
                         signal,
                     );
                 }
-                state = await status();
-                if (state.state === 'complete') return;
+                try {
+                    state = await status();
+                    if (state.state === 'complete') return;
+                } catch (reason) {
+                    signal.throwIfAborted();
+                    if (!retryable(reason)) throw reason;
+                    await transferWait(reason.retryAfter ?? 2_000, signal);
+                }
             }
             throw new UploadError('The server could not finish storing the chunk.');
         } catch (reason) {

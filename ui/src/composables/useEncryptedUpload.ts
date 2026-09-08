@@ -275,6 +275,7 @@ export function useEncryptedUpload(config: FilebeamConfig) {
         if (!isUploading.value) entries.value = entries.value.filter((entry) => entry.id !== id);
     }
     function clear(): void {
+        if (turboReservation) revokeTurbo();
         stopMonitoring();
         sessions.value = [];
         monitoringUnavailable.value = false;

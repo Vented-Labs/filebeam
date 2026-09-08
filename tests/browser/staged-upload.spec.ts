@@ -221,6 +221,94 @@ test('retries a lost transfer completion acknowledgement without changing the pu
     expect(share).toMatch(/#k=v1\./);
 });
 
+test('a cancelled download cannot abort the writable from its replacement download', async ({
+    browser,
+    page,
+}) => {
+    test.setTimeout(60_000);
+    await setFile(page, 'download-cancel-race.bin', content(128 * 1024 + 19));
+    await startUpload(page);
+    await expect(page.getByRole('heading', { name: 'Your encrypted link is ready' })).toBeVisible({
+        timeout: 30_000,
+    });
+    const link = await page.locator('#share-link').inputValue();
+    const context = await browser.newContext();
+    contexts.push(context);
+    await context.addInitScript(() => {
+        let writableIndex = 0;
+        (
+            window as Window & {
+                __downloadWritables: Array<{ aborted: boolean; closed: boolean }>;
+                __firstWriteEntered: boolean;
+                __releaseFirstWrite?: () => void;
+            }
+        ).__downloadWritables = [];
+        Object.defineProperty(window, 'showSaveFilePicker', {
+            configurable: true,
+            value: async () => {
+                const index = writableIndex++;
+                const writable = { aborted: false, closed: false };
+                (
+                    window as Window & {
+                        __downloadWritables: Array<{ aborted: boolean; closed: boolean }>;
+                    }
+                ).__downloadWritables.push(writable);
+                return {
+                    createWritable: async () => ({
+                        write: async () => {
+                            if (index !== 0) return;
+                            const state = window as Window & {
+                                __firstWriteEntered: boolean;
+                                __releaseFirstWrite?: () => void;
+                            };
+                            state.__firstWriteEntered = true;
+                            await new Promise<void>((resolve) => {
+                                state.__releaseFirstWrite = resolve;
+                            });
+                        },
+                        close: async () => {
+                            writable.closed = true;
+                        },
+                        abort: async () => {
+                            writable.aborted = true;
+                        },
+                    }),
+                };
+            },
+        });
+    });
+    const receiver = await context.newPage();
+    let chunkGets = 0;
+    let releaseSecondGet!: () => void;
+    const secondGet = new Promise<void>((resolve) => {
+        releaseSecondGet = resolve;
+        releaseGates.push(resolve);
+    });
+    await receiver.route(directChunk, async (route) => {
+        if (route.request().method() !== 'GET') return route.continue();
+        chunkGets++;
+        if (chunkGets === 2) await secondGet;
+        await route.continue();
+    });
+    await receiver.goto(link);
+    await receiver.getByRole('button', { name: 'Download files' }).click();
+    await expect.poll(() => receiver.evaluate(() => window.__firstWriteEntered)).toBe(true);
+    await receiver.getByRole('button', { name: 'Cancel' }).click();
+    await receiver.getByRole('button', { name: 'Download files' }).click();
+    await expect.poll(() => chunkGets).toBe(2);
+    await receiver.evaluate(() => window.__releaseFirstWrite?.());
+    await expect
+        .poll(() => receiver.evaluate(() => window.__downloadWritables[0]?.aborted))
+        .toBe(true);
+    releaseSecondGet();
+    await expect
+        .poll(() => receiver.evaluate(() => window.__downloadWritables[1]?.closed), {
+            timeout: 30_000,
+        })
+        .toBe(true);
+    expect(await receiver.evaluate(() => window.__downloadWritables[1]?.aborted)).toBe(false);
+});
+
 test('a throttled uplink switches to smaller requests and keeps byte progress visible', async ({
     page,
 }) => {

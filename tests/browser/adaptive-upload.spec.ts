@@ -67,7 +67,7 @@ const stage = (
     offset: number,
     bytes: number,
     checksum: string,
-    state: 'receiving' | 'complete' = 'receiving',
+    state: 'receiving' | 'finalizing' | 'complete' = 'receiving',
 ) => ({ data: { id, state, offset, ciphertext_bytes: bytes, checksum } });
 
 async function mocked(run: () => Promise<void>): Promise<void> {
@@ -307,6 +307,55 @@ test('a 410 reset is bounded and starts a fresh staging id', async () =>
                 .filter((xhr) => xhr.method === 'PUT' && /\/uploads\/[^/]+$/.test(xhr.url))
                 .map((xhr) => xhr.url);
             expect(new Set(createsUrls).size).toBe(2);
+        } finally {
+            FakeXhr.prototype.send = originalSend;
+        }
+    }));
+
+test('a finalizing completion retries after bounded status failures', async () =>
+    mocked(async () => {
+        const originalSend = FakeXhr.prototype.send;
+        let id = '';
+        let checksum = '';
+        let completionPosts = 0;
+        let statusGets = 0;
+        FakeXhr.prototype.send = function (body: unknown): void {
+            if (this.url === '/chunk') FakeXhr.plan.unshift({ error: true });
+            else if (this.method === 'PUT' && !this.url.includes('/parts/')) {
+                id = this.url.split('/uploads/')[1] ?? '';
+                checksum = (JSON.parse(String(body)) as { checksum: string }).checksum;
+                FakeXhr.plan.unshift({ data: stage(id, 0, 2, checksum) });
+            } else if (this.url.endsWith('/parts/0')) {
+                FakeXhr.plan.unshift({ data: stage(id, 2, 2, checksum) });
+            } else if (this.method === 'GET') {
+                statusGets++;
+                FakeXhr.plan.unshift({ status: 500 });
+            } else {
+                completionPosts++;
+                FakeXhr.plan.unshift({
+                    data: stage(
+                        id,
+                        2,
+                        2,
+                        checksum,
+                        completionPosts === 1 ? 'finalizing' : 'complete',
+                    ),
+                });
+            }
+            originalSend.call(this, body);
+        };
+        try {
+            await uploadCiphertext({
+                chunkUrl: '/chunk',
+                token: 't',
+                ciphertext: new Uint8Array([1, 2]),
+                transport,
+                signal: new AbortController().signal,
+                controller: new AdaptiveConcurrency(1),
+                onProgress: () => undefined,
+            });
+            expect(completionPosts).toBe(2);
+            expect(statusGets).toBe(4);
         } finally {
             FakeXhr.prototype.send = originalSend;
         }

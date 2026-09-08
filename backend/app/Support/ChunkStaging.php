@@ -206,9 +206,14 @@ class ChunkStaging
         }
         $existing = is_dir($root);
         if (! $existing) {
-            if (! @mkdir($root, 0700, true)) {
+            if (! @mkdir($root, 0700, true) && ! is_dir($root)) {
                 throw new RuntimeException('Staging storage is unavailable.');
             }
+        }
+        $resolved = realpath($root);
+        $public = realpath(public_path());
+        if ($resolved === false || ($public !== false && str_starts_with($resolved.'/', $public.'/'))) {
+            throw new RuntimeException('Staging storage must not be publicly served.');
         }
         if (($existing && ((fileperms($root) ?: 0) & 0077) !== 0) || ! is_dir($root)) {
             throw new RuntimeException('Staging storage is unavailable.');

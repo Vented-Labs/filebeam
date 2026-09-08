@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Storage;
 beforeEach(function (): void {
     $this->testStoragePath = sys_get_temp_dir().'/filebeam-stage-tests-'.bin2hex(random_bytes(8));
     $this->originalStoragePath = app()->storagePath();
+    $this->originalPublicPath = app()->publicPath();
     File::ensureDirectoryExists($this->testStoragePath);
     app()->useStoragePath($this->testStoragePath);
     Plan::factory()->create(['slug' => 'default']);
@@ -27,6 +28,7 @@ beforeEach(function (): void {
 
 afterEach(function (): void {
     app()->useStoragePath($this->originalStoragePath);
+    app()->usePublicPath($this->originalPublicPath);
     File::deleteDirectory($this->testStoragePath);
 });
 
@@ -136,6 +138,19 @@ test('capacity includes expired rows until their files are removed', function ()
     TransferChunkStage::query()->whereKey($first)->update(['expires_at' => now()->subSecond()]);
     $second = '018f7b8c-2f2d-4f2d-8c43-123456789ab5';
     $this->putJson("/api/v1/transfers/{$transfer}/items/{$item}/chunks/0/uploads/{$second}", ['ciphertext_bytes' => 16, 'checksum' => hash('sha256', str_repeat('y', 16))], ['X-Filebeam-Upload-Token' => $token])->assertStatus(503);
+});
+
+test('a staging root symlinked into the public directory is rejected', function (): void {
+    $publicPath = $this->testStoragePath.'/public';
+    app()->usePublicPath($publicPath);
+    File::makeDirectory($publicPath, 0700, true);
+    symlink($publicPath, $this->testStoragePath.'/staging-alias');
+    config()->set('filebeam.staging.root', $this->testStoragePath.'/staging-alias');
+    [$transfer, $item, $token] = stagedTransfer();
+    $upload = '018f7b8c-2f2d-4f2d-8c43-123456789ab5';
+
+    $this->putJson("/api/v1/transfers/{$transfer}/items/{$item}/chunks/0/uploads/{$upload}", ['ciphertext_bytes' => 16, 'checksum' => hash('sha256', str_repeat('x', 16))], ['X-Filebeam-Upload-Token' => $token])->assertStatus(503);
+    expect(File::glob($publicPath.'/*.bin'))->toBeEmpty();
 });
 
 test('stage row limits bound new sessions', function (): void {

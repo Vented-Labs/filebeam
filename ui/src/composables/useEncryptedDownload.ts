@@ -774,6 +774,7 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
         onProgress?: (bytes: number) => void,
     ): Promise<void> {
         if (!transfer.value?.chunk_bytes) throw new Error('Transfer unavailable.');
+        const downloadController = controller!;
         const hashId = crypto.randomUUID();
         const verifyDigest = Boolean(item.digest || turbo.value);
         if (verifyDigest) await hash('hash-start', jobId, hashId);
@@ -865,7 +866,7 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
                         (reason) => {
                             concurrency.forget(sampleKey);
                             pipelineFailure ??= reason;
-                            controller?.abort(reason);
+                            downloadController.abort(reason);
                             return { reason };
                         },
                     );
@@ -919,7 +920,7 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
                     throw new Error('The downloaded file failed its integrity check.');
             }
         } catch (reason) {
-            controller?.abort(reason);
+            downloadController.abort(reason);
             await Promise.all(pending.values());
             if (verifyDigest && worker)
                 worker.postMessage({
