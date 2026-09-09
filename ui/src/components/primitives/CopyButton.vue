@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref } from 'vue';
 import Button from './Button.vue';
-import FilebeamIcon from './FilebeamIcon.vue';
+import Icon from './Icon.vue';
 import Tooltip from './Tooltip.vue';
 
 const props = withDefaults(
@@ -71,7 +71,7 @@ onBeforeUnmount(() => {
                         class="copy-button__content"
                         :class="{ 'copy-button__content--icon': iconOnly }"
                     >
-                        <FilebeamIcon
+                        <Icon
                             :name="state === 'copied' ? 'check' : 'copy'"
                             :size="16"
                             class="copy-button__icon"

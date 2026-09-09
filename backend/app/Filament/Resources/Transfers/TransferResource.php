@@ -30,7 +30,6 @@ use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
-use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
@@ -50,7 +49,7 @@ class TransferResource extends Resource
 
     protected static ?string $slug = 'transfers';
 
-    protected static string|\BackedEnum|null $navigationIcon = Heroicon::OutlinedClipboardDocumentList;
+    protected static string|\BackedEnum|null $navigationIcon = 'filebeam-transfers';
 
     protected static string|\UnitEnum|null $navigationGroup = 'Work';
 

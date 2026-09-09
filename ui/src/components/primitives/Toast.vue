@@ -7,7 +7,7 @@ import {
     ToastTitle,
     ToastViewport,
 } from 'reka-ui';
-import FilebeamIcon from './FilebeamIcon.vue';
+import Icon from './Icon.vue';
 
 withDefaults(
     defineProps<{
@@ -34,7 +34,7 @@ const open = defineModel<boolean>('open', { required: true });
             <span
                 class="grid size-6 shrink-0 place-items-center rounded-full bg-[var(--fb-selected-surface)] text-[var(--fb-success)]"
             >
-                <FilebeamIcon name="check" :size="16" />
+                <Icon name="check" :size="16" />
             </span>
             <div class="min-w-0 flex-1">
                 <ToastTitle class="font-medium">{{ title }}</ToastTitle>
@@ -49,7 +49,7 @@ const open = defineModel<boolean>('open', { required: true });
                 aria-label="Dismiss notification"
                 class="rounded-md p-1 text-[var(--fb-text-muted)] outline-none transition-colors hover:text-[var(--fb-text)] focus-visible:ring-2 focus-visible:ring-[var(--fb-focus)]"
             >
-                <FilebeamIcon name="x" :size="16" />
+                <Icon name="x" :size="16" />
             </ToastClose>
         </ToastRoot>
         <ToastViewport

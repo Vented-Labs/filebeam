@@ -6,7 +6,7 @@ import InboxController from '@/actions/App/Http/Controllers/InboxController';
 import AppShell from '../../../../ui/src/components/layout/AppShell.vue';
 import AppLink from '../../../../ui/src/components/primitives/AppLink.vue';
 import Button from '../../../../ui/src/components/primitives/Button.vue';
-import FilebeamIcon from '../../../../ui/src/components/primitives/FilebeamIcon.vue';
+import Icon from '../../../../ui/src/components/primitives/Icon.vue';
 import { formatBytes } from '../../../../ui/src/lib/format';
 import { csrfHeaders } from '../../../../ui/src/lib/csrf';
 
@@ -70,7 +70,7 @@ async function remove(id: string): Promise<void> {
                     v-if="!transfers.length"
                     class="mt-8 rounded-2xl border border-[var(--fb-border)] bg-[var(--fb-surface)] p-10 text-center"
                 >
-                    <FilebeamIcon name="folder" :size="36" class="mx-auto" />
+                    <Icon name="folder" :size="36" class="mx-auto" />
                     <h2 class="mt-4 text-xl font-semibold">No incoming files yet</h2>
                     <p class="mt-2 text-sm text-[var(--fb-text-muted)]">
                         Share your receiving page from your profile. Completed transfers will appear
@@ -122,7 +122,7 @@ async function remove(id: string): Promise<void> {
                             variant="ghost"
                             :aria-label="`Delete transfer ${transfer.id}`"
                             @click="confirming = transfer.id"
-                            ><FilebeamIcon name="trash" :size="18"
+                            ><Icon name="trash" :size="18"
                         /></Button>
                     </li>
                 </ul>

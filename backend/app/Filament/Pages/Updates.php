@@ -9,7 +9,6 @@ use App\Services\ReleaseChecker;
 use Filament\Facades\Filament;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
-use Filament\Support\Icons\Heroicon;
 
 class Updates extends Page
 {
@@ -17,7 +16,7 @@ class Updates extends Page
 
     protected static ?string $navigationLabel = 'Updates';
 
-    protected static string|\BackedEnum|null $navigationIcon = Heroicon::OutlinedArrowPath;
+    protected static string|\BackedEnum|null $navigationIcon = 'filebeam-updates';
 
     protected static string|\UnitEnum|null $navigationGroup = 'Administration';
 

@@ -2,11 +2,11 @@
 import type { UploadEntry } from '../../upload-types';
 import { formatBytes } from '../../lib/format';
 import Button from '../primitives/Button.vue';
-import FilebeamIcon, { type FilebeamIconName } from '../primitives/FilebeamIcon.vue';
+import Icon, { type IconName } from '../primitives/Icon.vue';
 import SmoothProgress from '../primitives/SmoothProgress.vue';
 defineProps<{ entries: UploadEntry[]; disabled: boolean }>();
 const emit = defineEmits<{ choose: []; remove: [id: string] }>();
-function iconFor(entry: UploadEntry): FilebeamIconName {
+function iconFor(entry: UploadEntry): IconName {
     if (entry.type.startsWith('image/')) return 'image';
     if (entry.type.startsWith('video/')) return 'video';
     if (entry.type.startsWith('audio/')) return 'music';
@@ -47,7 +47,7 @@ function iconFor(entry: UploadEntry): FilebeamIconName {
                 <div class="flex min-w-0 items-center gap-3">
                     <span
                         class="grid size-10 shrink-0 place-items-center rounded-xl border border-[var(--fb-border)] bg-[var(--fb-selected-surface)] text-[var(--fb-accent-text)]"
-                        ><FilebeamIcon
+                        ><Icon
                             :name="entry.state === 'complete' ? 'check' : iconFor(entry)"
                             :size="21"
                     /></span>
@@ -69,7 +69,7 @@ function iconFor(entry: UploadEntry): FilebeamIconName {
                         :aria-label="`Remove ${entry.name}`"
                         @click="emit('remove', entry.id)"
                     >
-                        <FilebeamIcon name="x" :size="16" />
+                        <Icon name="x" :size="16" />
                     </button>
                 </div>
                 <SmoothProgress

@@ -7,14 +7,19 @@ namespace App\Providers\Filament;
 use App\Filament\Pages\AdminLogin;
 use App\Filament\Pages\Dashboard;
 use App\Filament\Pages\StaffProfile;
+use App\Support\Icons\FilamentIcons;
+use App\Support\Icons\IconsaxLoadingIndicator;
+use BladeUI\Icons\Factory as BladeIconFactory;
 use Filament\Auth\MultiFactor\App\AppAuthentication;
 use Filament\Enums\ThemeMode;
+use Filament\Forms\Components\DateTimePicker;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
 use Filament\Panel;
 use Filament\PanelProvider;
+use Filament\Support\Contracts\LoadingIndicator;
 use Filament\View\PanelsRenderHook;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
@@ -26,6 +31,20 @@ use Illuminate\View\Middleware\ShareErrorsFromSession;
 
 class AdminPanelProvider extends PanelProvider
 {
+    public function boot(): void
+    {
+        app(BladeIconFactory::class)->add('filebeam', [
+            'path' => resource_path('icons/iconsax'),
+            'prefix' => 'filebeam',
+        ]);
+
+        app()->bind(LoadingIndicator::class, IconsaxLoadingIndicator::class);
+
+        DateTimePicker::configureUsing(static fn (DateTimePicker $component): DateTimePicker => $component->suffixIcon('filebeam-calendar'));
+
+        Blade::extend(FilamentIcons::replaceDirectReferences(...));
+    }
+
     public function panel(Panel $panel): Panel
     {
         return $panel
@@ -53,6 +72,10 @@ class AdminPanelProvider extends PanelProvider
             ])
             ->colors([
                 'primary' => '#7c3aed',
+            ])
+            ->icons([
+                ...FilamentIcons::aliases(),
+                'filebeam-alert' => 'filebeam-alert',
             ])
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\Filament\Resources')
             ->discoverPages(in: app_path('Filament/Pages'), for: 'App\Filament\Pages')

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { CheckboxIndicator, CheckboxRoot } from 'reka-ui';
-import FilebeamIcon from './FilebeamIcon.vue';
+import Icon from './Icon.vue';
 
 withDefaults(defineProps<{ disabled?: boolean }>(), { disabled: false });
 const checked = defineModel<boolean>({ default: false });
@@ -9,7 +9,7 @@ const checked = defineModel<boolean>({ default: false });
 <template>
     <CheckboxRoot v-model="checked" :disabled="disabled" class="fb-checkbox">
         <CheckboxIndicator class="fb-checkbox-indicator">
-            <FilebeamIcon name="check" :size="13" :stroke-width="2.4" />
+            <Icon name="check" :size="13" />
         </CheckboxIndicator>
     </CheckboxRoot>
 </template>

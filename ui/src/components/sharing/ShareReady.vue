@@ -2,7 +2,7 @@
 import Button from '../primitives/Button.vue';
 import CopyButton from '../primitives/CopyButton.vue';
 import Input from '../primitives/Input.vue';
-import FilebeamIcon from '../primitives/FilebeamIcon.vue';
+import Icon from '../primitives/Icon.vue';
 import TransferExpiry from '../download/TransferExpiry.vue';
 import DownloadMonitor from './DownloadMonitor.vue';
 import SmoothProgress from '../primitives/SmoothProgress.vue';
@@ -26,7 +26,7 @@ const emit = defineEmits<{ reset: []; delete: []; cancel: [] }>();
         <div
             class="mx-auto grid size-12 place-items-center rounded-full bg-[var(--fb-selected-surface)] text-2xl text-[var(--fb-success)]"
         >
-            <FilebeamIcon :name="uploading ? 'loader' : 'check'" :size="24" />
+            <Icon :name="uploading ? 'loader' : 'check'" :size="24" />
         </div>
         <p
             v-if="share.turbo"

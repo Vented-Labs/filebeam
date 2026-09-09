@@ -11,7 +11,7 @@ import {
 } from 'reka-ui';
 import { inject, ref } from 'vue';
 import BrandLogo from '../brand/BrandLogo.vue';
-import FilebeamIcon from '../primitives/FilebeamIcon.vue';
+import Icon from '../primitives/Icon.vue';
 import AnimatedHeight from '../layout/AnimatedHeight.vue';
 
 defineProps<{ title: string; description: string }>();
@@ -49,7 +49,7 @@ function closeAutoFocus(event: Event): void {
                 <header class="auth-drawer__header">
                     <BrandLogo />
                     <DialogClose class="auth-drawer__close" aria-label="Close authentication"
-                        ><FilebeamIcon name="x" :size="19"
+                        ><Icon name="x" :size="19"
                     /></DialogClose>
                 </header>
                 <div class="auth-drawer__body">

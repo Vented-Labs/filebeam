@@ -12,7 +12,7 @@ import { csrfHeaders } from '../../lib/csrf';
 import AppLink from '../primitives/AppLink.vue';
 import Button from '../primitives/Button.vue';
 import CopyButton from '../primitives/CopyButton.vue';
-import FilebeamIcon from '../primitives/FilebeamIcon.vue';
+import Icon from '../primitives/Icon.vue';
 import Input from '../primitives/Input.vue';
 import Switch from '../primitives/Switch.vue';
 
@@ -335,7 +335,7 @@ onBeforeUnmount(() => {
                             :disabled="savingKey || !!generated"
                         />
                         <span class="flex gap-3"
-                            ><FilebeamIcon name="lock" :size="24" /><span
+                            ><Icon name="lock" :size="24" /><span
                                 ><strong class="block"
                                     >Protect with password
                                     <span class="text-xs font-normal text-[var(--fb-success)]"
@@ -366,7 +366,7 @@ onBeforeUnmount(() => {
                             :disabled="savingKey || !!generated"
                         />
                         <span class="flex gap-3"
-                            ><FilebeamIcon name="key" :size="24" /><span
+                            ><Icon name="key" :size="24" /><span
                                 ><strong class="block">Keep the key yourself</strong
                                 ><span class="mt-1 block text-sm text-[var(--fb-text-muted)]"
                                     >Filebeam stores only your public key. If the private export is

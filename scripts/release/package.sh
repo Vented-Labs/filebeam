@@ -74,6 +74,7 @@ copy_entry() {
 for entry in app bootstrap config database public resources routes artisan composer.json composer.lock .env.example; do
     copy_entry "$entry"
 done
+cp -a "$root/icons/NOTICE" "$stage/backend/ICONSAX-NOTICE"
 rm -rf "$stage/backend/vendor" "$stage/backend/node_modules" "$stage/backend/tests" "$stage/backend/.agents" "$stage/backend/.zed" "$stage/backend/docker"
 rm -rf "$stage/backend/public/storage" "$stage/backend/public/hot" "$stage/backend/storage"
 find "$stage/backend/database" -type f \( -name '*.sqlite' -o -name '*.sqlite-*' -o -name '*.db' -o -name '*.db-*' \) -delete 2>/dev/null || true

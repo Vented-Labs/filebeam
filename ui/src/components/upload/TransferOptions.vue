@@ -11,7 +11,7 @@ import {
     SelectViewport,
 } from 'reka-ui';
 import Button from '../primitives/Button.vue';
-import FilebeamIcon from '../primitives/FilebeamIcon.vue';
+import Icon from '../primitives/Icon.vue';
 import Input from '../primitives/Input.vue';
 import Switch from '../primitives/Switch.vue';
 import Tooltip from '../primitives/Tooltip.vue';
@@ -76,7 +76,7 @@ function setRetention(value: unknown): void {
                 >
                     <SelectTrigger aria-label="Retention period" class="fb-select-trigger">
                         <SelectValue>{{ retentionLabel(retentionHours) }}</SelectValue>
-                        <FilebeamIcon name="chevron-down" :size="16" />
+                        <Icon name="chevron-down" :size="16" />
                     </SelectTrigger>
                     <SelectPortal>
                         <SelectContent
@@ -95,7 +95,7 @@ function setRetention(value: unknown): void {
                                 >
                                     <SelectItemText>{{ retentionLabel(hours) }}</SelectItemText>
                                     <SelectItemIndicator
-                                        ><FilebeamIcon name="check" :size="15"
+                                        ><Icon name="check" :size="15"
                                     /></SelectItemIndicator>
                                 </SelectItem>
                             </SelectViewport>
@@ -128,7 +128,7 @@ function setRetention(value: unknown): void {
         </div>
 
         <footer class="action-footer">
-            <p><FilebeamIcon name="lock" :size="15" />Encrypted in your browser before upload.</p>
+            <p><Icon name="lock" :size="15" />Encrypted in your browser before upload.</p>
             <div class="action-area">
                 <Button
                     v-if="uploading"
@@ -148,7 +148,7 @@ function setRetention(value: unknown): void {
                                 class="action-button"
                                 :disabled="!canUpload"
                                 @click="emit('turbo')"
-                                ><FilebeamIcon name="bolt" :size="17" />Turbo Transfer</Button
+                                ><Icon name="bolt" :size="17" />Turbo Transfer</Button
                             >
                         </Tooltip>
                         <Button

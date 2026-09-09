@@ -6,7 +6,7 @@ import { useEncryptedDownload } from '../composables/useEncryptedDownload';
 import AppShell from './layout/AppShell.vue';
 import NoteViewer from './notes/NoteViewer.vue';
 import Button from './primitives/Button.vue';
-import FilebeamIcon from './primitives/FilebeamIcon.vue';
+import Icon from './primitives/Icon.vue';
 import DownloadList from './download/DownloadList.vue';
 import DownloadStatus from './download/DownloadStatus.vue';
 import TransferExpiry from './download/TransferExpiry.vue';
@@ -90,7 +90,7 @@ onMounted(() => {
                     v-if="download.state.value === 'loading'"
                     class="py-20 text-center text-[var(--fb-text-muted)]"
                 >
-                    <FilebeamIcon name="loader" class="mb-3" />
+                    <Icon name="loader" class="mx-auto mb-3" />
                     <p>Loading encrypted transfer...</p>
                 </div>
                 <form
@@ -98,7 +98,7 @@ onMounted(() => {
                     class="mx-auto max-w-md space-y-5"
                     @submit.prevent="unlockRecipient"
                 >
-                    <FilebeamIcon name="lock" :size="32" />
+                    <Icon name="lock" :size="32" />
                     <h1 class="text-3xl font-semibold">Unlock received files</h1>
                     <p class="text-sm text-[var(--fb-text-muted)]">
                         Decryption happens in this browser. Your unlock secret is not sent to
@@ -230,7 +230,7 @@ onMounted(() => {
                                     ? download.downloadNote()
                                     : download.decryptNote()
                             "
-                            ><FilebeamIcon name="download" :size="18" />{{
+                            ><Icon name="download" :size="18" />{{
                                 download.note.value ? 'Download note' : 'Decrypt note'
                             }}</Button
                         >
@@ -241,7 +241,7 @@ onMounted(() => {
                                 download.downloadedItemIds.value.length ? 'secondary' : 'primary'
                             "
                             @click="download.downloadFiles()"
-                            ><FilebeamIcon name="download" :size="18" />{{
+                            ><Icon name="download" :size="18" />{{
                                 download.downloadedItemIds.value.length
                                     ? 'Download files again'
                                     : 'Download files'
@@ -253,7 +253,7 @@ onMounted(() => {
                             :key="item.id"
                             variant="secondary"
                             @click="download.downloadFiles([item])"
-                            ><FilebeamIcon name="download" :size="17" />Download {{ item.name
+                            ><Icon name="download" :size="17" />Download {{ item.name
                             }}{{
                                 download.downloadedItemIds.value.includes(item.id) ? ' again' : ''
                             }}</Button

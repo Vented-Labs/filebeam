@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ManifestItem } from '../../composables/useEncryptedDownload';
 import { formatBytes } from '../../lib/format';
-import FilebeamIcon from '../primitives/FilebeamIcon.vue';
+import Icon from '../primitives/Icon.vue';
 
 defineProps<{ items: ManifestItem[] }>();
 </script>
@@ -16,7 +16,7 @@ defineProps<{ items: ManifestItem[] }>();
             class="flex items-center justify-between gap-4 px-4 py-3"
         >
             <span class="flex min-w-0 items-center gap-3"
-                ><FilebeamIcon name="file" class="shrink-0 text-[var(--fb-accent-text)]" /><span
+                ><Icon name="file" class="shrink-0 text-[var(--fb-accent-text)]" /><span
                     class="truncate"
                     >{{ item.name }}</span
                 ></span

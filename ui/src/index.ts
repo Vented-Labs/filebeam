@@ -9,3 +9,5 @@ export { default as Tooltip } from './components/primitives/Tooltip.vue';
 export { default as Toast } from './components/primitives/Toast.vue';
 export { default as FormField } from './components/primitives/FormField.vue';
 export { default as Input } from './components/primitives/Input.vue';
+export { default as Icon } from './components/primitives/Icon.vue';
+export type { IconName } from './components/primitives/Icon.vue';

@@ -19,7 +19,7 @@ import {
 } from 'reka-ui';
 import { ref } from 'vue';
 import Button from '../primitives/Button.vue';
-import FilebeamIcon from '../primitives/FilebeamIcon.vue';
+import Icon from '../primitives/Icon.vue';
 import FormField from '../primitives/FormField.vue';
 import Input from '../primitives/Input.vue';
 import Tooltip from '../primitives/Tooltip.vue';
@@ -60,7 +60,7 @@ function closeAutoFocus(event: Event): void {
         <Tooltip content="Report this transfer">
             <DialogTrigger as-child>
                 <Button ref="trigger" variant="danger" icon aria-label="Report this transfer"
-                    ><FilebeamIcon name="alert" :size="19"
+                    ><Icon name="alert" :size="19"
                 /></Button>
             </DialogTrigger>
         </Tooltip>
@@ -80,7 +80,7 @@ function closeAutoFocus(event: Event): void {
                         icon
                         class="absolute right-3 top-3"
                         aria-label="Close report dialog"
-                        ><FilebeamIcon name="x" :size="18" /></Button
+                        ><Icon name="x" :size="18" /></Button
                 ></DialogClose>
 
                 <div v-if="successful" class="mt-6 space-y-5">
@@ -106,7 +106,7 @@ function closeAutoFocus(event: Event): void {
                                     :aria-describedby="describedBy"
                                     :aria-invalid="invalid"
                                     class="fb-select-trigger"
-                                    ><SelectValue placeholder="Select a category" /><FilebeamIcon
+                                    ><SelectValue placeholder="Select a category" /><Icon
                                         name="chevron-down"
                                         :size="16"
                                 /></SelectTrigger>

@@ -1,0 +1,85 @@
+{
+    "npm": {
+        "package.json": {
+            "@fontsource-variable/inter": "^5.3.0",
+            "@playwright/test": "^1.63.0",
+            "@vitejs/plugin-vue": "^6.0.8",
+            "@vue/compiler-sfc": "^3.5.42",
+            "iconsax": "0.1.1",
+            "typescript": "^6.0.3",
+            "vite": "^8.2.2",
+            "vite-plus": "^0.3.0",
+            "vue": "^3.5.42",
+            "vue-tsc": "^3.3.11"
+        },
+        "backend/package.json": {
+            "@filebeam/ui": "file:../ui",
+            "@fontsource-variable/inter": "^5.3.0",
+            "@fontsource-variable/jetbrains-mono": "^5.3.0",
+            "@inertiajs/vite": "^3.0.0",
+            "@inertiajs/vue3": "^3.0.0",
+            "@laravel/multiplex": "^0.4.1",
+            "@laravel/vite-plugin-wayfinder": "^0.1.3",
+            "@tailwindcss/vite": "^4.1.11",
+            "@types/node": "^26.4.1",
+            "@vitejs/plugin-vue": "^6.0.0",
+            "concurrently": "^10.0.3",
+            "laravel-vite-plugin": "^3.1",
+            "tailwindcss": "^4.1.1",
+            "vite": "^8.0.0",
+            "vite-plus": "0.3.0",
+            "vue": "^3.5.13",
+            "vue-tsc": "^3.3.11"
+        },
+        "ui/package.json": {
+            "@codemirror/commands": "^6.11.0",
+            "@codemirror/lang-css": "^6.3.1",
+            "@codemirror/lang-html": "^6.4.12",
+            "@codemirror/lang-javascript": "^6.2.5",
+            "@codemirror/lang-json": "^6.0.2",
+            "@codemirror/lang-markdown": "^6.5.2",
+            "@codemirror/lang-php": "^6.0.2",
+            "@codemirror/language": "^6.12.4",
+            "@codemirror/state": "^6.7.4",
+            "@codemirror/view": "^6.43.11",
+            "@inertiajs/vue3": "^3.7.0",
+            "@lezer/highlight": "^1.2.3",
+            "codemirror": "^6.0.2",
+            "reka-ui": "^2.6.0",
+            "vue": "^3.5.0"
+        }
+    },
+    "composer": {
+        "backend/composer.json": {
+            "fakerphp/faker": "^1.24",
+            "filament/filament": "^5.0",
+            "inertiajs/inertia-laravel": "^3.0",
+            "larastan/larastan": "^3.9",
+            "laravel/boost": "^2.2",
+            "laravel/framework": "^13.17",
+            "laravel/octane": "^2.0",
+            "laravel/pail": "^1.2.5",
+            "laravel/pao": "^1.0.6",
+            "laravel/pint": "^1.27",
+            "laravel/sail": "^1.53",
+            "laravel/tinker": "^3.0",
+            "laravel/wayfinder": "^0.1.14",
+            "league/flysystem-aws-s3-v3": "^3.35",
+            "mockery/mockery": "^1.6",
+            "nunomaduro/collision": "^8.9.3",
+            "pestphp/pest": "^5.1",
+            "pestphp/pest-plugin-laravel": "^5.0"
+        }
+    },
+    "npmResolved": {
+        "count": 353,
+        "sha256": "09b34b3b058bcf0e86b9983ef9a355374e8d81a356b6b332a88b3ff6a0e0b6ad"
+    },
+    "composerResolved": {
+        "count": 179,
+        "sha256": "1800dd18e9a5278033a2cd254ffdd33e42ba076ec9668e09c826b48535ca3a24",
+        "exceptions": {
+            "blade-ui-kit/blade-heroicons": "2.7.0"
+        }
+    }
+}

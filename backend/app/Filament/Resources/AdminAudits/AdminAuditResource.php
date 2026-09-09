@@ -25,7 +25,6 @@ use Filament\Resources\Pages\PageRegistration;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
-use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
@@ -44,7 +43,7 @@ class AdminAuditResource extends Resource
 
     protected static string|\UnitEnum|null $navigationGroup = 'Administration';
 
-    protected static string|\BackedEnum|null $navigationIcon = Heroicon::OutlinedClock;
+    protected static string|\BackedEnum|null $navigationIcon = 'filebeam-clock';
 
     protected static ?int $navigationSort = 50;
 

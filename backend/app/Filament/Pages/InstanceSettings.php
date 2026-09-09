@@ -15,7 +15,6 @@ use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
-use Filament\Support\Icons\Heroicon;
 use Throwable;
 use UnitEnum;
 
@@ -26,7 +25,7 @@ class InstanceSettings extends Page
 
     protected static ?string $navigationLabel = 'Instance settings';
 
-    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCog6Tooth;
+    protected static string|BackedEnum|null $navigationIcon = 'filebeam-settings';
 
     protected static string|UnitEnum|null $navigationGroup = 'Administration';
 

@@ -101,6 +101,11 @@ jobs:
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
+      - name: Verify approved icon catalog
+        run: |
+          npm run check:icons
+          npm run test:icons
+
       # The backend build consumes the generated WASM package, so do not parallelize these.
       - name: Build frontend assets
         run: |

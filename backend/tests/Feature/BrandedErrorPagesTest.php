@@ -2,10 +2,26 @@
 
 declare(strict_types=1);
 
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Str;
 
 beforeEach(function () {
-    config()->set('app.debug', false);
+    config()->set([
+        'app.debug' => false,
+        'app.key' => 'base64:'.base64_encode(str_repeat('e', 32)),
+    ]);
+    $directory = storage_path('framework/testing/error-pages-'.Str::uuid());
+    config()->set('installation.state_directory', $directory);
+    File::ensureDirectoryExists($directory);
+    File::put($directory.'/state.json', json_encode([
+        'id' => (string) Str::uuid(),
+        'status' => 'completed',
+    ], JSON_THROW_ON_ERROR));
+});
+
+afterEach(function () {
+    File::deleteDirectory((string) config('installation.state_directory'));
 });
 
 test('renders branded pages for common browser errors', function (int $status, string $title) {
