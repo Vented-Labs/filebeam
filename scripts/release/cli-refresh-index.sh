@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-for variable in R2_ENDPOINT_URL R2_BUCKET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY RELEASE_PUBLIC_KEY RELEASE_SIGNING_KEY; do
+for variable in R2_ENDPOINT_URL R2_BUCKET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY RELEASE_SIGNING_KEY; do
     [[ -n ${!variable:-} ]] || { printf '%s is required.\n' "$variable" >&2; exit 1; }
 done
 command -v aws >/dev/null
 command -v php >/dev/null
 
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
+RELEASE_PUBLIC_KEY=$(php "$root/scripts/release/cli-public-key.php" derive)
+export RELEASE_PUBLIC_KEY
 R2_ENDPOINT_URL=$(php "$root/scripts/release/r2-endpoint.php" "$R2_ENDPOINT_URL" "$R2_BUCKET")
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/beam-refresh.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT

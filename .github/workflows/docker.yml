@@ -7,6 +7,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: docker-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     name: ${{ matrix.variant }} (${{ matrix.platform }})
@@ -19,29 +23,30 @@ jobs:
           - variant: light
             platform: linux/amd64
             arch: amd64
-            runner: ubuntu-latest
+            runner: blacksmith-4vcpu-ubuntu-2404
           - variant: light
             platform: linux/arm64
             arch: arm64
-            runner: ubuntu-24.04-arm
+            runner: blacksmith-4vcpu-ubuntu-2404-arm
           - variant: omnibus
             platform: linux/amd64
             arch: amd64
-            runner: ubuntu-latest
+            runner: blacksmith-4vcpu-ubuntu-2404
           - variant: omnibus
             platform: linux/arm64
             arch: arm64
-            runner: ubuntu-24.04-arm
+            runner: blacksmith-4vcpu-ubuntu-2404-arm
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
         with:
           persist-credentials: false
-      - name: Create ephemeral Buildx builder
-        run: |
-          builder="filebeam-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ matrix.variant }}-${{ matrix.arch }}"
-          docker buildx create --name "$builder" --driver docker-container --use
-          docker buildx inspect --bootstrap
-          printf 'FILEBEAM_BUILDER=%s\n' "$builder" >> "$GITHUB_ENV"
+          dissociate: true
+      - name: Set up cached production builder
+        uses: useblacksmith/setup-docker-builder@19215110ab936351210feebdfa5b440b4493e184 # v2
+        with:
+          # Same workload key in CI and Release; architectures have separate disks.
+          cache-key: docker/production/Dockerfile
+          platforms: ${{ matrix.platform }}
       - name: Validate build context
         run: scripts/docker/check-context.sh
       - name: Build image
@@ -63,6 +68,3 @@ jobs:
           FILEBEAM_IMAGE: filebeam-${{ matrix.variant }}:ci-${{ github.sha }}-${{ matrix.arch }}
         run: |
           scripts/docker/test.sh --variant "${{ matrix.variant }}" --suite full
-      - name: Remove ephemeral Buildx builder
-        if: always()
-        run: docker buildx rm "$FILEBEAM_BUILDER" || true

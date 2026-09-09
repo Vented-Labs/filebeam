@@ -38,17 +38,17 @@ permissions:
 
 concurrency:
   group: beam-${{ github.event_name == 'pull_request' && github.ref || 'release-catalog' }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   validate-ref:
     if: github.event_name != 'pull_request' && github.event_name != 'schedule'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     outputs:
       commit: ${{ steps.verify.outputs.commit }}
       tag: ${{ steps.verify.outputs.tag }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
         with:
           persist-credentials: false
           ref: refs/heads/master
@@ -64,19 +64,39 @@ jobs:
   test:
     needs: validate-ref
     if: always() && (github.event_name == 'pull_request' || github.event_name == 'schedule' || needs.validate-ref.result == 'success')
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 30
+    env:
+      BEAM_DOCKER_BUILD: 'false'
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
         with:
           persist-credentials: false
+          # CLI containers need Git objects without the host's mirror mount.
+          dissociate: true
           ref: ${{ needs.validate-ref.outputs.commit || github.ref }}
+      - name: Set up cached CLI builder
+        uses: useblacksmith/setup-docker-builder@19215110ab936351210feebdfa5b440b4493e184 # v2
+        with:
+          cache-key: docker/cli/Dockerfile
+      - name: Build CLI tooling image once
+        run: docker buildx build --load --pull --tag filebeam-beam-tooling:rust-1.98.0 --file docker/cli/Dockerfile .
+      - name: Locate CLI Cargo cache
+        run: printf 'BEAM_CARGO_CACHE_DIR=%s/beam-cargo\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - name: Cache CLI Cargo state
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ${{ env.BEAM_CARGO_CACHE_DIR }}
+            cli/target
+          key: beam-cargo-${{ runner.os }}-${{ runner.arch }}-rust1.98.0-${{ hashFiles('docker/cli/Dockerfile', 'cli/Cargo.lock') }}-${{ hashFiles('cli/src/**', 'cli/tests/**', 'cli/build.rs', 'cli/Cargo.toml') }}
+          restore-keys: beam-cargo-${{ runner.os }}-${{ runner.arch }}-rust1.98.0-${{ hashFiles('docker/cli/Dockerfile', 'cli/Cargo.lock') }}-
       - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240
         with:
           php-version: '8.5'
           extensions: sodium
           coverage: none
-      - name: Check and test beam in constrained Docker
+      - name: Check and test beam in Docker
         run: |
           chmod +x scripts/cli/*.sh scripts/release/cli-*.php scripts/release/cli-publish.sh
           scripts/cli/check.sh
@@ -91,20 +111,39 @@ jobs:
   package:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     needs: [test, validate-ref]
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     environment: release
     timeout-minutes: 40
     env:
       RELEASE_TAG: ${{ needs.validate-ref.outputs.tag }}
       RELEASE_COMMIT: ${{ needs.validate-ref.outputs.commit }}
-      BEAM_RELEASE_PUBLIC_KEY: ${{ secrets.RELEASE_PUBLIC_KEY }}
+      BEAM_DOCKER_BUILD: 'false'
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
         with:
           persist-credentials: false
+          dissociate: true
           ref: ${{ env.RELEASE_COMMIT }}
           fetch-depth: 0
-      - name: Package Linux artifacts in constrained Docker
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240
+        with:
+          php-version: '8.5'
+          extensions: sodium
+          coverage: none
+      - name: Derive canonical CLI public key
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+          RELEASE_PUBLIC_KEY: ${{ secrets.RELEASE_PUBLIC_KEY }}
+        run: |
+          public_key=$(php scripts/release/cli-public-key.php derive)
+          printf 'BEAM_RELEASE_PUBLIC_KEY=%s\n' "$public_key" >> "$GITHUB_ENV"
+      - name: Set up cached CLI builder
+        uses: useblacksmith/setup-docker-builder@19215110ab936351210feebdfa5b440b4493e184 # v2
+        with:
+          cache-key: docker/cli/Dockerfile
+      - name: Build CLI tooling image once
+        run: docker buildx build --load --pull --tag filebeam-beam-tooling:rust-1.98.0 --file docker/cli/Dockerfile .
+      - name: Package Linux artifacts in Docker
         run: |
           chmod +x scripts/cli/*.sh
           [[ "$RELEASE_TAG" =~ ^beam-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
@@ -123,13 +162,13 @@ jobs:
     needs: [package, validate-ref]
     permissions:
       contents: write
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     environment: release
     env:
       RELEASE_TAG: ${{ needs.validate-ref.outputs.tag }}
       RELEASE_COMMIT: ${{ needs.validate-ref.outputs.commit }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
         with:
           persist-credentials: false
           ref: ${{ env.RELEASE_COMMIT }}
@@ -163,10 +202,10 @@ jobs:
   refresh-catalog:
     if: github.event_name == 'schedule'
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     environment: release
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
         with:
           persist-credentials: false
       - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240

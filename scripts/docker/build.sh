@@ -45,6 +45,9 @@ build_variant() {
     local current=$1 tag
     tag=${FILEBEAM_IMAGE:-filebeam/$current:local}
     local -a args=(buildx build --platform "$platform" --file "$root/docker/production/Dockerfile" --target "$current" --tag "$tag")
+    if [[ ${CI:-false} == true ]]; then
+        args+=(--build-arg "CARGO_BUILD_JOBS=$(nproc)")
+    fi
     [[ -n ${FILEBEAM_VERSION:-} ]] && args+=(--build-arg "VERSION=$FILEBEAM_VERSION")
     [[ -n ${FILEBEAM_COMMIT:-} ]] && args+=(--build-arg "COMMIT=$FILEBEAM_COMMIT")
     [[ -n ${FILEBEAM_BUILD_METADATA:-} ]] && args+=(--build-arg "BUILD_METADATA=$FILEBEAM_BUILD_METADATA")

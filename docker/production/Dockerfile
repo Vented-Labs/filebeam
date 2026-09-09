@@ -37,25 +37,34 @@ RUN rustup target add wasm32-unknown-unknown \
     && cargo install wasm-pack --version 0.15.0 --locked
 WORKDIR /src
 COPY encryption encryption
-RUN wasm-pack build encryption --target web --release --no-opt
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/src/encryption/target \
+    wasm-pack build encryption --target web --release --no-opt
 
 FROM node:24-trixie@sha256:f7d34e58713740f9eef9092c0bd6ff10369d132f7238399a4b270f16d47fa608 AS node
 
-FROM application AS frontend
+FROM php-base AS frontend-dependencies
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
 COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
+WORKDIR /opt/filebeam
 COPY package.json package-lock.json ./
+COPY backend/package.json backend/package.json
+COPY ui/package.json ui/package.json
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci \
+    && npx playwright install --with-deps chromium
+
+FROM frontend-dependencies AS frontend
+COPY --from=application /opt/filebeam /opt/filebeam
 COPY ui ui
 COPY icons icons
 COPY scripts/check-icons.mjs scripts/generate-icons.mjs scripts/
 COPY scripts/og scripts/og
 COPY scripts/prism-gallery scripts/prism-gallery
 COPY vite.config.ts ./
-RUN --mount=type=cache,target=/root/.npm \
-    npm ci \
-    && npx playwright install --with-deps chromium
 COPY --from=wasm /src/encryption/pkg /opt/filebeam/encryption/pkg
 RUN npm run check:icons \
     && npm run build --workspace=backend
@@ -73,17 +82,6 @@ RUN rm -rf /usr/lib/postgresql/18/lib/bitcode /usr/lib/postgresql/18/lib/llvmjit
 
 FROM php-base AS runtime
 ARG FILEBEAM_VARIANT=light
-ARG VERSION=0.0.0-local
-ARG COMMIT=local-source
-ARG BUILD_METADATA=local
-LABEL org.opencontainers.image.title="Filebeam" \
-    org.opencontainers.image.description="End-to-end encrypted file sharing" \
-    org.opencontainers.image.source="https://github.com/Vented-Labs/filebeam" \
-    org.opencontainers.image.licenses="MIT" \
-    org.opencontainers.image.version="${VERSION}" \
-    org.opencontainers.image.revision="${COMMIT}" \
-    io.filebeam.build="${BUILD_METADATA}" \
-    io.filebeam.postgresql.client-source="docker.io/library/postgres:18.6-trixie@sha256:4ef4dbc939d61acea57712655ddb4b4ab27419c913f94cca0cd57cb3ea3c2280"
 ENV FILEBEAM_CONTAINER=true \
     FILEBEAM_VARIANT=${FILEBEAM_VARIANT} \
     LOG_CHANNEL=stderr \
@@ -100,10 +98,6 @@ ENV FILEBEAM_CONTAINER=true \
     XDG_CONFIG_HOME=/data/caddy \
     XDG_DATA_HOME=/data/caddy
 
-COPY --from=application /opt/filebeam /opt/filebeam
-COPY --from=frontend /opt/filebeam/backend/public/build /opt/filebeam/backend/public/build
-COPY icons/NOTICE /opt/filebeam/ICONSAX-NOTICE
-COPY LICENSE SECURITY.md /opt/filebeam/
 COPY docker/production/php.ini /usr/local/etc/php/conf.d/99-filebeam-production.ini
 COPY docker/production/Caddyfile /etc/filebeam/Caddyfile
 COPY docker/production/filebeam-init /usr/local/bin/filebeam-init
@@ -129,14 +123,31 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     && chmod 1777 /tmp \
     && chmod 755 /usr/local/bin/filebeam-init /usr/local/bin/filebeam-supervisor /usr/local/bin/filebeam-healthcheck \
     && (setcap -r /usr/local/bin/frankenphp 2>/dev/null || true) \
-    && rm -rf /opt/filebeam/backend/storage /opt/filebeam/backend/bootstrap/cache \
-    && ln -s /data/app /opt/filebeam/backend/storage \
-    && ln -s /run/filebeam/cache /opt/filebeam/backend/bootstrap/cache \
-    && VERSION="$VERSION" COMMIT="$COMMIT" BUILD_METADATA="$BUILD_METADATA" php -r 'file_put_contents("/opt/filebeam/backend/config/version.php", "<?php\ndeclare(strict_types=1);\nreturn ".var_export(["version" => getenv("VERSION"), "tag" => getenv("VERSION"), "commit" => getenv("COMMIT"), "distribution" => "container", "build" => getenv("BUILD_METADATA"), "update_public_key" => ""], true).";\n");' \
     && build_packages="$(dpkg-query -W -f='${binary:Package}\t${db:Status-Status}\n' 2>/dev/null | awk '$2 == "installed" && $1 !~ /^gcc-[0-9]+-base(:|$)/ && ($1 ~ /^(gcc|g\+\+|cpp|binutils)(-|:|$)/ || $1 ~ /^(autoconf|automake|dpkg-dev|libtool|make|patch|pkg-config|re2c)(:|$)/ || $1 ~ /-dev(:|$)/) { print $1 }')" \
     && if [ -n "$build_packages" ]; then apt-get purge -y $build_packages; fi \
     && rm -rf /usr/include /usr/local/include /usr/src /tmp/pear /var/cache/apt/* \
     && rm -f /usr/lib/*.a /usr/lib/*/*.a /usr/lib/*/*/*.a /usr/local/lib/*.a
+
+COPY --from=application /opt/filebeam /opt/filebeam
+COPY --from=frontend /opt/filebeam/backend/public/build /opt/filebeam/backend/public/build
+COPY icons/NOTICE /opt/filebeam/ICONSAX-NOTICE
+COPY LICENSE SECURITY.md /opt/filebeam/
+RUN rm -rf /opt/filebeam/backend/storage /opt/filebeam/backend/bootstrap/cache \
+    && ln -s /data/app /opt/filebeam/backend/storage \
+    && ln -s /run/filebeam/cache /opt/filebeam/backend/bootstrap/cache
+
+ARG VERSION=0.0.0-local
+ARG COMMIT=local-source
+ARG BUILD_METADATA=local
+LABEL org.opencontainers.image.title="Filebeam" \
+    org.opencontainers.image.description="End-to-end encrypted file sharing" \
+    org.opencontainers.image.source="https://github.com/Vented-Labs/filebeam" \
+    org.opencontainers.image.licenses="MIT" \
+    org.opencontainers.image.version="${VERSION}" \
+    org.opencontainers.image.revision="${COMMIT}" \
+    io.filebeam.build="${BUILD_METADATA}" \
+    io.filebeam.postgresql.client-source="docker.io/library/postgres:18.6-trixie@sha256:4ef4dbc939d61acea57712655ddb4b4ab27419c913f94cca0cd57cb3ea3c2280"
+RUN VERSION="$VERSION" COMMIT="$COMMIT" BUILD_METADATA="$BUILD_METADATA" php -r 'file_put_contents("/opt/filebeam/backend/config/version.php", "<?php\ndeclare(strict_types=1);\nreturn ".var_export(["version" => getenv("VERSION"), "tag" => getenv("VERSION"), "commit" => getenv("COMMIT"), "distribution" => "container", "build" => getenv("BUILD_METADATA"), "update_public_key" => ""], true).";\n");'
 
 WORKDIR /opt/filebeam/backend
 EXPOSE 8080 8443

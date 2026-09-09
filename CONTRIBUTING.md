@@ -23,6 +23,24 @@ Sail captures outgoing development email in Mailpit. Open [http://localhost:8025
 
 Use `backend/composer.json` for PHP commands and root `package.json` for JavaScript commands. Run the narrowest relevant checks before proposing a change.
 
+## Continuous Integration
+
+All Actions jobs use Blacksmith's Ubuntu 24.04 runners: `blacksmith-4vcpu-ubuntu-2404` for AMD64, `blacksmith-4vcpu-ubuntu-2404-arm` for ARM64 Docker coverage, and `blacksmith-8vcpu-ubuntu-2404` for the Beam CLI test job. CI containers have no Docker CPU or memory caps, and Cargo uses the available CPUs. Local CLI scripts retain their default limits.
+
+Tests run when a PR is opened, updated, or reopened, and on pushes to `master`. Release workflows call the same suite with the validated release commit; tag pushes do not start a second standalone Tests run. New PR updates cancel superseded Tests, Docker, and Beam CLI runs.
+
+Frontend build/checks, Rust, and PHP static checks start independently. The compiled frontend is shared with isolated SQLite, MySQL, Sail PostgreSQL/Redis, distribution, and browser jobs. Main browser tests run in two Sail shards with two workers each; small-chunk tests use their own SQLite application. The final `Test` check requires every job and matrix entry to succeed.
+
+### Blacksmith caching
+
+- Checkouts use `useblacksmith/checkout`, retaining the requested source ref and fetch settings. Container-mounted source checkouts use `dissociate: true` so Git objects remain accessible inside Docker.
+- Production, Sail, and CLI tooling builds use `useblacksmith/setup-docker-builder` with a separate cache key per Dockerfile. Production variants share their common layers, and CI/release builds share the same workload key. Blacksmith handles architecture separation and builder cleanup; avoid replacing or pruning the managed builder before its post-job cache save.
+- Existing `docker buildx` commands use the managed builder directly. Sail explicitly selects it via `docker compose build --builder`. Release images push directly from BuildKit; locally tested images are loaded into Docker.
+- CLI tooling is built once per job. `BEAM_CARGO_CACHE_DIR` shares Cargo downloads between disposable containers, and the CLI test job caches downloads and compilation output between runs.
+- Docker container-image caching is automatic on Blacksmith as it rolls out to organizations; it needs no extra action or Docker data-directory mounts. This is separate from the persistent build-layer cache.
+
+Run `actionlint` from the repository root when editing workflows. `.github/actionlint.yaml` declares the Blacksmith runner labels. Shared PHP, Node, Rust, and MinIO setup lives in `.github/actions/`. Third-party actions are pinned to full commit SHAs; add new revisions to the repository's Actions allowlist before running CI.
+
 ## Contribution Rules
 
 - Preserve browser encryption: plaintext files, notes, titles, filenames, and manifest metadata must not become API metadata or server logs.
@@ -43,3 +61,5 @@ Maintainers create official packages from a Git commit:
 ```sh
 RELEASE_PUBLIC_KEY=... scripts/release/package.sh v0.1.0 dist/release
 ```
+
+CLI release jobs derive their Ed25519 public key from `RELEASE_SIGNING_KEY`. If `RELEASE_PUBLIC_KEY` is also configured, it must decode to the same key. Whitespace and omitted Base64 padding are accepted at the input boundary; Docker, packaged installers, and CLI catalog publishing use canonical padded Base64 of the 32-byte public key. Packaging records that value in `dist/beam/public-key`, and publishing rejects a package or installer built with a different key before uploading anything. The signing secret is scoped to host-side derivation/signing steps and is never passed into the CLI build container.

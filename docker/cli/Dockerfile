@@ -11,8 +11,7 @@ RUN apt-get update \
     && rustup target add x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu \
     && rm -rf /var/lib/apt/lists/*
 
-ENV CARGO_BUILD_JOBS=1 \
-    CARGO_NET_GIT_FETCH_WITH_CLI=true \
+ENV CARGO_NET_GIT_FETCH_WITH_CLI=true \
     CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
 
 WORKDIR /workspace

@@ -3,13 +3,23 @@ set -euo pipefail
 
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 image=${BEAM_DOCKER_IMAGE:-filebeam-beam-tooling:rust-1.98.0}
-memory=${BEAM_DOCKER_MEMORY:-2g}
-memory_swap=${BEAM_DOCKER_MEMORY_SWAP:-2g}
-cpus=${BEAM_DOCKER_CPUS:-2}
-jobs=${CARGO_BUILD_JOBS:-1}
+docker_limits=()
 docker_env=()
 docker_volumes=()
+if [[ ${CI:-false} != true ]]; then
+    docker_limits+=(--memory "${BEAM_DOCKER_MEMORY:-2g}" --memory-swap "${BEAM_DOCKER_MEMORY_SWAP:-2g}" --cpus "${BEAM_DOCKER_CPUS:-2}")
+    docker_env+=(--env CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}")
+elif [[ -n ${CARGO_BUILD_JOBS:-} ]]; then
+    docker_env+=(--env CARGO_BUILD_JOBS)
+fi
+if [[ -n ${BEAM_CARGO_CACHE_DIR:-} ]]; then
+    mkdir -p "$BEAM_CARGO_CACHE_DIR"
+    cargo_cache=$(CDPATH='' cd -- "$BEAM_CARGO_CACHE_DIR" && pwd)
+    docker_volumes+=(--volume "$cargo_cache:/tmp/cargo")
+fi
 if [[ -n ${BEAM_RELEASE_PUBLIC_KEY:-} ]]; then
+    BEAM_RELEASE_PUBLIC_KEY=$(php "$root/scripts/release/cli-public-key.php" public)
+    export BEAM_RELEASE_PUBLIC_KEY
     docker_env+=(--env BEAM_RELEASE_PUBLIC_KEY)
 fi
 if [[ -n ${BEAM_DOCKER_OUTPUT_DIR:-} ]]; then
@@ -25,11 +35,8 @@ if [[ ${BEAM_DOCKER_BUILD:-true} == true ]]; then
 fi
 
 exec docker run --rm --init \
-    --memory "$memory" \
-    --memory-swap "$memory_swap" \
-    --cpus "$cpus" \
+    "${docker_limits[@]}" \
     --user "$(id -u):$(id -g)" \
-    --env CARGO_BUILD_JOBS="$jobs" \
     --env CARGO_HOME=/tmp/cargo \
     --env CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
     "${docker_env[@]}" \
