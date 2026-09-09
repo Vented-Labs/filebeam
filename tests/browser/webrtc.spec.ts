@@ -278,27 +278,106 @@ test.describe('WebRTC live transfers', () => {
             .toBe(404);
     });
 
-    test('cancelling a live sender revokes the link and restart creates a new stored HTTP transfer', async ({
+    for (const kind of ['files', 'note'] as const) {
+        test(`confirms ${kind} restart in a branded modal before creating a new stored HTTP transfer`, async ({
+            page,
+            request,
+        }) => {
+            const nativeDialogs: string[] = [];
+            page.on('dialog', async (dialog) => {
+                nativeDialogs.push(dialog.message());
+                await dialog.dismiss();
+            });
+            const live = await createLiveTransfer(
+                page,
+                [{ name: 'restart.bin', buffer: Buffer.alloc(32_000, 7) }],
+                kind === 'note' ? { note: 'A note to restart over HTTP.' } : {},
+            );
+            await page.getByRole('button', { name: 'Restart as stored HTTP' }).click();
+            const modal = page.getByRole('dialog', { name: 'Restart as stored HTTP?' });
+            await expect(modal).toBeVisible();
+            await expect(modal).toHaveClass(/fb-dialog__content/);
+            await expect(modal).toContainText('This creates a new link and applies HTTP limits.');
+            await expect(modal).toContainText('the current live share will end');
+            expect(nativeDialogs).toEqual([]);
+            expect(transfers).toHaveLength(1);
+            expect((await request.get(`/api/v1/transfers/${live.id}`)).status()).toBe(200);
+
+            await modal.getByRole('button', { name: 'Restart with HTTP' }).click();
+            await expect(modal).toBeHidden();
+            await expect(
+                page.getByRole('heading', { name: 'Your encrypted link is ready' }),
+            ).toBeVisible({ timeout: 90_000 });
+            await expect.poll(() => transfers.length).toBe(2);
+            expect(transfers[1]!.id).not.toBe(live.id);
+            expect((await request.get(`/api/v1/transfers/${live.id}`)).status()).toBe(404);
+        });
+    }
+
+    test('dismissing restart confirmation preserves the live share and restores keyboard focus', async ({
         page,
         request,
     }) => {
         const live = await createLiveTransfer(page, [
-            { name: 'restart.bin', buffer: Buffer.alloc(32_000, 7) },
+            { name: 'keep-live.bin', buffer: Buffer.alloc(1024, 3) },
         ]);
-        page.once('dialog', (dialog) => dialog.accept());
-        await page.getByRole('button', { name: 'Restart as stored HTTP' }).click();
-        await expect(
-            page.getByRole('heading', { name: 'Your encrypted link is ready' }),
-        ).toBeVisible({
-            timeout: 90_000,
-        });
-        await expect.poll(() => transfers.length).toBe(2);
-        expect(transfers[1]!.id).not.toBe(live.id);
-        expect((await request.get(`/api/v1/transfers/${live.id}`)).status()).toBe(404);
+        const trigger = page.getByRole('button', { name: 'Restart as stored HTTP' });
+        const modal = page.getByRole('dialog', { name: 'Restart as stored HTTP?' });
+        for (const dismissal of ['cancel', 'escape', 'close', 'outside']) {
+            await trigger.click();
+            await expect(modal).toBeVisible();
+            await expect(modal.getByRole('button', { name: 'Cancel', exact: true })).toBeFocused();
+            await page.keyboard.press('Shift+Tab');
+            await expect(
+                modal.getByRole('button', { name: 'Close restart confirmation' }),
+            ).toBeFocused();
+            if (dismissal === 'cancel')
+                await modal.getByRole('button', { name: 'Cancel', exact: true }).click();
+            else if (dismissal === 'escape') await page.keyboard.press('Escape');
+            else if (dismissal === 'close')
+                await modal.getByRole('button', { name: 'Close restart confirmation' }).click();
+            else
+                await page
+                    .locator('.fb-dialog__overlay[data-state="open"]')
+                    .click({ position: { x: 5, y: 5 } });
+            await expect(modal).toBeHidden();
+            await expect(trigger).toBeFocused();
+            await expect(page.locator('#share-link')).toHaveValue(live.link);
+            expect(transfers).toHaveLength(1);
+            expect((await request.get(`/api/v1/transfers/${live.id}`)).status()).toBe(200);
+        }
+    });
+
+    test('restart confirmation fits mobile and respects reduced motion', async ({ page }) => {
+        await page.setViewportSize({ width: 375, height: 812 });
+        await createLiveTransfer(page, [
+            { name: 'mobile-restart.txt', buffer: Buffer.from('mobile') },
+        ]);
+        const trigger = page.getByRole('button', { name: 'Restart as stored HTTP' });
+        const modal = page.getByRole('dialog', { name: 'Restart as stored HTTP?' });
+        await trigger.click();
+        await expect(modal).toBeVisible();
+        await expect(modal).toHaveCSS('animation-name', 'fb-dialog-in');
+        const bounds = await modal.boundingBox();
+        expect(bounds!.x).toBeGreaterThanOrEqual(0);
+        expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(375);
+        await page.keyboard.press('Escape');
+        await expect(modal).toBeHidden();
+        await page.emulateMedia({ reducedMotion: 'reduce' });
+        await trigger.click();
+        await expect(modal).toBeVisible();
+        expect(
+            await modal.evaluate((element) =>
+                parseFloat(getComputedStyle(element).animationDuration),
+            ),
+        ).toBeLessThanOrEqual(0.001);
+        await modal.getByRole('button', { name: 'Cancel', exact: true }).click();
+        await expect(modal).toBeHidden();
     });
 
     test('disables live selection without RTCPeerConnection and rejects HTTP restart over its smaller limit', async ({
         browser,
+        request,
     }) => {
         const unsupported = await newPage(browser, () => {
             Object.defineProperty(window, 'RTCPeerConnection', {
@@ -313,11 +392,14 @@ test.describe('WebRTC live transfers', () => {
         const live = await createLiveTransfer(sender, [
             { name: 'over-http-limit.bin', buffer: Buffer.alloc(2_200_000, 1) },
         ]);
-        sender.once('dialog', (dialog) => dialog.accept());
         await sender.getByRole('button', { name: 'Restart as stored HTTP' }).click();
         await expect(sender.getByText(/HTTP limits/i)).toBeVisible();
+        await expect(sender.getByRole('dialog', { name: 'Restart as stored HTTP?' })).toHaveCount(
+            0,
+        );
         expect(transfers).toHaveLength(1);
         expect(live.id).toBe(transfers[0]!.id);
+        expect((await request.get(`/api/v1/transfers/${live.id}`)).status()).toBe(200);
     });
 
     test('serves simultaneous recipients independently and keeps the live link readable', async ({

@@ -1,5 +1,16 @@
 <script setup lang="ts">
-import { TabsList, TabsRoot, TabsTrigger } from 'reka-ui';
+import {
+    DialogClose,
+    DialogContent,
+    DialogDescription,
+    DialogOverlay,
+    DialogPortal,
+    DialogRoot,
+    DialogTitle,
+    TabsList,
+    TabsRoot,
+    TabsTrigger,
+} from 'reka-ui';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { FilebeamConfig, PublicRecipient, TransferDriver } from '../types';
 import { useEncryptedUpload } from '../composables/useEncryptedUpload';
@@ -47,6 +58,8 @@ const driver = ref<TransferDriver>(
 );
 const webrtcConsent = ref(false);
 const webrtcConsentDialog = ref<InstanceType<typeof WebRtcConsent>>();
+const restartHttpOpen = ref(false);
+let restartHttpTrigger: HTMLElement | undefined;
 const webRtcSupported = typeof RTCPeerConnection !== 'undefined';
 const dragDepth = ref(0);
 const deleting = ref(false);
@@ -235,8 +248,12 @@ function resetActive(): void {
 function cancelUpload(): void {
     activeUpload.value.cancel();
 }
-async function restartHttp(): Promise<void> {
-    if (!enabledDrivers.value.includes('http')) return;
+async function restartHttp(confirmed = false): Promise<void> {
+    if (confirmed && !restartHttpOpen.value) return;
+    if (activeShare.value?.driver !== 'webrtc' || !enabledDrivers.value.includes('http')) {
+        restartHttpOpen.value = false;
+        return;
+    }
     const httpLimits = transferLimits(props.config, 'http');
     const httpMaximumBytes =
         mode.value === 'files' ? httpLimits.maximum_transfer_bytes : httpLimits.maximum_note_bytes;
@@ -247,20 +264,26 @@ async function restartHttp(): Promise<void> {
         httpLimits.maximum_file_count !== null &&
         filesUpload.entries.value.length > httpLimits.maximum_file_count;
     if (exceedsBytes || exceedsFiles) {
+        restartHttpOpen.value = false;
         activeUpload.value.error.value =
             'This live transfer exceeds the stored HTTP limits and cannot be restarted as HTTP.';
         return;
     }
-    if (
-        !window.confirm(
-            'Restart as a stored HTTP transfer? This creates a new link and applies HTTP limits.',
-        )
-    )
+    if (!confirmed) {
+        restartHttpTrigger =
+            document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
+        restartHttpOpen.value = true;
         return;
+    }
+    restartHttpOpen.value = false;
     activeUpload.value.cancel();
     driver.value = 'http';
     webrtcConsent.value = false;
     await submit();
+}
+function restoreRestartFocus(event: Event): void {
+    event.preventDefault();
+    restartHttpTrigger?.focus();
 }
 function preventFileNavigation(event: DragEvent): void {
     if (canCreateTransfers.value && hasDraggedFiles(event)) event.preventDefault();
@@ -542,6 +565,25 @@ onBeforeUnmount(() => {
             description="The sharing link is no longer available."
         />
         <WebRtcConsent ref="webrtcConsentDialog" v-model="webrtcConsent" />
+        <DialogRoot v-model:open="restartHttpOpen">
+            <DialogPortal>
+                <DialogOverlay class="fb-dialog__overlay" />
+                <DialogContent class="fb-dialog__content" @close-auto-focus="restoreRestartFocus">
+                    <DialogTitle class="fb-dialog__title">Restart as stored HTTP?</DialogTitle>
+                    <DialogDescription class="fb-dialog__description">
+                        This creates a new link and applies HTTP limits. Your encrypted content will
+                        be stored on the server, and the current live share will end.
+                    </DialogDescription>
+                    <div class="mt-6 flex flex-wrap justify-end gap-3">
+                        <DialogClose as-child><Button variant="ghost">Cancel</Button></DialogClose>
+                        <Button @click="restartHttp(true)">Restart with HTTP</Button>
+                    </div>
+                    <DialogClose class="fb-dialog__close" aria-label="Close restart confirmation">
+                        <Icon name="x" :size="18" />
+                    </DialogClose>
+                </DialogContent>
+            </DialogPortal>
+        </DialogRoot>
     </AppShell>
 </template>
 
