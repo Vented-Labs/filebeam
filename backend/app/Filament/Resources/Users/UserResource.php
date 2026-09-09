@@ -28,7 +28,6 @@ use Filament\Resources\Resource;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
-use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\Filter;
@@ -42,7 +41,7 @@ class UserResource extends Resource
 
     protected static ?string $recordTitleAttribute = 'email';
 
-    protected static string|\BackedEnum|null $navigationIcon = Heroicon::OutlinedUsers;
+    protected static string|\BackedEnum|null $navigationIcon = 'filebeam-users';
 
     protected static string|\UnitEnum|null $navigationGroup = 'Administration';
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import FilebeamIcon from '../primitives/FilebeamIcon.vue';
+import Icon from '../primitives/Icon.vue';
 import Tooltip from '../primitives/Tooltip.vue';
 
 const props = defineProps<{ expiresAt: string }>();
@@ -45,7 +45,7 @@ onBeforeUnmount(() => {
 <template>
     <Tooltip :content="absoluteExpiry" toggle-on-click>
         <button type="button" aria-label="Expiry details" class="fb-expiry-trigger">
-            <FilebeamIcon name="clock" :size="17" />
+            <Icon name="clock" :size="17" />
             <span>{{ relativeExpiry }}</span>
         </button>
     </Tooltip>

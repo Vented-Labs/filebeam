@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import Button from '../primitives/Button.vue';
-import FilebeamIcon from '../primitives/FilebeamIcon.vue';
+import Icon from '../primitives/Icon.vue';
 import { formatBytes } from '../../lib/format';
 const props = defineProps<{
     disabled: boolean;
@@ -44,26 +44,11 @@ function onDragOver(event: DragEvent): void {
             @change="emit('files', ($event.target as HTMLInputElement).files!)"
         />
         <div class="max-w-xl">
-            <svg
-                class="mx-auto size-24 text-[var(--fb-brand-bright)]"
-                viewBox="0 0 96 96"
-                fill="none"
-                aria-hidden="true"
-            >
-                <path
-                    d="M29 72H21a13 13 0 0 1-1-26 28 28 0 0 1 53-8 17 17 0 1 1 2 34H67"
-                    stroke="currentColor"
-                    stroke-width="4"
-                    stroke-linecap="round"
-                />
-                <path
-                    d="M48 69V40m0 0-11 11m11-11 11 11"
-                    stroke="currentColor"
-                    stroke-width="4"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                />
-            </svg>
+            <Icon
+                name="upload"
+                :size="96"
+                class="pond-illustration mx-auto text-[var(--fb-brand-bright)]"
+            />
             <h1
                 class="mt-7 text-4xl font-semibold tracking-tight text-[var(--fb-text)] sm:text-5xl"
             >
@@ -77,7 +62,7 @@ function onDragOver(event: DragEvent): void {
                 variant="primary"
                 :disabled="disabled"
                 @click="emit('choose')"
-                ><FilebeamIcon name="folder" :size="22" />Choose files</Button
+                ><Icon name="folder" :size="22" />Choose files</Button
             >
             <p class="mt-5 text-sm text-[var(--fb-text-muted)]" aria-live="polite">
                 {{ dragging ? 'Release to add your files' : 'Or drag and drop anywhere' }}
@@ -115,7 +100,7 @@ function onDragOver(event: DragEvent): void {
     font-size: 1rem;
     border-radius: 0.9rem;
 }
-.file-pond > div > svg {
+.file-pond :deep(.pond-illustration) {
     width: 8rem;
     height: 8rem;
 }
@@ -132,17 +117,17 @@ function onDragOver(event: DragEvent): void {
         box-shadow: inset 0 0 56px color-mix(in srgb, var(--fb-brand) 20%, transparent);
     }
 }
-.file-pond svg {
+.file-pond :deep(.fb-icon) {
     transition: transform 240ms ease;
 }
-.file-pond--dragging svg {
+.file-pond--dragging :deep(.fb-icon) {
     transform: translateY(-2px);
 }
 @media (prefers-reduced-motion: reduce) {
     .file-pond--dragging {
         animation: none;
     }
-    .file-pond svg {
+    .file-pond :deep(.fb-icon) {
         transition: none;
         transform: none;
     }
@@ -151,7 +136,7 @@ function onDragOver(event: DragEvent): void {
     .file-pond {
         min-height: 29rem;
     }
-    .file-pond > div > svg {
+    .file-pond :deep(.pond-illustration) {
         width: 6rem;
         height: 6rem;
     }
@@ -161,7 +146,7 @@ function onDragOver(event: DragEvent): void {
         min-height: 0;
         padding-block: 1.5rem;
     }
-    .file-pond--compact > div > svg {
+    .file-pond--compact :deep(.pond-illustration) {
         width: 3rem;
         height: 3rem;
     }

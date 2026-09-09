@@ -15,7 +15,7 @@ import {
 } from 'reka-ui';
 import BrandLogo from '../brand/BrandLogo.vue';
 import AppLink from '../primitives/AppLink.vue';
-import FilebeamIcon from '../primitives/FilebeamIcon.vue';
+import Icon from '../primitives/Icon.vue';
 import { computed, nextTick, ref } from 'vue';
 import { useBranding } from '../../lib/branding';
 
@@ -115,8 +115,7 @@ function goHome(event: MouseEvent): void {
                     :href="githubUrl"
                     target="_blank"
                     rel="noopener noreferrer"
-                    ><FilebeamIcon name="github" :size="17" /><span>GitHub</span
-                    ><FilebeamIcon name="arrow-up-right" :size="14"
+                    ><span>GitHub</span><Icon name="arrow-up-right" :size="14"
                 /></a>
             </nav>
             <div class="fb-header__actions">
@@ -125,9 +124,7 @@ function goHome(event: MouseEvent): void {
                     href="/account/inbox"
                     class="fb-button fb-button--ghost"
                     :aria-label="`${user.unread_inbox_notifications} new inbox notifications`"
-                    ><FilebeamIcon name="folder" :size="18" />{{
-                        user.unread_inbox_notifications
-                    }}</AppLink
+                    ><Icon name="folder" :size="18" />{{ user.unread_inbox_notifications }}</AppLink
                 >
                 <AppLink
                     v-if="user"
@@ -152,18 +149,7 @@ function goHome(event: MouseEvent): void {
                         class="fb-button fb-button--ghost fb-button--icon fb-mobile-nav"
                         aria-label="Open navigation"
                     >
-                        <svg
-                            width="20"
-                            height="20"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="1.8"
-                            stroke-linecap="round"
-                            aria-hidden="true"
-                        >
-                            <path d="M4 7h16M4 12h16M4 17h16" />
-                        </svg>
+                        <Icon name="menu" :size="20" />
                     </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuPortal>
@@ -197,7 +183,7 @@ function goHome(event: MouseEvent): void {
                                 target="_blank"
                                 rel="noopener noreferrer"
                             >
-                                <FilebeamIcon name="github" :size="17" /><span>GitHub</span>
+                                <span>GitHub</span>
                             </a>
                         </DropdownMenuItem>
                     </DropdownMenuContent>
@@ -219,7 +205,7 @@ function goHome(event: MouseEvent): void {
                         activeInformation.description
                     }}</DialogDescription>
                     <DialogClose class="fb-dialog__close" aria-label="Close dialog"
-                        ><FilebeamIcon name="x" :size="18"
+                        ><Icon name="x" :size="18"
                     /></DialogClose>
                 </DialogContent>
             </DialogPortal>

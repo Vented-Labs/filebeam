@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head } from '@inertiajs/vue3';
-import { BrandLogo } from '@filebeam/ui';
+import { BrandLogo, Icon } from '@filebeam/ui';
 import { computed } from 'vue';
 
 const props = defineProps<{ status: number }>();
@@ -67,14 +67,11 @@ const error = computed(() => {
                     class="relative mx-auto mb-8 grid size-28 place-items-center overflow-hidden rounded-full border border-[var(--fb-border)] bg-[var(--fb-selected-surface)]"
                     aria-hidden="true"
                 >
-                    <svg
-                        class="absolute inset-0 size-full text-[var(--fb-accent-text)]"
-                        viewBox="0 0 112 112"
-                        fill="none"
-                    >
-                        <path d="M8 85 104 27" stroke="currentColor" opacity=".9" />
-                        <path d="m8 27 96 58" stroke="currentColor" opacity=".4" />
-                    </svg>
+                    <Icon
+                        name="alert"
+                        :size="112"
+                        class="absolute inset-0 text-[var(--fb-accent-text)]"
+                    />
                     <span
                         class="fb-code relative z-10 rounded-lg border border-[var(--fb-control-border)] bg-[var(--fb-surface)] px-2 py-1 text-sm font-semibold tracking-widest"
                         >{{ status }}</span
@@ -90,18 +87,7 @@ const error = computed(() => {
                 </p>
                 <a href="/" class="fb-button fb-button--secondary mt-8 gap-2">
                     Return home
-                    <svg
-                        class="size-4"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="1.8"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        aria-hidden="true"
-                    >
-                        <path d="M5 12h14M13 6l6 6-6 6" />
-                    </svg>
+                    <Icon name="arrow-right" :size="16" />
                 </a>
             </section>
         </main>

@@ -1,0 +1,3 @@
+<?php
+
+Heroicon::OutlinedUsers;

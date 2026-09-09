@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import Button from '../primitives/Button.vue';
-import FilebeamIcon from '../primitives/FilebeamIcon.vue';
+import Icon from '../primitives/Icon.vue';
 import SmoothProgress from '../primitives/SmoothProgress.vue';
 
 const props = defineProps<{
@@ -84,8 +84,8 @@ function uploaderLabel(): string {
                             ><span
                                 class="grid size-[17px] shrink-0 place-items-center"
                                 aria-hidden="true"
-                                ><FilebeamIcon v-if="showLoader()" name="loader" :size="17" />
-                                <FilebeamIcon
+                                ><Icon v-if="showLoader()" name="loader" :size="17" />
+                                <Icon
                                     v-else-if="phase === 'completed'"
                                     name="check"
                                     :size="17"

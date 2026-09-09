@@ -12,7 +12,7 @@ import FilePond from './upload/FilePond.vue';
 import FileQueue from './upload/FileQueue.vue';
 import TransferOptions from './upload/TransferOptions.vue';
 import ShareReady from './sharing/ShareReady.vue';
-import FilebeamIcon from './primitives/FilebeamIcon.vue';
+import Icon from './primitives/Icon.vue';
 import AppLink from './primitives/AppLink.vue';
 import Toast from './primitives/Toast.vue';
 import Button from './primitives/Button.vue';
@@ -266,13 +266,13 @@ onBeforeUnmount(() => {
                             value="files"
                             :disabled="isBusy"
                             class="flex items-center gap-2 rounded-xl px-8 py-3 font-medium text-[var(--fb-text-muted)] transition data-[state=active]:bg-[var(--fb-action)] data-[state=active]:text-[var(--fb-on-action)]"
-                            ><FilebeamIcon name="folder" :size="19" />Files</TabsTrigger
+                            ><Icon name="folder" :size="19" />Files</TabsTrigger
                         >
                         <TabsTrigger
                             value="note"
                             :disabled="isBusy"
                             class="flex items-center gap-2 rounded-xl px-8 py-3 font-medium text-[var(--fb-text-muted)] transition data-[state=active]:bg-[var(--fb-action)] data-[state=active]:text-[var(--fb-on-action)]"
-                            ><FilebeamIcon name="note" :size="19" />Notes</TabsTrigger
+                            ><Icon name="note" :size="19" />Notes</TabsTrigger
                         >
                     </TabsList>
                 </TabsRoot>
@@ -306,7 +306,7 @@ onBeforeUnmount(() => {
                                 v-else-if="activeStatus === 'complete' && recipient"
                                 class="mx-auto max-w-xl rounded-3xl border border-[var(--fb-border)] bg-[var(--fb-surface)] p-8 text-center sm:p-12"
                             >
-                                <FilebeamIcon
+                                <Icon
                                     name="check"
                                     :size="36"
                                     class="mx-auto text-[var(--fb-success)]"

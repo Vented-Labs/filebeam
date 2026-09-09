@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Head } from '@inertiajs/vue3';
+import { Icon } from '@filebeam/ui';
 import InstallationField from '@/components/InstallationField.vue';
 import {
     bootstrap as bootstrapAction,
@@ -865,19 +866,11 @@ watch(
                             >
                                 <span class="installer-step__marker" aria-hidden="true">
                                     <span v-if="stepHasErrors(index + 1)">!</span>
-                                    <svg
+                                    <Icon
                                         v-else-if="completedSteps.includes(index + 1)"
-                                        width="16"
-                                        height="16"
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        stroke-width="2"
-                                        stroke-linecap="round"
-                                        stroke-linejoin="round"
-                                    >
-                                        <path d="m5 12 4 4L19 6" />
-                                    </svg>
+                                        name="check"
+                                        :size="16"
+                                    />
                                     <span v-else>{{ index + 1 }}</span>
                                 </span>
                                 <span class="installer-step__label">{{ name }}</span>

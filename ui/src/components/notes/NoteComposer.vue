@@ -13,7 +13,7 @@ import {
 import { computed, ref } from 'vue';
 import { noteFilename, noteLanguages } from '../../lib/note-languages';
 import CodeEditor from './CodeEditor.vue';
-import FilebeamIcon from '../primitives/FilebeamIcon.vue';
+import Icon from '../primitives/Icon.vue';
 import Switch from '../primitives/Switch.vue';
 
 const props = defineProps<{
@@ -67,10 +67,10 @@ function formatBytes(value: number): string {
                     <SelectTrigger
                         aria-label="Note language"
                         class="fb-select-trigger fb-select-trigger--compact note-language-trigger"
-                        ><FilebeamIcon
+                        ><Icon
                             name="file"
                             :size="15"
-                            class="text-[var(--fb-text-muted)]" /><SelectValue /><FilebeamIcon
+                            class="text-[var(--fb-text-muted)]" /><SelectValue /><Icon
                             name="chevron-down"
                             :size="15"
                             class="ml-auto"
@@ -88,7 +88,7 @@ function formatBytes(value: number): string {
                                     class="fb-select-item"
                                     ><SelectItemText>{{ item.label }}</SelectItemText
                                     ><SelectItemIndicator
-                                        ><FilebeamIcon
+                                        ><Icon
                                             name="check"
                                             :size="
                                                 15

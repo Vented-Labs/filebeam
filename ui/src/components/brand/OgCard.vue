@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import Icon from '../primitives/Icon.vue';
 defineProps<{ variant: 'home' | 'receive' | 'transfer' }>();
 
 const copy = {
@@ -22,10 +23,7 @@ const copy = {
         <img class="og-mark" src="/brand/filebeam-mark.svg" alt="" />
         <footer class="og-footer">
             <span class="og-lock" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-                    <rect x="5" y="10" width="14" height="11" rx="3" />
-                    <path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3" />
-                </svg>
+                <Icon name="lock" :size="22" />
             </span>
             <span>End-to-end encrypted.</span>
         </footer>
@@ -126,7 +124,7 @@ h1 span + span {
     display: flex;
     color: var(--fb-accent-text);
 }
-.og-lock svg {
+.og-lock :deep(.fb-icon) {
     width: 22px;
     height: 22px;
 }

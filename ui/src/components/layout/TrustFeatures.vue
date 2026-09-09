@@ -1,7 +1,7 @@
 <script lang="ts" setup>
-import FilebeamIcon, { type FilebeamIconName } from '../primitives/FilebeamIcon.vue';
+import Icon, { type IconName } from '../primitives/Icon.vue';
 
-const features: Array<{ icon: FilebeamIconName; title: string; description: string }> = [
+const features: Array<{ icon: IconName; title: string; description: string }> = [
     {
         icon: 'lock',
         title: 'End-to-end encrypted',
@@ -24,7 +24,7 @@ const features: Array<{ icon: FilebeamIconName; title: string; description: stri
 <template>
     <section aria-label="Sharing features" class="fb-trust-features">
         <article v-for="feature in features" :key="feature.title" class="fb-trust-feature">
-            <FilebeamIcon :name="feature.icon" :size="30" />
+            <Icon :name="feature.icon" :size="30" />
             <div>
                 <h2>{{ feature.title }}</h2>
                 <p>{{ feature.description }}</p>

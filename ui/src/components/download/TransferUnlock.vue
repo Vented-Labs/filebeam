@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import AnimatedHeight from '../layout/AnimatedHeight.vue';
 import Button from '../primitives/Button.vue';
-import FilebeamIcon from '../primitives/FilebeamIcon.vue';
+import Icon from '../primitives/Icon.vue';
 import FormField from '../primitives/FormField.vue';
 import Input from '../primitives/Input.vue';
 
@@ -78,7 +78,7 @@ onBeforeUnmount(() => {
         <div
             class="mx-auto grid size-12 place-items-center rounded-2xl bg-[var(--fb-selected-surface)] text-[var(--fb-accent-text)]"
         >
-            <FilebeamIcon name="lock" />
+            <Icon name="lock" />
         </div>
         <h1 class="mt-5 text-3xl font-semibold">
             {{ step === 'password' ? 'Enter the password' : 'Unlock this transfer' }}
@@ -117,7 +117,7 @@ onBeforeUnmount(() => {
                         </template>
                     </FormField>
                     <Button class="w-full" type="submit" :disabled="unlocking">
-                        <FilebeamIcon v-if="unlocking" name="loader" :size="17" />
+                        <Icon v-if="unlocking" name="loader" :size="17" />
                         {{ unlocking ? 'Unlocking' : passwordRequired ? 'Continue' : 'Unlock' }}
                     </Button>
                 </form>
@@ -147,7 +147,7 @@ onBeforeUnmount(() => {
                     <div class="flex items-center justify-between gap-3">
                         <Button variant="ghost" @click="changeKey">Change key</Button>
                         <Button type="submit" :disabled="unlocking">
-                            <FilebeamIcon v-if="unlocking" name="loader" :size="17" />
+                            <Icon v-if="unlocking" name="loader" :size="17" />
                             {{ unlocking ? 'Unlocking' : 'Unlock' }}
                         </Button>
                     </div>

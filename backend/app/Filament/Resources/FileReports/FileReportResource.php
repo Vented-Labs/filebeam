@@ -28,7 +28,6 @@ use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
-use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
@@ -44,7 +43,7 @@ class FileReportResource extends Resource
 
     protected static ?int $navigationSort = 10;
 
-    protected static string|\BackedEnum|null $navigationIcon = Heroicon::OutlinedFlag;
+    protected static string|\BackedEnum|null $navigationIcon = 'filebeam-reports';
 
     protected static ?string $modelLabel = 'File Report';
 

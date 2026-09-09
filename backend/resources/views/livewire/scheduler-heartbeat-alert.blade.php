@@ -1,6 +1,6 @@
 <div wire:poll.60s class="fi-scheduler-heartbeat-alert w-full min-w-0">
     @unless ($isHealthy)
-        <x-filament::callout color="danger" icon="heroicon-o-exclamation-triangle" heading="Scheduler heartbeat is unhealthy." role="alert" class="my-6 w-full min-w-0">
+        <x-filament::callout color="danger" icon="filebeam-alert" heading="Scheduler heartbeat is unhealthy." role="alert" class="my-6 w-full min-w-0">
             <x-slot:footer>
                 <div class="min-w-0">
                     <p>

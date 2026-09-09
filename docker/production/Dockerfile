@@ -45,13 +45,16 @@ RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
 COPY package.json package-lock.json ./
 COPY ui ui
+COPY icons icons
+COPY scripts/check-icons.mjs scripts/generate-icons.mjs scripts/
 COPY scripts/og scripts/og
 COPY vite.config.ts ./
 RUN --mount=type=cache,target=/root/.npm \
     npm ci \
     && npx playwright install --with-deps chromium
 COPY --from=wasm /src/encryption/pkg /opt/filebeam/encryption/pkg
-RUN npm run build --workspace=backend
+RUN npm run check:icons \
+    && npm run build --workspace=backend
 
 FROM postgres:18.6-trixie@sha256:4ef4dbc939d61acea57712655ddb4b4ab27419c913f94cca0cd57cb3ea3c2280 AS postgres
 FROM valkey/valkey:9.1.2-trixie@sha256:c123e3715db63d06d4ad6964884037aa0d5d4d703939b9929954112889708e1d AS valkey
@@ -95,6 +98,7 @@ ENV FILEBEAM_CONTAINER=true \
 
 COPY --from=application /opt/filebeam /opt/filebeam
 COPY --from=frontend /opt/filebeam/backend/public/build /opt/filebeam/backend/public/build
+COPY icons/NOTICE /opt/filebeam/ICONSAX-NOTICE
 COPY LICENSE SECURITY.md /opt/filebeam/
 COPY docker/production/php.ini /usr/local/etc/php/conf.d/99-filebeam-production.ini
 COPY docker/production/Caddyfile /etc/filebeam/Caddyfile
