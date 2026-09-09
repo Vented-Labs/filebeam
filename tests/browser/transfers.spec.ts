@@ -223,14 +223,21 @@ test('does not overflow with the CI version label on a mobile viewport', async (
     await page.route(/\/$/, async (route) => {
         const response = await route.fetch();
         const body = await response.text();
+        const script = /(<script\b[^>]*\bdata-page[^>]*>)([\s\S]*?)(<\/script>)/i;
+        const match = body.match(script);
+        if (!match) throw new Error('Missing Inertia bootstrap');
+        const data = JSON.parse(match[2]);
+        data.props.branding.name = 'Filebeam acceptance';
+        data.props.branding.version = version;
         await route.fulfill({
             response,
-            body: body.replace(/"version":"[^"]+"/, `"version":"${version}"`),
+            body: body.replace(script, () => `${match[1]}${JSON.stringify(data)}${match[3]}`),
         });
     });
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto('/');
     await expect(page.locator('.fb-footer')).toContainText(`v${version}`);
+    await expect(page.getByRole('link', { name: 'Filebeam acceptance home' })).toBeVisible();
     expect(
         await page.locator('body').evaluate((body) => body.scrollWidth <= window.innerWidth),
     ).toBe(true);

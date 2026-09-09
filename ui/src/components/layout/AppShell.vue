@@ -243,6 +243,22 @@ function goHome(event: MouseEvent): void {
 .fb-mobile-nav {
     display: none;
 }
+.fb-header__brand {
+    min-width: 0;
+    flex: 0 1 auto;
+}
+.fb-header__brand :deep(.fb-brand) {
+    max-width: 100%;
+}
+.fb-header__brand :deep(.fb-brand__glyph) {
+    flex: none;
+}
+.fb-header__brand :deep(.fb-brand__wordmark) {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 .fb-header__cli {
     border: 1px solid var(--fb-border);
     background: var(--fb-surface);

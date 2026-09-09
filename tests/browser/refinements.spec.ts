@@ -1,9 +1,15 @@
 import { expect, test, type Page } from '@playwright/test';
 
 test.use({
-    launchOptions: {
-        ignoreDefaultArgs: ['--hide-scrollbars'],
-        args: ['--disable-features=OverlayScrollbar'],
+    launchOptions: async ({ browserName }, use) => {
+        await use(
+            browserName === 'chromium'
+                ? {
+                      ignoreDefaultArgs: ['--hide-scrollbars'],
+                      args: ['--disable-features=OverlayScrollbar'],
+                  }
+                : {},
+        );
     },
 });
 
