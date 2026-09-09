@@ -23,7 +23,11 @@ Use `backend/composer.json` for PHP commands and root `package.json` for JavaScr
 - We need to support traditional shared hosting as well as more modern (FrankenPHP/Docker) installations 100% on every feature.
 - Do not commit secrets, `.env` files, generated dependencies, build output, runtime state, or local tooling metadata.
 
-Open a focused pull request with tests and documentation appropriate to the behavior changed. Report security issues through the [private vulnerability form](https://github.com/Vented-Labs/filebeam/security/advisories/new), not public issues.
+Open a focused pull request with tests and documentation appropriate to the behavior changed.
+
+## Filing Issues
+
+Use the Bug report or Feature request templates. Questions belong in [Discussions](https://github.com/Vented-Labs/filebeam/discussions). Report security issues through the [private vulnerability form](https://github.com/Vented-Labs/filebeam/security/advisories/new), not public issues.
 
 ## Release Packages
 
