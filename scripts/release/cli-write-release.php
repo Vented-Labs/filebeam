@@ -3,7 +3,7 @@
 
 declare(strict_types=1);
 
-if ($argc !== 4) {
+if (! isset($argc, $argv) || $argc !== 4) {
     fwrite(STDERR, "Usage: cli-write-release.php TAG DIRECTORY OUTPUT\n");
     exit(64);
 }

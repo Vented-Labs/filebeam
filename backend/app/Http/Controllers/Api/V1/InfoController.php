@@ -17,8 +17,8 @@ class InfoController extends Controller
         $plan = $plans->default();
         $policy = $transport->configuration(null);
         $limits = $policy['limits']['http'];
-        $fileRetentionHours = $plan?->default_file_retention_hours ?? config('filebeam.default_plan.file_retention_hours');
-        $maximumFileRetentionHours = $plan?->maximum_file_retention_hours ?? $fileRetentionHours;
+        $fileRetentionHours = $plan->default_file_retention_hours ?? config('filebeam.default_plan.file_retention_hours');
+        $maximumFileRetentionHours = $plan->maximum_file_retention_hours ?? $fileRetentionHours;
 
         return new InfoResource([
             'name' => config('app.name'),

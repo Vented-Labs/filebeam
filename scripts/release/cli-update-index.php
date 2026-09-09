@@ -3,7 +3,7 @@
 
 declare(strict_types=1);
 
-if ($argc !== 2 && $argc !== 3) {
+if (! isset($argc, $argv) || ($argc !== 2 && $argc !== 3)) {
     fwrite(STDERR, "Usage: cli-update-index.php CURRENT [RELEASE]\n");
     exit(64);
 }

@@ -10,7 +10,7 @@ if (! is_array($envelope) || ! is_string($envelope['signed'] ?? null) || ! is_st
 }
 $payload = base64_decode($envelope['signed'], true);
 $signature = base64_decode($envelope['signature'], true);
-if ($payload === false || $signature === false || ! sodium_crypto_sign_verify_detached($signature, $payload, $public)) {
+if ($payload === false || $signature === false || $signature === '' || strlen($signature) !== SODIUM_CRYPTO_SIGN_BYTES || ! sodium_crypto_sign_verify_detached($signature, $payload, $public)) {
     throw new RuntimeException('CLI index signature verification failed.');
 }
 $index = json_decode($payload, true, 512, JSON_THROW_ON_ERROR);

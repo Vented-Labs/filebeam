@@ -2,7 +2,9 @@
 # All service images are the selected, multi-architecture upstream releases.
 FROM dunglas/frankenphp:1.12.7-php8.5-trixie@sha256:f92d81eb3fe4fd18b35d3d58192b7cc3acc8943817bbf39f2fcf0be02a3916dc AS php-base
 
-RUN install-php-extensions pdo_sqlite pdo_pgsql pdo_mysql redis-6.3.0 sodium pcntl posix intl bcmath zip \
+COPY docker/production/apt.conf /etc/apt/apt.conf.d/80-filebeam-network
+RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
+    && install-php-extensions pdo_sqlite pdo_pgsql pdo_mysql redis-6.3.0 sodium pcntl posix intl bcmath zip \
     && rm -rf /var/lib/apt/lists/*
 
 FROM composer:2@sha256:d8f6343d3fae98107426bc49163ccad46ef85aabd4a27d80a74401fab4aba332 AS composer
@@ -30,6 +32,7 @@ RUN composer --working-dir=backend dump-autoload --no-dev --optimize --no-script
     && php backend/artisan filament:upgrade --no-interaction
 
 FROM rust:1.98.0-trixie@sha256:620dbcd124499c59e2406d3741574b5c5838cf9eb9656f0c3a03948f79b02959 AS wasm
+ARG CARGO_BUILD_JOBS=1
 RUN rustup target add wasm32-unknown-unknown \
     && cargo install wasm-pack --version 0.15.0 --locked
 WORKDIR /src
