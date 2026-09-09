@@ -1,0 +1,39 @@
+name: Prepare Rust
+description: Install the pinned encryption toolchain with cached Cargo dependencies and wasm-pack
+inputs:
+  wasm:
+    description: Install the WASM target and wasm-pack
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - name: Install toolchain
+      shell: bash
+      run: |
+        rustup toolchain install 1.98.0 --profile minimal --component rustfmt --component clippy
+        rustup default 1.98.0
+    - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          encryption/target
+        key: cargo-${{ runner.os }}-${{ runner.arch }}-1.98.0-wasm${{ inputs.wasm }}-${{ hashFiles('encryption/Cargo.lock') }}-${{ hashFiles('encryption/src/**', 'encryption/Cargo.toml') }}
+        restore-keys: cargo-${{ runner.os }}-${{ runner.arch }}-1.98.0-wasm${{ inputs.wasm }}-${{ hashFiles('encryption/Cargo.lock') }}-
+    - name: Cache wasm-pack
+      if: inputs.wasm == 'true'
+      id: wasm-pack
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ~/.cargo/bin/wasm-pack
+        key: wasm-pack-${{ runner.os }}-${{ runner.arch }}-rust1.98.0-v0.15.0
+    - name: Install WASM tools
+      if: inputs.wasm == 'true'
+      shell: bash
+      env:
+        WASM_PACK_CACHE_HIT: ${{ steps.wasm-pack.outputs.cache-hit }}
+      run: |
+        rustup target add wasm32-unknown-unknown
+        if [[ "$WASM_PACK_CACHE_HIT" != true ]]; then
+          cargo install wasm-pack --version 0.15.0 --locked --force
+        fi

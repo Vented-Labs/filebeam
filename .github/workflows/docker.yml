@@ -7,6 +7,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: docker-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     name: ${{ matrix.variant }} (${{ matrix.platform }})
@@ -19,19 +23,19 @@ jobs:
           - variant: light
             platform: linux/amd64
             arch: amd64
-            runner: ubuntu-latest
+            runner: blacksmith-4vcpu-ubuntu-2404
           - variant: light
             platform: linux/arm64
             arch: arm64
-            runner: ubuntu-24.04-arm
+            runner: blacksmith-4vcpu-ubuntu-2404-arm
           - variant: omnibus
             platform: linux/amd64
             arch: amd64
-            runner: ubuntu-latest
+            runner: blacksmith-4vcpu-ubuntu-2404
           - variant: omnibus
             platform: linux/arm64
             arch: arm64
-            runner: ubuntu-24.04-arm
+            runner: blacksmith-4vcpu-ubuntu-2404-arm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:

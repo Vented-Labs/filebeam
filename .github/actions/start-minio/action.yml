@@ -1,0 +1,19 @@
+name: Start test storage
+description: Start an isolated disposable MinIO server
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        docker run --detach --name filebeam-minio --publish 127.0.0.1:9000:9000 \
+          --env MINIO_ROOT_USER=filebeam-test \
+          --env MINIO_ROOT_PASSWORD=filebeam-test-secret \
+          minio/minio:RELEASE.2025-04-22T22-12-26Z server /data --console-address :9001
+        for _ in {1..30}; do
+          if curl --fail --silent http://127.0.0.1:9000/minio/health/live; then
+            exit 0
+          fi
+          sleep 1
+        done
+        docker logs filebeam-minio
+        exit 1

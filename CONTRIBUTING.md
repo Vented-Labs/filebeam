@@ -23,6 +23,16 @@ Sail captures outgoing development email in Mailpit. Open [http://localhost:8025
 
 Use `backend/composer.json` for PHP commands and root `package.json` for JavaScript commands. Run the narrowest relevant checks before proposing a change.
 
+## Continuous Integration
+
+All Actions jobs use Blacksmith's Ubuntu 24.04 runners: `blacksmith-4vcpu-ubuntu-2404` for AMD64 and `blacksmith-4vcpu-ubuntu-2404-arm` for ARM64 Docker coverage.
+
+Tests run when a PR is opened, updated, or reopened, and on pushes to `master`. Release workflows call the same suite with the validated release commit; tag pushes do not start a second standalone Tests run. New PR updates cancel superseded Tests, Docker, and Beam CLI runs.
+
+Frontend build/checks, Rust, and PHP static checks start independently. The compiled frontend is shared with isolated SQLite, MySQL, Sail PostgreSQL/Redis, distribution, and browser jobs. Main browser tests run in two Sail shards with two workers each; small-chunk tests use their own SQLite application. The final `Test` check requires every job and matrix entry to succeed.
+
+Run `actionlint` from the repository root when editing workflows. `.github/actionlint.yaml` declares the two Blacksmith runner labels. Shared PHP, Node, Rust, and MinIO setup lives in `.github/actions/`.
+
 ## Contribution Rules
 
 - Preserve browser encryption: plaintext files, notes, titles, filenames, and manifest metadata must not become API metadata or server logs.

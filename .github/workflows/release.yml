@@ -62,7 +62,7 @@ jobs:
 
   validate-ref:
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master')
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     outputs:
       tag: ${{ steps.verify.outputs.tag }}
       commit: ${{ steps.verify.outputs.commit }}
@@ -84,7 +84,7 @@ jobs:
   package:
     if: github.event_name != 'schedule' && !(github.event_name == 'workflow_dispatch' && inputs.metadata_only) && needs.validate-ref.result == 'success'
     needs: [test, validate-ref]
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 35
     env:
       RELEASE_TAG: ${{ needs.validate-ref.outputs.tag }}
@@ -133,7 +133,7 @@ jobs:
   publish:
     if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.publish && !inputs.metadata_only)) && needs.validate-ref.result == 'success'
     needs: [package, validate-ref]
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     environment: release
     env:
       RELEASE_TAG: ${{ needs.validate-ref.outputs.tag }}
@@ -167,7 +167,7 @@ jobs:
   metadata:
     if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.publish && inputs.metadata_only && needs.validate-ref.result == 'success'
     needs: validate-ref
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     environment: release
     env:
       RELEASE_TAG: ${{ needs.validate-ref.outputs.tag }}
@@ -196,7 +196,7 @@ jobs:
 
   refresh-catalog:
     if: github.event_name == 'schedule' && github.ref == 'refs/heads/master'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     environment: release
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -221,7 +221,7 @@ jobs:
   docker-plan:
     if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.publish && !inputs.metadata_only)) && needs.validate-ref.result == 'success'
     needs: validate-ref
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     outputs:
       revision: ${{ steps.tags.outputs.revision }}
       advance_aliases: ${{ steps.tags.outputs.advance_aliases }}
@@ -262,22 +262,22 @@ jobs:
             image: ghcr.io/vented-labs/filebeam/light
             platform: linux/amd64
             arch: amd64
-            runner: ubuntu-latest
+            runner: blacksmith-4vcpu-ubuntu-2404
           - variant: light
             image: ghcr.io/vented-labs/filebeam/light
             platform: linux/arm64
             arch: arm64
-            runner: ubuntu-24.04-arm
+            runner: blacksmith-4vcpu-ubuntu-2404-arm
           - variant: omnibus
             image: ghcr.io/vented-labs/filebeam/omnibus
             platform: linux/amd64
             arch: amd64
-            runner: ubuntu-latest
+            runner: blacksmith-4vcpu-ubuntu-2404
           - variant: omnibus
             image: ghcr.io/vented-labs/filebeam/omnibus
             platform: linux/arm64
             arch: arm64
-            runner: ubuntu-24.04-arm
+            runner: blacksmith-4vcpu-ubuntu-2404-arm
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 35
     env:
@@ -347,7 +347,7 @@ jobs:
       packages: write
       id-token: write
     environment: release
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     env:
       RELEASE_TAG: ${{ needs.validate-ref.outputs.tag }}
@@ -428,7 +428,7 @@ jobs:
     permissions:
       contents: write
     environment: release
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
     env:
       RELEASE_TAG: ${{ needs.validate-ref.outputs.tag }}

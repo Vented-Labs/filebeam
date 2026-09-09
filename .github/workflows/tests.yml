@@ -2,8 +2,9 @@ name: Tests
 
 on:
   push:
+    branches: [master]
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, edited]
+    types: [opened, synchronize, reopened]
   workflow_call:
     inputs:
       ref:
@@ -14,21 +15,126 @@ permissions:
   contents: read
 
 concurrency:
-  group: tests-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # A release call must not cancel a master/PR run or another release invocation.
+  group: tests-${{ github.workflow }}-${{ github.event.pull_request.number || inputs.ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/master') }}
 
 jobs:
-  test:
-    # Keep this name in sync with the required GitHub Actions check on master.
-    name: Test
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    env:
-      # Auth links use the canonical origin, which must match the browser tests.
-      SAIL_APP_URL: http://127.0.0.1:8000
+  frontend:
+    name: Frontend build and checks
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref || github.ref }}
+      # Keep setup actions at the workflow revision when validating an older release ref.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ github.workflow_sha }}
+          path: .ci-workflow
+          sparse-checkout: .github/actions
+      - uses: ./.ci-workflow/.github/actions/setup-php
+      - uses: ./.ci-workflow/.github/actions/setup-node
+        with:
+          browser: 'true'
+      - uses: ./.ci-workflow/.github/actions/setup-rust
+        with:
+          wasm: 'true'
+      - name: Verify approved icon catalog
+        run: |
+          npm run check:icons
+          npm run test:icons
+      # npm run build preserves WASM -> frontend -> social card generation order.
+      - name: Build frontend assets
+        run: |
+          npm run build
+          test -f backend/public/build/manifest.json
+          php scripts/release/validate-og.php backend/public/build/og
+      - name: Test social card rendering
+        run: npm run test:og -- --workers=2
+      - name: Check JavaScript
+        run: npm run check
+      - name: Share compiled frontend
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: test-frontend
+          path: backend/public/build/
+          if-no-files-found: error
+          retention-days: 1
+      - name: Upload browser failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: playwright-frontend
+          path: test-results/
+          if-no-files-found: ignore
+
+  rust:
+    name: Rust
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ github.workflow_sha }}
+          path: .ci-workflow
+          sparse-checkout: .github/actions
+      - uses: ./.ci-workflow/.github/actions/setup-rust
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path encryption/Cargo.toml --check
+      - name: Lint Rust
+        run: cargo clippy --manifest-path encryption/Cargo.toml --all-targets -- -D warnings
+      - name: Test Rust
+        run: cargo test --manifest-path encryption/Cargo.toml
+
+  php-static:
+    name: PHP static checks
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ github.workflow_sha }}
+          path: .ci-workflow
+          sparse-checkout: .github/actions
+      - uses: ./.ci-workflow/.github/actions/setup-php
+      - name: Check PHP formatting
+        working-directory: backend
+        run: composer lint:check
+      - name: Analyze PHP
+        working-directory: backend
+        run: vendor/bin/phpstan analyse --memory-limit=512M
+
+  php:
+    name: PHP (${{ matrix.database }})
+    needs: frontend
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - database: SQLite
+            configuration: phpunit.xml
+          - database: MySQL
+            configuration: phpunit.mysql.xml
     services:
       mysql:
-        image: mysql:8.4
+        # An empty image disables the service for the SQLite job.
+        image: ${{ matrix.database == 'MySQL' && 'mysql:8.4' || '' }}
         env:
           MYSQL_DATABASE: filebeam_testing
           MYSQL_USER: sail
@@ -42,145 +148,165 @@ jobs:
           --health-timeout=5s
           --health-retries=5
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
           ref: ${{ inputs.ref || github.ref }}
-
-      - name: Start disposable MinIO
-        run: |
-          docker run --detach --name filebeam-minio --publish 127.0.0.1:9000:9000 \
-            --env MINIO_ROOT_USER=filebeam-test \
-            --env MINIO_ROOT_PASSWORD=filebeam-test-secret \
-            minio/minio:RELEASE.2025-04-22T22-12-26Z server /data --console-address :9001
-          for _ in {1..30}; do
-            if curl --fail --silent http://127.0.0.1:9000/minio/health/live; then
-              exit 0
-            fi
-            sleep 1
-          done
-          docker logs filebeam-minio
-          exit 1
-
-      - name: Set up PHP
-        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          php-version: '8.5'
-          extensions: mbstring, dom, curl, sodium, zip, pdo_sqlite, pdo_mysql, pdo_pgsql, redis
-          coverage: none
-
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+          persist-credentials: false
+          ref: ${{ github.workflow_sha }}
+          path: .ci-workflow
+          sparse-checkout: .github/actions
+      - uses: ./.ci-workflow/.github/actions/setup-php
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
-          node-version: '24'
-          cache: npm
-
-      - name: Set up Rust and wasm-pack
-        run: |
-          rustup toolchain install 1.98.0 --profile minimal
-          rustup default 1.98.0
-          rustup component add rustfmt clippy
-          rustup target add wasm32-unknown-unknown
-          cargo install wasm-pack --version 0.15.0 --locked
-
-      - name: Prepare Laravel writable directories
-        working-directory: backend
-        run: mkdir -p bootstrap/cache storage/app/private storage/app/public storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs
-
-      - name: Install PHP dependencies
-        working-directory: backend
-        run: composer install --no-interaction --prefer-dist --no-progress
-
-      - name: Prepare Laravel environment
-        working-directory: backend
-        run: |
-          cp .env.example .env
-          # Sail sources .env and overrides exported variables with its values.
-          sed -i "s|^SAIL_APP_URL=.*|SAIL_APP_URL=${SAIL_APP_URL}|" .env
-          php artisan key:generate --force --no-interaction
-
-      - name: Install JavaScript dependencies
-        run: npm ci
-
-      - name: Install Playwright Chromium
-        run: |
-          # Playwright supplies Chromium; its Ubuntu dependencies do not use the runner's Chrome feed.
-          sudo rm -f /etc/apt/sources.list.d/google-chrome.list /etc/apt/sources.list.d/google-chrome.sources
-          npx playwright install --with-deps chromium
-
-      - name: Verify approved icon catalog
-        run: |
-          npm run check:icons
-          npm run test:icons
-
-      # The backend build consumes the generated WASM package, so do not parallelize these.
-      - name: Build frontend assets
-        run: |
-          npm run build
-          test -f backend/public/build/manifest.json
-          php scripts/release/validate-og.php backend/public/build/og
-
-      - name: Test social card rendering
-        run: npm run test:og
-
-      - name: Check JavaScript
-        run: npm run check
-
-      - name: Check Rust formatting
-        run: cargo fmt --manifest-path encryption/Cargo.toml --check
-
-      - name: Lint Rust
-        run: cargo clippy --manifest-path encryption/Cargo.toml --all-targets -- -D warnings
-
-      - name: Test Rust
-        run: cargo test --manifest-path encryption/Cargo.toml
-
-      - name: Check PHP formatting
-        working-directory: backend
-        run: composer lint:check
-
-      - name: Analyze PHP
-        working-directory: backend
-        run: vendor/bin/phpstan analyse --memory-limit=512M
-
-      - name: Test PHP with SQLite
+          name: test-frontend
+          path: backend/public/build
+      - uses: ./.ci-workflow/.github/actions/start-minio
+      - name: Test PHP
         working-directory: backend
         env:
           FILEBEAM_TEST_S3_ENDPOINT: http://127.0.0.1:9000
           FILEBEAM_TEST_S3_KEY: filebeam-test
           FILEBEAM_TEST_S3_SECRET: filebeam-test-secret
           FILEBEAM_TEST_S3_BUCKET: filebeam-test
-        run: vendor/bin/pest --configuration phpunit.xml
+          PHPUNIT_CONFIGURATION: ${{ matrix.configuration }}
+        run: vendor/bin/pest --configuration "$PHPUNIT_CONFIGURATION"
+      - name: Stop disposable MinIO
+        if: always()
+        run: docker rm --force filebeam-minio || true
 
-      - name: Test PHP with MySQL
+  sail:
+    name: Sail (${{ matrix.suite }})
+    needs: frontend
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: PostgreSQL and Redis
+            shard: ''
+          - suite: Browser 1/2
+            shard: '1/2'
+          - suite: Browser 2/2
+            shard: '2/2'
+    env:
+      SAIL_APP_URL: http://127.0.0.1:8000
+      FILEBEAM_CREATIONS_PER_HOUR: '600'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ github.workflow_sha }}
+          path: .ci-workflow
+          sparse-checkout: .github/actions
+      - uses: ./.ci-workflow/.github/actions/setup-php
+      - uses: ./.ci-workflow/.github/actions/setup-node
+        if: matrix.shard != ''
+        with:
+          browser: 'true'
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: test-frontend
+          path: backend/public/build
+      - uses: ./.ci-workflow/.github/actions/start-minio
+        if: matrix.shard == ''
+      - name: Validate Sail configuration
         working-directory: backend
+        run: docker compose config --quiet
+      - name: Match container permissions to runner
+        run: printf 'WWWUSER=%s\nWWWGROUP=%s\n' "$(id -u)" "$(id -g)" >> "$GITHUB_ENV"
+      - name: Build and start Sail
+        working-directory: backend
+        run: ./vendor/bin/sail up --build --detach --wait
+      - name: Migrate and seed Sail database
+        working-directory: backend
+        run: ./vendor/bin/sail artisan migrate --seed --force --no-interaction
+      - name: Test PHP with PostgreSQL and Redis
+        if: matrix.shard == ''
+        working-directory: backend
+        run: |
+          docker network connect filebeam_sail filebeam-minio
+          docker compose exec -T --user sail \
+            -e FILEBEAM_TEST_S3_ENDPOINT=http://filebeam-minio:9000 \
+            -e FILEBEAM_TEST_S3_KEY=filebeam-test \
+            -e FILEBEAM_TEST_S3_SECRET=filebeam-test-secret \
+            -e FILEBEAM_TEST_S3_BUCKET=filebeam-test \
+            laravel.test vendor/bin/pest --configuration phpunit.sail.xml
+      - name: Test Turbo cache with Redis
+        if: matrix.shard == ''
+        working-directory: backend
+        run: docker compose exec -T --user sail -e FILEBEAM_TEST_REDIS_HOST=redis laravel.test vendor/bin/pest --group=redis --configuration phpunit.xml
+      - name: Create unhealthy scheduler browser fixture
+        if: matrix.shard != ''
+        working-directory: backend
+        run: |
+          docker compose exec -T laravel.test php -r 'foreach (glob("/proc/[0-9]*/cmdline") as $file) { $command = file_get_contents($file); if (str_contains($command, "artisan\0schedule:work")) { posix_kill((int) basename(dirname($file)), 19); } }'
+          docker compose exec -T --user sail laravel.test php -r '
+            require "vendor/autoload.php";
+            $app = require "bootstrap/app.php";
+            $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+            Illuminate\Support\Facades\DB::table("scheduler_heartbeats")->delete();
+          '
+      - name: Run browser tests
+        if: matrix.shard != ''
         env:
-          FILEBEAM_TEST_S3_ENDPOINT: http://127.0.0.1:9000
-          FILEBEAM_TEST_S3_KEY: filebeam-test
-          FILEBEAM_TEST_S3_SECRET: filebeam-test-secret
-          FILEBEAM_TEST_S3_BUCKET: filebeam-test
-        run: vendor/bin/pest --configuration phpunit.mysql.xml
+          BASE_URL: http://127.0.0.1:8000
+          BROWSER_TEST_UNHEALTHY_SCHEDULER: 'true'
+          PLAYWRIGHT_SHARD: ${{ matrix.shard }}
+        run: npm run test:browser -- --grep-invert @small-chunks --shard="$PLAYWRIGHT_SHARD" --workers=2
+      - name: Capture Sail failure logs
+        if: failure()
+        working-directory: backend
+        run: docker compose logs --no-color > "$RUNNER_TEMP/sail.log" 2>&1
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: sail-artifacts-${{ strategy.job-index }}
+          path: |
+            test-results/
+            playwright-report/
+            ${{ runner.temp }}/sail.log
+          if-no-files-found: ignore
+      - name: Stop Sail
+        if: always()
+        working-directory: backend
+        run: ./vendor/bin/sail down --volumes --remove-orphans
+      - name: Stop disposable MinIO
+        if: always() && matrix.shard == ''
+        run: docker rm --force filebeam-minio || true
 
-      - name: Test updater harness
-        run: php tests/updater/run.php
-
-      - name: Test release reference validation
-        run: bash scripts/release/validate-ref.test.sh
-
-      - name: Test release publishing safeguards
-        run: |
-          bash scripts/release/publish.test.sh
-          bash scripts/release/github-release.test.sh
-
-      - name: Test Docker lifecycle assertions
-        run: bash tests/docker/lifecycle.test.sh
-
-      - name: Test distribution package
-        run: |
-          bash scripts/release/package.sh v0.0.0 "$RUNNER_TEMP/filebeam-package" --skip-build --allow-unsigned-local
-          bash scripts/release/smoke.sh "$RUNNER_TEMP/filebeam-package/filebeam-v0.0.0.zip"
-
+  small-chunks:
+    name: Small-chunk browser
+    needs: frontend
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ github.workflow_sha }}
+          path: .ci-workflow
+          sparse-checkout: .github/actions
+      - uses: ./.ci-workflow/.github/actions/setup-php
+      - uses: ./.ci-workflow/.github/actions/setup-node
+        with:
+          browser: 'true'
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: test-frontend
+          path: backend/public/build
       - name: Run small-chunk browser tests
         env:
           APP_ENV: testing
@@ -211,84 +337,66 @@ jobs:
           server_pid=$!
           for _ in {1..30}; do curl --fail --silent http://127.0.0.1:8010/up && break; sleep 1; done
           curl --fail --silent http://127.0.0.1:8010/up
-          BASE_URL=http://127.0.0.1:8010 npx playwright test tests/browser/chunks.spec.ts --config=playwright.config.ts --grep @small-chunks
-
-      - name: Validate Sail configuration
-        working-directory: backend
-        env:
-          FILEBEAM_CREATIONS_PER_HOUR: '600'
-        run: docker compose config --quiet
-
-      - name: Match container permissions to runner
-        run: |
-          printf 'WWWUSER=%s\nWWWGROUP=%s\n' "$(id -u)" "$(id -g)" >> "$GITHUB_ENV"
-
-      - name: Build and start Sail
-        working-directory: backend
-        env:
-          FILEBEAM_CREATIONS_PER_HOUR: '600'
-        run: ./vendor/bin/sail up --build --detach --wait
-
-      - name: Migrate and seed Sail database
-        working-directory: backend
-        env:
-          FILEBEAM_CREATIONS_PER_HOUR: '600'
-        run: ./vendor/bin/sail artisan migrate --seed --force --no-interaction
-
-      - name: Test PHP with PostgreSQL and Redis
-        working-directory: backend
-        env:
-          FILEBEAM_CREATIONS_PER_HOUR: '600'
-        run: |
-          docker network connect filebeam_sail filebeam-minio
-          docker compose exec -T --user sail \
-            -e FILEBEAM_TEST_S3_ENDPOINT=http://filebeam-minio:9000 \
-            -e FILEBEAM_TEST_S3_KEY=filebeam-test \
-            -e FILEBEAM_TEST_S3_SECRET=filebeam-test-secret \
-            -e FILEBEAM_TEST_S3_BUCKET=filebeam-test \
-            laravel.test vendor/bin/pest --configuration phpunit.sail.xml
-
-      - name: Test Turbo cache with Redis
-        working-directory: backend
-        env:
-          FILEBEAM_CREATIONS_PER_HOUR: '600'
-        run: docker compose exec -T --user sail -e FILEBEAM_TEST_REDIS_HOST=redis laravel.test vendor/bin/pest --group=redis --configuration phpunit.xml
-
-      - name: Create unhealthy scheduler browser fixture
-        working-directory: backend
-        run: |
-          docker compose exec -T laravel.test php -r 'foreach (glob("/proc/[0-9]*/cmdline") as $file) { $command = file_get_contents($file); if (str_contains($command, "artisan\0schedule:work")) { posix_kill((int) basename(dirname($file)), 19); } }'
-          docker compose exec -T --user sail laravel.test php -r '
-            require "vendor/autoload.php";
-            $app = require "bootstrap/app.php";
-            $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
-            Illuminate\Support\Facades\DB::table("scheduler_heartbeats")->delete();
-          '
-
-      - name: Run browser tests
-        env:
-          BASE_URL: http://127.0.0.1:8000
-          BROWSER_TEST_UNHEALTHY_SCHEDULER: 'true'
-          FILEBEAM_CREATIONS_PER_HOUR: '600'
-        run: npm run test:browser -- --grep-invert @small-chunks
-
+          BASE_URL=http://127.0.0.1:8010 npx playwright test tests/browser/chunks.spec.ts --config=playwright.config.ts --grep @small-chunks --workers=2
       - name: Upload browser failure artifacts
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: playwright-artifacts
+          name: playwright-small-chunks
           path: |
             test-results/
             playwright-report/
+            ${{ runner.temp }}/filebeam-chunks.log
           if-no-files-found: ignore
 
-      - name: Stop Sail
-        if: always()
-        working-directory: backend
-        env:
-          FILEBEAM_CREATIONS_PER_HOUR: '600'
-        run: ./vendor/bin/sail down --volumes --remove-orphans
+  distribution:
+    name: Distribution and harnesses
+    needs: frontend
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ github.workflow_sha }}
+          path: .ci-workflow
+          sparse-checkout: .github/actions
+      - uses: ./.ci-workflow/.github/actions/setup-php
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: test-frontend
+          path: backend/public/build
+      - name: Install archive tools
+        run: sudo apt-get update && sudo apt-get install --yes zip unzip
+      - name: Test updater harness
+        run: php tests/updater/run.php
+      - name: Test release reference validation
+        run: bash scripts/release/validate-ref.test.sh
+      - name: Test release publishing safeguards
+        run: |
+          bash scripts/release/publish.test.sh
+          bash scripts/release/github-release.test.sh
+      - name: Test Docker lifecycle assertions
+        run: bash tests/docker/lifecycle.test.sh
+      - name: Test distribution package
+        run: |
+          bash scripts/release/package.sh v0.0.0 "$RUNNER_TEMP/filebeam-package" --skip-build --allow-unsigned-local
+          bash scripts/release/smoke.sh "$RUNNER_TEMP/filebeam-package/filebeam-v0.0.0.zip"
 
-      - name: Stop disposable MinIO
-        if: always()
-        run: docker rm --force filebeam-minio || true
+  test:
+    # Keep this name in sync with the required GitHub Actions check on master.
+    name: Test
+    if: always()
+    needs: [frontend, rust, php-static, php, sail, small-chunks, distribution]
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 5
+    steps:
+      - name: Require every test job to pass
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          jq -e 'length > 0 and all(.[]; .result == "success")' <<< "$RESULTS"
