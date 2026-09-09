@@ -18,6 +18,7 @@ import { ciphertextBytes, formatBytes } from '../lib/format';
 import AppShell from './layout/AppShell.vue';
 import AnimatedHeight from './layout/AnimatedHeight.vue';
 import TrustFeatures from './layout/TrustFeatures.vue';
+import CliInstallDialog from './cli/CliInstallDialog.vue';
 import NoteComposer from './notes/NoteComposer.vue';
 import FilePond from './upload/FilePond.vue';
 import FileQueue from './upload/FileQueue.vue';
@@ -584,6 +585,7 @@ onBeforeUnmount(() => {
                 </DialogContent>
             </DialogPortal>
         </DialogRoot>
+        <template #footer><CliInstallDialog /></template>
     </AppShell>
 </template>
 
