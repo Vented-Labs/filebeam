@@ -8,7 +8,7 @@ grep -Fq 'ICONSAX-NOTICE' "$root/scripts/release/package.sh"
 grep -Fq 'Iconsax Free License' "$root/icons/NOTICE"
 grep -Fq 'validate-manifest.php' "$root/scripts/release/package.sh"
 if grep -Fq '"$root/docs/social-previews.md"' "$root/scripts/release/package.sh"; then
-    printf 'Protocol 1 packages must remain installable by the v0.1.0 updater.\n' >&2
+    printf 'Protocol 1 package paths must remain backward compatible.\n' >&2
     exit 1
 fi
 

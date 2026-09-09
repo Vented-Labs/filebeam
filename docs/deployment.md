@@ -79,12 +79,6 @@ For PostgreSQL, each updater backup is a native custom-format archive at `.fileb
 
 Use `--recover` only for an interrupted update before migrations begin. Once migrations begin, `--recover` refuses to continue: restore the database backup and deploy manually. The updater never automatically performs a destructive restore.
 
-### v0.1.0 Updater Bridge
-
-The v0.1.0 updater rejects the v0.1.1 package because that archive contains the unapproved, non-runtime path `docs/social-previews.md`. The rejection occurs before maintenance mode, backups, code replacement, or migrations. Do not replace the immutable v0.1.0 or v0.1.1 release objects and do not install an unsigned updater patch.
-
-Publish the next corrected release with the current release tooling. `scripts/release/package.sh` intentionally keeps updater-protocol-1 archives compatible with v0.1.0 by excluding `docs/social-previews.md`, and it verifies the generated manifest before creating the archive. Once the corrected release is the latest stable catalog entry, run `php update.php` once from a v0.1.0 package root. The existing updater skips the older invalid release, selects the corrected latest release, and installs the scheduler integration and corrected manifest policy. Subsequent administrator-queued upgrades are processed by the Laravel scheduler.
-
 ### PostgreSQL Manual Restore
 
 Keep maintenance mode enabled until the restored application has been verified. Restore a PostgreSQL archive into an existing, empty database allocated for the recovery. This accommodates shared-hosting accounts without `CREATEDB` privileges and avoids acting on the active database. Configure the restored application's database name and credentials in `backend/.env` to match that allocated database.

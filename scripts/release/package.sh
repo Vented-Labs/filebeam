@@ -61,8 +61,7 @@ trap cleanup EXIT
 mkdir -p "$stage/backend"
 cp -a "$root/LICENSE" "$root/SECURITY.md" "$root/README.md" "$stage/"
 mkdir -p "$stage/docs"
-# Updater protocol 1 accepts only deployment.md. Keep bridge releases installable
-# by v0.1.0; the corrected updater permits social-previews.md in future protocols.
+# Keep the protocol 1 package surface compatible with all protocol 1 updaters.
 cp -a "$root/docs/deployment.md" "$stage/docs/"
 
 copy_entry() {
