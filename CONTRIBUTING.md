@@ -10,14 +10,14 @@ Use Docker Engine and Docker Compose. Follow the local setup commands in the [RE
 ./sail run cargo test --manifest-path ../encryption/Cargo.toml
 ```
 
-Browser tests run on the host against an isolated application instance. Keep Sail's canonical application URL and Playwright's base URL identical so same-origin authentication stays within the Vue document:
+Browser tests run on the host against an isolated application instance. Set `SAIL_APP_URL=http://127.0.0.1:8000` in `backend/.env`, then recreate the application container and use the same URL for Playwright so same-origin authentication stays within the Vue document:
 
 ```sh
-SAIL_APP_URL=http://127.0.0.1:8000 ./sail up -d
+./sail up -d
 BASE_URL=http://127.0.0.1:8000 npm run test:browser
 ```
 
-Install Chromium first with `npx playwright install chromium`. Use the same `SAIL_APP_URL` for subsequent Sail commands against that instance.
+Install Chromium first with `npx playwright install chromium`. Sail sources `backend/.env`, so passing `SAIL_APP_URL` only as a shell environment variable does not override the value in that file.
 
 Sail captures outgoing development email in Mailpit. Open [http://localhost:8025](http://localhost:8025) after running `./sail up -d`; the default `.env.example` mail settings also reach Mailpit from host-side Artisan commands. Override `FORWARD_MAILPIT_PORT` or `FORWARD_MAILPIT_DASHBOARD_PORT` if either port is already in use.
 

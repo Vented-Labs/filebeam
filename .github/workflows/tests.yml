@@ -96,6 +96,8 @@ jobs:
         working-directory: backend
         run: |
           cp .env.example .env
+          # Sail sources .env and overrides exported variables with its values.
+          sed -i "s|^SAIL_APP_URL=.*|SAIL_APP_URL=${SAIL_APP_URL}|" .env
           php artisan key:generate --force --no-interaction
 
       - name: Install JavaScript dependencies

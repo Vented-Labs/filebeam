@@ -118,6 +118,11 @@ test('same-origin auth links and mode switches keep the Vue document', async ({
     page,
     baseURL,
 }) => {
+    // Check the real server configuration before the profile fixture overrides it.
+    await page.goto('/');
+    await expect(
+        page.locator('.fb-header__actions').getByRole('link', { name: 'Sign in' }),
+    ).toHaveAttribute('href', '/login');
     await profile(page, baseURL!);
     await page.evaluate(() => Object.assign(window, { authDocument: document }));
     const expectSameDocument = async () => {
