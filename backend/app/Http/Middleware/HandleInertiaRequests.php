@@ -53,6 +53,7 @@ class HandleInertiaRequests extends Middleware
                 'default_mark_url' => asset('brand/filebeam-mark.svg'),
             ],
             'filebeam' => [
+                'main_site_url' => config('app.url'),
                 'github_url' => config('filebeam.github_url'),
                 'copyright_holder' => config('filebeam.copyright_holder'),
                 'maximum_transfer_bytes' => $plan->maximum_transfer_bytes ?? config('filebeam.default_plan.maximum_transfer_bytes'),

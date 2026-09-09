@@ -7,6 +7,7 @@ export type TransferLimits = {
 };
 
 export type FilebeamConfig = {
+    main_site_url: string;
     github_url: string;
     copyright_holder: string;
     maximum_transfer_bytes: number;

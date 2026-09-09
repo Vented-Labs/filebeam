@@ -309,14 +309,20 @@ test('inbox completion requires a canonical 80-byte recipient envelope and an ac
 test('optional username domains supplement the permanent path and obey the routing switch', function (): void {
     $this->withoutVite();
     config()->set('filebeam.username_domain', 'fbea.me');
+    config()->set('app.url', 'http://localhost');
     Route::middleware('web')->group(base_path('routes/web.php'));
     $recipient = User::factory()->create(['username' => 'receiver', 'normalized_username' => 'receiver', 'inbox_enabled' => true]);
     AccountKeyBundle::factory()->for($recipient)->create();
 
     expect(app(InstanceSettings::class)->boolean('username_routing'))->toBeTrue()
         ->and(app(FilebeamUrlGenerator::class)->profile('receiver'))->toBe('https://fbea.me/receiver');
-    $this->get('https://fbea.me/receiver')->assertOk()->assertInertia(fn ($page) => $page->component('Receive')->where('recipient.username', 'receiver'));
-    $this->get('http://localhost/u/receiver')->assertOk();
+    $this->get('https://fbea.me/receiver')->assertOk()->assertInertia(fn ($page) => $page
+        ->component('Receive')
+        ->where('recipient.username', 'receiver')
+        ->where('filebeam.main_site_url', 'http://localhost'));
+    $this->get('http://localhost/u/receiver')->assertOk()->assertInertia(fn ($page) => $page
+        ->component('Receive')
+        ->where('filebeam.main_site_url', 'http://localhost'));
     $this->get('http://localhost/receiver')->assertNotFound();
 
     InstanceSetting::query()->create(['key' => 'username_routing', 'value' => false]);

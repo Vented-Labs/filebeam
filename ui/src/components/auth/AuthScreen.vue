@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { FilebeamConfig } from '../../types';
-import AppLink from '../primitives/AppLink.vue';
+import AuthLink from './AuthLink.vue';
 import AuthDrawer from './AuthDrawer.vue';
 import AuthForm from './AuthForm.vue';
 
@@ -71,18 +71,18 @@ function update(
         >
             <template v-if="mode === 'login' && registrationEnabled">
                 New here?
-                <AppLink href="/register" preserve-state preserve-scroll class="fb-text-link ml-1"
-                    >Create account</AppLink
+                <AuthLink href="/register" preserve-state preserve-scroll class="fb-text-link ml-1"
+                    >Create account</AuthLink
                 >
             </template>
             <span v-if="mode === 'register'">Already have an account? </span>
-            <AppLink
+            <AuthLink
                 v-if="mode !== 'login' && mode !== 'verify'"
                 href="/login"
                 preserve-state
                 preserve-scroll
                 class="fb-text-link ml-1"
-                >Sign in</AppLink
+                >Sign in</AuthLink
             >
         </nav>
     </AuthDrawer>

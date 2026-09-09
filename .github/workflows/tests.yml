@@ -23,6 +23,9 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    env:
+      # Auth links use the canonical origin, which must match the browser tests.
+      SAIL_APP_URL: http://127.0.0.1:8000
     services:
       mysql:
         image: mysql:8.4
@@ -93,6 +96,8 @@ jobs:
         working-directory: backend
         run: |
           cp .env.example .env
+          # Sail sources .env and overrides exported variables with its values.
+          sed -i "s|^SAIL_APP_URL=.*|SAIL_APP_URL=${SAIL_APP_URL}|" .env
           php artisan key:generate --force --no-interaction
 
       - name: Install JavaScript dependencies
