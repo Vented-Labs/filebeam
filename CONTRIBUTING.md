@@ -61,3 +61,5 @@ Maintainers create official packages from a Git commit:
 ```sh
 RELEASE_PUBLIC_KEY=... scripts/release/package.sh v0.1.0 dist/release
 ```
+
+CLI release jobs derive their Ed25519 public key from `RELEASE_SIGNING_KEY`. If `RELEASE_PUBLIC_KEY` is also configured, it must decode to the same key. Whitespace and omitted Base64 padding are accepted at the input boundary; Docker, packaged installers, and CLI catalog publishing use canonical padded Base64 of the 32-byte public key. Packaging records that value in `dist/beam/public-key`, and publishing rejects a package or installer built with a different key before uploading anything. The signing secret is scoped to host-side derivation/signing steps and is never passed into the CLI build container.

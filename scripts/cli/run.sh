@@ -18,6 +18,8 @@ if [[ -n ${BEAM_CARGO_CACHE_DIR:-} ]]; then
     docker_volumes+=(--volume "$cargo_cache:/tmp/cargo")
 fi
 if [[ -n ${BEAM_RELEASE_PUBLIC_KEY:-} ]]; then
+    BEAM_RELEASE_PUBLIC_KEY=$(php "$root/scripts/release/cli-public-key.php" public)
+    export BEAM_RELEASE_PUBLIC_KEY
     docker_env+=(--env BEAM_RELEASE_PUBLIC_KEY)
 fi
 if [[ -n ${BEAM_DOCKER_OUTPUT_DIR:-} ]]; then

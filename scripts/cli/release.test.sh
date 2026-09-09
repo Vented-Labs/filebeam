@@ -14,7 +14,9 @@ trap cleanup EXIT
 keypair=$(php -r '$pair=sodium_crypto_sign_keypair(); echo base64_encode(sodium_crypto_sign_publickey($pair))." ".base64_encode(sodium_crypto_sign_secretkey($pair));')
 read -r RELEASE_PUBLIC_KEY RELEASE_SIGNING_KEY <<< "$keypair"
 export RELEASE_PUBLIC_KEY RELEASE_SIGNING_KEY
-BEAM_RELEASE_PUBLIC_KEY=$RELEASE_PUBLIC_KEY "$root/scripts/cli/package.sh" beam-v0.2.0 "$temporary/package"
+# A copied secret may contain whitespace or omit padding; Docker receives canonical Base64.
+BEAM_RELEASE_PUBLIC_KEY=$' \n'"${RELEASE_PUBLIC_KEY%=}"$'\t\r\n' "$root/scripts/cli/package.sh" beam-v0.2.0 "$temporary/package"
+[[ $(<"$temporary/package/public-key") == "$RELEASE_PUBLIC_KEY" ]]
 bash "$root/scripts/cli/smoke-package.sh" beam-v0.2.0 "$temporary/package"
 
 mkdir -p "$temporary/public/cli/versions/v0.2.0"

@@ -6,16 +6,21 @@ usage() { printf 'Usage: %s beam-vX.Y.Z [output-dir]\n' "$0" >&2; exit 64; }
 tag=$1
 output_dir=${2:-dist/beam}
 [[ $tag =~ ^beam-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || usage
-for variable in R2_ENDPOINT_URL R2_BUCKET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY RELEASE_PUBLIC_KEY RELEASE_SIGNING_KEY; do
+for variable in R2_ENDPOINT_URL R2_BUCKET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY RELEASE_SIGNING_KEY; do
     [[ -n ${!variable:-} ]] || { printf '%s is required.\n' "$variable" >&2; exit 1; }
 done
 command -v aws >/dev/null
 command -v php >/dev/null
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
-[[ -f "$output_dir/checksums.txt" && -f "$output_dir/version" ]] || { printf 'Expected CLI package output in %s.\n' "$output_dir" >&2; exit 1; }
+RELEASE_PUBLIC_KEY=$(php "$root/scripts/release/cli-public-key.php" derive)
+export RELEASE_PUBLIC_KEY
+[[ -f "$output_dir/checksums.txt" && -f "$output_dir/version" && -f "$output_dir/public-key" && -f "$output_dir/install.sh" ]] || { printf 'Expected CLI package output in %s.\n' "$output_dir" >&2; exit 1; }
+[[ $(<"$output_dir/public-key") == "$RELEASE_PUBLIC_KEY" ]] || { printf 'CLI package public key does not match RELEASE_SIGNING_KEY.\n' >&2; exit 1; }
 R2_ENDPOINT_URL=$(php "$root/scripts/release/r2-endpoint.php" "$R2_ENDPOINT_URL" "$R2_BUCKET")
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/beam-publish.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
+sed "s|__BEAM_RELEASE_PUBLIC_KEY__|$RELEASE_PUBLIC_KEY|g" "$root/scripts/cli/install.sh" > "$tmp/install.sh"
+cmp --silent "$output_dir/install.sh" "$tmp/install.sh" || { printf 'CLI package installer does not match the canonical release public key.\n' >&2; exit 1; }
 aws_r2=(aws --endpoint-url "$R2_ENDPOINT_URL" s3api)
 export AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-auto}
 export AWS_REQUEST_CHECKSUM_CALCULATION=${AWS_REQUEST_CHECKSUM_CALCULATION:-WHEN_REQUIRED}
@@ -68,6 +73,5 @@ if [[ -n $etag ]]; then
 else
     "${aws_r2[@]}" put-object --bucket "$R2_BUCKET" --key cli/index.json --body "$tmp/index-envelope.json" --content-type application/json --cache-control 'no-cache' --if-none-match '*' >/dev/null
 fi
-sed "s|__BEAM_RELEASE_PUBLIC_KEY__|$RELEASE_PUBLIC_KEY|g" "$root/scripts/cli/install.sh" > "$tmp/install.sh"
 "${aws_r2[@]}" put-object --bucket "$R2_BUCKET" --key cli/install.sh --body "$tmp/install.sh" --content-type text/x-shellscript --cache-control 'no-cache' >/dev/null
 printf 'Published %s.\n' "$tag"

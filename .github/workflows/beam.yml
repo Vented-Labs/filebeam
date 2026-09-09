@@ -117,7 +117,6 @@ jobs:
     env:
       RELEASE_TAG: ${{ needs.validate-ref.outputs.tag }}
       RELEASE_COMMIT: ${{ needs.validate-ref.outputs.commit }}
-      BEAM_RELEASE_PUBLIC_KEY: ${{ secrets.RELEASE_PUBLIC_KEY }}
       BEAM_DOCKER_BUILD: 'false'
     steps:
       - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
@@ -126,6 +125,18 @@ jobs:
           dissociate: true
           ref: ${{ env.RELEASE_COMMIT }}
           fetch-depth: 0
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240
+        with:
+          php-version: '8.5'
+          extensions: sodium
+          coverage: none
+      - name: Derive canonical CLI public key
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+          RELEASE_PUBLIC_KEY: ${{ secrets.RELEASE_PUBLIC_KEY }}
+        run: |
+          public_key=$(php scripts/release/cli-public-key.php derive)
+          printf 'BEAM_RELEASE_PUBLIC_KEY=%s\n' "$public_key" >> "$GITHUB_ENV"
       - name: Set up cached CLI builder
         uses: useblacksmith/setup-docker-builder@19215110ab936351210feebdfa5b440b4493e184 # v2
         with:

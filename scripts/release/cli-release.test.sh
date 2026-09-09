@@ -37,3 +37,5 @@ SOURCE_DATE_EPOCH=1700000000 php "$root/scripts/release/cli-write-release.php" b
 cmp "$temporary/first.json" "$temporary/second.json"
 php -r '$release=json_decode(file_get_contents($argv[1]), true, 512, JSON_THROW_ON_ERROR); if ($release["published_at"] !== "2023-11-14T22:13:20Z") exit(1);' "$temporary/first.json"
 printf 'CLI release metadata is stable across publication retries.\n'
+
+bash "$root/scripts/release/cli-key.test.sh"
