@@ -23,6 +23,9 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    env:
+      # Auth links use the canonical origin, which must match the browser tests.
+      SAIL_APP_URL: http://127.0.0.1:8000
     services:
       mysql:
         image: mysql:8.4

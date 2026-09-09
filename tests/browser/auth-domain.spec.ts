@@ -120,21 +120,26 @@ test('same-origin auth links and mode switches keep the Vue document', async ({
 }) => {
     await profile(page, baseURL!);
     await page.evaluate(() => Object.assign(window, { authDocument: document }));
+    const expectSameDocument = async () => {
+        expect(
+            await page.evaluate(
+                () => (window as Window & { authDocument?: Document }).authDocument === document,
+            ),
+        ).toBe(true);
+    };
     await page.locator('.fb-header__actions').getByRole('link', { name: 'Sign in' }).click();
     await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
+    await expectSameDocument();
     await page
         .getByRole('navigation', { name: 'Authentication links' })
         .getByRole('link', { name: 'Create account' })
         .click();
     await expect(page.getByRole('heading', { name: 'Create your account' })).toBeVisible();
+    await expectSameDocument();
     await page
         .getByRole('navigation', { name: 'Authentication links' })
         .getByRole('link', { name: 'Sign in' })
         .click();
     await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
-    expect(
-        await page.evaluate(
-            () => (window as Window & { authDocument?: Document }).authDocument === document,
-        ),
-    ).toBe(true);
+    await expectSameDocument();
 });
