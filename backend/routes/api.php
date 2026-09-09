@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\Api\V1\DownloadSessionController;
+use App\Http\Controllers\Api\V1\InfoController;
 use App\Http\Controllers\Api\V1\TransferChunkController;
 use App\Http\Controllers\Api\V1\TransferChunkStageController;
 use App\Http\Controllers\Api\V1\TransferController;
@@ -16,6 +17,8 @@ use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function (): void {
+    Route::get('/info', InfoController::class)->name('api.info');
+
     Route::post('/transfers', [TransferController::class, 'store'])
         ->middleware([
             EncryptCookies::class,

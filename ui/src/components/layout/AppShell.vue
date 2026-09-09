@@ -220,6 +220,7 @@ function goHome(event: MouseEvent): void {
                     >v{{ branding.version }}</span
                 >
             </div>
+            <slot name="footer" />
             <span>&copy; {{ branding.copyright_year }} {{ copyrightHolder }}</span>
         </footer>
     </div>

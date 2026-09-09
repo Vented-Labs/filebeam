@@ -1,0 +1,125 @@
+name: Beam CLI
+
+on:
+  pull_request:
+    paths:
+      - 'cli/**'
+      - 'docker/cli/**'
+      - 'scripts/cli/**'
+      - 'scripts/release/cli-*'
+      - '.github/workflows/beam.yml'
+  push:
+    tags:
+      - 'beam-v*.*.*'
+  schedule:
+    - cron: '19 4 * * *'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing beam-vX.Y.Z tag to package and publish
+        required: true
+        type: string
+      publish:
+        description: Publish to R2
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.tag || github.ref }}
+      - name: Check and test beam in constrained Docker
+        run: |
+          chmod +x scripts/cli/*.sh scripts/release/cli-*.php scripts/release/cli-publish.sh
+          scripts/cli/check.sh
+          scripts/cli/test.sh
+          scripts/cli/build.sh
+          scripts/cli/terminal.test.sh
+          scripts/cli/catalog.test.sh
+          scripts/cli/install.test.sh
+
+  package:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: test
+    runs-on: ubuntu-latest
+    environment: release
+    timeout-minutes: 40
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      BEAM_RELEASE_PUBLIC_KEY: ${{ secrets.RELEASE_PUBLIC_KEY }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+      - name: Package Linux artifacts in constrained Docker
+        run: |
+          chmod +x scripts/cli/*.sh
+          [[ "$RELEASE_TAG" =~ ^beam-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          [[ $(git rev-list -n 1 "$RELEASE_TAG") == "$(git rev-parse HEAD)" ]]
+          [[ -n "$BEAM_RELEASE_PUBLIC_KEY" ]]
+          scripts/cli/package.sh "$RELEASE_TAG" dist/beam
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: beam-${{ env.RELEASE_TAG }}
+          path: dist/beam/
+          if-no-files-found: error
+
+  publish:
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    needs: package
+    runs-on: ubuntu-latest
+    environment: release
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: beam-${{ env.RELEASE_TAG }}
+          path: dist/beam
+      - name: Publish immutable artifacts and signed CLI catalog
+        run: |
+          chmod +x scripts/release/cli-publish.sh scripts/release/cli-*.php scripts/release/sign-index.php
+          scripts/release/cli-publish.sh "$RELEASE_TAG" dist/beam
+        env:
+          R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          RELEASE_PUBLIC_KEY: ${{ secrets.RELEASE_PUBLIC_KEY }}
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+
+  refresh-catalog:
+    if: github.event_name == 'schedule'
+    needs: test
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Refresh signed CLI catalog expiry
+        run: |
+          chmod +x scripts/release/cli-refresh-index.sh scripts/release/cli-*.php scripts/release/sign-index.php
+          scripts/release/cli-refresh-index.sh
+        env:
+          R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          RELEASE_PUBLIC_KEY: ${{ secrets.RELEASE_PUBLIC_KEY }}
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}

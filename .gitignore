@@ -1,5 +1,6 @@
 node_modules/
 encryption/target/
+cli/target/
 encryption/pkg/
 .filebeam/
 /.ai/
