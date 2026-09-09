@@ -39,6 +39,16 @@ function rejects(callable $callback, string $message): void
     }
 }
 
+function rejectsWith(callable $callback, string $expected, string $message): void
+{
+    try {
+        $callback();
+        check(false, $message);
+    } catch (Throwable $exception) {
+        check($exception->getMessage() === $expected, $message);
+    }
+}
+
 function removeDirectory(string $directory): void
 {
     if (! is_dir($directory)) {
@@ -127,7 +137,7 @@ try {
     file_put_contents($manifestRoot.'/updater/ActivityLock.php', 'test');
     file_put_contents($manifestRoot.'/updater/PostgresBackup.php', 'test');
     mkdir($manifestRoot.'/docs', 0700, true);
-    foreach (['LICENSE', 'README.md', 'SECURITY.md', 'docs/deployment.md'] as $path) {
+    foreach (['LICENSE', 'README.md', 'SECURITY.md', 'docs/deployment.md', 'docs/social-previews.md'] as $path) {
         file_put_contents($manifestRoot.'/'.$path, 'test');
     }
     $manifestFiles = [
@@ -139,17 +149,30 @@ try {
         'README.md' => hash_file('sha256', $manifestRoot.'/README.md'),
         'SECURITY.md' => hash_file('sha256', $manifestRoot.'/SECURITY.md'),
         'docs/deployment.md' => hash_file('sha256', $manifestRoot.'/docs/deployment.md'),
+        'docs/social-previews.md' => hash_file('sha256', $manifestRoot.'/docs/social-previews.md'),
     ];
     file_put_contents($manifestRoot.'/package-files.json', json_encode(['schema' => 1, 'files' => $manifestFiles], JSON_THROW_ON_ERROR));
     Package::verify($manifestRoot, Package::manifest($manifestRoot));
-    check(true, 'validates package manifests containing required legal and deployment files');
+    check(true, 'validates package manifests containing approved legal and documentation files');
     $missingBackupHelper = Package::manifest($manifestRoot);
     unset($missingBackupHelper['files']['updater/PostgresBackup.php']);
     rejects(fn () => Package::verify($manifestRoot, $missingBackupHelper), 'rejects a package missing the PostgreSQL backup helper');
     file_put_contents($manifestRoot.'/package-files.json', json_encode(['schema' => 1, 'files' => ['../.env' => str_repeat('a', 64)]], JSON_THROW_ON_ERROR));
     rejects(fn (): array => Package::manifest($manifestRoot), 'rejects unsafe manifest paths');
     file_put_contents($manifestRoot.'/package-files.json', json_encode(['schema' => 1, 'files' => ['unexpected.md' => str_repeat('a', 64)]], JSON_THROW_ON_ERROR));
-    rejects(fn (): array => Package::manifest($manifestRoot), 'rejects unapproved package-root files');
+    rejectsWith(fn (): array => Package::manifest($manifestRoot), 'Package manifest entry has an unsafe or unapproved path: "unexpected.md".', 'identifies unapproved package-root files');
+    file_put_contents($manifestRoot.'/package-files.json', '{');
+    rejectsWith(fn (): array => Package::manifest($manifestRoot), 'Package manifest JSON is invalid: Syntax error.', 'identifies malformed manifest JSON');
+    file_put_contents($manifestRoot.'/package-files.json', json_encode(['schema' => 2, 'files' => new stdClass], JSON_THROW_ON_ERROR));
+    rejectsWith(fn (): array => Package::manifest($manifestRoot), 'Package manifest schema must be 1.', 'identifies unsupported manifest schemas');
+    file_put_contents($manifestRoot.'/package-files.json', json_encode(['schema' => 1, 'files' => []], JSON_THROW_ON_ERROR));
+    rejectsWith(fn (): array => Package::manifest($manifestRoot), 'Package manifest files must be an object.', 'rejects a manifest files array');
+    file_put_contents($manifestRoot.'/package-files.json', json_encode(['schema' => 1, 'files' => ['update.php' => 'invalid']], JSON_THROW_ON_ERROR));
+    rejectsWith(fn (): array => Package::manifest($manifestRoot), 'Package manifest hash is invalid for "update.php".', 'identifies invalid manifest hashes');
+    $missingFile = ['schema' => 1, 'files' => ['backend/missing.php' => str_repeat('a', 64)]];
+    rejectsWith(fn () => Package::verify($manifestRoot, $missingFile), 'Package manifest file is missing: "backend/missing.php".', 'identifies missing package files');
+    $hashMismatch = ['schema' => 1, 'files' => ['update.php' => str_repeat('a', 64)]];
+    rejectsWith(fn () => Package::verify($manifestRoot, $hashMismatch), 'Package manifest hash mismatch for "update.php".', 'identifies package hash mismatches');
 
     $archive = $temporary.'/traversal.zip';
     $zip = new ZipArchive;

@@ -30,11 +30,11 @@ Shared hosting needs just one cron entry, configured after installation using th
 * * * * * cd /path/to/filebeam/backend && php artisan schedule:run >> /dev/null 2>&1
 ```
 
-The scheduler performs transfer cleanup, checks releases, and processes pending notifications and file deletions. With the default `QUEUE_CONNECTION=database` and `FILEBEAM_CRON_QUEUE_ENABLED=true`, it starts a short-lived job processor every minute, stops when empty or after 25 jobs / a 50-second processing budget, and prevents overlapping batches. Jobs and retries remain in the database until a later cron run; notifications and physical file deletion may therefore be delayed by a minute or more. Keep the default file cache, or another persistent lock-capable cache, for overlap protection.
+The scheduler performs transfer cleanup, checks releases, invokes the package updater, and processes pending notifications and file deletions. The updater invocation records its heartbeat every minute and processes upgrades queued by an administrator even when automatic updates are disabled. It is overlap-protected and runs only for package installations; do not add a separate `update.php --cron` system cron entry. With the default `QUEUE_CONNECTION=database` and `FILEBEAM_CRON_QUEUE_ENABLED=true`, the scheduler also starts a short-lived job processor every minute, stops when empty or after 25 jobs / a 50-second processing budget, and prevents overlapping batches. Jobs and retries remain in the database until a later cron run; notifications and physical file deletion may therefore be delayed by a minute or more. Keep the default file cache, or another persistent lock-capable cache, for overlap protection.
 
 The processing budget is checked between jobs, so a single slow job may take longer. The 60-second per-job timeout requires PHP's PCNTL extension and must remain shorter than the database queue's `retry_after` (90 seconds by default). Allow enough CLI runtime on the hosting plan for mail and storage operations. If the host forcibly terminates a scheduler, its batch lock expires after ten minutes; `php artisan schedule:clear-cache` clears a stale lock after confirming no batch is still running.
 
-The admin panel can flag a missing scheduler heartbeat; restore cron before expecting background work to catch up. Configure mail separately if the deployment needs account emails or notifications. Failed jobs can be inspected with `php artisan queue:failed` and retried with `php artisan queue:retry <id>`.
+The admin panel can flag a missing scheduler or scheduler-managed updater heartbeat; restore the single scheduler cron entry before expecting background work or queued upgrades to catch up. Configure mail separately if the deployment needs account emails or notifications. Failed jobs can be inspected with `php artisan queue:failed` and retried with `php artisan queue:retry <id>`.
 
 Dedicated servers may optionally run a persistent `php artisan queue:work` instead. Set `FILEBEAM_CRON_QUEUE_ENABLED=false` and rebuild configuration with `php artisan optimize` when doing so. The cron processor does not consume Redis or other queue connections; those deployments retain their own worker setup.
 
@@ -78,6 +78,12 @@ Before changing code or running migrations, the updater enters maintenance mode,
 For PostgreSQL, each updater backup is a native custom-format archive at `.filebeam/database-backups/database-*.dump`. The updater creates the backup directory with mode `0700` and archives with mode `0600`. It validates the PostgreSQL custom archive (`PGDMP` header), runs `pg_restore --list`, and fully parses it with `pg_restore --file=/dev/null` before continuing. Database credentials are provided through a private, ephemeral `PGPASSFILE`; passwords are never placed on the command line.
 
 Use `--recover` only for an interrupted update before migrations begin. Once migrations begin, `--recover` refuses to continue: restore the database backup and deploy manually. The updater never automatically performs a destructive restore.
+
+### v0.1.0 Updater Bridge
+
+The v0.1.0 updater rejects the v0.1.1 package because that archive contains the unapproved, non-runtime path `docs/social-previews.md`. The rejection occurs before maintenance mode, backups, code replacement, or migrations. Do not replace the immutable v0.1.0 or v0.1.1 release objects and do not install an unsigned updater patch.
+
+Publish the next corrected release with the current release tooling. `scripts/release/package.sh` intentionally keeps updater-protocol-1 archives compatible with v0.1.0 by excluding `docs/social-previews.md`, and it verifies the generated manifest before creating the archive. Once the corrected release is the latest stable catalog entry, run `php update.php` once from a v0.1.0 package root. The existing updater skips the older invalid release, selects the corrected latest release, and installs the scheduler integration and corrected manifest policy. Subsequent administrator-queued upgrades are processed by the Laravel scheduler.
 
 ### PostgreSQL Manual Restore
 

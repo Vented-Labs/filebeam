@@ -267,7 +267,7 @@ class ReleaseChecker
         }
 
         if ($requireCron && ! $this->cronIsReady()) {
-            $reasons[] = 'The updater cron has not reported a heartbeat in the last 24 hours.';
+            $reasons[] = 'The scheduler-managed updater has not reported a heartbeat in the last 24 hours.';
         }
 
         if ($reasons === []

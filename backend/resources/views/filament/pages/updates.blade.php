@@ -28,8 +28,8 @@
 
             <div class="mt-4 flex gap-3">
                 <x-filament::button wire:click="checkNow">Check now</x-filament::button>
-                @if (($releaseCheck['latest']['upgradeable'] ?? false) && ($availability['available'] ?? false))
-                    <x-filament::button color="warning" wire:click="upgradeNow">Upgrade now</x-filament::button>
+                @if ($releaseCheck['latest']['upgradeable'] ?? false)
+                    <x-filament::button color="warning" wire:click="upgradeNow" :disabled="! ($availability['available'] ?? false)">Upgrade now</x-filament::button>
                 @endif
             </div>
         </x-filament::section>
@@ -38,7 +38,7 @@
             <x-slot name="heading">Updater</x-slot>
 
             <p>Status: {{ $updaterStatus['state'] ?? 'idle' }}</p>
-            <p class="mt-2">Cron heartbeat: {{ $updaterHeartbeat['at'] ?? 'Not reported' }}</p>
+            <p class="mt-2">Scheduler updater heartbeat: {{ $updaterHeartbeat['at'] ?? 'Not reported' }}</p>
             @if ($updaterStatus['tag'] ?? null)<p class="mt-2">Release: {{ $updaterStatus['tag'] }}</p>@endif
             @if ($updaterStatus['error'] ?? null)<p class="mt-2 text-sm text-danger-600">{{ $updaterStatus['error'] }}</p>@endif
             @unless ($availability['available'] ?? false)

@@ -9,6 +9,7 @@ use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schedule;
+use Symfony\Component\Process\PhpExecutableFinder;
 
 Artisan::command('filebeam:inspire', function () {
     $this->comment(Inspiring::quote());
@@ -82,3 +83,10 @@ Schedule::call(fn (): array => app(ReleaseChecker::class)->checkAndInstallAutoma
     ->name('filebeam:check-updates')
     ->daily()
     ->withoutOverlapping();
+
+$php = (new PhpExecutableFinder)->find(false) ?: 'php';
+Schedule::exec(escapeshellarg($php), [escapeshellarg(dirname(base_path()).'/update.php'), '--cron'])
+    ->name('filebeam:process-updates')
+    ->everyMinute()
+    ->when(fn (): bool => config('version.distribution') === 'package')
+    ->withoutOverlapping(60);

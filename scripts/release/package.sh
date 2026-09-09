@@ -61,7 +61,9 @@ trap cleanup EXIT
 mkdir -p "$stage/backend"
 cp -a "$root/LICENSE" "$root/SECURITY.md" "$root/README.md" "$stage/"
 mkdir -p "$stage/docs"
-cp -a "$root/docs/deployment.md" "$root/docs/social-previews.md" "$stage/docs/"
+# Updater protocol 1 accepts only deployment.md. Keep bridge releases installable
+# by v0.1.0; the corrected updater permits social-previews.md in future protocols.
+cp -a "$root/docs/deployment.md" "$stage/docs/"
 
 copy_entry() {
     local entry=$1
@@ -104,6 +106,7 @@ fi
 mkdir -p "$stage/backend/config"
 php "$root/scripts/release/write-version.php" "$stage/backend/config/version.php" "$version" "$tag" "$commit" "$built_at" "$public_key"
 php "$root/scripts/release/manifest.php" "$stage" > "$stage/package-files.json"
+php "$root/scripts/release/validate-manifest.php" "$stage"
 
 archive="$output_dir/filebeam-$tag.zip"
 release="$output_dir/release.json"

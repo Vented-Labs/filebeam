@@ -683,27 +683,61 @@ final class Package
     public static function manifest(string $root): array
     {
         $file = $root.'/package-files.json';
-        $manifest = is_file($file) ? json_decode((string) file_get_contents($file), true, 512, JSON_THROW_ON_ERROR) : null;
-        if (! is_array($manifest) || ($manifest['schema'] ?? null) !== 1 || ! is_array($manifest['files'] ?? null)) {
-            throw new RuntimeException('Package manifest is invalid.');
-        } foreach ($manifest['files'] as $path => $hash) {
-            if (! is_string($path) || ! self::packagePath($path) || ! is_string($hash) || ! preg_match('/^[a-f0-9]{64}$/', $hash)) {
-                throw new RuntimeException('Package manifest is invalid.');
+        if (! is_file($file)) {
+            throw new RuntimeException('Package manifest is missing: package-files.json.');
+        }
+        $contents = file_get_contents($file);
+        if ($contents === false) {
+            throw new RuntimeException('Package manifest cannot be read: package-files.json.');
+        }
+        try {
+            $manifest = json_decode($contents, false, 512, JSON_THROW_ON_ERROR);
+        } catch (\JsonException $exception) {
+            throw new RuntimeException('Package manifest JSON is invalid: '.$exception->getMessage().'.');
+        }
+        if (! $manifest instanceof \stdClass) {
+            throw new RuntimeException('Package manifest root must be an object.');
+        }
+        if (($manifest->schema ?? null) !== 1) {
+            throw new RuntimeException('Package manifest schema must be 1.');
+        }
+        if (! isset($manifest->files) || ! $manifest->files instanceof \stdClass) {
+            throw new RuntimeException('Package manifest files must be an object.');
+        }
+        $files = get_object_vars($manifest->files);
+        foreach ($files as $path => $hash) {
+            if (! self::packagePath($path)) {
+                throw new RuntimeException('Package manifest entry has an unsafe or unapproved path: '.self::displayPath($path).'.');
+            }
+            if (! is_string($hash) || ! preg_match('/^[a-f0-9]{64}$/', $hash)) {
+                throw new RuntimeException('Package manifest hash is invalid for '.self::displayPath($path).'.');
             }
         }
 
-        return ['schema' => 1, 'files' => $manifest['files']];
+        return ['schema' => 1, 'files' => $files];
     }
 
     /** @param array{schema: 1, files: array<string, string>} $manifest */
     public static function verify(string $root, array $manifest): void
     {
         foreach ($manifest['files'] as $path => $hash) {
-            if (! self::packagePath($path) || ! preg_match('/^[a-f0-9]{64}$/', $hash) || ! is_file($root.'/'.$path) || hash_file('sha256', $root.'/'.$path) !== $hash) {
-                throw new RuntimeException('Package manifest verification failed.');
+            if (! self::packagePath($path)) {
+                throw new RuntimeException('Package manifest entry has an unsafe or unapproved path: '.self::displayPath($path).'.');
             }
-        } if (! isset($manifest['files']['update.php'], $manifest['files']['updater/Updater.php'], $manifest['files']['updater/ActivityLock.php'], $manifest['files']['updater/PostgresBackup.php'])) {
-            throw new RuntimeException('Package is missing updater files.');
+            if (! preg_match('/^[a-f0-9]{64}$/', $hash)) {
+                throw new RuntimeException('Package manifest hash is invalid for '.self::displayPath($path).'.');
+            }
+            if (! is_file($root.'/'.$path)) {
+                throw new RuntimeException('Package manifest file is missing: '.self::displayPath($path).'.');
+            }
+            if (hash_file('sha256', $root.'/'.$path) !== $hash) {
+                throw new RuntimeException('Package manifest hash mismatch for '.self::displayPath($path).'.');
+            }
+        }
+        foreach (['update.php', 'updater/Updater.php', 'updater/ActivityLock.php', 'updater/PostgresBackup.php'] as $required) {
+            if (! isset($manifest['files'][$required])) {
+                throw new RuntimeException('Package is missing required updater file: '.$required.'.');
+            }
         }
     }
 
@@ -722,7 +756,12 @@ final class Package
     private static function packagePath(string $path): bool
     {
         return self::safePath($path)
-            && ($path === 'LICENSE' || $path === 'README.md' || $path === 'SECURITY.md' || $path === 'docs/deployment.md' || str_starts_with($path, 'backend/') || str_starts_with($path, 'updater/') || $path === 'update.php');
+            && ($path === 'LICENSE' || $path === 'README.md' || $path === 'SECURITY.md' || $path === 'docs/deployment.md' || $path === 'docs/social-previews.md' || str_starts_with($path, 'backend/') || str_starts_with($path, 'updater/') || $path === 'update.php');
+    }
+
+    private static function displayPath(string $path): string
+    {
+        return json_encode($path, JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) ?: '"<invalid>"';
     }
 }
 
