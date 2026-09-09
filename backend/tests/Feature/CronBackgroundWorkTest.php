@@ -30,6 +30,29 @@ test('cron registers short database batches with an overlap lock', function (): 
     expect(config('queue.connections.database.retry_after'))->toBeGreaterThan(60);
 });
 
+test('scheduler processes package updates without a separate system cron', function (): void {
+    $event = collect(app(Schedule::class)->events())->first(fn (Event $event): bool => $event->description === 'filebeam:process-updates');
+
+    expect($event)->not->toBeNull();
+    expect($event->expression)->toBe('* * * * *');
+    expect($event->command)->toContain(PHP_BINARY, dirname(base_path()).'/update.php', '--cron');
+    expect($event->withoutOverlapping)->toBeTrue();
+    expect($event->expiresAt)->toBe(60);
+
+    config()->set('filebeam.updates.auto_enabled', false);
+    config()->set('version.distribution', 'package');
+    expect($event->filtersPass(app()))->toBeTrue();
+    expect($event->mutex->create($event))->toBeTrue();
+    try {
+        expect($event->filtersPass(app()))->toBeFalse();
+    } finally {
+        $event->mutex->forget($event);
+    }
+
+    config()->set('version.distribution', 'source');
+    expect($event->filtersPass(app()))->toBeFalse();
+});
+
 test('cron maintains SQLite nightly without overlapping', function (): void {
     $default = DB::getDefaultConnection();
     $connection = 'sqlite_maintenance';

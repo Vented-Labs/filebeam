@@ -69,7 +69,7 @@ class Updates extends Page
         try {
             $releaseChecker->queue($tag, (string) $user->getKey());
             $this->refreshState($releaseChecker);
-            Notification::make()->title('Upgrade queued for the updater cron')->success()->send();
+            Notification::make()->title('Upgrade queued for the scheduler')->success()->send();
         } catch (\Throwable $exception) {
             Notification::make()->title('Upgrade was not queued')->body($exception->getMessage())->danger()->send();
         }

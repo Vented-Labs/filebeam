@@ -262,6 +262,32 @@ test('only admins can access updates and page reads do not fetch the network', f
         ->assertSee('Installed version');
 });
 
+test('blocked upgrades remain visible with the scheduler updater requirement', function () {
+    $keypair = sodium_crypto_sign_keypair();
+    config()->set('version', [...config('version'), 'distribution' => 'package', 'update_public_key' => base64_encode(sodium_crypto_sign_publickey($keypair))]);
+    $statePath = config('filebeam.updates.state_path');
+    File::ensureDirectoryExists($statePath);
+    File::put($statePath.'/release-check.json', json_encode([
+        'state' => 'available',
+        'checked_at' => now('UTC')->toIso8601String(),
+        'latest' => [
+            'tag' => 'v0.2.0',
+            'upgradeable' => true,
+            'warning' => null,
+            'security_warnings' => [],
+        ],
+        'error' => null,
+    ], JSON_THROW_ON_ERROR));
+    $admin = User::factory()->create(['role' => UserRole::Admin]);
+    $this->actingAs($admin, 'admin');
+
+    Livewire::test(Updates::class)
+        ->assertOk()
+        ->assertSee('Upgrade now')
+        ->assertSeeHtml('disabled')
+        ->assertSee('The scheduler-managed updater has not reported a heartbeat in the last 24 hours.');
+});
+
 test('source installations cannot queue self-updates', function () {
     expect(app(ReleaseChecker::class)->availability()['available'])->toBeFalse()
         ->and(app(ReleaseChecker::class)->availability()['reasons'])->toContain('Self-updates are available only for package installations.');
