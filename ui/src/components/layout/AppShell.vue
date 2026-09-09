@@ -249,7 +249,7 @@ function goHome(event: MouseEvent): void {
     font-size: 0.75rem;
 }
 
-@media (max-width: 720px) {
+@media (max-width: 900px) {
     .fb-header {
         flex-wrap: nowrap;
     }
