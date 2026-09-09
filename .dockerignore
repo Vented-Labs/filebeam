@@ -13,7 +13,14 @@
 !LICENSE
 !SECURITY.md
 
+!icons/
+!icons/NOTICE
+!icons/approved.json
+!icons/dependency-inventory.json
+
 !scripts/
+!scripts/check-icons.mjs
+!scripts/generate-icons.mjs
 !scripts/og/
 !scripts/og/**
 
