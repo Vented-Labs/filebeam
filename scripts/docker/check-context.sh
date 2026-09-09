@@ -55,6 +55,7 @@ COPY docker/production /context/docker/production
 COPY icons /context/icons
 COPY scripts/check-icons.mjs scripts/generate-icons.mjs /context/scripts/
 COPY scripts/og /context/scripts/og
+COPY scripts/prism-gallery /context/scripts/prism-gallery
 COPY backend/artisan backend/composer.json backend/composer.lock backend/package.json backend/vite.config.ts backend/tsconfig.json /context/backend/
 COPY backend/app /context/backend/app
 COPY backend/bootstrap /context/backend/bootstrap
@@ -177,6 +178,8 @@ require_present 'icons/dependency-inventory.json'
 require_present 'scripts/check-icons.mjs'
 require_present 'scripts/generate-icons.mjs'
 require_prefix 'scripts/og'
+require_present 'scripts/prism-gallery/check-icons.mjs'
+require_present 'scripts/prism-gallery/Gallery.vue'
 require_present 'backend/artisan'
 require_present 'backend/composer.json'
 require_present 'backend/composer.lock'
@@ -249,6 +252,10 @@ if [[ $# -eq 2 ]]; then
     while IFS= read -r path; do
         path="${path#./}"
         [[ "$path" == opt/filebeam/* ]] || continue
+        if [[ "$path" == opt/filebeam/scripts/prism-gallery/* ]]; then
+            printf 'Build-only gallery source leaked into the runtime image: /%s\n' "$path" >&2
+            exit 1
+        fi
         [[ "$path" != 'opt/filebeam/LICENSE' ]] || license_present=true
         [[ "$path" != 'opt/filebeam/SECURITY.md' ]] || security_present=true
         name="${path##*/}"
