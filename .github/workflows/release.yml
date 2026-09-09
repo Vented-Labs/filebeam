@@ -43,6 +43,16 @@ permissions:
   contents: read
 
 jobs:
+  cli:
+    if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish && !inputs.metadata_only)) && needs.validate-ref.result == 'success'
+    needs: [test, validate-ref]
+    permissions:
+      contents: write
+    uses: ./.github/workflows/beam.yml
+    with:
+      tag: ${{ needs.validate-ref.outputs.tag }}
+      publish: true
+    secrets: inherit
   test:
     if: github.event_name != 'schedule' && needs.validate-ref.result == 'success'
     needs: validate-ref
@@ -97,7 +107,10 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install --yes zip unzip
       - run: npm ci
       - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
+        run: |
+          # Avoid unrelated Chrome repository index races during Ubuntu dependency installation.
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.list /etc/apt/sources.list.d/google-chrome.sources
+          npx playwright install --with-deps chromium
       - name: Prepare Laravel writable directories
         working-directory: backend
         run: mkdir -p bootstrap/cache storage/app/private storage/app/public storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs

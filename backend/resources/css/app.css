@@ -10,6 +10,9 @@
 @theme inline {
     --font-sans: var(--fb-font-ui);
     --font-mono: var(--fb-font-code);
+    --text-xs: 0.825rem;
+    --text-sm: 0.9625rem;
+    --text-base: 1.1rem;
 }
 
 :root {
@@ -24,6 +27,11 @@ html {
 body {
     margin: 0;
     min-width: 320px;
+    background: var(--fb-bg);
+}
+
+#app {
+    min-height: 100svh;
     background: var(--fb-bg);
 }
 

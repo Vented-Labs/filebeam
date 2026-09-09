@@ -1,9 +1,15 @@
 import { expect, test, type Page } from '@playwright/test';
 
 test.use({
-    launchOptions: {
-        ignoreDefaultArgs: ['--hide-scrollbars'],
-        args: ['--disable-features=OverlayScrollbar'],
+    launchOptions: async ({ browserName }, use) => {
+        await use(
+            browserName === 'chromium'
+                ? {
+                      ignoreDefaultArgs: ['--hide-scrollbars'],
+                      args: ['--disable-features=OverlayScrollbar'],
+                  }
+                : {},
+        );
     },
 });
 
@@ -60,7 +66,11 @@ test('keeps independent file and note composers across completed results and res
     page,
 }) => {
     const file = await upload(page);
-    await note(page, 'private note draft');
+    const outgoingFileResult = page.locator('.prism-stage__pane--result');
+    await page.getByRole('tab', { name: 'Notes' }).click();
+    await expect(outgoingFileResult).toHaveAttribute('inert', '');
+    await expect(outgoingFileResult).toHaveAttribute('aria-hidden', 'true');
+    await page.locator('.cm-content[contenteditable="true"]').fill('private note draft');
     await page.getByRole('tab', { name: 'Files' }).click();
     await expect(page.locator('#share-link')).toHaveValue(file.link);
     await note(page, 'private note draft');
@@ -74,7 +84,10 @@ test('keeps independent file and note composers across completed results and res
     const data = (await (await created).json()).data as { id: string; delete_token: string };
     transfers.push({ id: data.id, deleteToken: data.delete_token });
     await expect(page.getByRole('heading', { name: 'Your encrypted link is ready' })).toBeVisible();
+    const outgoingNoteResult = page.locator('.prism-stage__pane--result');
     await page.getByRole('button', { name: 'New transfer' }).click();
+    await expect(outgoingNoteResult).toHaveAttribute('inert', '');
+    await expect(outgoingNoteResult).toHaveAttribute('aria-hidden', 'true');
     await expect(page.locator('.cm-content[contenteditable="true"]')).toHaveText('');
     await page.getByRole('tab', { name: 'Files' }).click();
     await expect(page.locator('#share-link')).toHaveValue(file.link);
@@ -106,7 +119,7 @@ test('copies link and key independently after clipboard promises settle, with lo
         const keyButton = page.getByRole('button', { name: 'Copy key' });
         const widths = await Promise.all(
             [linkButton, keyButton].map((button) =>
-                button.evaluate((node) => node.getBoundingClientRect().width),
+                button.evaluate((node) => (node as HTMLElement).offsetWidth),
             ),
         );
         await linkButton.click();
@@ -123,7 +136,7 @@ test('copies link and key independently after clipboard promises settle, with lo
         expect(
             await Promise.all(
                 [linkButton, keyButton].map((button) =>
-                    button.evaluate((node) => node.getBoundingClientRect().width),
+                    button.evaluate((node) => (node as HTMLElement).offsetWidth),
                 ),
             ),
         ).toEqual(widths);
@@ -327,7 +340,9 @@ test('start a new transfer uses Vue navigation and a view transition', async ({ 
     expect(await page.evaluate(() => (window as any).homeTransitionCount)).toBeGreaterThan(0);
 });
 
-test('profile and home navigation stays within the Vue document', async ({ page }) => {
+test('profile and home navigation stays within the Vue document without route ghosting', async ({
+    page,
+}) => {
     const username = `qa_nav_${Date.now().toString(36)}`;
     await page.goto('/register');
     await page.getByLabel('Username', { exact: true }).fill(username);
@@ -340,10 +355,103 @@ test('profile and home navigation stays within the Vue document', async ({ page 
     await expect(page.getByRole('dialog')).toHaveCount(0);
     await expect(page.getByTestId('file-pond')).toBeVisible();
     await page.evaluate(() => Object.assign(window, { profileDocument: document }));
-    await page.locator('header a[href="/account"]').click();
-    await expect(page.getByRole('heading', { name: 'Account', exact: true })).toBeVisible();
-    await page.getByRole('link', { name: 'Filebeam home' }).click();
-    await expect(page.getByTestId('file-pond')).toBeVisible();
+
+    const openProfile = async () => {
+        const frameSampling = page.locator('.fb-page-transition').evaluate(async (surface) => {
+            const deadline = performance.now() + 5_000;
+            while (!surface.hasAttribute('data-changing') && performance.now() < deadline)
+                await new Promise(requestAnimationFrame);
+
+            let samples = 0;
+            let accountStateSamples = 0;
+            let filteredStateFrames = 0;
+            let nestedStateTransitionFrames = 0;
+            let scaledPageFrames = 0;
+            let exposedOutgoingFrames = 0;
+            while (surface.hasAttribute('data-changing') && performance.now() < deadline) {
+                const leaving = surface.querySelector<HTMLElement>('.fb-page-leave-active');
+                if (leaving && getComputedStyle(leaving).visibility !== 'hidden')
+                    exposedOutgoingFrames++;
+                const entering = surface.querySelector<HTMLElement>('.fb-page-enter-active');
+                if (entering) {
+                    const transform = getComputedStyle(entering).transform;
+                    const matrix =
+                        transform === 'none'
+                            ? new DOMMatrixReadOnly()
+                            : new DOMMatrixReadOnly(transform);
+                    if (Math.abs(matrix.a - 1) > 0.0001 || Math.abs(matrix.d - 1) > 0.0001)
+                        scaledPageFrames++;
+                }
+                const accountStates = [
+                    ...document.querySelectorAll<HTMLElement>('.inbox-settings__state'),
+                ];
+                if (accountStates.length > 0) accountStateSamples++;
+                if (accountStates.some((state) => getComputedStyle(state).filter !== 'none'))
+                    filteredStateFrames++;
+                if (
+                    accountStates.some(
+                        (state) =>
+                            state.classList.contains('inbox-settings__state-enter-active') ||
+                            state.classList.contains('inbox-settings__state-leave-active'),
+                    )
+                )
+                    nestedStateTransitionFrames++;
+                samples++;
+                await new Promise(requestAnimationFrame);
+            }
+            return {
+                samples,
+                accountStateSamples,
+                filteredStateFrames,
+                nestedStateTransitionFrames,
+                scaledPageFrames,
+                exposedOutgoingFrames,
+            };
+        });
+        const transitionStarted = page.waitForFunction(
+            () =>
+                document.querySelectorAll('.fb-page-transition[data-changing] .fb-page-pane')
+                    .length === 2,
+        );
+        await page.locator('header a[href="/account"]').click();
+        await transitionStarted;
+        const surfaceState = await page
+            .locator('.fb-page-transition[data-changing]')
+            .evaluate((surface) => {
+                const leaving = surface.querySelector<HTMLElement>('.fb-page-leave-active');
+                return {
+                    outgoingHidden: leaving && getComputedStyle(leaving).visibility === 'hidden',
+                    mask: getComputedStyle(surface, '::before').content,
+                    ambient: getComputedStyle(surface.closest('.fb-shell')!).backgroundImage,
+                };
+            });
+        expect(surfaceState.outgoingHidden).toBe(true);
+        expect(surfaceState.mask).toBe('none');
+        expect(surfaceState.ambient).toContain('radial-gradient');
+        const frames = await frameSampling;
+        expect(frames.samples).toBeGreaterThan(0);
+        expect(frames.accountStateSamples).toBeGreaterThan(0);
+        expect(frames.filteredStateFrames).toBe(0);
+        expect(frames.nestedStateTransitionFrames).toBe(0);
+        expect(frames.scaledPageFrames).toBe(0);
+        expect(frames.exposedOutgoingFrames).toBe(0);
+        await expect(page.getByRole('heading', { name: 'Account', exact: true })).toBeVisible();
+        await expect(page.locator('.fb-page-transition[data-changing]')).toHaveCount(0);
+    };
+
+    for (const mode of ['Files', 'Notes']) {
+        if (mode === 'Notes') {
+            await page.getByRole('tab', { name: 'Notes', exact: true }).click();
+            await expect(page.getByRole('tab', { name: 'Notes', exact: true })).toHaveAttribute(
+                'aria-selected',
+                'true',
+            );
+        }
+        await openProfile();
+        await page.getByRole('link', { name: 'Filebeam home' }).click();
+        await expect(page.getByTestId('file-pond')).toBeVisible();
+        await expect(page.locator('.fb-page-transition[data-changing]')).toHaveCount(0);
+    }
     expect(await page.evaluate(() => (window as any).profileDocument === document)).toBe(true);
 });
 
@@ -352,24 +460,21 @@ test('keeps note controls aligned, exposes mobile information, and changes auth 
 }) => {
     await page.goto('/');
     await note(page, '<p>short</p>');
-    const controls = page.locator('.note-composer > div').nth(1);
-    const initial = await controls.locator('label').evaluate((node) => ({
-        wrap: node.getBoundingClientRect().left,
-        picker: node
-            .parentElement!.querySelector('[aria-label="Note language"]')!
-            .getBoundingClientRect().right,
-    }));
+    const controls = page.locator('.note-composer__tools');
+    const controlGeometry = () =>
+        controls.evaluate((node) => {
+            const wrap = node.querySelector<HTMLElement>('.note-composer__wrap')!;
+            const picker = node.querySelector<HTMLElement>('[aria-label="Note language"]')!;
+            return {
+                wrap: wrap.offsetLeft,
+                picker: picker.offsetLeft + picker.offsetWidth,
+            };
+        });
+    const initial = await controlGeometry();
     await page.getByRole('combobox', { name: 'Note language' }).click();
     await page.getByRole('option', { name: 'HTML', exact: true }).click();
     await page.locator('.cm-content[contenteditable="true"]').fill('plain text '.repeat(200));
-    expect(
-        await controls.locator('label').evaluate((node) => ({
-            wrap: node.getBoundingClientRect().left,
-            picker: node
-                .parentElement!.querySelector('[aria-label="Note language"]')!
-                .getBoundingClientRect().right,
-        })),
-    ).toEqual(initial);
+    expect(await controlGeometry()).toEqual(initial);
     await expect(page.getByText('Private draft', { exact: true })).toHaveCount(0);
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(page.locator('.fb-desktop-nav')).toBeHidden();
@@ -385,13 +490,29 @@ test('keeps note controls aligned, exposes mobile information, and changes auth 
     await page.getByText('About', { exact: true }).last().click();
     await expect(page.getByRole('dialog')).toBeVisible();
     await page.getByRole('button', { name: 'Close dialog' }).click();
-    await page.getByRole('link', { name: 'Register', exact: true }).click();
+    await page.getByRole('button', { name: 'Open navigation' }).click();
+    await page.getByRole('menuitem', { name: 'Register', exact: true }).click();
     const drawer = page.getByRole('dialog');
     await drawer.evaluate((node) => ((window as any).__refinementDrawer = node));
+    await expect
+        .poll(() => drawer.evaluate((node) => getComputedStyle(node).transform))
+        .toBe('none');
+    const paneGeometry = (selector: string) =>
+        drawer.locator(selector).evaluate((pane) => ({
+            x: pane.offsetLeft,
+            y: pane.offsetTop,
+            width: pane.offsetWidth,
+            height: pane.offsetHeight,
+        }));
     await page.getByLabel('Email', { exact: true }).fill('drawer@example.test');
     await page.getByLabel('Password', { exact: true }).fill('not-a-secret');
     const registerHeight = (await drawer.boundingBox())!.height;
+    const registerPaneBox = await paneGeometry('.auth-drawer__pane');
     await page.getByRole('link', { name: 'Sign in', exact: true }).click();
+    await expect(drawer.locator('.auth-drawer__pane')).toHaveCount(2);
+    const outgoingRegisterBox = await paneGeometry('.auth-drawer__pane[inert]');
+    for (const edge of ['x', 'y', 'width', 'height'] as const)
+        expect(Math.abs(outgoingRegisterBox[edge] - registerPaneBox[edge])).toBeLessThan(1);
     await expect(drawer).toContainText('Welcome back');
     const checkbox = page.getByRole('checkbox', { name: 'Keep me signed in' });
     await checkbox.focus();
@@ -403,7 +524,13 @@ test('keeps note controls aligned, exposes mobile information, and changes auth 
         'drawer@example.test',
     );
     await expect(page.getByLabel('Password', { exact: true })).toHaveValue('');
+    await expect(drawer.locator('.auth-drawer__pane[inert]')).toHaveCount(0);
+    const loginPaneBox = await paneGeometry('.auth-drawer__pane');
     await page.getByRole('link', { name: 'Forgot password?' }).click();
+    await expect(drawer.locator('.auth-drawer__pane')).toHaveCount(2);
+    const outgoingLoginBox = await paneGeometry('.auth-drawer__pane[inert]');
+    for (const edge of ['x', 'y', 'width', 'height'] as const)
+        expect(Math.abs(outgoingLoginBox[edge] - loginPaneBox[edge])).toBeLessThan(1);
     await expect(drawer).toContainText('Reset your password');
     expect((await drawer.boundingBox())!.height).not.toBe(registerHeight);
     expect(await drawer.evaluate((node) => node.scrollHeight <= node.clientHeight)).toBe(true);

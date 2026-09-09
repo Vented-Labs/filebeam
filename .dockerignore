@@ -25,6 +25,8 @@
 !scripts/generate-icons.mjs
 !scripts/og/
 !scripts/og/**
+!scripts/prism-gallery/
+!scripts/prism-gallery/**
 
 !backend/
 !backend/artisan

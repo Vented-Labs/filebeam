@@ -1,6 +1,14 @@
 name: Beam CLI
 
 on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+      publish:
+        required: true
+        type: boolean
   pull_request:
     paths:
       - 'cli/**'
@@ -16,7 +24,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing beam-vX.Y.Z tag to package and publish
+        description: Existing master vX.Y.Z or beam-vX.Y.Z tag to package and publish
         required: true
         type: string
       publish:
@@ -28,15 +36,46 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: beam-${{ github.event_name == 'pull_request' && github.ref || 'release-catalog' }}
+  cancel-in-progress: false
+
 jobs:
+  validate-ref:
+    if: github.event_name != 'pull_request' && github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    outputs:
+      commit: ${{ steps.verify.outputs.commit }}
+      tag: ${{ steps.verify.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          ref: refs/heads/master
+          fetch-depth: 0
+          fetch-tags: true
+      - id: verify
+        env:
+          SOURCE_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          commit=$(bash scripts/release/cli-validate-ref.sh "$SOURCE_TAG")
+          tag="beam-${SOURCE_TAG#beam-}"
+          printf 'commit=%s\ntag=%s\n' "$commit" "$tag" >> "$GITHUB_OUTPUT"
   test:
+    needs: validate-ref
+    if: always() && (github.event_name == 'pull_request' || github.event_name == 'schedule' || needs.validate-ref.result == 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ needs.validate-ref.outputs.commit || github.ref }}
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240
+        with:
+          php-version: '8.5'
+          extensions: sodium
+          coverage: none
       - name: Check and test beam in constrained Docker
         run: |
           chmod +x scripts/cli/*.sh scripts/release/cli-*.php scripts/release/cli-publish.sh
@@ -46,50 +85,62 @@ jobs:
           scripts/cli/terminal.test.sh
           scripts/cli/catalog.test.sh
           scripts/cli/install.test.sh
+          scripts/cli/release.test.sh
+          bash scripts/release/cli-release.test.sh
 
   package:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-    needs: test
+    needs: [test, validate-ref]
     runs-on: ubuntu-latest
     environment: release
     timeout-minutes: 40
     env:
-      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      RELEASE_TAG: ${{ needs.validate-ref.outputs.tag }}
+      RELEASE_COMMIT: ${{ needs.validate-ref.outputs.commit }}
       BEAM_RELEASE_PUBLIC_KEY: ${{ secrets.RELEASE_PUBLIC_KEY }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ env.RELEASE_COMMIT }}
           fetch-depth: 0
       - name: Package Linux artifacts in constrained Docker
         run: |
           chmod +x scripts/cli/*.sh
           [[ "$RELEASE_TAG" =~ ^beam-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
-          [[ $(git rev-list -n 1 "$RELEASE_TAG") == "$(git rev-parse HEAD)" ]]
+          [[ "$RELEASE_COMMIT" == "$(git rev-parse HEAD)" ]]
           [[ -n "$BEAM_RELEASE_PUBLIC_KEY" ]]
           scripts/cli/package.sh "$RELEASE_TAG" dist/beam
+          bash scripts/cli/smoke-package.sh "$RELEASE_TAG" dist/beam
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: beam-${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_TAG }}
           path: dist/beam/
           if-no-files-found: error
 
   publish:
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish)
-    needs: package
+    needs: [package, validate-ref]
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     environment: release
     env:
-      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      RELEASE_TAG: ${{ needs.validate-ref.outputs.tag }}
+      RELEASE_COMMIT: ${{ needs.validate-ref.outputs.commit }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ env.RELEASE_COMMIT }}
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240
+        with:
+          php-version: '8.5'
+          extensions: sodium
+          coverage: none
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
-          name: beam-${{ env.RELEASE_TAG }}
+          name: ${{ env.RELEASE_TAG }}
           path: dist/beam
       - name: Publish immutable artifacts and signed CLI catalog
         run: |
@@ -102,6 +153,12 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           RELEASE_PUBLIC_KEY: ${{ secrets.RELEASE_PUBLIC_KEY }}
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+      - name: Smoke test the public signed installer
+        run: bash scripts/cli/smoke-install.sh "$RELEASE_TAG"
+      - name: Create matching CLI release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/release/cli-github-release.sh "$RELEASE_TAG" "$RELEASE_COMMIT" dist/beam
 
   refresh-catalog:
     if: github.event_name == 'schedule'
@@ -112,6 +169,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240
+        with:
+          php-version: '8.5'
+          extensions: sodium
+          coverage: none
       - name: Refresh signed CLI catalog expiry
         run: |
           chmod +x scripts/release/cli-refresh-index.sh scripts/release/cli-*.php scripts/release/sign-index.php

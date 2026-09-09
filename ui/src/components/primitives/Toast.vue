@@ -53,33 +53,59 @@ const open = defineModel<boolean>('open', { required: true });
             </ToastClose>
         </ToastRoot>
         <ToastViewport
-            class="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-[max(1rem,env(safe-area-inset-right))] z-50 flex w-[calc(100vw-2rem)] max-w-sm flex-col outline-none sm:bottom-6 sm:right-6"
+            class="fb-toast-viewport fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-[max(1rem,env(safe-area-inset-right))] z-50 flex w-[calc(100vw-2rem)] max-w-sm flex-col outline-none sm:bottom-6 sm:right-6"
         />
     </ToastProvider>
 </template>
 
-<style scoped>
+<style>
 .fb-toast[data-state='open'] {
-    animation: toast-enter 180ms ease-out;
+    animation: toast-enter var(--fb-duration-toast-in) var(--fb-ease);
 }
 .fb-toast[data-state='closed'] {
-    animation: toast-exit 140ms ease-in;
+    animation: toast-exit var(--fb-duration-toast-out) cubic-bezier(0.4, 0, 1, 1);
+}
+.fb-toast[data-swipe='move'] {
+    transform: translateX(var(--reka-toast-swipe-move-x));
+}
+.fb-toast[data-swipe='cancel'] {
+    transform: translateX(0);
+    transition: transform var(--fb-duration-switch) var(--fb-ease);
+}
+.fb-toast[data-swipe='end'] {
+    animation: toast-swipe-out var(--fb-duration-toast-out) ease-out;
+}
+.fb-toast-viewport {
+    gap: 0.625rem;
+    perspective: 60rem;
 }
 @keyframes toast-enter {
     from {
         opacity: 0;
-        transform: translateY(6px);
+        filter: blur(4px);
+        transform: translate3d(2rem, 1.25rem, 0) scale(0.94);
+    }
+    55% {
+        opacity: 1;
     }
 }
 @keyframes toast-exit {
     to {
         opacity: 0;
-        transform: translateY(4px);
+        filter: blur(2px);
+        transform: translate3d(1.5rem, 0.5rem, 0) scale(0.97);
+    }
+}
+@keyframes toast-swipe-out {
+    to {
+        opacity: 0;
+        transform: translateX(calc(var(--reka-toast-swipe-end-x) + 2rem));
     }
 }
 @media (prefers-reduced-motion: reduce) {
     .fb-toast[data-state='open'],
-    .fb-toast[data-state='closed'] {
+    .fb-toast[data-state='closed'],
+    .fb-toast[data-swipe='end'] {
         animation: none;
     }
 }

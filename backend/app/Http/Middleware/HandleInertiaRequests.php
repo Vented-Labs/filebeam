@@ -54,6 +54,7 @@ class HandleInertiaRequests extends Middleware
             ],
             'filebeam' => [
                 'main_site_url' => config('app.url'),
+                'cli' => config('filebeam.cli'),
                 'github_url' => config('filebeam.github_url'),
                 'copyright_holder' => config('filebeam.copyright_holder'),
                 'maximum_transfer_bytes' => $plan->maximum_transfer_bytes ?? config('filebeam.default_plan.maximum_transfer_bytes'),

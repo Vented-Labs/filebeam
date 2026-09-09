@@ -9,11 +9,8 @@ version=${tag#beam-v}
     printf '%s\n' 'BEAM_RELEASE_PUBLIC_KEY must be a base64-encoded Ed25519 public key.' >&2
     exit 1
 }
-manifest_version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' cli/Cargo.toml | awk 'NR == 1 { print; exit }')
-[[ $manifest_version == "$version" ]] || {
-    printf 'cli/Cargo.toml version %s does not match %s.\n' "$manifest_version" "$tag" >&2
-    exit 1
-}
+export BEAM_RELEASE_VERSION="$version"
+source_date_epoch=$(git show -s --format=%ct HEAD)
 mkdir -p "$output_dir"
 
 for architecture in x86_64 aarch64; do
@@ -34,10 +31,11 @@ for architecture in x86_64 aarch64; do
     (cd "$stage/beam" && sha256sum beam install.sh LICENSE version > checksums.txt)
     archive="$output_dir/$tag-linux-$architecture.tar.gz"
     [[ ! -e $archive ]] || { printf 'Refusing to overwrite %s.\n' "$archive" >&2; exit 1; }
-    tar -C "$stage" -czf "$archive" beam
+    tar --sort=name --mtime="@$source_date_epoch" --owner=0 --group=0 --numeric-owner -C "$stage" -czf "$archive" beam
     rm -rf "$stage"
     trap - EXIT
 done
 
 (cd "$output_dir" && sha256sum "$tag"-linux-*.tar.gz > checksums.txt)
 printf '%s\n' "$version" > "$output_dir/version"
+sed "s|__BEAM_RELEASE_PUBLIC_KEY__|$BEAM_RELEASE_PUBLIC_KEY|g" scripts/cli/install.sh > "$output_dir/install.sh"

@@ -51,6 +51,7 @@ COPY ui ui
 COPY icons icons
 COPY scripts/check-icons.mjs scripts/generate-icons.mjs scripts/
 COPY scripts/og scripts/og
+COPY scripts/prism-gallery scripts/prism-gallery
 COPY vite.config.ts ./
 RUN --mount=type=cache,target=/root/.npm \
     npm ci \

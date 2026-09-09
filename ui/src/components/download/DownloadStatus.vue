@@ -2,6 +2,7 @@
 import Button from '../primitives/Button.vue';
 import Icon from '../primitives/Icon.vue';
 import SmoothProgress from '../primitives/SmoothProgress.vue';
+import AnimatedReveal from '../layout/AnimatedReveal.vue';
 
 const props = defineProps<{
     progress: number;
@@ -78,7 +79,7 @@ function uploaderLabel(): string {
                             ><span
                                 class="download-status__title"
                                 :class="{ 'text-[var(--fb-success)]': phase === 'completed' }"
-                                ><Transition name="status-copy" mode="out-in"
+                                ><Transition name="status-copy"
                                     ><span :key="phaseLabel()">{{ phaseLabel() }}</span></Transition
                                 ></span
                             ><span
@@ -102,12 +103,14 @@ function uploaderLabel(): string {
                 aria-live="polite"
                 aria-atomic="true"
             >
-                <Transition name="status-copy" mode="out-in"
+                <Transition name="status-copy"
                     ><span :key="phaseLabel()">{{ phaseDescription() }}</span></Transition
                 >
             </p>
             <div class="download-status__controls mt-4">
-                <Button v-if="downloading" variant="ghost" @click="$emit('cancel')">Cancel</Button>
+                <AnimatedReveal :show="downloading">
+                    <Button variant="ghost" @click="$emit('cancel')">Cancel</Button>
+                </AnimatedReveal>
             </div>
         </section>
     </div>
@@ -122,6 +125,8 @@ function uploaderLabel(): string {
     min-height: 2.75rem;
 }
 .download-status__title {
+    position: relative;
+    display: inline-grid;
     min-width: 0;
     min-height: 1.25rem;
 }
@@ -132,6 +137,8 @@ function uploaderLabel(): string {
     text-align: right;
 }
 .download-status__description {
+    position: relative;
+    display: grid;
     min-height: 3rem;
 }
 .status-copy-enter-active,
@@ -139,6 +146,11 @@ function uploaderLabel(): string {
     transition:
         opacity 120ms ease,
         transform 120ms ease;
+}
+.status-copy-leave-active {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
 }
 .status-copy-enter-from,
 .status-copy-leave-to {

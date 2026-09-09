@@ -104,7 +104,10 @@ jobs:
         run: npm ci
 
       - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
+        run: |
+          # Playwright supplies Chromium; its Ubuntu dependencies do not use the runner's Chrome feed.
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.list /etc/apt/sources.list.d/google-chrome.sources
+          npx playwright install --with-deps chromium
 
       - name: Verify approved icon catalog
         run: |

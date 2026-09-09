@@ -49,6 +49,13 @@ async function completeUpload(page: Page): Promise<void> {
     await expect(ready).toBeVisible({ timeout: 30_000 });
 }
 
+async function setSenderPassword(page: Page, password: string): Promise<void> {
+    await page.getByTestId('prism-password-trigger').click();
+    const popover = page.getByTestId('prism-password-popover');
+    await popover.locator('#transfer-password').fill(password);
+    await popover.getByRole('button', { name: 'Done' }).click();
+}
+
 async function uploadFile(
     page: Page,
     options: { includeKey?: boolean; password?: string; name?: string; content?: string } = {},
@@ -61,7 +68,7 @@ async function uploadFile(
         mimeType: 'text/plain',
         buffer: Buffer.from(marker),
     });
-    if (options.password) await page.locator('#transfer-password').fill(options.password);
+    if (options.password) await setSenderPassword(page, options.password);
     if (options.includeKey === false) await page.getByText('Include key in link').click();
     const sentBodies: string[] = [];
     page.on('request', (request) => {
@@ -156,7 +163,7 @@ test('round-trips a password-protected note', async ({ browser, page }) => {
     await page
         .locator('[data-testid="note-editor"] .cm-content[contenteditable="true"]')
         .fill(marker);
-    await page.locator('#transfer-password').fill(password);
+    await setSenderPassword(page, password);
     await page.getByText('Include key in link').click();
     await completeUpload(page);
     expect(sentBodies.join('\n')).not.toContain(marker);
@@ -216,14 +223,21 @@ test('does not overflow with the CI version label on a mobile viewport', async (
     await page.route(/\/$/, async (route) => {
         const response = await route.fetch();
         const body = await response.text();
+        const script = /(<script\b[^>]*\bdata-page[^>]*>)([\s\S]*?)(<\/script>)/i;
+        const match = body.match(script);
+        if (!match) throw new Error('Missing Inertia bootstrap');
+        const data = JSON.parse(match[2]);
+        data.props.branding.name = 'Filebeam acceptance';
+        data.props.branding.version = version;
         await route.fulfill({
             response,
-            body: body.replace(/"version":"[^"]+"/, `"version":"${version}"`),
+            body: body.replace(script, () => `${match[1]}${JSON.stringify(data)}${match[3]}`),
         });
     });
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto('/');
     await expect(page.locator('.fb-footer')).toContainText(`v${version}`);
+    await expect(page.getByRole('link', { name: 'Filebeam acceptance home' })).toBeVisible();
     expect(
         await page.locator('body').evaluate((body) => body.scrollWidth <= window.innerWidth),
     ).toBe(true);
@@ -249,7 +263,7 @@ test('retention and burn-on-read protect a titled note until successful decrypti
     await page.getByRole('option', { name: '7 days', exact: true }).click();
     await page.getByRole('switch', { name: 'Burn on read' }).click();
     await page.getByRole('switch', { name: 'Include key in link' }).click();
-    await page.locator('#transfer-password').fill('private-burn-password');
+    await setSenderPassword(page, 'private-burn-password');
     await completeUpload(page);
     const link = await page.locator('#share-link').inputValue();
     const key = await page.locator('#generated-key').inputValue();

@@ -110,6 +110,13 @@ async function receiver(browser: Browser, mode: WritableMode = 'plain'): Promise
     return context.newPage();
 }
 
+async function setSenderPassword(page: Page, password: string): Promise<void> {
+    await page.getByTestId('prism-password-trigger').click();
+    const popover = page.getByTestId('prism-password-popover');
+    await popover.locator('#transfer-password').fill(password);
+    await popover.getByRole('button', { name: 'Done' }).click();
+}
+
 async function startTurbo(page: Page, bytes: Buffer, password?: string): Promise<Transfer> {
     const creation = page.waitForResponse(
         (response) =>
@@ -122,7 +129,7 @@ async function startTurbo(page: Page, bytes: Buffer, password?: string): Promise
         mimeType: 'application/octet-stream',
         buffer: bytes,
     });
-    if (password) await page.locator('#transfer-password').fill(password);
+    if (password) await setSenderPassword(page, password);
     await page.getByRole('button', { name: 'Turbo Transfer' }).click();
     const data = (await (await creation).json()).data as {
         id: string;
@@ -507,7 +514,7 @@ test('rejects a Turbo descriptor mismatch and a corrupted final digest without c
     }
 });
 
-test('offers Turbo only for files, to the left of normal sharing at desktop and mobile widths', async ({
+test('offers Turbo only for files, beside normal sharing on desktop and stacked on mobile', async ({
     page,
 }) => {
     await page.goto('/');
@@ -529,15 +536,17 @@ test('offers Turbo only for files, to the left of normal sharing at desktop and 
     await page.keyboard.press('Escape');
     await turbo.focus();
     await expect(tooltip).toBeVisible();
-    for (const width of [1280, 375]) {
-        await page.setViewportSize({ width, height: 812 });
-        expect((await turbo.boundingBox())!.x).toBeLessThan((await normal.boundingBox())!.x);
-        await expect
-            .poll(() =>
-                page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
-            )
-            .toBe(true);
-    }
+    await page.setViewportSize({ width: 1280, height: 812 });
+    expect((await turbo.boundingBox())!.x).toBeLessThan((await normal.boundingBox())!.x);
+    await page.setViewportSize({ width: 375, height: 812 });
+    const mobileTurbo = (await turbo.boundingBox())!;
+    const mobileNormal = (await normal.boundingBox())!;
+    expect(mobileTurbo.x).toBeCloseTo(mobileNormal.x, 0);
+    expect(mobileTurbo.y).toBeGreaterThan(mobileNormal.y);
+    await expect
+        .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+        .toBe(true);
+    await page.keyboard.press('Escape');
     await page.waitForTimeout(350);
     await page.screenshot({ path: test.info().outputPath('turbo-mobile.png'), fullPage: true });
     await page.getByRole('tab', { name: 'Notes' }).click();

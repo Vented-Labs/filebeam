@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import {
     SelectContent,
     SelectItem,
@@ -12,11 +13,11 @@ import {
 } from 'reka-ui';
 import Button from '../primitives/Button.vue';
 import Icon from '../primitives/Icon.vue';
-import Input from '../primitives/Input.vue';
 import Switch from '../primitives/Switch.vue';
 import Tooltip from '../primitives/Tooltip.vue';
-import TransferMethod from './TransferMethod.vue';
-import type { TransferDriver, TransferLimits } from '../../types';
+import TransferPasswordPopover from './TransferPasswordPopover.vue';
+import type { TransferDriver } from '../../types';
+import AnimatedReveal from '../layout/AnimatedReveal.vue';
 
 const props = defineProps<{
     disabled: boolean;
@@ -25,9 +26,6 @@ const props = defineProps<{
     mode: 'files' | 'note';
     uploading: boolean;
     recipient?: boolean;
-    enabledDrivers: TransferDriver[];
-    webRtcSupported: boolean;
-    limits: TransferLimits;
 }>();
 
 const password = defineModel<string>('password', { required: true });
@@ -36,6 +34,9 @@ const retentionHours = defineModel<number>('retentionHours', { required: true })
 const burnOnRead = defineModel<boolean>('burnOnRead', { default: false });
 const driver = defineModel<TransferDriver>('driver', { required: true });
 const emit = defineEmits<{ submit: []; turbo: []; cancel: [] }>();
+const passwordInvalid = computed(
+    () => password.value.length > 0 && Array.from(password.value).length < 8,
+);
 
 const labels: Record<number, string> = {
     1: '1 hour',
@@ -55,275 +56,342 @@ function setRetention(value: unknown): void {
 </script>
 
 <template>
-    <section
-        class="transfer-options mt-5 w-full rounded-2xl border border-[var(--fb-border)] bg-[var(--fb-surface)] p-5 sm:p-6"
-        :class="mode === 'note' ? 'max-w-[896px]' : 'max-w-none'"
-    >
-        <div class="controls-grid" :class="{ 'controls-grid--with-method': mode === 'note' }">
-            <div class="controls-main">
-                <div v-if="!recipient" class="control-field">
-                    <label for="transfer-password">Password <span>optional</span></label>
-                    <Input
-                        id="transfer-password"
-                        v-model="password"
-                        :disabled="disabled"
-                        type="password"
-                        autocomplete="new-password"
-                        minlength="8"
-                        placeholder="At least 8 characters"
-                    />
-                </div>
-
-                <div class="control-field">
-                    <label>{{ driver === 'webrtc' ? 'Link lifetime' : 'Retained for' }}</label>
-                    <SelectRoot
-                        :model-value="String(retentionHours)"
-                        :disabled="disabled"
-                        @update:model-value="setRetention"
-                    >
-                        <SelectTrigger aria-label="Retention period" class="fb-select-trigger">
-                            <SelectValue>{{ retentionLabel(retentionHours) }}</SelectValue>
-                            <Icon name="chevron-down" :size="16" />
-                        </SelectTrigger>
-                        <SelectPortal>
-                            <SelectContent
-                                :body-lock="false"
-                                position="popper"
-                                class="fb-select-content"
-                            >
-                                <SelectViewport>
-                                    <SelectItem
-                                        v-for="hours in [
-                                            ...new Set([...props.retentionOptions, retentionHours]),
-                                        ].sort((a, b) => a - b)"
-                                        :key="hours"
-                                        :value="String(hours)"
-                                        class="fb-select-item"
-                                    >
-                                        <SelectItemText>{{ retentionLabel(hours) }}</SelectItemText>
-                                        <SelectItemIndicator
-                                            ><Icon name="check" :size="15"
-                                        /></SelectItemIndicator>
-                                    </SelectItem>
-                                </SelectViewport>
-                            </SelectContent>
-                        </SelectPortal>
-                    </SelectRoot>
-                    <p v-if="driver === 'webrtc'" class="mt-2 text-xs text-[var(--fb-text-muted)]">
-                        The server may shorten this lifetime.
-                    </p>
-                </div>
+    <section class="transfer-options" data-testid="prism-settings" aria-label="Transfer settings">
+        <div
+            class="transfer-options__grid"
+            :class="{ 'transfer-options__grid--recipient': recipient }"
+            data-testid="prism-settings-controls"
+            :inert="disabled || undefined"
+        >
+            <div v-if="!recipient" class="transfer-options__field">
+                <label id="password-setting-label"> Password <span>optional</span> </label>
+                <TransferPasswordPopover
+                    v-model="password"
+                    :disabled="disabled"
+                    :invalid="passwordInvalid"
+                    labelled-by="password-setting-label"
+                />
             </div>
-            <TransferMethod
-                v-if="mode === 'note'"
-                v-model="driver"
-                :enabled-drivers="enabledDrivers"
-                :web-rtc-supported="webRtcSupported"
-                :disabled="disabled"
-                :limits="limits"
-                mode="note"
-            />
-        </div>
 
-        <div v-if="!recipient" class="preferences-row">
-            <p>Sharing preferences</p>
-            <div class="preferences">
-                <label class="preference">
+            <div class="transfer-options__field">
+                <label id="retention-setting-label">
+                    {{ driver === 'webrtc' ? 'Link lifetime' : 'Retained for' }}
+                </label>
+                <SelectRoot
+                    :model-value="String(retentionHours)"
+                    :disabled="disabled"
+                    @update:model-value="setRetention"
+                >
+                    <SelectTrigger
+                        aria-label="Retention period"
+                        class="fb-select-trigger transfer-options__trigger"
+                    >
+                        <Icon name="clock" :size="15" />
+                        <SelectValue class="transfer-options__value">{{
+                            retentionLabel(retentionHours)
+                        }}</SelectValue>
+                        <Icon name="chevron-down" :size="15" />
+                    </SelectTrigger>
+                    <SelectPortal>
+                        <SelectContent
+                            :body-lock="false"
+                            position="popper"
+                            :side-offset="9"
+                            :collision-padding="8"
+                            class="fb-select-content retention-menu"
+                        >
+                            <p class="retention-menu__label">
+                                {{ driver === 'webrtc' ? 'Link lifetime' : 'Retained for' }}
+                            </p>
+                            <SelectViewport>
+                                <SelectItem
+                                    v-for="hours in [
+                                        ...new Set([...props.retentionOptions, retentionHours]),
+                                    ].sort((a, b) => a - b)"
+                                    :key="hours"
+                                    :value="String(hours)"
+                                    class="fb-select-item"
+                                >
+                                    <Icon name="clock" :size="14" />
+                                    <SelectItemText class="transfer-options__value">{{
+                                        retentionLabel(hours)
+                                    }}</SelectItemText>
+                                    <SelectItemIndicator>
+                                        <Icon name="check" :size="15" />
+                                    </SelectItemIndicator>
+                                </SelectItem>
+                            </SelectViewport>
+                            <p v-if="driver === 'webrtc'" class="retention-menu__footer">
+                                The server may shorten this lifetime.
+                            </p>
+                        </SelectContent>
+                    </SelectPortal>
+                </SelectRoot>
+                <AnimatedReveal :show="driver === 'webrtc'">
+                    <p class="transfer-options__help">The server may shorten this lifetime.</p>
+                </AnimatedReveal>
+            </div>
+
+            <div v-if="!recipient" class="transfer-options__sharing">
+                <p class="transfer-options__label">Sharing preferences</p>
+                <label class="transfer-options__preference">
+                    <span>Include key in link</span>
                     <Switch
                         v-model="includeKey"
                         :disabled="disabled"
                         aria-label="Include key in link"
                     />
-                    <span>Include key in link</span>
                 </label>
-                <label v-if="mode === 'note'" class="preference preference--burn">
-                    <Switch v-model="burnOnRead" :disabled="disabled" aria-label="Burn on read" />
-                    <span
-                        >Burn on read<small>{{
-                            driver === 'webrtc'
-                                ? 'Revokes the live share after the first successful decrypt.'
-                                : 'Disappears from the server after the first successful decrypt.'
-                        }}</small></span
-                    >
-                </label>
+                <AnimatedReveal :show="mode === 'note'">
+                    <label class="transfer-options__preference">
+                        <span>
+                            Burn on read
+                            <small>{{
+                                driver === 'webrtc'
+                                    ? 'Revokes after the first successful decrypt.'
+                                    : 'Removed after the first successful decrypt.'
+                            }}</small>
+                        </span>
+                        <Switch
+                            v-model="burnOnRead"
+                            :disabled="disabled"
+                            aria-label="Burn on read"
+                        />
+                    </label>
+                </AnimatedReveal>
             </div>
         </div>
 
-        <footer class="action-footer">
-            <p><Icon name="lock" :size="15" />Encrypted in your browser before upload.</p>
-            <div class="action-area">
+        <AnimatedReveal :show="!recipient && !includeKey">
+            <div class="transfer-options__key-hint" role="status">
+                <Icon name="key" :size="14" />Share the decryption key separately.
+            </div>
+        </AnimatedReveal>
+
+        <div class="transfer-options__footer">
+            <p><Icon name="lock" :size="14" />Encrypted in your browser before upload.</p>
+            <div class="transfer-options__actions">
                 <Button
                     v-if="uploading"
                     variant="secondary"
-                    class="action-button"
+                    class="transfer-options__action"
                     @click="emit('cancel')"
-                    >Cancel</Button
                 >
+                    Cancel
+                </Button>
                 <template v-else>
-                    <div class="action-buttons">
-                        <Tooltip
-                            v-if="mode === 'files' && !recipient && driver === 'http'"
-                            content="Share the link while files are still uploading."
-                        >
-                            <Button
-                                variant="secondary"
-                                class="action-button"
-                                :disabled="!canUpload"
-                                @click="emit('turbo')"
-                                ><Icon name="bolt" :size="17" />Turbo Transfer</Button
-                            >
-                        </Tooltip>
+                    <Tooltip
+                        v-if="mode === 'files' && !recipient && driver === 'http'"
+                        content="Share the link while files are still uploading."
+                    >
                         <Button
-                            variant="primary"
-                            class="action-button"
+                            variant="secondary"
+                            class="transfer-options__action transfer-options__action--turbo"
                             :disabled="!canUpload"
-                            @click="emit('submit')"
-                            >{{ recipient ? 'Encrypt and send' : 'Encrypt and share' }}</Button
+                            @click="emit('turbo')"
                         >
-                    </div>
+                            <Icon name="bolt" :size="16" />Turbo Transfer
+                        </Button>
+                    </Tooltip>
+                    <Button
+                        class="transfer-options__action"
+                        :disabled="!canUpload"
+                        :aria-busy="uploading || undefined"
+                        @click="emit('submit')"
+                    >
+                        <Icon name="lock" :size="16" />
+                        {{ recipient ? 'Encrypt and send' : 'Encrypt and share' }}
+                        <Icon name="arrow-right" :size="16" />
+                    </Button>
                 </template>
             </div>
-        </footer>
+        </div>
     </section>
 </template>
 
 <style scoped>
 .transfer-options {
-    margin-inline: auto;
+    border-top: 1px solid #ffffff08;
+    background: var(--fb-settings-surface);
 }
-.controls-grid {
+.transfer-options__grid {
     display: grid;
-    gap: 1rem;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.12fr);
+    gap: 1.5rem;
     align-items: start;
+    padding: 1.25rem 1.5rem 1.125rem;
 }
-.controls-main {
-    display: grid;
-    gap: 1rem;
+.transfer-options__grid--recipient {
+    grid-template-columns: minmax(0, 1fr);
 }
-.control-field {
+.transfer-options__field,
+.transfer-options__sharing {
     min-width: 0;
 }
-.control-field > label,
-.preferences-row > p {
-    display: block;
-    margin-bottom: 0.5rem;
-    color: var(--fb-text);
-    font-size: 0.875rem;
-    font-weight: 500;
-}
-.control-field > label span {
-    color: var(--fb-text-muted);
-    font-weight: 400;
-}
-.preferences-row {
+.transfer-options__field > label,
+.transfer-options__label {
     display: flex;
-    align-items: flex-start;
-    gap: 1.5rem;
-    margin-top: 1.25rem;
-    padding-top: 1.25rem;
-    border-top: 1px solid var(--fb-border);
-}
-.preferences-row > p {
-    min-width: 9.5rem;
-    margin: 0.125rem 0 0;
-    color: var(--fb-text-muted);
-}
-.preferences {
-    display: flex;
-    flex: 1;
-    flex-wrap: wrap;
-    gap: 1.25rem 2rem;
-}
-.preference {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.625rem;
-    color: var(--fb-text);
-    font-size: 0.875rem;
-    line-height: 1.25rem;
-}
-.preference--burn {
-    max-width: 22rem;
-}
-.preference small {
-    display: block;
-    margin-top: 0.125rem;
-    color: var(--fb-text-muted);
+    min-height: 1rem;
+    align-items: baseline;
+    gap: 0.25rem;
+    margin: 0 0 0.5rem;
+    color: #d8cee4;
     font-size: 0.75rem;
+    font-weight: 500;
     line-height: 1rem;
 }
-.action-footer {
+.transfer-options__field > label span {
+    color: var(--fb-text-subtle);
+    font-weight: 400;
+}
+.transfer-options__trigger {
+    height: 2.625rem;
+    min-height: 2.625rem;
+    gap: 0.5625rem;
+    padding-inline: 0.6875rem;
+    border-color: #44374f;
+    font-size: 0.8125rem;
+}
+.transfer-options__value {
+    min-width: 0;
+    flex: 1;
+}
+.transfer-options__help {
+    margin: 0.5rem 0 0;
+    color: var(--fb-text-subtle);
+    font-size: 0.6875rem;
+    line-height: 1.5;
+}
+.transfer-options__sharing {
     display: flex;
+    flex-direction: column;
+}
+.transfer-options__preference {
+    display: flex;
+    min-height: 2.125rem;
     align-items: center;
     justify-content: space-between;
-    gap: 1rem;
-    margin-top: 1.25rem;
-    padding-top: 1.25rem;
-    border-top: 1px solid var(--fb-border);
+    gap: 0.75rem;
+    color: #d3c9df;
+    font-size: 0.75rem;
+    cursor: pointer;
 }
-.action-footer > p {
+.transfer-options__preference small {
+    display: block;
+    margin-top: 0.125rem;
+    color: var(--fb-text-subtle);
+    font-size: 0.625rem;
+    line-height: 1.4;
+}
+.transfer-options__key-hint {
     display: flex;
     align-items: center;
-    gap: 0.375rem;
+    gap: 0.5rem;
+    margin: -0.0625rem 1.5rem 1.125rem;
+    padding: 0.625rem 0.75rem;
+    border: 1px solid #ffffff08;
+    border-radius: 0.625rem;
+    color: var(--fb-text-muted);
+    background: #ffffff03;
+    font-size: 0.75rem;
+}
+.transfer-options__footer {
+    display: flex;
+    min-height: 4.875rem;
+    box-sizing: border-box;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.125rem;
+    padding: 1.0625rem 1.5rem;
+    border-top: 1px solid #ffffff08;
+    border-radius: 0 0 var(--fb-radius-panel) var(--fb-radius-panel);
+    background: var(--fb-footer-surface);
+}
+.transfer-options__footer > p {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0;
     color: var(--fb-text-muted);
     font-size: 0.75rem;
 }
-.action-button {
-    min-width: 10.5rem;
+.transfer-options__footer > p :deep(.fb-icon) {
+    color: var(--fb-text-subtle);
 }
-.action-area {
-    min-width: 0;
-}
-.action-buttons {
+.transfer-options__actions {
     display: flex;
+    min-width: 0;
     flex-wrap: wrap;
     justify-content: flex-end;
     gap: 0.5rem;
 }
-@media (min-width: 1024px) {
-    .controls-grid--with-method {
-        grid-template-columns: minmax(0, 1fr) minmax(25rem, 1.1fr);
-    }
-    .controls-main {
+.transfer-options__action {
+    min-width: 12.375rem;
+    min-height: 2.6875rem;
+}
+.transfer-options__action--turbo {
+    min-width: 10rem;
+}
+.retention-menu {
+    min-width: 12.8125rem;
+}
+.retention-menu__label,
+.retention-menu__footer {
+    margin: 0;
+    padding: 0.5rem 0.625rem 0.625rem;
+    color: var(--fb-text-subtle);
+    font-size: 0.6875rem;
+}
+.retention-menu__footer {
+    padding-top: 0.625rem;
+    border-top: 1px solid #ffffff08;
+}
+@media (max-width: 780px) {
+    .transfer-options__grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 1.125rem 1.25rem;
+    }
+    .transfer-options__sharing {
+        grid-column: 1 / -1;
     }
 }
-@media (max-width: 639px) {
-    .controls-grid {
-        grid-template-columns: 1fr;
+@media (max-width: 730px) {
+    .transfer-options__grid {
+        gap: 1.0625rem 0.875rem;
+        padding: 1.125rem 1.0625rem;
     }
-    .preferences-row {
-        display: block;
+    .transfer-options__field > label,
+    .transfer-options__label {
+        font-size: 0.6875rem;
     }
-    .preferences-row > p {
-        margin-bottom: 0.75rem;
+    .transfer-options__trigger {
+        padding-inline: 0.5625rem;
+        font-size: 0.75rem;
     }
-    .preferences {
-        display: grid;
-        gap: 1rem;
+    .transfer-options__footer {
+        align-items: stretch;
+        flex-direction: column;
+        padding: 1rem 1.0625rem 1.0625rem;
     }
-    .preference {
+    .transfer-options__footer > p {
+        justify-content: center;
+        font-size: 0.6875rem;
+    }
+    .transfer-options__actions,
+    .transfer-options__action {
         width: 100%;
     }
-    .action-footer {
-        display: block;
+    .transfer-options__actions {
+        flex-direction: column-reverse;
     }
-    .action-footer > p {
-        margin-bottom: 1rem;
+}
+@media (max-width: 380px) {
+    .transfer-options__grid {
+        gap: 1rem 0.6875rem;
     }
-    .action-area,
-    .action-button {
-        width: 100%;
-    }
-    .action-buttons {
-        justify-content: stretch;
-        flex-wrap: nowrap;
-    }
-    .action-buttons .action-button {
-        flex: 1;
-        min-width: 0;
-        padding-inline: 0.5rem;
-        font-size: 0.8125rem;
+    .transfer-options__trigger,
+    :deep(.password-trigger) {
+        font-size: 0.6875rem;
     }
 }
 </style>

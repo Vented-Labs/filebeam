@@ -27,3 +27,16 @@ test('browser share URLs stay relative to the uploading instance', function () {
     ])->assertCreated();
     expect($response->json('data.share_url'))->toBe('/'.$response->json('data.id'));
 });
+
+test('CLI installer instructions use public configuration without fetching artifacts', function () {
+    Plan::factory()->create(['slug' => 'default']);
+    config()->set('filebeam.cli.installer_url', null);
+    $this->get('/')->assertInertia(fn (Assert $page) => $page
+        ->where('filebeam.cli.installer_url', null)
+        ->where('filebeam.cli.installer_interpreter', 'sh')
+        ->where('filebeam.cli.executable', 'beam'));
+
+    config()->set('filebeam.cli.installer_url', 'https://releases.filebeam.test/cli/install.sh');
+    $this->get('/')->assertInertia(fn (Assert $page) => $page
+        ->where('filebeam.cli.installer_url', 'https://releases.filebeam.test/cli/install.sh'));
+});

@@ -4,6 +4,7 @@ import AppLink from '../primitives/AppLink.vue';
 import Button from '../primitives/Button.vue';
 import FormField from '../primitives/FormField.vue';
 import Input from '../primitives/Input.vue';
+import AnimatedReveal from '../layout/AnimatedReveal.vue';
 
 type Mode = 'login' | 'register' | 'forgot' | 'reset' | 'verify';
 type Field = 'username' | 'name' | 'email' | 'password' | 'password_confirmation' | 'remember';
@@ -25,13 +26,14 @@ const emit = defineEmits<{
 
 <template>
     <form class="space-y-5" @submit.prevent="emit('submit')">
-        <p
-            v-if="status"
-            class="rounded-lg border border-[var(--fb-border)] bg-[var(--fb-selected-surface)] px-3 py-2 text-sm text-[var(--fb-text)]"
-            role="status"
-        >
-            {{ status }}
-        </p>
+        <AnimatedReveal :show="Boolean(status)">
+            <p
+                class="rounded-lg border border-[var(--fb-border)] bg-[var(--fb-selected-surface)] px-3 py-2 text-sm text-[var(--fb-text)]"
+                role="status"
+            >
+                {{ status }}
+            </p>
+        </AnimatedReveal>
         <template v-if="mode === 'register'">
             <FormField
                 id="auth-username"
