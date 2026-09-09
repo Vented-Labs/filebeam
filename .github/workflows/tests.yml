@@ -25,12 +25,12 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
         with:
           persist-credentials: false
           ref: ${{ inputs.ref || github.ref }}
       # Keep setup actions at the workflow revision when validating an older release ref.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
         with:
           persist-credentials: false
           ref: ${{ github.workflow_sha }}
@@ -77,11 +77,11 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
         with:
           persist-credentials: false
           ref: ${{ inputs.ref || github.ref }}
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
         with:
           persist-credentials: false
           ref: ${{ github.workflow_sha }}
@@ -100,11 +100,11 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
         with:
           persist-credentials: false
           ref: ${{ inputs.ref || github.ref }}
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
         with:
           persist-credentials: false
           ref: ${{ github.workflow_sha }}
@@ -148,11 +148,11 @@ jobs:
           --health-timeout=5s
           --health-retries=5
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
         with:
           persist-credentials: false
           ref: ${{ inputs.ref || github.ref }}
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
         with:
           persist-credentials: false
           ref: ${{ github.workflow_sha }}
@@ -196,11 +196,12 @@ jobs:
       SAIL_APP_URL: http://127.0.0.1:8000
       FILEBEAM_CREATIONS_PER_HOUR: '600'
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
         with:
           persist-credentials: false
+          dissociate: true
           ref: ${{ inputs.ref || github.ref }}
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
         with:
           persist-credentials: false
           ref: ${{ github.workflow_sha }}
@@ -222,9 +223,15 @@ jobs:
         run: docker compose config --quiet
       - name: Match container permissions to runner
         run: printf 'WWWUSER=%s\nWWWGROUP=%s\n' "$(id -u)" "$(id -g)" >> "$GITHUB_ENV"
+      - name: Set up cached Sail builder
+        uses: useblacksmith/setup-docker-builder@19215110ab936351210feebdfa5b440b4493e184 # v2
+        with:
+          cache-key: backend/docker/frankenphp/Dockerfile
       - name: Build and start Sail
         working-directory: backend
-        run: ./vendor/bin/sail up --build --detach --wait
+        run: |
+          docker compose build --builder "$(docker buildx inspect --format '{{.Name}}')" laravel.test
+          ./vendor/bin/sail up --no-build --detach --wait
       - name: Migrate and seed Sail database
         working-directory: backend
         run: ./vendor/bin/sail artisan migrate --seed --force --no-interaction
@@ -289,11 +296,11 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
         with:
           persist-credentials: false
           ref: ${{ inputs.ref || github.ref }}
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
         with:
           persist-credentials: false
           ref: ${{ github.workflow_sha }}
@@ -355,11 +362,11 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
         with:
           persist-credentials: false
           ref: ${{ inputs.ref || github.ref }}
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
         with:
           persist-credentials: false
           ref: ${{ github.workflow_sha }}

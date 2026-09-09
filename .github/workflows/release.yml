@@ -67,7 +67,7 @@ jobs:
       tag: ${{ steps.verify.outputs.tag }}
       commit: ${{ steps.verify.outputs.commit }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
         with:
           persist-credentials: false
           ref: refs/heads/master
@@ -90,7 +90,7 @@ jobs:
       RELEASE_TAG: ${{ needs.validate-ref.outputs.tag }}
       RELEASE_COMMIT: ${{ needs.validate-ref.outputs.commit }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
         with:
           persist-credentials: false
           ref: ${{ env.RELEASE_COMMIT }}
@@ -139,7 +139,7 @@ jobs:
       RELEASE_TAG: ${{ needs.validate-ref.outputs.tag }}
       RELEASE_COMMIT: ${{ needs.validate-ref.outputs.commit }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
         with:
           persist-credentials: false
           ref: refs/heads/master
@@ -175,7 +175,7 @@ jobs:
       WITHDRAWN: ${{ inputs.withdrawn }}
       NOTES_URL: ${{ inputs.notes_url }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
         with:
           persist-credentials: false
           ref: refs/heads/master
@@ -199,7 +199,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     environment: release
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
         with:
           persist-credentials: false
           ref: refs/heads/master
@@ -226,7 +226,7 @@ jobs:
       revision: ${{ steps.tags.outputs.revision }}
       advance_aliases: ${{ steps.tags.outputs.advance_aliases }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
         with:
           persist-credentials: false
           ref: refs/heads/master
@@ -285,16 +285,16 @@ jobs:
       IMAGE: ${{ matrix.image }}
       IMAGE_TAG: ${{ needs.docker-plan.outputs.revision }}-${{ matrix.arch }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
         with:
           persist-credentials: false
+          dissociate: true
           ref: ${{ env.RELEASE_COMMIT }}
-      - name: Create ephemeral Buildx builder
-        run: |
-          builder="filebeam-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${{ matrix.variant }}-${{ matrix.arch }}"
-          docker buildx create --name "$builder" --driver docker-container --use
-          docker buildx inspect --bootstrap
-          printf 'FILEBEAM_BUILDER=%s\n' "$builder" >> "$GITHUB_ENV"
+      - name: Set up cached production builder
+        uses: useblacksmith/setup-docker-builder@19215110ab936351210feebdfa5b440b4493e184 # v2
+        with:
+          cache-key: docker/production/Dockerfile
+          platforms: ${{ matrix.platform }}
       - name: Log in to GHCR
         env:
           GHCR_USERNAME: ${{ github.actor }}
@@ -335,9 +335,6 @@ jobs:
           scripts/docker/test.sh --variant "${{ matrix.variant }}" --suite full
       - name: Sign platform image
         run: cosign sign --yes "$IMAGE@${{ steps.digest.outputs.digest }}"
-      - name: Remove ephemeral Buildx builder
-        if: always()
-        run: docker buildx rm "$FILEBEAM_BUILDER" || true
 
   docker-publish:
     if: needs.docker-build.result == 'success'
@@ -354,16 +351,10 @@ jobs:
       REVISION: ${{ needs.docker-plan.outputs.revision }}
       ADVANCE_ALIASES: ${{ needs.docker-plan.outputs.advance_aliases }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
         with:
           persist-credentials: false
           ref: ${{ needs.validate-ref.outputs.commit }}
-      - name: Create ephemeral Buildx builder
-        run: |
-          builder="filebeam-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-publish"
-          docker buildx create --name "$builder" --driver docker-container --use
-          docker buildx inspect --bootstrap
-          printf 'FILEBEAM_BUILDER=%s\n' "$builder" >> "$GITHUB_ENV"
       - name: Log in to GHCR
         env:
           GHCR_USERNAME: ${{ github.actor }}
@@ -418,9 +409,6 @@ jobs:
               docker buildx imagetools create --tag "$image:$RELEASE_TAG" --tag "$image:$major_minor" --tag "$image:$major" --tag "$image:latest" "$image:$REVISION"
             fi
           done
-      - name: Remove ephemeral Buildx builder
-        if: always()
-        run: docker buildx rm "$FILEBEAM_BUILDER" || true
 
   github-release:
     if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.publish && !inputs.metadata_only)) && needs.package.result == 'success' && needs.publish.result == 'success' && needs.docker-publish.result == 'success' && needs.validate-ref.result == 'success'
@@ -436,7 +424,7 @@ jobs:
       GH_REPO: ${{ github.repository }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
         with:
           persist-credentials: false
           ref: ${{ env.RELEASE_COMMIT }}
