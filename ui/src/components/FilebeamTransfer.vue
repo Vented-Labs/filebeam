@@ -214,7 +214,6 @@ function makeOutgoingInert(element: Element): void {
                                     />
                                 </span>
                                 <div class="transfer-content__heading">
-                                    <p>End-to-end encrypted</p>
                                     <h1>
                                         {{
                                             download.isNote.value
@@ -240,8 +239,10 @@ function makeOutgoingInert(element: Element): void {
                                             v-else-if="!download.webrtc.value"
                                             :expires-at="download.transfer.value.expires_at"
                                         />
-                                        <slot name="report" :transfer-id="transferId" />
                                     </div>
+                                </div>
+                                <div v-if="$slots.report" class="transfer-content__report">
+                                    <slot name="report" :transfer-id="transferId" />
                                 </div>
                             </header>
                             <p
@@ -445,17 +446,9 @@ function makeOutgoingInert(element: Element): void {
     height: 3.5rem;
     border-radius: 1rem;
 }
-.transfer-content__heading > p {
-    margin: 0;
-    color: var(--fb-accent-text);
-    font-size: 0.6875rem;
-    font-weight: 650;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-}
 .transfer-content__heading h1 {
     overflow-wrap: anywhere;
-    margin: 0.375rem 0 0;
+    margin: 0;
     font-size: 1.75rem;
     font-weight: 600;
     letter-spacing: -0.035em;
@@ -466,9 +459,13 @@ function makeOutgoingInert(element: Element): void {
     align-items: center;
     flex-wrap: wrap;
     gap: 0.625rem;
-    margin-top: 0.625rem;
+    margin-top: -0.25rem;
     color: var(--fb-text-muted);
     font-size: 0.8125rem;
+}
+.transfer-content__report {
+    grid-column: 3;
+    grid-row: 1;
 }
 .transfer-state-enter-active,
 .transfer-state-leave-active {

@@ -262,15 +262,19 @@ test('renders expiry metadata and submits only the public report contract withou
     );
     const download = page.getByRole('button', { name: 'Download files' });
     expect((await download.boundingBox())!.height).toBeGreaterThanOrEqual(52);
-    expect(
-        await page.locator('[data-testid="transfer-meta"]').evaluate((meta) => {
-            const [expiryButton, reportButton] = Array.from(meta.querySelectorAll('button'));
-            return (
-                reportButton.getBoundingClientRect().left >=
-                expiryButton.getBoundingClientRect().right
-            );
-        }),
-    ).toBe(true);
+    const reportPlacement = await page.locator('.transfer-content__header').evaluate((header) => {
+        const headerRect = header.getBoundingClientRect();
+        const report = header.querySelector('.transfer-content__report button')!;
+        const reportRect = report.getBoundingClientRect();
+        return {
+            inMetadata: header.querySelector('[data-testid="transfer-meta"]')!.contains(report),
+            topOffset: reportRect.top - headerRect.top,
+            rightOffset: headerRect.right - reportRect.right,
+        };
+    });
+    expect(reportPlacement.inMetadata).toBe(false);
+    expect(reportPlacement.topOffset).toBe(0);
+    expect(reportPlacement.rightOffset).toBe(0);
     const url = page.url();
     const submissions: { body: Record<string, string>; csrf?: string }[] = [];
     let status = 422;
