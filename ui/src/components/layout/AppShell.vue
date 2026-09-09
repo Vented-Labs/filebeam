@@ -15,6 +15,7 @@ import {
 } from 'reka-ui';
 import BrandLogo from '../brand/BrandLogo.vue';
 import AppLink from '../primitives/AppLink.vue';
+import AuthLink from '../auth/AuthLink.vue';
 import Icon from '../primitives/Icon.vue';
 import { computed, nextTick, ref } from 'vue';
 import { useBranding } from '../../lib/branding';
@@ -133,12 +134,13 @@ function goHome(event: MouseEvent): void {
                     >{{ user.username || user.name }}</AppLink
                 >
                 <template v-else
-                    ><AppLink class="fb-button fb-button--ghost" href="/login">Sign in</AppLink
-                    ><AppLink
+                    ><AuthLink class="fb-button fb-button--ghost fb-sign-in-link" href="/login"
+                        >Sign in</AuthLink
+                    ><AuthLink
                         v-if="registrationEnabled"
                         class="fb-button fb-button--secondary"
                         href="/register"
-                        >Register</AppLink
+                        >Register</AuthLink
                     ></template
                 >
             </div>
@@ -159,13 +161,13 @@ function goHome(event: MouseEvent): void {
                         align="end"
                     >
                         <DropdownMenuItem v-if="!user" as-child>
-                            <AppLink href="/login" class="fb-select-item fb-mobile-nav__item"
-                                >Sign in</AppLink
+                            <AuthLink href="/login" class="fb-select-item fb-mobile-nav__item"
+                                >Sign in</AuthLink
                             >
                         </DropdownMenuItem>
                         <DropdownMenuItem v-if="!user && registrationEnabled" as-child>
-                            <AppLink href="/register" class="fb-select-item fb-mobile-nav__item"
-                                >Register</AppLink
+                            <AuthLink href="/register" class="fb-select-item fb-mobile-nav__item"
+                                >Register</AuthLink
                             >
                         </DropdownMenuItem>
                         <DropdownMenuItem
@@ -240,7 +242,7 @@ function goHome(event: MouseEvent): void {
     .fb-header .fb-header__actions {
         margin-left: auto;
     }
-    .fb-header__actions > a[href='/login'] {
+    .fb-header__actions .fb-sign-in-link {
         display: none;
     }
     .fb-header__actions .fb-account-link {

@@ -26,7 +26,7 @@ import TransferMethod from './upload/TransferMethod.vue';
 import ShareReady from './sharing/ShareReady.vue';
 import WebRtcConsent from './sharing/WebRtcConsent.vue';
 import Icon from './primitives/Icon.vue';
-import AppLink from './primitives/AppLink.vue';
+import AuthLink from './auth/AuthLink.vue';
 import Toast from './primitives/Toast.vue';
 import Button from './primitives/Button.vue';
 import SmoothProgress from './primitives/SmoothProgress.vue';
@@ -341,12 +341,12 @@ onBeforeUnmount(() => {
                     File and note sharing is available to account holders.
                 </p>
                 <div class="mt-6 flex justify-center gap-3">
-                    <AppLink class="fb-button fb-button--primary" href="/login">Sign in</AppLink>
-                    <AppLink
+                    <AuthLink class="fb-button fb-button--primary" href="/login">Sign in</AuthLink>
+                    <AuthLink
                         v-if="config.registration_enabled"
                         class="fb-button fb-button--secondary"
                         href="/register"
-                        >Register</AppLink
+                        >Register</AuthLink
                     >
                 </div>
             </section>
