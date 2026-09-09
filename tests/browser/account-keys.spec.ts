@@ -82,7 +82,7 @@ test('self custody rejects a wrong key and keeps private controls usable on mobi
     await page.setViewportSize({ width: 375, height: 812 });
     await register(page);
     await openKeySetup(page);
-    await page.getByRole('radio', { name: /Keep the key yourself/ }).check({ force: true });
+    await page.getByRole('radio', { name: /Keep the key yourself/ }).check();
     await page.getByRole('button', { name: 'Generate account key' }).click();
 
     const privateCopy = page.getByRole('button', { name: 'Copy private key' });
