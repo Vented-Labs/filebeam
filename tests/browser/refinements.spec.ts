@@ -239,7 +239,9 @@ test('renders expiry metadata and submits only the public report contract withou
     const csrf = decodeURIComponent(
         (await page.context().cookies()).find((cookie) => cookie.name === 'XSRF-TOKEN')!.value,
     );
-    await expect(page.getByRole('button', { name: 'Expiry details' })).toContainText(/^Expires in/);
+    await expect(page.getByRole('button', { name: 'Expiry details' }).locator('span')).toHaveText(
+        /^Expires in/,
+    );
     await page.getByRole('button', { name: 'Expiry details' }).click();
     await expect(page.getByText(expectedUtc, { exact: true })).toBeVisible();
     await expect(page.locator('[data-testid="transfer-meta"]')).not.toContainText(
