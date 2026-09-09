@@ -29,7 +29,7 @@ return [
             'prefix' => '',
             'foreign_key_constraints' => env('DB_FOREIGN_KEYS', true),
             'busy_timeout' => (int) $sqliteBusyTimeout,
-            'journal_mode' => null,
+            'journal_mode' => env('DB_JOURNAL_MODE', 'WAL'),
             'synchronous' => null,
             // Acquire the writer reservation when the transaction starts, before application reads.
             'transaction_mode' => 'IMMEDIATE',

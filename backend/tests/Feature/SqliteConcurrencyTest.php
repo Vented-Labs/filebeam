@@ -24,9 +24,11 @@ test('sqlite immediate transactions reserve the writer before reads', function (
         $busyTimeout = config('database.connections.sqlite.busy_timeout');
 
         expect(config('database.connections.sqlite.transaction_mode'))->toBe('IMMEDIATE')
+            ->and(config('database.connections.sqlite.journal_mode'))->toBe('WAL')
             ->and($busyTimeout)->toBeInt()
             ->and($first->scalar('pragma foreign_keys'))->toBe(1)
             ->and($first->scalar('pragma busy_timeout'))->toBe($busyTimeout)
+            ->and($first->scalar('pragma journal_mode'))->toBe('wal')
             ->and($second->scalar('pragma foreign_keys'))->toBe(1)
             ->and($second->scalar('pragma busy_timeout'))->toBe(100);
 

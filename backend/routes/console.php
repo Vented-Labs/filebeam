@@ -39,6 +39,29 @@ Schedule::call(function (): void {
 
 Schedule::command('filebeam:prune-transfers')->everyFifteenMinutes()->withoutOverlapping();
 
+Schedule::call(function (): void {
+    $lock = new ActivityLock(storage_path('app/update-activity.lock'));
+    $handle = null;
+    if (config('version.distribution') === 'package') {
+        try {
+            $handle = $lock->acquireShared();
+        } catch (RuntimeException) {
+            return;
+        }
+    }
+    try {
+        DB::statement('PRAGMA optimize');
+        DB::statement('VACUUM');
+    } finally {
+        if (is_resource($handle)) {
+            $lock->release($handle);
+        }
+    }
+})->name('filebeam:maintain-sqlite')
+    ->daily()
+    ->when(fn (): bool => DB::connection()->getDriverName() === 'sqlite')
+    ->withoutOverlapping();
+
 Schedule::command('queue:work', [
     'database',
     '--stop-when-empty',

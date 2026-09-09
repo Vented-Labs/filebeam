@@ -30,6 +30,50 @@ test('cron registers short database batches with an overlap lock', function (): 
     expect(config('queue.connections.database.retry_after'))->toBeGreaterThan(60);
 });
 
+test('cron maintains SQLite nightly without overlapping', function (): void {
+    $default = DB::getDefaultConnection();
+    $connection = 'sqlite_maintenance';
+    // VACUUM must run outside RefreshDatabase's transaction, on an isolated SQLite connection.
+    config()->set('database.connections.'.$connection, array_replace(config('database.connections.sqlite'), ['url' => null, 'database' => ':memory:']));
+    DB::setDefaultConnection($connection);
+
+    try {
+        $database = DB::connection($connection);
+        $database->enableQueryLog();
+        $event = collect(app(Schedule::class)->events())->first(fn (Event $event): bool => $event->description === 'filebeam:maintain-sqlite');
+
+        expect($event)->not->toBeNull();
+        expect($event->expression)->toBe('0 0 * * *');
+        expect($event->withoutOverlapping)->toBeTrue();
+        expect($event->filtersPass(app()))->toBeTrue();
+
+        $event->run(app());
+
+        expect(array_column($database->getQueryLog(), 'query'))->toBe(['PRAGMA optimize', 'VACUUM']);
+    } finally {
+        DB::setDefaultConnection($default);
+        DB::purge($connection);
+        config()->offsetUnset('database.connections.'.$connection);
+    }
+});
+
+test('SQLite maintenance cron skips non-SQLite connections', function (string $driver): void {
+    $default = DB::getDefaultConnection();
+    $connection = 'non_sqlite_maintenance';
+    config()->set('database.connections.'.$connection, array_replace(config('database.connections.'.$driver), ['url' => null]));
+    DB::setDefaultConnection($connection);
+
+    try {
+        $event = collect(app(Schedule::class)->events())->first(fn (Event $event): bool => $event->description === 'filebeam:maintain-sqlite');
+        expect($event)->not->toBeNull();
+        expect($event->filtersPass(app()))->toBeFalse();
+    } finally {
+        DB::setDefaultConnection($default);
+        DB::purge($connection);
+        config()->offsetUnset('database.connections.'.$connection);
+    }
+})->with(['mysql', 'pgsql']);
+
 test('cron batches run only for an installed database-queue deployment that opts in', function (bool $enabled, string $connection, bool $pending, bool $runs): void {
     config()->set('queue.cron_enabled', $enabled);
     config()->set('queue.default', $connection);
