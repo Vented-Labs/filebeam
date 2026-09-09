@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace App\Filament\Resources\Plans\Pages;
 
 use App\Actions\Admin\ManagePlan;
+use App\Enums\TransferDriver;
 use App\Filament\Resources\Plans\PlanResource;
 use App\Models\Plan;
 use App\Models\User;
+use App\Support\TransportPolicy;
 use Filament\Facades\Filament;
 use Filament\Resources\Pages\EditRecord;
 use Illuminate\Database\Eloquent\Model;
@@ -33,6 +35,8 @@ class EditPlan extends EditRecord
         $plan = $this->getRecord();
         $transfer = PlanResource::humanBytes($plan->maximum_transfer_bytes);
         $note = PlanResource::humanBytes($plan->maximum_note_bytes);
+        $webrtcTransfer = $plan->webrtc_maximum_transfer_bytes === null ? null : PlanResource::humanBytes($plan->webrtc_maximum_transfer_bytes);
+        $webrtcNote = $plan->webrtc_maximum_note_bytes === null ? null : PlanResource::humanBytes($plan->webrtc_maximum_note_bytes);
         $defaultFile = PlanResource::humanHours($plan->default_file_retention_hours);
         $maximumFile = PlanResource::humanHours($plan->maximum_file_retention_hours);
         $defaultNote = PlanResource::humanHours($plan->default_note_retention_hours);
@@ -42,6 +46,12 @@ class EditPlan extends EditRecord
             'maximum_transfer_quantity' => $transfer['quantity'], 'maximum_transfer_unit' => $transfer['unit'],
             'maximum_file_count' => $plan->maximum_file_count,
             'maximum_note_quantity' => $note['quantity'], 'maximum_note_unit' => $note['unit'],
+            'webrtc_maximum_transfer_unlimited' => $webrtcTransfer === null,
+            'webrtc_maximum_transfer_quantity' => $webrtcTransfer['quantity'] ?? null, 'webrtc_maximum_transfer_unit' => $webrtcTransfer['unit'] ?? 'B',
+            'webrtc_maximum_file_count_unlimited' => $plan->webrtc_maximum_file_count === null,
+            'webrtc_maximum_file_count' => $plan->webrtc_maximum_file_count,
+            'webrtc_maximum_note_unlimited' => $webrtcNote === null,
+            'webrtc_maximum_note_quantity' => $webrtcNote['quantity'] ?? null, 'webrtc_maximum_note_unit' => $webrtcNote['unit'] ?? 'B',
             'default_file_retention_quantity' => $defaultFile['quantity'], 'default_file_retention_unit' => $defaultFile['unit'],
             'maximum_file_retention_quantity' => $maximumFile['quantity'], 'maximum_file_retention_unit' => $maximumFile['unit'],
             'default_note_retention_quantity' => $defaultNote['quantity'], 'default_note_retention_unit' => $defaultNote['unit'],
@@ -63,6 +73,9 @@ class EditPlan extends EditRecord
             'maximum_transfer_bytes' => $this->bytes($data, 'maximum_transfer'),
             'maximum_file_count' => $data['maximum_file_count'],
             'maximum_note_bytes' => $this->bytes($data, 'maximum_note'),
+            'webrtc_maximum_transfer_bytes' => (bool) $data['webrtc_maximum_transfer_unlimited'] ? null : $this->bytes($data, 'webrtc_maximum_transfer'),
+            'webrtc_maximum_file_count' => (bool) $data['webrtc_maximum_file_count_unlimited'] ? null : $data['webrtc_maximum_file_count'],
+            'webrtc_maximum_note_bytes' => (bool) $data['webrtc_maximum_note_unlimited'] ? null : $this->bytes($data, 'webrtc_maximum_note'),
             'default_file_retention_hours' => $this->hours($data, 'default_file_retention'),
             'maximum_file_retention_hours' => $this->hours($data, 'maximum_file_retention'),
             'default_note_retention_hours' => $this->hours($data, 'default_note_retention'),
@@ -81,7 +94,7 @@ class EditPlan extends EditRecord
             throw ValidationException::withMessages(['data.default_note_retention_quantity' => 'Default note retention cannot exceed the maximum note retention.']);
         }
 
-        if ($attributes['filestore_ids'] === [] && $attributes['default_filestore_ids'] === []) {
+        if ($attributes['filestore_ids'] === [] && $attributes['default_filestore_ids'] === [] && app(TransportPolicy::class)->allows(TransferDriver::Http)) {
             unset($attributes['filestore_ids'], $attributes['default_filestore_ids']);
         }
 

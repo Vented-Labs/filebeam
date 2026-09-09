@@ -14,6 +14,7 @@ import TransferUnlock from './download/TransferUnlock.vue';
 import TransferUnavailable from './download/TransferUnavailable.vue';
 import Input from './primitives/Input.vue';
 import AppLink from './primitives/AppLink.vue';
+import WebRtcConsent from './sharing/WebRtcConsent.vue';
 
 const props = defineProps<{
     transferId: string;
@@ -40,7 +41,36 @@ const displayError = computed(() =>
 );
 const secret = ref('');
 const unlockingRecipient = ref(false);
+const webrtcConsentDialog = ref<InstanceType<typeof WebRtcConsent>>();
 let disposed = false;
+
+async function requestWebRtcConsent(): Promise<boolean> {
+    if (!download.webrtc.value) return true;
+    if (typeof RTCPeerConnection === 'undefined') {
+        download.error.value = 'WebRTC is not supported by this browser.';
+        return false;
+    }
+    const accepted = await webrtcConsentDialog.value?.requestConsent();
+    if (accepted) download.webrtcConsent.value = true;
+    return Boolean(accepted);
+}
+async function downloadFiles(items?: Parameters<typeof download.downloadFiles>[0]): Promise<void> {
+    if (!download.webrtc.value) return download.downloadFiles(items);
+    if (!(await requestWebRtcConsent())) return;
+    await download.downloadFiles(items);
+}
+async function decryptNote(): Promise<void> {
+    if (!download.webrtc.value) return download.decryptNote();
+    if (!(await requestWebRtcConsent())) return;
+    await download.decryptNote();
+}
+async function downloadNote(): Promise<void> {
+    if (download.note.value) {
+        await download.downloadNote();
+        return;
+    }
+    await decryptNote();
+}
 
 async function unlockRecipient(): Promise<void> {
     const recipientKey = download.transfer.value?.recipient_key;
@@ -160,7 +190,14 @@ onMounted(() => {
                     </h1>
                     <div class="mt-3 flex min-h-6 items-center gap-2" data-testid="transfer-meta">
                         <span
+                            v-if="download.webrtc.value"
+                            class="text-sm text-[var(--fb-text-muted)]"
+                        >
+                            WebRTC live transfer. The sender must keep their browser open.
+                        </span>
+                        <span
                             v-if="
+                                !download.webrtc.value &&
                                 download.turbo.value &&
                                 download.uploaderStatus.value !== 'completed'
                             "
@@ -168,7 +205,10 @@ onMounted(() => {
                         >
                             Retention starts when uploading finishes.
                         </span>
-                        <TransferExpiry v-else :expires-at="download.transfer.value.expires_at" />
+                        <TransferExpiry
+                            v-else-if="!download.webrtc.value"
+                            :expires-at="download.transfer.value.expires_at"
+                        />
                         <slot name="report" :transfer-id="transferId" />
                     </div>
                     <p
@@ -178,8 +218,12 @@ onMounted(() => {
                     >
                         {{
                             download.burned.value
-                                ? 'Removed from the server. Your decrypted copy remains in this tab.'
-                                : 'Burn on read: this note is removed from the server after successful decryption.'
+                                ? download.webrtc.value
+                                    ? 'The live share was revoked. Your decrypted copy remains in this tab.'
+                                    : 'Removed from the server. Your decrypted copy remains in this tab.'
+                                : download.webrtc.value
+                                  ? 'Burn on read: this live share is revoked after the first successful decrypt.'
+                                  : 'Burn on read: this note is removed from the server after successful decryption.'
                         }}
                     </p>
                     <NoteViewer
@@ -193,12 +237,18 @@ onMounted(() => {
                         class="mt-7"
                         :items="download.manifest.value.items"
                     />
-                    <p v-if="download.turbo.value" class="mt-5 text-sm text-[var(--fb-text-muted)]">
+                    <p
+                        v-if="download.turbo.value && !download.webrtc.value"
+                        class="mt-5 text-sm text-[var(--fb-text-muted)]"
+                    >
                         Your download progress is shared anonymously with the sender while this
                         transfer is active.
                     </p>
                     <DownloadStatus
-                        v-if="download.turbo.value || download.isDownloading.value"
+                        v-if="
+                            (download.turbo.value && !download.webrtc.value) ||
+                            download.isDownloading.value
+                        "
                         :progress="download.progress.value"
                         :downloading="download.isDownloading.value"
                         :phase="download.downloadPhase.value"
@@ -222,14 +272,7 @@ onMounted(() => {
                             @click="download.burnNote"
                             >Retry removal</Button
                         >
-                        <Button
-                            v-if="download.isNote.value"
-                            size="large"
-                            @click="
-                                download.note.value
-                                    ? download.downloadNote()
-                                    : download.decryptNote()
-                            "
+                        <Button v-if="download.isNote.value" size="large" @click="downloadNote"
                             ><Icon name="download" :size="18" />{{
                                 download.note.value ? 'Download note' : 'Decrypt note'
                             }}</Button
@@ -240,7 +283,7 @@ onMounted(() => {
                             :variant="
                                 download.downloadedItemIds.value.length ? 'secondary' : 'primary'
                             "
-                            @click="download.downloadFiles()"
+                            @click="downloadFiles()"
                             ><Icon name="download" :size="18" />{{
                                 download.downloadedItemIds.value.length
                                     ? 'Download files again'
@@ -252,7 +295,7 @@ onMounted(() => {
                             v-else
                             :key="item.id"
                             variant="secondary"
-                            @click="download.downloadFiles([item])"
+                            @click="downloadFiles([item])"
                             ><Icon name="download" :size="17" />Download {{ item.name
                             }}{{
                                 download.downloadedItemIds.value.includes(item.id) ? ' again' : ''
@@ -269,6 +312,7 @@ onMounted(() => {
                     {{ displayError }}
                 </p>
             </div>
+            <WebRtcConsent ref="webrtcConsentDialog" v-model="download.webrtcConsent.value" />
         </section>
     </AppShell>
 </template>

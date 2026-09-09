@@ -15,6 +15,8 @@ import Icon from '../primitives/Icon.vue';
 import Input from '../primitives/Input.vue';
 import Switch from '../primitives/Switch.vue';
 import Tooltip from '../primitives/Tooltip.vue';
+import TransferMethod from './TransferMethod.vue';
+import type { TransferDriver, TransferLimits } from '../../types';
 
 const props = defineProps<{
     disabled: boolean;
@@ -23,12 +25,16 @@ const props = defineProps<{
     mode: 'files' | 'note';
     uploading: boolean;
     recipient?: boolean;
+    enabledDrivers: TransferDriver[];
+    webRtcSupported: boolean;
+    limits: TransferLimits;
 }>();
 
 const password = defineModel<string>('password', { required: true });
 const includeKey = defineModel<boolean>('includeKey', { required: true });
 const retentionHours = defineModel<number>('retentionHours', { required: true });
 const burnOnRead = defineModel<boolean>('burnOnRead', { default: false });
+const driver = defineModel<TransferDriver>('driver', { required: true });
 const emit = defineEmits<{ submit: []; turbo: []; cancel: [] }>();
 
 const labels: Record<number, string> = {
@@ -53,56 +59,70 @@ function setRetention(value: unknown): void {
         class="transfer-options mt-5 w-full rounded-2xl border border-[var(--fb-border)] bg-[var(--fb-surface)] p-5 sm:p-6"
         :class="mode === 'note' ? 'max-w-[896px]' : 'max-w-none'"
     >
-        <div class="controls-grid">
-            <div v-if="!recipient" class="control-field">
-                <label for="transfer-password">Password <span>optional</span></label>
-                <Input
-                    id="transfer-password"
-                    v-model="password"
-                    :disabled="disabled"
-                    type="password"
-                    autocomplete="new-password"
-                    minlength="8"
-                    placeholder="At least 8 characters"
-                />
-            </div>
+        <div class="controls-grid" :class="{ 'controls-grid--with-method': mode === 'note' }">
+            <div class="controls-main">
+                <div v-if="!recipient" class="control-field">
+                    <label for="transfer-password">Password <span>optional</span></label>
+                    <Input
+                        id="transfer-password"
+                        v-model="password"
+                        :disabled="disabled"
+                        type="password"
+                        autocomplete="new-password"
+                        minlength="8"
+                        placeholder="At least 8 characters"
+                    />
+                </div>
 
-            <div class="control-field">
-                <label>Retained for</label>
-                <SelectRoot
-                    :model-value="String(retentionHours)"
-                    :disabled="disabled"
-                    @update:model-value="setRetention"
-                >
-                    <SelectTrigger aria-label="Retention period" class="fb-select-trigger">
-                        <SelectValue>{{ retentionLabel(retentionHours) }}</SelectValue>
-                        <Icon name="chevron-down" :size="16" />
-                    </SelectTrigger>
-                    <SelectPortal>
-                        <SelectContent
-                            :body-lock="false"
-                            position="popper"
-                            class="fb-select-content"
-                        >
-                            <SelectViewport>
-                                <SelectItem
-                                    v-for="hours in [
-                                        ...new Set([...props.retentionOptions, retentionHours]),
-                                    ].sort((a, b) => a - b)"
-                                    :key="hours"
-                                    :value="String(hours)"
-                                    class="fb-select-item"
-                                >
-                                    <SelectItemText>{{ retentionLabel(hours) }}</SelectItemText>
-                                    <SelectItemIndicator
-                                        ><Icon name="check" :size="15"
-                                    /></SelectItemIndicator>
-                                </SelectItem>
-                            </SelectViewport>
-                        </SelectContent>
-                    </SelectPortal>
-                </SelectRoot>
+                <div class="control-field">
+                    <label>{{ driver === 'webrtc' ? 'Link lifetime' : 'Retained for' }}</label>
+                    <SelectRoot
+                        :model-value="String(retentionHours)"
+                        :disabled="disabled"
+                        @update:model-value="setRetention"
+                    >
+                        <SelectTrigger aria-label="Retention period" class="fb-select-trigger">
+                            <SelectValue>{{ retentionLabel(retentionHours) }}</SelectValue>
+                            <Icon name="chevron-down" :size="16" />
+                        </SelectTrigger>
+                        <SelectPortal>
+                            <SelectContent
+                                :body-lock="false"
+                                position="popper"
+                                class="fb-select-content"
+                            >
+                                <SelectViewport>
+                                    <SelectItem
+                                        v-for="hours in [
+                                            ...new Set([...props.retentionOptions, retentionHours]),
+                                        ].sort((a, b) => a - b)"
+                                        :key="hours"
+                                        :value="String(hours)"
+                                        class="fb-select-item"
+                                    >
+                                        <SelectItemText>{{ retentionLabel(hours) }}</SelectItemText>
+                                        <SelectItemIndicator
+                                            ><Icon name="check" :size="15"
+                                        /></SelectItemIndicator>
+                                    </SelectItem>
+                                </SelectViewport>
+                            </SelectContent>
+                        </SelectPortal>
+                    </SelectRoot>
+                    <p v-if="driver === 'webrtc'" class="mt-2 text-xs text-[var(--fb-text-muted)]">
+                        The server may shorten this lifetime.
+                    </p>
+                </div>
             </div>
+            <TransferMethod
+                v-if="mode === 'note'"
+                v-model="driver"
+                :enabled-drivers="enabledDrivers"
+                :web-rtc-supported="webRtcSupported"
+                :disabled="disabled"
+                :limits="limits"
+                mode="note"
+            />
         </div>
 
         <div v-if="!recipient" class="preferences-row">
@@ -119,9 +139,11 @@ function setRetention(value: unknown): void {
                 <label v-if="mode === 'note'" class="preference preference--burn">
                     <Switch v-model="burnOnRead" :disabled="disabled" aria-label="Burn on read" />
                     <span
-                        >Burn on read<small
-                            >Disappears from the server after the first successful decrypt.</small
-                        ></span
+                        >Burn on read<small>{{
+                            driver === 'webrtc'
+                                ? 'Revokes the live share after the first successful decrypt.'
+                                : 'Disappears from the server after the first successful decrypt.'
+                        }}</small></span
                     >
                 </label>
             </div>
@@ -140,7 +162,7 @@ function setRetention(value: unknown): void {
                 <template v-else>
                     <div class="action-buttons">
                         <Tooltip
-                            v-if="mode === 'files' && !recipient"
+                            v-if="mode === 'files' && !recipient && driver === 'http'"
                             content="Share the link while files are still uploading."
                         >
                             <Button
@@ -172,7 +194,11 @@ function setRetention(value: unknown): void {
 .controls-grid {
     display: grid;
     gap: 1rem;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+}
+.controls-main {
+    display: grid;
+    gap: 1rem;
 }
 .control-field {
     min-width: 0;
@@ -255,8 +281,11 @@ function setRetention(value: unknown): void {
     gap: 0.5rem;
 }
 @media (min-width: 1024px) {
-    .controls-grid {
-        grid-template-columns: minmax(0, 1.35fr) minmax(12rem, 0.65fr);
+    .controls-grid--with-method {
+        grid-template-columns: minmax(0, 1fr) minmax(25rem, 1.1fr);
+    }
+    .controls-main {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }
 @media (max-width: 639px) {

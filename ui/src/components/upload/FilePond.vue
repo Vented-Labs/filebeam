@@ -5,8 +5,8 @@ import { formatBytes } from '../../lib/format';
 const props = defineProps<{
     disabled: boolean;
     dragging: boolean;
-    maximumFiles: number;
-    maximumBytes: number;
+    maximumFiles: number | null;
+    maximumBytes: number | null;
     compact?: boolean;
 }>();
 const emit = defineEmits<{ choose: []; files: [files: FileList] }>();
@@ -58,18 +58,23 @@ function onDragOver(event: DragEvent): void {
                 They are encrypted in your browser before they leave your device.
             </p>
             <Button
-                class="pond-choose mt-9 gap-3"
+                class="pond-choose mt-12 gap-3"
                 variant="primary"
                 :disabled="disabled"
                 @click="emit('choose')"
                 ><Icon name="folder" :size="22" />Choose files</Button
             >
-            <p class="mt-5 text-sm text-[var(--fb-text-muted)]" aria-live="polite">
-                {{ dragging ? 'Release to add your files' : 'Or drag and drop anywhere' }}
-            </p>
-            <p class="mt-8 text-xs text-[var(--fb-text-muted)]">
-                {{ formatBytes(maximumBytes) }} per transfer &middot; Up to {{ maximumFiles }} files
-            </p>
+            <slot name="transfer-method">
+                <p class="mt-8 text-xs text-[var(--fb-text-muted)]">
+                    {{
+                        maximumBytes === null
+                            ? 'Unlimited size'
+                            : `${formatBytes(maximumBytes)} per transfer`
+                    }}
+                    &middot;
+                    {{ maximumFiles === null ? 'Unlimited files' : `Up to ${maximumFiles} files` }}
+                </p>
+            </slot>
         </div>
     </section>
 </template>

@@ -46,6 +46,68 @@ if ($usernameDomain !== null && (! is_string($usernameDomain) || filter_var($use
     throw new InvalidArgumentException('FILEBEAM_USERNAME_DOMAIN must be an exact hostname.');
 }
 
+$transportDriversValue = env('FILEBEAM_ENABLED_TRANSFER_DRIVERS');
+
+if ($transportDriversValue !== null && ! is_string($transportDriversValue)) {
+    throw new InvalidArgumentException('FILEBEAM_ENABLED_TRANSFER_DRIVERS must be a JSON array.');
+}
+
+$transportDrivers = $transportDriversValue === null ? null : json_decode($transportDriversValue, true, 512, JSON_THROW_ON_ERROR);
+
+if ($transportDrivers !== null && (! is_array($transportDrivers) || ! array_is_list($transportDrivers) || $transportDrivers === [] || array_filter($transportDrivers, 'is_string') !== $transportDrivers)) {
+    throw new InvalidArgumentException('FILEBEAM_ENABLED_TRANSFER_DRIVERS must be a non-empty JSON array of driver names.');
+}
+
+$transportDefaultDriver = env('FILEBEAM_DEFAULT_TRANSFER_DRIVER') ?: null;
+
+if ($transportDefaultDriver !== null && ! is_string($transportDefaultDriver)) {
+    throw new InvalidArgumentException('FILEBEAM_DEFAULT_TRANSFER_DRIVER must be a driver name.');
+}
+
+$knownTransferDrivers = ['http', 'webrtc'];
+
+if (($transportDrivers === null) !== ($transportDefaultDriver === null)) {
+    throw new InvalidArgumentException('FILEBEAM_ENABLED_TRANSFER_DRIVERS and FILEBEAM_DEFAULT_TRANSFER_DRIVER must be configured together.');
+}
+
+if ($transportDrivers !== null && (array_diff($transportDrivers, $knownTransferDrivers) !== [] || ! in_array($transportDefaultDriver, $transportDrivers, true))) {
+    throw new InvalidArgumentException('The configured default transfer driver must be known and enabled.');
+}
+
+$turnUrls = array_values(array_filter(array_map('trim', explode(',', (string) env('FILEBEAM_WEBRTC_TURN_URLS', '')))));
+$iceServersValue = env('FILEBEAM_WEBRTC_ICE_SERVERS');
+
+if ($iceServersValue !== null && ! is_string($iceServersValue)) {
+    throw new InvalidArgumentException('FILEBEAM_WEBRTC_ICE_SERVERS must be a JSON array.');
+}
+
+$iceServers = $iceServersValue === null
+    ? ($turnUrls === [] ? [['urls' => ['stun:stun.vented.com:3478']]] : [])
+    : json_decode($iceServersValue, true, 512, JSON_THROW_ON_ERROR);
+
+if (! is_array($iceServers) || ! array_is_list($iceServers)) {
+    throw new InvalidArgumentException('FILEBEAM_WEBRTC_ICE_SERVERS must be a JSON array.');
+}
+
+foreach ($iceServers as $iceServer) {
+    if (! is_array($iceServer) || array_diff(array_keys($iceServer), ['urls']) !== []) {
+        throw new InvalidArgumentException('FILEBEAM_WEBRTC_ICE_SERVERS entries may contain only STUN URLs.');
+    }
+    $urls = $iceServer['urls'] ?? null;
+    $urls = is_string($urls) ? [$urls] : $urls;
+
+    if (! is_array($urls) || $urls === [] || ! array_is_list($urls) || array_filter($urls, static fn (mixed $url): bool => is_string($url) && (str_starts_with($url, 'stun:') || str_starts_with($url, 'stuns:'))) !== $urls) {
+        throw new InvalidArgumentException('FILEBEAM_WEBRTC_ICE_SERVERS must contain non-empty stun: or stuns: URL lists.');
+    }
+}
+
+$webrtcSessionLimit = (int) env('FILEBEAM_WEBRTC_SESSION_LIMIT', 8);
+$webrtcMaxSdpBytes = (int) env('FILEBEAM_WEBRTC_MAX_SDP_BYTES', 65_536);
+
+if ($webrtcSessionLimit < 1 || $webrtcSessionLimit > 128 || $webrtcMaxSdpBytes < 1_024 || $webrtcMaxSdpBytes > 1_048_576) {
+    throw new InvalidArgumentException('WebRTC session and SDP limits are outside supported bounds.');
+}
+
 return [
     'username_domain' => $usernameDomain,
     'branding' => $branding,
@@ -92,6 +154,25 @@ return [
                 'environment' => 'username_routing',
             ],
         ],
+    ],
+
+    'transport_policy' => [
+        'defaults' => ['enabled_drivers' => ['http'], 'default_driver' => 'http'],
+        'environment' => [
+            'enabled_drivers' => $transportDrivers,
+            'default_driver' => $transportDefaultDriver,
+        ],
+    ],
+
+    'webrtc' => [
+        'ice_servers' => $iceServers,
+        'turn_urls' => $turnUrls,
+        'turn_secret' => env('FILEBEAM_WEBRTC_TURN_SECRET') ?: null,
+        'turn_ttl_seconds' => min(86_400, max(60, (int) env('FILEBEAM_WEBRTC_TURN_TTL_SECONDS', 3_600))),
+        'session_idle_seconds' => min(3_600, max(10, (int) env('FILEBEAM_WEBRTC_SESSION_IDLE_SECONDS', 120))),
+        'session_limit' => $webrtcSessionLimit,
+        'max_sdp_bytes' => $webrtcMaxSdpBytes,
+        'live_max_hours' => min(168, max(1, (int) env('FILEBEAM_WEBRTC_LIVE_MAX_HOURS', 24))),
     ],
 
     'transfers' => [

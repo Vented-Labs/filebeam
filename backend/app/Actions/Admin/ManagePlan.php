@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace App\Actions\Admin;
 
+use App\Enums\TransferDriver;
 use App\Models\AdminAudit;
 use App\Models\Filestore;
 use App\Models\Plan;
 use App\Models\User;
 use App\Support\FilestoreRegistry;
+use App\Support\TransportPolicy;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
@@ -24,6 +26,9 @@ class ManagePlan
         'maximum_transfer_bytes',
         'maximum_file_count',
         'maximum_note_bytes',
+        'webrtc_maximum_transfer_bytes',
+        'webrtc_maximum_file_count',
+        'webrtc_maximum_note_bytes',
         'default_file_retention_hours',
         'maximum_file_retention_hours',
         'default_note_retention_hours',
@@ -50,25 +55,29 @@ class ManagePlan
             throw ValidationException::withMessages(['attributes' => 'Only plan limits, retention settings, availability, and storage placement may be changed.']);
         }
 
+        $httpEnabled = app(TransportPolicy::class)->allows(TransferDriver::Http);
         $validated = Validator::make($attributes, [
             'maximum_transfer_bytes' => ['required', 'integer', 'min:1', 'max:9223372036854775807'],
             'maximum_file_count' => ['required', 'integer', 'min:1', 'max:32767'],
             'maximum_note_bytes' => ['required', 'integer', 'min:1', 'max:9223372036854775807'],
+            'webrtc_maximum_transfer_bytes' => ['nullable', 'integer', 'min:1', 'max:9223372036854775807'],
+            'webrtc_maximum_file_count' => ['nullable', 'integer', 'min:1', 'max:32767'],
+            'webrtc_maximum_note_bytes' => ['nullable', 'integer', 'min:1', 'max:9223372036854775807'],
             'default_file_retention_hours' => ['required', 'integer', 'min:1', 'max:2147483647', 'lte:maximum_file_retention_hours'],
             'maximum_file_retention_hours' => ['required', 'integer', 'min:1', 'max:2147483647'],
             'default_note_retention_hours' => ['required', 'integer', 'min:1', 'max:2147483647', 'lte:maximum_note_retention_hours'],
             'maximum_note_retention_hours' => ['required', 'integer', 'min:1', 'max:2147483647'],
             'is_active' => ['required', 'boolean'],
             'placement_mode' => ['sometimes', 'required', 'in:distribute,replicate'],
-            'filestore_ids' => ['sometimes', 'required', 'array', 'min:1'],
+            'filestore_ids' => ['sometimes', $httpEnabled ? 'required' : 'nullable', 'array'],
             'filestore_ids.*' => ['integer', 'distinct', 'exists:filestores,id'],
-            'default_filestore_ids' => ['sometimes', 'required', 'array', 'min:1'],
+            'default_filestore_ids' => ['sometimes', $httpEnabled ? 'required' : 'nullable', 'array'],
             'default_filestore_ids.*' => ['integer', 'distinct', 'exists:filestores,id'],
         ])->validate();
 
         $validated['is_active'] = filter_var($validated['is_active'], FILTER_VALIDATE_BOOLEAN);
 
-        return DB::transaction(function () use ($actor, $plan, $validated): Plan {
+        return DB::transaction(function () use ($actor, $plan, $validated, $httpEnabled): Plan {
             $actor = User::query()->lockForUpdate()->findOrFail($actor->id);
             $plan = Plan::query()->lockForUpdate()->findOrFail($plan->id);
             Gate::forUser($actor)->authorize('update', $plan);
@@ -114,8 +123,11 @@ class ManagePlan
 
             if ($managesFilestores) {
                 $defaultFilestoreIds = array_map('intval', $validated['default_filestore_ids'] ?? $existingAssignments->filter()->keys()->all());
-                if ($defaultFilestoreIds === []) {
+                if ($httpEnabled && $defaultFilestoreIds === []) {
                     throw ValidationException::withMessages(['default_filestore_ids' => 'Select at least one default store.']);
+                }
+                if ($httpEnabled && $filestoreIds === []) {
+                    throw ValidationException::withMessages(['filestore_ids' => 'Select at least one allowed store.']);
                 }
                 if (array_diff($defaultFilestoreIds, $filestoreIds) !== []) {
                     throw ValidationException::withMessages(['default_filestore_ids' => 'Every default store must be in the allowed store subset.']);

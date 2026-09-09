@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { TabsList, TabsRoot, TabsTrigger } from 'reka-ui';
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import type { FilebeamConfig, PublicRecipient } from '../types';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import type { FilebeamConfig, PublicRecipient, TransferDriver } from '../types';
 import { useEncryptedUpload } from '../composables/useEncryptedUpload';
 import { ciphertextBytes, formatBytes } from '../lib/format';
 import AppShell from './layout/AppShell.vue';
@@ -11,12 +11,15 @@ import NoteComposer from './notes/NoteComposer.vue';
 import FilePond from './upload/FilePond.vue';
 import FileQueue from './upload/FileQueue.vue';
 import TransferOptions from './upload/TransferOptions.vue';
+import TransferMethod from './upload/TransferMethod.vue';
 import ShareReady from './sharing/ShareReady.vue';
+import WebRtcConsent from './sharing/WebRtcConsent.vue';
 import Icon from './primitives/Icon.vue';
 import AppLink from './primitives/AppLink.vue';
 import Toast from './primitives/Toast.vue';
 import Button from './primitives/Button.vue';
 import SmoothProgress from './primitives/SmoothProgress.vue';
+import { enabledTransferDrivers, transferLimits } from '../lib/transfer-policy';
 
 const props = defineProps<{
     config: FilebeamConfig;
@@ -34,11 +37,22 @@ const noteIncludeKey = ref(true);
 const fileRetentionHours = ref(props.config.file_retention_hours);
 const noteRetentionHours = ref(props.config.note_retention_hours);
 const burnOnRead = ref(false);
+const enabledDrivers = computed(() =>
+    props.recipient
+        ? enabledTransferDrivers(props.config).filter((driver) => driver === 'http')
+        : enabledTransferDrivers(props.config),
+);
+const driver = ref<TransferDriver>(
+    props.recipient ? 'http' : (props.config.transport_policy?.default_driver ?? 'http'),
+);
+const webrtcConsent = ref(false);
+const webrtcConsentDialog = ref<InstanceType<typeof WebRtcConsent>>();
+const webRtcSupported = typeof RTCPeerConnection !== 'undefined';
 const dragDepth = ref(0);
 const deleting = ref(false);
 const transferDeletedToastOpen = ref(false);
-const filesUpload = useEncryptedUpload(props.config);
-const noteUpload = useEncryptedUpload(props.config);
+const filesUpload = useEncryptedUpload(() => props.config, driver);
+const noteUpload = useEncryptedUpload(() => props.config, driver);
 const activeUpload = computed(() => (mode.value === 'files' ? filesUpload : noteUpload));
 const activeStatus = computed(() => activeUpload.value.status.value);
 const activeShare = computed(() => activeUpload.value.share.value);
@@ -52,14 +66,18 @@ const dragging = computed(() => dragDepth.value > 0);
 const canCreateTransfers = computed(
     () => Boolean(props.user) || props.config.anonymous_uploads_enabled,
 );
+const transfersAvailable = computed(
+    () => !props.recipient || enabledDrivers.value.includes('http'),
+);
 const isBusy = computed(
     () => deleting.value || filesUpload.isUploading.value || noteUpload.isUploading.value,
 );
 const noteCiphertextBytes = computed(() =>
     ciphertextBytes(new Blob([note.value]).size, props.config.chunk_bytes),
 );
+const limits = computed(() => transferLimits(props.config, driver.value));
 const maximumBytes = computed(() =>
-    mode.value === 'files' ? props.config.maximum_transfer_bytes : props.config.maximum_note_bytes,
+    mode.value === 'files' ? limits.value.maximum_transfer_bytes : limits.value.maximum_note_bytes,
 );
 const activeCiphertextBytes = computed(() =>
     mode.value === 'files' ? filesUpload.totalCiphertextBytes.value : noteCiphertextBytes.value,
@@ -67,9 +85,25 @@ const activeCiphertextBytes = computed(() =>
 const hasContent = computed(() =>
     mode.value === 'files' ? filesUpload.entries.value.length > 0 : note.value.length > 0,
 );
-const canUpload = computed(
-    () => hasContent.value && activeCiphertextBytes.value <= maximumBytes.value && !isBusy.value,
-);
+const canUpload = computed(() => {
+    const countAllowed =
+        mode.value !== 'files' ||
+        limits.value.maximum_file_count === null ||
+        filesUpload.entries.value.length <= limits.value.maximum_file_count;
+    const bytesAllowed =
+        maximumBytes.value === null || activeCiphertextBytes.value <= maximumBytes.value;
+    return (
+        hasContent.value &&
+        bytesAllowed &&
+        countAllowed &&
+        enabledDrivers.value.includes(driver.value) &&
+        (driver.value !== 'webrtc' || webRtcSupported) &&
+        !isBusy.value
+    );
+});
+watch(driver, () => {
+    webrtcConsent.value = false;
+});
 const selectedPassword = computed({
     get: () => (mode.value === 'files' ? filePassword.value : notePassword.value),
     set: (value: string) => {
@@ -132,6 +166,14 @@ function onDrop(event: DragEvent): void {
         filesUpload.addFiles(event.dataTransfer.files);
 }
 async function submit(turbo = false): Promise<void> {
+    if (driver.value === 'webrtc') {
+        if (!webRtcSupported) {
+            activeUpload.value.error.value = 'WebRTC is not supported by this browser.';
+            return;
+        }
+        if (!(await webrtcConsentDialog.value?.requestConsent())) return;
+        if (driver.value !== 'webrtc' || !canUpload.value) return;
+    }
     const uploader = activeUpload.value;
     await uploader.upload({
         mode: mode.value,
@@ -145,6 +187,7 @@ async function submit(turbo = false): Promise<void> {
         burnOnRead: mode.value === 'note' && burnOnRead.value,
         recipient: props.recipient,
         turbo,
+        webrtcConsent: webrtcConsent.value,
     });
 }
 async function removeTransfer(): Promise<void> {
@@ -171,6 +214,10 @@ async function removeTransfer(): Promise<void> {
 function resetActive(): void {
     if (isBusy.value) return;
     activeUpload.value.clear();
+    driver.value = props.recipient
+        ? 'http'
+        : (props.config.transport_policy?.default_driver ?? 'http');
+    webrtcConsent.value = false;
     if (mode.value === 'files') {
         filePassword.value = '';
         fileIncludeKey.value = true;
@@ -187,6 +234,33 @@ function resetActive(): void {
 }
 function cancelUpload(): void {
     activeUpload.value.cancel();
+}
+async function restartHttp(): Promise<void> {
+    if (!enabledDrivers.value.includes('http')) return;
+    const httpLimits = transferLimits(props.config, 'http');
+    const httpMaximumBytes =
+        mode.value === 'files' ? httpLimits.maximum_transfer_bytes : httpLimits.maximum_note_bytes;
+    const exceedsBytes =
+        httpMaximumBytes !== null && activeCiphertextBytes.value > httpMaximumBytes;
+    const exceedsFiles =
+        mode.value === 'files' &&
+        httpLimits.maximum_file_count !== null &&
+        filesUpload.entries.value.length > httpLimits.maximum_file_count;
+    if (exceedsBytes || exceedsFiles) {
+        activeUpload.value.error.value =
+            'This live transfer exceeds the stored HTTP limits and cannot be restarted as HTTP.';
+        return;
+    }
+    if (
+        !window.confirm(
+            'Restart as a stored HTTP transfer? This creates a new link and applies HTTP limits.',
+        )
+    )
+        return;
+    activeUpload.value.cancel();
+    driver.value = 'http';
+    webrtcConsent.value = false;
+    await submit();
 }
 function preventFileNavigation(event: DragEvent): void {
     if (canCreateTransfers.value && hasDraggedFiles(event)) event.preventDefault();
@@ -224,7 +298,19 @@ onBeforeUnmount(() => {
     >
         <section class="mx-auto w-full max-w-[1370px] px-5 pb-14 pt-8 sm:px-10">
             <section
-                v-if="!canCreateTransfers"
+                v-if="!transfersAvailable"
+                class="mx-auto max-w-xl rounded-2xl border border-[var(--fb-border)] bg-[var(--fb-surface)] px-6 py-12 text-center shadow-2xl shadow-black/30"
+            >
+                <h1 class="text-2xl font-semibold text-[var(--fb-text)]">
+                    Stored transfers unavailable
+                </h1>
+                <p class="mt-3 text-[var(--fb-text-muted)]">
+                    This recipient inbox accepts stored HTTP transfers, but HTTP is disabled by the
+                    server.
+                </p>
+            </section>
+            <section
+                v-else-if="!canCreateTransfers"
                 class="mx-auto max-w-xl rounded-2xl border border-[var(--fb-border)] bg-[var(--fb-surface)] px-6 py-12 text-center shadow-2xl shadow-black/30"
             >
                 <h1 class="text-2xl font-semibold text-[var(--fb-text)]">Sign in to share files</h1>
@@ -290,9 +376,14 @@ onBeforeUnmount(() => {
                                     :activity="activeActivity"
                                     :sessions="activeSessions"
                                     :monitoring-unavailable="activeMonitoringUnavailable"
+                                    :can-restart-http="
+                                        activeShare.driver === 'webrtc' &&
+                                        enabledDrivers.includes('http')
+                                    "
                                     @reset="resetActive"
                                     @delete="removeTransfer"
                                     @cancel="cancelUpload"
+                                    @restart-http="restartHttp"
                                 />
                                 <p
                                     v-if="activeError"
@@ -330,11 +421,23 @@ onBeforeUnmount(() => {
                                         :disabled="isBusy"
                                         :dragging="dragging"
                                         :compact="filesUpload.entries.value.length > 0"
-                                        :maximum-files="config.maximum_file_count"
-                                        :maximum-bytes="config.maximum_transfer_bytes"
+                                        :maximum-files="limits.maximum_file_count"
+                                        :maximum-bytes="limits.maximum_transfer_bytes"
                                         @choose="chooseFiles"
                                         @files="addFiles"
-                                    />
+                                    >
+                                        <template #transfer-method>
+                                            <TransferMethod
+                                                v-model="driver"
+                                                class="mt-8 text-left"
+                                                :enabled-drivers="enabledDrivers"
+                                                :web-rtc-supported="webRtcSupported"
+                                                :disabled="isBusy"
+                                                :limits="limits"
+                                                mode="files"
+                                            />
+                                        </template>
+                                    </FilePond>
                                     <div class="min-w-0 overflow-hidden">
                                         <Transition name="queue-panel"
                                             ><FileQueue
@@ -352,7 +455,7 @@ onBeforeUnmount(() => {
                                         v-model:title="noteTitle"
                                         v-model:language="language"
                                         :disabled="isBusy"
-                                        :maximum-bytes="config.maximum_note_bytes"
+                                        :maximum-bytes="limits.maximum_note_bytes"
                                         :retention-hours="noteRetentionHours"
                                     />
                                 </section>
@@ -363,11 +466,15 @@ onBeforeUnmount(() => {
                                         v-model:include-key="selectedIncludeKey"
                                         v-model:retention-hours="selectedRetentionHours"
                                         v-model:burn-on-read="burnOnRead"
+                                        v-model:driver="driver"
                                         :disabled="isBusy"
                                         :can-upload="canUpload"
                                         :uploading="activeIsUploading"
                                         :mode="mode"
                                         :recipient="Boolean(recipient)"
+                                        :enabled-drivers="enabledDrivers"
+                                        :web-rtc-supported="webRtcSupported"
+                                        :limits="limits"
                                         :retention-options="
                                             mode === 'files'
                                                 ? (config.file_retention_options ?? [])
@@ -399,13 +506,27 @@ onBeforeUnmount(() => {
                                     </p>
                                     <p
                                         v-else-if="
-                                            hasContent && activeCiphertextBytes > maximumBytes
+                                            hasContent &&
+                                            maximumBytes !== null &&
+                                            activeCiphertextBytes > maximumBytes
                                         "
                                         class="text-sm text-[var(--fb-danger)]"
                                     >
-                                        This encrypted
+                                        This encrypted {{ driver === 'webrtc' ? 'WebRTC' : 'HTTP' }}
                                         {{ mode === 'files' ? 'transfer' : 'note' }} exceeds the
                                         {{ formatBytes(maximumBytes) }} limit.
+                                    </p>
+                                    <p
+                                        v-else-if="
+                                            mode === 'files' &&
+                                            limits.maximum_file_count !== null &&
+                                            filesUpload.entries.value.length >
+                                                limits.maximum_file_count
+                                        "
+                                        class="text-sm text-[var(--fb-danger)]"
+                                    >
+                                        This transfer exceeds the
+                                        {{ limits.maximum_file_count }} file limit.
                                     </p>
                                 </div>
                             </template>
@@ -420,6 +541,7 @@ onBeforeUnmount(() => {
             title="Transfer deleted"
             description="The sharing link is no longer available."
         />
+        <WebRtcConsent ref="webrtcConsentDialog" v-model="webrtcConsent" />
     </AppShell>
 </template>
 

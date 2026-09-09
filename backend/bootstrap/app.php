@@ -35,7 +35,11 @@ $application = Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->prepend(RequireInstallation::class);
         $middleware->append(TrackUpdateActivity::class);
-        $middleware->trimStrings(except: [fn (Request $request): bool => $request->is('install/*')]);
+        $middleware->trimStrings(except: [
+            fn (Request $request): bool => $request->is('install/*'),
+            // SDP requires its final CRLF; trimming it produces an invalid session description.
+            'description.sdp',
+        ]);
         $middleware->trustHosts(function (): array {
             $installation = app(InstallationState::class);
             if ($installation->isPending() || $installation->canBootstrap()) {

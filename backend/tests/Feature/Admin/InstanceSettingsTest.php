@@ -5,18 +5,25 @@ declare(strict_types=1);
 use App\Actions\Admin\ManageInstanceSettings;
 use App\Enums\UserRole;
 use App\Filament\Pages\InstanceSettings as InstanceSettingsPage;
+use App\Http\Middleware\HandleInertiaRequests;
+use App\Models\AdminAudit;
 use App\Models\InstanceSetting;
+use App\Models\InstanceTransportPolicy;
 use App\Models\Plan;
 use App\Models\User;
 use App\Support\InstanceSettings;
+use App\Support\TransportPolicy;
 use Filament\Facades\Filament;
 use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
-use Inertia\Testing\AssertableInertia as Assert;
 use Livewire\Livewire;
 
 beforeEach(function (): void {
+    config()->set('app.key', 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=');
+    config()->set('installation.environment_path', base_path('composer.json'));
+    config()->set('filebeam.transport_policy.environment', ['enabled_drivers' => null, 'default_driver' => null]);
     Filament::setCurrentPanel(Filament::getPanel('admin'));
 });
 
@@ -53,16 +60,17 @@ test('shared props resolve all database settings with one query and reflect edit
         }
     });
 
-    $this->get('/')->assertInertia(fn (Assert $page) => $page
-        ->where('filebeam.registration_enabled', false)
-        ->where('filebeam.anonymous_uploads_enabled', false)
-        ->where('filebeam.username_routing_enabled', false));
+    $shared = app(HandleInertiaRequests::class)->share(Request::create('/'));
+    expect($shared['filebeam']['registration_enabled'])->toBeFalse()
+        ->and($shared['filebeam']['anonymous_uploads_enabled'])->toBeFalse()
+        ->and($shared['filebeam']['username_routing_enabled'])->toBeFalse();
 
     expect($queries)->toHaveCount(2);
 
     InstanceSetting::query()->whereKey('registration')->update(['value' => true]);
 
-    $this->get('/')->assertInertia(fn (Assert $page) => $page->where('filebeam.registration_enabled', true));
+    $shared = app(HandleInertiaRequests::class)->share(Request::create('/'));
+    expect($shared['filebeam']['registration_enabled'])->toBeTrue();
 });
 
 test('environment settings take precedence over database settings in shared props', function (): void {
@@ -70,7 +78,8 @@ test('environment settings take precedence over database settings in shared prop
     InstanceSetting::query()->create(['key' => 'registration', 'value' => false]);
     config()->set('filebeam.instance_settings.environment.registration', true);
 
-    $this->get('/')->assertInertia(fn (Assert $page) => $page->where('filebeam.registration_enabled', true));
+    $shared = app(HandleInertiaRequests::class)->share(Request::create('/'));
+    expect($shared['filebeam']['registration_enabled'])->toBeTrue();
 });
 
 test('shared authentication props are evaluated for the current user only', function (): void {
@@ -78,8 +87,15 @@ test('shared authentication props are evaluated for the current user only', func
     $firstUser = User::factory()->create();
     $secondUser = User::factory()->create();
 
-    $this->actingAs($firstUser)->get('/')->assertInertia(fn (Assert $page) => $page->where('auth.user.id', $firstUser->id));
-    $this->actingAs($secondUser)->get('/')->assertInertia(fn (Assert $page) => $page->where('auth.user.id', $secondUser->id));
+    $firstRequest = Request::create('/');
+    $firstRequest->setUserResolver(fn (): User => $firstUser);
+    $firstShared = app(HandleInertiaRequests::class)->share($firstRequest);
+    $secondRequest = Request::create('/');
+    $secondRequest->setUserResolver(fn (): User => $secondUser);
+    $secondShared = app(HandleInertiaRequests::class)->share($secondRequest);
+
+    expect($firstShared['auth']['user']()['id'])->toBe($firstUser->id)
+        ->and($secondShared['auth']['user']()['id'])->toBe($secondUser->id);
 });
 
 test('admins can save an override and inherit the PHP fallback again', function () {
@@ -116,6 +132,18 @@ test('environment controlled settings cannot be overridden by backend mutations'
     $this->assertDatabaseMissing('instance_settings', ['key' => 'registration']);
 });
 
+test('an invalid transport policy rolls back feature flags and their audit entries', function (): void {
+    $admin = User::factory()->create(['role' => UserRole::Admin]);
+    config()->set('filebeam.instance_settings.environment.registration', null);
+    $this->actingAs($admin, 'admin');
+    Livewire::test(InstanceSettingsPage::class)
+        ->fillForm(['registration' => '0', 'enabled_drivers' => ['http'], 'default_driver' => 'webrtc'])
+        ->call('save')
+        ->assertHasErrors();
+    $this->assertDatabaseMissing('instance_settings', ['key' => 'registration']);
+    $this->assertDatabaseMissing('admin_audits', ['action' => 'instance_setting.updated', 'target_id' => 'registration']);
+});
+
 test('only admins can access and update the instance settings page', function () {
     $user = User::factory()->create();
     $admin = User::factory()->create(['role' => UserRole::Admin]);
@@ -131,4 +159,60 @@ test('only admins can access and update the instance settings page', function ()
         ->assertHasNoFormErrors();
 
     $this->assertDatabaseHas('instance_settings', ['key' => 'registration', 'value' => false]);
+});
+
+test('the admin transport form saves every allowed driver mode and default', function (array $enabledDrivers, string $defaultDriver): void {
+    $admin = User::factory()->create(['role' => UserRole::Admin]);
+    $this->actingAs($admin, 'admin');
+
+    Livewire::test(InstanceSettingsPage::class)
+        ->set('data.enabled_drivers', $enabledDrivers)
+        ->set('data.default_driver', $defaultDriver)
+        ->assertSet('data.enabled_drivers', $enabledDrivers)
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect(InstanceTransportPolicy::query()->findOrFail(1)->enabled_drivers)->toBe($enabledDrivers)
+        ->and(InstanceTransportPolicy::query()->findOrFail(1)->default_driver)->toBe($defaultDriver)
+        ->and(app(TransportPolicy::class)->resolve())->toBe(['enabled_drivers' => $enabledDrivers, 'default_driver' => $defaultDriver]);
+})->with([
+    'HTTP only' => [['http'], 'http'],
+    'WebRTC only' => [['webrtc'], 'webrtc'],
+    'both with HTTP default' => [['http', 'webrtc'], 'http'],
+    'both with WebRTC default' => [['http', 'webrtc'], 'webrtc'],
+]);
+
+test('the admin transport form audits persisted changes', function (): void {
+    $admin = User::factory()->create(['role' => UserRole::Admin]);
+    $this->actingAs($admin, 'admin');
+
+    Livewire::test(InstanceSettingsPage::class)
+        ->set('data.enabled_drivers', ['http', 'webrtc'])
+        ->set('data.default_driver', 'webrtc')
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect(AdminAudit::query()->where('action', 'instance_transport_policy.updated')->latest()->value('changes'))->toMatchArray([
+        'enabled_drivers' => ['from' => ['http'], 'to' => ['http', 'webrtc']],
+        'default_driver' => ['from' => 'http', 'to' => 'webrtc'],
+    ]);
+});
+
+test('environment locked transport form fields cannot change the persisted policy', function (): void {
+    $admin = User::factory()->create(['role' => UserRole::Admin]);
+    config()->set('filebeam.transport_policy.environment', ['enabled_drivers' => ['webrtc'], 'default_driver' => 'webrtc']);
+    $this->actingAs($admin, 'admin');
+
+    Livewire::test(InstanceSettingsPage::class)
+        ->assertFormFieldIsDisabled('enabled_drivers')
+        ->assertFormFieldIsDisabled('default_driver')
+        ->set('data.enabled_drivers', ['http'])
+        ->set('data.default_driver', 'http')
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect(InstanceTransportPolicy::query()->findOrFail(1)->enabled_drivers)->toBe(['http'])
+        ->and(InstanceTransportPolicy::query()->findOrFail(1)->default_driver)->toBe('http')
+        ->and(app(TransportPolicy::class)->resolve())->toBe(['enabled_drivers' => ['webrtc'], 'default_driver' => 'webrtc'])
+        ->and(AdminAudit::query()->where('action', 'instance_transport_policy.updated')->exists())->toBeFalse();
 });

@@ -15,8 +15,9 @@ defineProps<{
     activity?: string;
     sessions?: DownloadSession[];
     monitoringUnavailable?: boolean;
+    canRestartHttp?: boolean;
 }>();
-const emit = defineEmits<{ reset: []; delete: []; cancel: [] }>();
+const emit = defineEmits<{ reset: []; delete: []; cancel: []; restartHttp: [] }>();
 </script>
 
 <template>
@@ -34,8 +35,18 @@ const emit = defineEmits<{ reset: []; delete: []; cancel: [] }>();
         >
             Turbo Transfer
         </p>
+        <p
+            v-if="share.driver === 'webrtc'"
+            class="mt-4 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--fb-accent-text)]"
+        >
+            WebRTC live transfer
+        </p>
         <h1 class="mt-4 text-3xl font-semibold text-[var(--fb-text)]">
-            Your encrypted link is ready
+            {{
+                share.driver === 'webrtc'
+                    ? 'Your live transfer is ready'
+                    : 'Your encrypted link is ready'
+            }}
         </h1>
         <p v-if="share.turbo" class="mt-2 min-h-6 text-[var(--fb-text-muted)]" aria-live="polite">
             {{
@@ -43,6 +54,19 @@ const emit = defineEmits<{ reset: []; delete: []; cancel: [] }>();
                     ? 'Uploading is still in progress. Keep this tab open until it finishes.'
                     : 'Upload complete. This link is ready to use.'
             }}
+        </p>
+        <p v-if="share.driver === 'webrtc'" class="mt-2 text-[var(--fb-text-muted)]">
+            Keep this tab open while the recipient downloads. No payload is stored by Filebeam.
+        </p>
+        <p
+            v-if="share.driver === 'webrtc'"
+            class="mt-3 text-sm text-[var(--fb-text-muted)]"
+            aria-live="polite"
+        >
+            {{ activity ?? 'Waiting for a recipient to connect.' }}
+            <span v-if="progress !== undefined" class="tabular-nums"
+                >{{ Math.round(progress) }}%</span
+            >
         </p>
         <p class="mt-2 min-h-12 text-[var(--fb-text-muted)]">
             {{
@@ -94,7 +118,7 @@ const emit = defineEmits<{ reset: []; delete: []; cancel: [] }>();
                 :disabled="deleting"
             />
         </div>
-        <div class="mt-4 flex min-h-6 justify-center text-sm">
+        <div v-if="share.driver !== 'webrtc'" class="mt-4 flex min-h-6 justify-center text-sm">
             <p v-if="uploading" class="text-[var(--fb-text-muted)]">
                 Retention starts when uploading finishes.
             </p>
@@ -105,11 +129,35 @@ const emit = defineEmits<{ reset: []; delete: []; cancel: [] }>();
             :sessions="sessions ?? []"
             :unavailable="monitoringUnavailable ?? false"
         />
-        <div class="mt-6 flex justify-center gap-4">
+        <div
+            v-if="share.driver === 'webrtc' && sessions?.length"
+            class="mt-5 text-left text-sm text-[var(--fb-text-muted)]"
+            aria-live="polite"
+        >
+            <p v-for="session in sessions" :key="session.id">
+                Recipient {{ session.status }}
+                <span class="tabular-nums">{{ Math.round(session.progress) }}%</span>
+            </p>
+        </div>
+        <div class="mt-6 flex flex-wrap justify-center gap-4">
             <Button variant="secondary" :disabled="uploading || deleting" @click="emit('reset')"
                 >New transfer</Button
-            ><Button v-if="uploading" variant="ghost" @click="emit('cancel')">Cancel upload</Button
-            ><Button v-else variant="ghost" :disabled="deleting" @click="emit('delete')"
+            ><Button
+                v-if="uploading || share.driver === 'webrtc'"
+                variant="ghost"
+                @click="emit('cancel')"
+                >{{ share.driver === 'webrtc' ? 'Stop live transfer' : 'Cancel upload' }}</Button
+            ><Button
+                v-if="share.driver === 'webrtc' && canRestartHttp"
+                variant="secondary"
+                :disabled="deleting"
+                @click="emit('restartHttp')"
+                >Restart as stored HTTP</Button
+            ><Button
+                v-else-if="!uploading && share.driver !== 'webrtc'"
+                variant="ghost"
+                :disabled="deleting"
+                @click="emit('delete')"
                 >Delete now</Button
             >
         </div>

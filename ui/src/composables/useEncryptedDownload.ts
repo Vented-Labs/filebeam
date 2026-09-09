@@ -9,6 +9,7 @@ import {
     transferConcurrency,
 } from '../lib/transfer';
 import { waitForWorkerMessage, type WorkerMessage } from '../lib/worker-request';
+import { connectWebRtcReceiver, type WebRtcReceiver } from '../lib/webrtc';
 import { progress as transferProgress } from '../../../backend/resources/js/actions/App/Http/Controllers/Api/V1/TurboTransferController';
 import {
     store as createSession,
@@ -20,10 +21,11 @@ const MAX_PLAINTEXT_CHUNK_BYTES = 25_000_000 - 16;
 export type Transfer = {
     id: string;
     kind: 'files' | 'note';
+    driver?: 'http' | 'webrtc';
     protocol_version: 1;
     encrypted_manifest: string | null;
     encrypted_descriptor?: string | null;
-    status?: 'pending' | 'available';
+    status?: 'pending' | 'available' | 'live' | 'ended';
     declared_ciphertext_bytes?: number;
     ciphertext_bytes: number;
     expires_at: string;
@@ -56,6 +58,7 @@ export type Manifest = {
     language?: string;
     title?: string;
     read_token?: string;
+    join_token?: string;
     purpose?: 'turbo-descriptor';
     chunk_bytes?: number;
 };
@@ -111,6 +114,12 @@ function validateManifest(candidate: unknown, transfer: Transfer, descriptor = f
     if (!candidate || typeof candidate !== 'object')
         throw new Error('The decrypted manifest is invalid.');
     const value = candidate as Partial<Manifest>;
+    if (
+        transfer.driver === 'webrtc' &&
+        (typeof value.join_token !== 'string' || !/^[A-Za-z0-9]{64}$/.test(value.join_token))
+    )
+        throw new Error('Invalid live transfer capability.');
+    const declaredSizes = descriptor || transfer.driver === 'webrtc';
     if (
         descriptor &&
         (value.purpose !== 'turbo-descriptor' ||
@@ -176,17 +185,17 @@ function validateManifest(candidate: unknown, transfer: Transfer, descriptor = f
         if (
             server.chunk_count !== expectedCount ||
             item.chunk_count !== expectedCount ||
-            (descriptor ? server.declared_ciphertext_bytes : server.ciphertext_bytes) !==
+            (declaredSizes ? server.declared_ciphertext_bytes : server.ciphertext_bytes) !==
                 item.size + expectedCount * 16
         )
             throw new Error('The transfer is incomplete or has been altered.');
         ids.add(item.id);
     }
     if (
-        (descriptor ? transfer.declared_ciphertext_bytes : transfer.ciphertext_bytes) !==
+        (declaredSizes ? transfer.declared_ciphertext_bytes : transfer.ciphertext_bytes) !==
         transfer.items.reduce(
             (total, item) =>
-                total + (descriptor ? item.declared_ciphertext_bytes! : item.ciphertext_bytes),
+                total + (declaredSizes ? item.declared_ciphertext_bytes! : item.ciphertext_bytes),
             0,
         )
     )
@@ -207,9 +216,17 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
     const downloadPhase = ref<DownloadPhase>('downloading');
     const downloadItemCount = ref(0);
     const downloadedItemIds = ref<string[]>([]);
+    const webrtc = computed(() => !inbox && transfer.value?.driver === 'webrtc');
+    const webrtcConsent = ref(false);
+    let liveReceiver: WebRtcReceiver | undefined;
+    let liveConnection: Promise<WebRtcReceiver> | undefined;
+    let liveJob = '';
+    let lastLiveReport = 0;
+    let burnSessionToken: string | undefined;
     const turbo = computed(
         () =>
             !inbox &&
+            !webrtc.value &&
             transfer.value?.kind === 'files' &&
             Boolean(transfer.value.encrypted_descriptor),
     );
@@ -635,6 +652,36 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
         onWaiting?: () => void,
     ): Promise<ArrayBuffer> {
         if (!transfer.value) throw new Error('Transfer unavailable.');
+        if (webrtc.value) {
+            if (!webrtcConsent.value || !manifest.value?.join_token)
+                throw new Error('Acknowledge WebRTC IP address exposure before connecting.');
+            if (!liveConnection) {
+                liveJob = jobId;
+                downloadPhase.value = 'waiting';
+                liveConnection = connectWebRtcReceiver({
+                    transferId,
+                    joinToken: manifest.value.join_token,
+                    signal: controller!.signal,
+                }).then((receiver) => {
+                    liveReceiver = receiver;
+                    burnSessionToken = receiver.sessionToken;
+                    return receiver;
+                });
+            }
+            const receiver = await liveConnection;
+            ensureActive(jobId);
+            onReady?.();
+            downloadPhase.value = 'downloading';
+            return receiver.readChunk(itemId, index, expectedBytes, (loaded) => {
+                onProgress(loaded);
+                if (Date.now() - lastLiveReport >= 2_000) {
+                    lastLiveReport = Date.now();
+                    void receiver
+                        .report('active', Math.min(99, progress.value))
+                        .catch(() => undefined);
+                }
+            });
+        }
         while (true) {
             await waitUntilAvailable(jobId, itemId, index);
             onReady?.();
@@ -778,10 +825,9 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
         const hashId = crypto.randomUUID();
         const verifyDigest = Boolean(item.digest || turbo.value);
         if (verifyDigest) await hash('hash-start', jobId, hashId);
-        const maximum = transferConcurrency(
-            transfer.value.download_concurrency,
-            transfer.value.chunk_bytes,
-        );
+        const maximum = webrtc.value
+            ? 1
+            : transferConcurrency(transfer.value.download_concurrency, transfer.value.chunk_bytes);
         const pending = new Map<number, Promise<{ plaintext?: Uint8Array; reason?: unknown }>>();
         let pipelineFailure: unknown;
         let nextFetch = 0;
@@ -944,6 +990,11 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
 
     async function decryptNote(): Promise<void> {
         if (!transfer.value || !manifest.value?.items[0] || isDownloading.value) return;
+        if (webrtc.value && !webrtcConsent.value) return;
+        if (webrtc.value && manifest.value.items[0].size > 512 * 1024 * 1024) {
+            error.value = 'This note exceeds the browser-safe display size of 512 MiB.';
+            return;
+        }
         error.value = '';
         const jobId = crypto.randomUUID();
         activeJob = jobId;
@@ -983,6 +1034,8 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
                     reason instanceof Error ? reason.message : 'Could not decrypt this note.';
             if (activeJob === jobId) state.value = 'ready';
         } finally {
+            if (webrtc.value && liveJob === jobId)
+                await finishLiveSession(note.value ? 'completed' : 'failed');
             if (activeJob === jobId) activeJob = '';
         }
     }
@@ -1001,7 +1054,12 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
         try {
             const response = await fetch(`/api/v1/transfers/${transferId}/consume`, {
                 method: 'POST',
-                headers: { 'X-Filebeam-Read-Token': manifest.value.read_token },
+                headers: {
+                    'X-Filebeam-Read-Token': manifest.value.read_token,
+                    ...(webrtc.value && burnSessionToken
+                        ? { 'X-Filebeam-Session-Token': burnSessionToken }
+                        : {}),
+                },
             });
             if (!response.ok && response.status !== 404)
                 throw new Error('Removal could not be confirmed.');
@@ -1017,6 +1075,7 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
 
     async function downloadFiles(items = manifest.value?.items): Promise<void> {
         if (!transfer.value || !manifest.value || !items?.length || isDownloading.value) return;
+        if (webrtc.value && !webrtcConsent.value) return;
         error.value = '';
         downloadItemCount.value = items.length;
         const jobId = crypto.randomUUID();
@@ -1117,11 +1176,29 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
                 error.value = reason instanceof Error ? reason.message : 'Download failed.';
             if (activeJob === jobId) state.value = 'ready';
         } finally {
+            if (webrtc.value && liveJob === jobId)
+                await finishLiveSession(
+                    downloadPhase.value === 'completed' ? 'completed' : 'failed',
+                );
             if (activeJob === jobId) activeJob = '';
         }
     }
 
+    async function finishLiveSession(status: 'completed' | 'failed' | 'cancelled'): Promise<void> {
+        const receiver = liveReceiver;
+        liveReceiver = undefined;
+        liveConnection = undefined;
+        liveJob = '';
+        if (receiver) {
+            await receiver
+                .report(status, status === 'completed' ? 100 : Math.min(99, progress.value))
+                .catch(() => undefined);
+            receiver.close();
+        }
+    }
+
     function cancel(): void {
+        void finishLiveSession('cancelled');
         if (reporter) void reportSession(reporter, 'cancelled', true);
         const jobId = activeJob;
         activeJob = '';
@@ -1147,6 +1224,8 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
         error,
         progress,
         turbo,
+        webrtc,
+        webrtcConsent,
         uploadProgress,
         uploaderStatus,
         downloadPhase,

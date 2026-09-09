@@ -20,7 +20,7 @@ const props = defineProps<{
     modelValue: string;
     language: string;
     disabled: boolean;
-    maximumBytes: number;
+    maximumBytes: number | null;
     retentionHours: number;
     title: string;
 }>();
@@ -114,8 +114,12 @@ function formatBytes(value: number): string {
         <div
             class="fb-code flex items-center justify-end border-t border-[var(--fb-border)] bg-[var(--fb-surface-raised)] px-4 py-2 text-[var(--fb-text-muted)]"
         >
-            <span :class="{ 'text-[var(--fb-danger)]': bytes > maximumBytes }"
-                >{{ formatBytes(bytes) }} / {{ formatBytes(maximumBytes) }}</span
+            <span
+                :class="{
+                    'text-[var(--fb-danger)]': maximumBytes !== null && bytes > maximumBytes,
+                }"
+                >{{ formatBytes(bytes) }} /
+                {{ maximumBytes === null ? 'Unlimited' : formatBytes(maximumBytes) }}</span
             >
         </div>
     </section>

@@ -10,6 +10,7 @@ use App\Models\AdminAudit;
 use App\Models\Transfer;
 use App\Models\User;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Throwable;
@@ -44,6 +45,10 @@ class RequestTransferTakedown
             ]);
 
             DeleteTransfer::dispatch($transfer->id)->afterCommit();
+            DB::afterCommit(function () use ($transfer): void {
+                Cache::forget("filebeam:webrtc:{$transfer->id}:sessions");
+                Cache::forget("filebeam:webrtc:{$transfer->id}:sender");
+            });
         });
     }
 

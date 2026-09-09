@@ -42,6 +42,8 @@ Set every PHP server, proxy, and storage-provider request limit to accommodate `
 
 Adaptive uploads also require private, disk-backed staging. By default this is `storage/app/transfer-staging`; set `FILEBEAM_STAGING_ROOT` to a persistent, private local directory when application storage is not persistent. Do not use RAM as the default, a web-served path, or S3/object storage for staging. The runtime user must be able to create files and use `flock` in the directory. See [Adaptive transfers](adaptive-transfers.md) for capacity, multi-instance, and cleanup requirements.
 
+See [WebRTC transfers](webrtc.md) before enabling the storage-free WebRTC driver. It covers STUN/TURN credentials, shared-cache signaling requirements, peer/relay warnings, limits, and the HTTP fallback behavior.
+
 Run the scheduler cron entry above in every deployment. Its 15-minute transfer-pruning task removes expired staging reservations and files; this cleanup is mandatory for staging capacity to recover. After deploying a release that includes database migrations, run the routine deployment migration manually before serving the release:
 
 ```sh

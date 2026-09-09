@@ -1,3 +1,11 @@
+export type TransferDriver = 'http' | 'webrtc';
+
+export type TransferLimits = {
+    maximum_transfer_bytes: number | null;
+    maximum_file_count: number | null;
+    maximum_note_bytes: number | null;
+};
+
 export type FilebeamConfig = {
     github_url: string;
     copyright_holder: string;
@@ -20,6 +28,11 @@ export type FilebeamConfig = {
     anonymous_uploads_enabled: boolean;
     file_retention_options?: number[];
     note_retention_options?: number[];
+    transport_policy?: {
+        enabled_drivers: TransferDriver[];
+        default_driver: TransferDriver;
+        limits: Record<TransferDriver, TransferLimits>;
+    };
 };
 
 export type PublicRecipient = {

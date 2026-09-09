@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Notifications\InboxTransferCompleted;
 use App\Support\EffectivePlan;
 use App\Support\InstanceSettings;
+use App\Support\TransportPolicy;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 
@@ -73,6 +74,7 @@ class HandleInertiaRequests extends Middleware
                 'registration_enabled' => $settings['registration'],
                 'anonymous_uploads_enabled' => $settings['anonymous_uploads'],
                 'username_routing_enabled' => $settings['username_routing'],
+                'transport_policy' => fn (): array => app(TransportPolicy::class)->configuration($request->user() instanceof User ? $request->user() : null),
             ],
         ];
     }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\V1;
 
 use App\Enums\TransferDelivery;
+use App\Enums\TransferDriver;
 use App\Enums\TransferKind;
 use App\Enums\TransferStatus;
 use App\Http\Controllers\Controller;
@@ -25,7 +26,9 @@ use App\Support\ChunkStaging;
 use App\Support\EffectivePlan;
 use App\Support\FilestoreRegistry;
 use App\Support\InstanceSettings;
+use App\Support\TransportPolicy;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -36,12 +39,14 @@ class TransferController extends Controller
     /**
      * @throws Throwable
      */
-    public function store(StoreTransferRequest $request, EffectivePlan $plans, FilestoreRegistry $stores): JsonResponse
+    public function store(StoreTransferRequest $request, EffectivePlan $plans, FilestoreRegistry $stores, TransportPolicy $transport): JsonResponse
     {
-        /** @var array{kind: string, protocol_version: int, chunk_bytes: int, items: array<int, array{ciphertext_bytes: int, chunk_count: int}>, retention_hours?: int, burn_on_read?: bool, recipient_username?: string, account_key_bundle_id?: int} $validated */
+        /** @var array{kind: string, driver?: string, protocol_version: int, chunk_bytes: int, items: array<int, array{ciphertext_bytes: int, chunk_count: int}>, retention_hours?: int, burn_on_read?: bool, recipient_username?: string, account_key_bundle_id?: int} $validated */
         $validated = $request->validated();
         $plan = $plans->resolve($request->user());
         $kind = TransferKind::from($validated['kind']);
+        $driver = TransferDriver::from((string) $request->input('driver', TransferDriver::Http->value));
+        abort_unless($transport->allows($driver), 422);
         $recipientUsername = $validated['recipient_username'] ?? null;
         $recipient = null;
         $recipientBundle = null;
@@ -60,18 +65,25 @@ class TransferController extends Controller
             }
         }
         $itemCount = count($validated['items']);
-        $declaredBytes = array_sum(array_column($validated['items'], 'ciphertext_bytes'));
+        $declaredBytes = 0;
+        foreach ($validated['items'] as $item) {
+            if ($item['ciphertext_bytes'] > PHP_INT_MAX - $declaredBytes) {
+                throw ValidationException::withMessages(['items' => 'The declared ciphertext total is too large.']);
+            }
+            $declaredBytes += $item['ciphertext_bytes'];
+        }
         $retentionHours = $validated['retention_hours'] ?? ($kind === TransferKind::Note
             ? $plan->default_note_retention_hours
             : $plan->default_file_retention_hours);
         $burnOnRead = $kind === TransferKind::Note && ($validated['burn_on_read'] ?? false);
 
-        $this->validatePlanLimits($plan, $kind, $itemCount, $declaredBytes);
+        $this->validatePlanLimits($plan, $kind, $driver, $itemCount, $declaredBytes, $transport);
 
         $uploadToken = Str::random(64);
         $deleteToken = Str::random(64);
         $readToken = $burnOnRead ? Str::random(64) : null;
         $monitorToken = $kind === TransferKind::Files && $recipient === null ? Str::random(64) : null;
+        $joinToken = $driver === TransferDriver::WebRtc ? Str::random(64) : null;
         $transferId = (string) Str::ulid();
         /** @var Transfer $transfer */
         $transfer = DB::transaction(function () use (
@@ -92,12 +104,18 @@ class TransferController extends Controller
             $recipientBundle,
             $recipientUsername,
             $stores,
+            $driver,
+            $joinToken,
+            $transport,
         ): Transfer {
             $plan = Plan::query()->lockForUpdate()->findOrFail($plan->id);
-            $filestoreIds = $stores->selectForPlan($plan, null);
-            $selected = Filestore::query()->whereKey($filestoreIds)->orderBy('id')->lockForUpdate()->get();
-            if ($selected->count() !== count($filestoreIds) || $selected->contains(fn (Filestore $store): bool => ! $stores->placementEnabled($store))) {
-                throw ValidationException::withMessages(['filestore_ids' => 'The selected filestores are no longer available.']);
+            $this->validatePlanLimits($plan, $kind, $driver, $itemCount, $declaredBytes, $transport);
+            $filestoreIds = $driver === TransferDriver::Http ? $stores->selectForPlan($plan, null) : [];
+            if ($driver === TransferDriver::Http) {
+                $selected = Filestore::query()->whereKey($filestoreIds)->orderBy('id')->lockForUpdate()->get();
+                if ($selected->count() !== count($filestoreIds) || $selected->contains(fn (Filestore $store): bool => ! $stores->placementEnabled($store))) {
+                    throw ValidationException::withMessages(['filestore_ids' => 'The selected filestores are no longer available.']);
+                }
             }
             $lockedRecipient = null;
             $lockedRecipientBundle = null;
@@ -118,6 +136,7 @@ class TransferController extends Controller
                 'id' => $transferId,
                 'kind' => $kind,
                 'delivery' => $lockedRecipient === null ? TransferDelivery::Link : TransferDelivery::Inbox,
+                'driver' => $driver,
                 'owner_id' => $request->user()?->getKey(),
                 'recipient_id' => $lockedRecipient?->getKey(),
                 'plan_id' => $plan->getKey(),
@@ -134,6 +153,7 @@ class TransferController extends Controller
                 'delete_token_hash' => hash('sha256', $deleteToken),
                 'read_token_hash' => $readToken === null ? null : hash('sha256', $readToken),
                 'monitor_token_hash' => $monitorToken === null ? null : hash('sha256', $monitorToken),
+                'join_token_hash' => $joinToken === null ? null : hash('sha256', $joinToken),
                 'expires_at' => now()->addHours((int) config('filebeam.transfers.incomplete_expiry_hours')),
             ]);
 
@@ -176,7 +196,8 @@ class TransferController extends Controller
                 'share_url' => route('transfers.show', ['transferId' => $transfer->id], absolute: false),
                 'expires_at' => $transfer->expires_at->toIso8601String(),
                 'chunk_bytes' => $transfer->chunk_bytes,
-                'upload_transport' => app(ChunkStaging::class)->transport($transfer->chunk_bytes),
+                'upload_transport' => $transfer->driver === TransferDriver::Http ? app(ChunkStaging::class)->transport($transfer->chunk_bytes) : null,
+                'driver' => $transfer->driver->value,
                 'items' => $transfer->items->map(fn (TransferItem $item): array => [
                     'id' => $item->id,
                     'position' => $item->position,
@@ -185,27 +206,27 @@ class TransferController extends Controller
                 'delete_token' => $deleteToken,
                 ...($readToken === null ? [] : ['read_token' => $readToken]),
                 ...($monitorToken === null ? [] : ['monitor_token' => $monitorToken]),
+                ...($joinToken === null ? [] : ['join_token' => $joinToken]),
             ],
         ], 201, ['Cache-Control' => 'no-store']);
     }
 
-    private function validatePlanLimits(Plan $plan, TransferKind $kind, int $itemCount, int $declaredBytes): void
+    private function validatePlanLimits(Plan $plan, TransferKind $kind, TransferDriver $driver, int $itemCount, int $declaredBytes, TransportPolicy $transport): void
     {
         $errors = [];
 
-        if ($itemCount > $plan->maximum_file_count) {
-            $errors['items'] = "This plan permits at most {$plan->maximum_file_count} items.";
+        $limits = $transport->limits($plan, $driver);
+        if ($limits['maximum_file_count'] !== null && $itemCount > $limits['maximum_file_count']) {
+            $errors['items'] = "This plan permits at most {$limits['maximum_file_count']} items.";
         }
 
         if ($kind === TransferKind::Note && $itemCount !== 1) {
             $errors['items'] = 'A note transfer must contain exactly one item.';
         }
 
-        $maximumBytes = $kind === TransferKind::Note
-            ? $plan->maximum_note_bytes
-            : $plan->maximum_transfer_bytes;
+        $maximumBytes = $kind === TransferKind::Note ? $limits['maximum_note_bytes'] : $limits['maximum_transfer_bytes'];
 
-        if ($declaredBytes > $maximumBytes) {
+        if ($maximumBytes !== null && $declaredBytes > $maximumBytes) {
             $errors['items'] = 'The transfer exceeds this plan\'s byte limit.';
         }
 
@@ -218,7 +239,7 @@ class TransferController extends Controller
     {
         abort_unless(
             $transfer->delivery === TransferDelivery::Link
-                && ($transfer->status === TransferStatus::Available || ($transfer->status === TransferStatus::Pending && $transfer->isPublishedTurbo()))
+                && ($transfer->status === TransferStatus::Available || $transfer->status === TransferStatus::Live || ($transfer->status === TransferStatus::Pending && $transfer->isPublishedTurbo()))
                 && $transfer->expires_at->isFuture(),
             404,
         );
@@ -233,6 +254,8 @@ class TransferController extends Controller
     {
         /** @var array{encrypted_manifest: string, encrypted_key?: string} $validated */
         $validated = $request->validated();
+
+        abort_unless($transfer->driver === TransferDriver::Http, 404);
 
         $notifyRecipient = DB::transaction(function () use ($request, $transfer, $validated): ?User {
             $lockedTransfer = Transfer::query()->lockForUpdate()->findOrFail($transfer->id);
@@ -339,6 +362,11 @@ class TransferController extends Controller
             }
         });
 
+        if ($transfer->driver === TransferDriver::WebRtc) {
+            Cache::forget("filebeam:webrtc:{$transfer->id}:sessions");
+            Cache::forget("filebeam:webrtc:{$transfer->id}:sender");
+        }
+
         return response()->json(status: 202);
     }
 
@@ -347,6 +375,40 @@ class TransferController extends Controller
      */
     public function consume(Transfer $transfer): JsonResponse
     {
+        if ($transfer->driver === TransferDriver::WebRtc) {
+            Cache::lock("filebeam:webrtc:{$transfer->id}:lock", 5)->block(3, function () use ($transfer): void {
+                DB::transaction(function () use ($transfer): void {
+                    $lockedTransfer = Transfer::query()->lockForUpdate()->findOrFail($transfer->id);
+                    $this->authorizeCapability($lockedTransfer->read_token_hash ?? '', request()->header('X-Filebeam-Read-Token'));
+                    abort_unless(
+                        $lockedTransfer->kind === TransferKind::Note
+                            && $lockedTransfer->delivery === TransferDelivery::Link
+                            && $lockedTransfer->burn_on_read
+                            && $lockedTransfer->status === TransferStatus::Live
+                            && $lockedTransfer->expires_at->isFuture(),
+                        404,
+                    );
+                    $sessionToken = request()->header('X-Filebeam-Session-Token');
+                    $sessions = Cache::get("filebeam:webrtc:{$lockedTransfer->id}:sessions", []);
+                    $claimed = collect(is_array($sessions) ? $sessions : [])->firstWhere('id', $lockedTransfer->webrtc_claimed_session_id);
+                    abort_unless(
+                        is_array($claimed)
+                            && is_int($claimed['expires_at'] ?? null)
+                            && $claimed['expires_at'] > now()->getTimestamp()
+                            && is_string($sessionToken)
+                            && Capability::matches((string) ($claimed['token_hash'] ?? ''), $sessionToken),
+                        403,
+                    );
+                    $lockedTransfer->update(['status' => TransferStatus::Deleting]);
+                    DB::afterCommit(fn (): mixed => DeleteTransfer::dispatch($lockedTransfer->id));
+                });
+                Cache::forget("filebeam:webrtc:{$transfer->id}:sessions");
+                Cache::forget("filebeam:webrtc:{$transfer->id}:sender");
+            });
+
+            return response()->json(status: 202);
+        }
+
         DB::transaction(function () use ($transfer): void {
             $lockedTransfer = Transfer::query()->lockForUpdate()->findOrFail($transfer->id);
             $this->authorizeCapability($lockedTransfer->read_token_hash ?? '', request()->header('X-Filebeam-Read-Token'));
@@ -359,7 +421,7 @@ class TransferController extends Controller
             );
 
             if ($lockedTransfer->status !== TransferStatus::Deleting) {
-                abort_unless($lockedTransfer->status === TransferStatus::Available, 404);
+                abort_unless(in_array($lockedTransfer->status, [TransferStatus::Available, TransferStatus::Live], true), 404);
                 $lockedTransfer->update(['status' => TransferStatus::Deleting]);
                 DB::afterCommit(fn (): mixed => DeleteTransfer::dispatch($lockedTransfer->id));
             }

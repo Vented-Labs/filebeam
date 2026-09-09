@@ -38,6 +38,20 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('transfer-monitoring', fn (Request $request): Limit => Limit::perMinute((int) config('filebeam.rate_limits.monitor_per_minute'))->by($request->ip()));
         RateLimiter::for('download-session-registration', fn (Request $request): Limit => Limit::perMinute((int) config('filebeam.rate_limits.session_registration_per_minute'))->by($request->ip()));
         RateLimiter::for('download-session-reporting', fn (Request $request): Limit => Limit::perMinute((int) config('filebeam.rate_limits.session_reporting_per_minute'))->by($request->ip()));
+        RateLimiter::for('webrtc-registration', fn (Request $request): Limit => Limit::perMinute((int) config('filebeam.rate_limits.session_registration_per_minute'))->by($request->ip()));
+        RateLimiter::for('webrtc-sender', function (Request $request): array {
+            $transfer = $request->route('transfer');
+            $identifier = is_object($transfer) && method_exists($transfer, 'getKey') ? $transfer->getKey() : $transfer;
+
+            return [
+                Limit::perMinute(1200)->by('ip:'.$request->ip()),
+                Limit::perMinute(120)->by('transfer:'.$request->ip().'|'.$identifier),
+            ];
+        });
+        RateLimiter::for('webrtc-session', fn (Request $request): array => [
+            Limit::perMinute(1200)->by('ip:'.$request->ip()),
+            Limit::perMinute(120)->by('session:'.hash('sha256', (string) $request->header('X-Filebeam-Session-Token'))),
+        ]);
         RateLimiter::for('account-key-writing', fn (Request $request): Limit => Limit::perMinute(5)->by((string) $request->user()?->getAuthIdentifier()));
     }
 

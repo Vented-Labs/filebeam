@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace App\Http\Requests;
 
+use App\Enums\TransferDriver;
 use App\Enums\TransferKind;
 use App\Models\Plan;
 use App\Support\EffectivePlan;
 use App\Support\InstanceSettings;
+use App\Support\TransportPolicy;
 use Closure;
 use Illuminate\Contracts\Container\BindingResolutionException;
 use Illuminate\Contracts\Container\CircularDependencyException;
@@ -39,6 +41,7 @@ class StoreTransferRequest extends FormRequest
 
         return [
             'kind' => ['required', 'string', 'in:files,note'],
+            'driver' => ['nullable', 'string', 'in:http,webrtc'],
             'protocol_version' => ['required', 'integer', 'in:1'],
             'chunk_bytes' => ['required', 'integer', 'in:'.config('filebeam.transfers.chunk_bytes')],
             'items' => ['required', 'array', 'min:1', 'max:100'],
@@ -68,6 +71,17 @@ class StoreTransferRequest extends FormRequest
         return [function (Validator $validator): void {
             if ($validator->errors()->isNotEmpty()) {
                 return;
+            }
+
+            $driver = TransferDriver::tryFrom((string) $this->input('driver', 'http'));
+            if ($driver === null || ! app(TransportPolicy::class)->allows($driver)) {
+                $validator->errors()->add('driver', 'This transfer driver is unavailable.');
+
+                return;
+            }
+
+            if ($driver === TransferDriver::WebRtc && ($this->input('recipient_username') !== null || $this->input('account_key_bundle_id') !== null)) {
+                $validator->errors()->add('driver', 'WebRTC transfers are link-only.');
             }
 
             $maximumChunkBytes = (int) config('filebeam.transfers.chunk_bytes') + 16;

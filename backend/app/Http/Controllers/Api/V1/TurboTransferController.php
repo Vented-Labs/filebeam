@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Enums\TransferDriver;
 use App\Enums\TransferStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\PublishTransferDescriptorRequest;
@@ -54,7 +55,8 @@ class TurboTransferController extends Controller
 
     private function isPendingTurbo(Transfer $transfer): bool
     {
-        return $transfer->kind->value === 'files'
+        return $transfer->driver === TransferDriver::Http
+            && $transfer->kind->value === 'files'
             && $transfer->delivery->value === 'link'
             && $transfer->protocol_version === 1
             && $transfer->status === TransferStatus::Pending
