@@ -10,6 +10,8 @@ directory=${3:?Package directory required}
 if gh release view "$tag" >/dev/null 2>&1; then
     existing=$(gh api "repos/{owner}/{repo}/commits/$tag" --jq .sha)
     [[ $existing == "$commit" ]] || { printf 'CLI release tag points to another commit.\n' >&2; exit 1; }
+    gh release upload "$tag" "$directory/$tag-linux-x86_64.tar.gz" "$directory/$tag-linux-aarch64.tar.gz" \
+        "$directory/checksums.txt" "$directory/install.sh" --clobber
     printf 'CLI GitHub release already exists: %s.\n' "$tag"
 else
     gh release create "$tag" "$directory/$tag-linux-x86_64.tar.gz" "$directory/$tag-linux-aarch64.tar.gz" \

@@ -28,3 +28,12 @@ if (cd "$temporary" && bash "$root/scripts/release/cli-validate-ref.sh" v0.3.0 >
     printf 'Accepted a release outside master.\n' >&2; exit 1
 fi
 printf 'CLI master release tag validation passed.\n'
+
+for architecture in x86_64 aarch64; do
+    printf 'archive fixture\n' > "$temporary/beam-v0.2.0-linux-$architecture.tar.gz"
+done
+SOURCE_DATE_EPOCH=1700000000 php "$root/scripts/release/cli-write-release.php" beam-v0.2.0 "$temporary" "$temporary/first.json"
+SOURCE_DATE_EPOCH=1700000000 php "$root/scripts/release/cli-write-release.php" beam-v0.2.0 "$temporary" "$temporary/second.json"
+cmp "$temporary/first.json" "$temporary/second.json"
+php -r '$release=json_decode(file_get_contents($argv[1]), true, 512, JSON_THROW_ON_ERROR); if ($release["published_at"] !== "2023-11-14T22:13:20Z") exit(1);' "$temporary/first.json"
+printf 'CLI release metadata is stable across publication retries.\n'

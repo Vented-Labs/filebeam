@@ -47,7 +47,9 @@ for architecture in x86_64 aarch64; do
 done
 put_immutable "$release_dir/checksums.txt" "$output_dir/checksums.txt"
 put_immutable "$release_dir/version" "$output_dir/version"
-php "$root/scripts/release/cli-write-release.php" "$tag" "$output_dir" "$tmp/release.json"
+# Immutable metadata must reproduce exactly when a failed publish job is retried.
+SOURCE_DATE_EPOCH=$(git -C "$root" show -s --format=%ct HEAD) \
+    php "$root/scripts/release/cli-write-release.php" "$tag" "$output_dir" "$tmp/release.json"
 put_immutable "$release_dir/release.json" "$tmp/release.json"
 
 etag=''

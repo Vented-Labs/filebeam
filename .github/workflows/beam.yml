@@ -71,6 +71,11 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ needs.validate-ref.outputs.commit || github.ref }}
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240
+        with:
+          php-version: '8.5'
+          extensions: sodium
+          coverage: none
       - name: Check and test beam in constrained Docker
         run: |
           chmod +x scripts/cli/*.sh scripts/release/cli-*.php scripts/release/cli-publish.sh

@@ -28,10 +28,14 @@ foreach (['x86_64', 'aarch64'] as $architecture) {
     ];
 }
 
+$sourceDateEpoch = getenv('SOURCE_DATE_EPOCH');
+if ($sourceDateEpoch !== false && ! ctype_digit($sourceDateEpoch)) {
+    throw new RuntimeException('SOURCE_DATE_EPOCH must be an integer timestamp.');
+}
 $json = json_encode([
     'tag' => $tag,
     'version' => "{$matches[1]}.{$matches[2]}.{$matches[3]}",
-    'published_at' => gmdate('Y-m-d\TH:i:s\Z'),
+    'published_at' => gmdate('Y-m-d\TH:i:s\Z', $sourceDateEpoch === false ? time() : (int) $sourceDateEpoch),
     'assets' => $assets,
 ], JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT)."\n";
 if (file_put_contents($output, $json) === false) {
