@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace App\Jobs;
 
+use App\Enums\TransferDriver;
 use App\Enums\TransferStatus;
 use App\Models\Transfer;
 use App\Support\ChunkStaging;
 use App\Support\FilestoreRegistry;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 use Throwable;
@@ -38,6 +40,14 @@ class DeleteTransfer implements ShouldQueue
             ->find($this->transferId);
 
         if ($transfer === null) {
+            return;
+        }
+
+        if ($transfer->driver === TransferDriver::WebRtc) {
+            Cache::forget("filebeam:webrtc:{$transfer->id}:sessions");
+            Cache::forget("filebeam:webrtc:{$transfer->id}:sender");
+            $transfer->delete();
+
             return;
         }
 

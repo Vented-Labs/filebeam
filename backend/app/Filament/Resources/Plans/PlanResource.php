@@ -80,6 +80,14 @@ class PlanResource extends Resource
                 ->schema([
                     TextEntry::make('maximum_note_bytes')->label('Maximum note size')->state(fn (Plan $record): string => self::formatBytes($record->maximum_note_bytes)),
                 ]),
+            Section::make('WebRTC')
+                ->columnSpanFull()
+                ->description('These limits apply only to storage-free WebRTC transfers. Unlimited limits are represented by empty values.')
+                ->schema([
+                    TextEntry::make('webrtc_maximum_transfer_bytes')->label('Maximum transfer size')->state(fn (Plan $record): string => self::formatNullableBytes($record->webrtc_maximum_transfer_bytes)),
+                    TextEntry::make('webrtc_maximum_file_count')->label('Maximum files')->state(fn (Plan $record): string => $record->webrtc_maximum_file_count === null ? 'Unlimited' : number_format($record->webrtc_maximum_file_count)),
+                    TextEntry::make('webrtc_maximum_note_bytes')->label('Maximum note size')->state(fn (Plan $record): string => self::formatNullableBytes($record->webrtc_maximum_note_bytes)),
+                ])->columns(['default' => 1, 'sm' => 3]),
             Section::make('Retention')
                 ->columnSpanFull()
                 ->schema([
@@ -131,6 +139,14 @@ class PlanResource extends Resource
                 ->schema([
                     self::sizedInput('maximum_note', 'Maximum note size'),
                     self::settingSummary('note', 'maximum_note', 'B', fn (Plan $record): string => self::formatBytes($record->maximum_note_bytes)),
+                ])->columns(1),
+            Section::make('WebRTC transfers')
+                ->columnSpanFull()
+                ->description('Set each limit to Unlimited independently for storage-free public file links and notes.')
+                ->schema([
+                    self::nullableSizedInput('webrtc_maximum_transfer', 'Maximum transfer size'),
+                    self::nullablePositiveInteger('webrtc_maximum_file_count', 'Maximum file count', 32767),
+                    self::nullableSizedInput('webrtc_maximum_note', 'Maximum note size'),
                 ])->columns(1),
             Section::make('Retention')
                 ->columnSpanFull()
@@ -231,6 +247,11 @@ class PlanResource extends Resource
         return number_format($human['quantity']).' '.$human['unit'];
     }
 
+    public static function formatNullableBytes(?int $bytes): string
+    {
+        return $bytes === null ? 'Unlimited' : self::formatBytes($bytes);
+    }
+
     public static function formatHours(int $hours): string
     {
         $human = self::humanHours($hours);
@@ -256,6 +277,25 @@ class PlanResource extends Resource
             TextInput::make("{$name}_quantity")->label($label)->numeric()->integer()->minValue(1)->required()->live(),
             Select::make("{$name}_unit")->label('Unit')->options(self::units())->required()->live(),
         ])->columns(2);
+    }
+
+    private static function nullableSizedInput(string $name, string $label): Group
+    {
+        return Group::make([
+            Toggle::make("{$name}_unlimited")->label('Unlimited')->live(),
+            Group::make([
+                TextInput::make("{$name}_quantity")->label($label)->numeric()->integer()->minValue(1)->required(fn (Get $get): bool => ! $get("{$name}_unlimited")),
+                Select::make("{$name}_unit")->label('Unit')->options(self::units())->required(fn (Get $get): bool => ! $get("{$name}_unlimited")),
+            ])->columns(2)->hidden(fn (Get $get): bool => (bool) $get("{$name}_unlimited")),
+        ]);
+    }
+
+    private static function nullablePositiveInteger(string $name, string $label, int $maximum): Group
+    {
+        return Group::make([
+            Toggle::make("{$name}_unlimited")->label('Unlimited')->live(),
+            TextInput::make($name)->label($label)->numeric()->integer()->minValue(1)->maxValue($maximum)->required(fn (Get $get): bool => ! $get("{$name}_unlimited"))->hidden(fn (Get $get): bool => (bool) $get("{$name}_unlimited")),
+        ]);
     }
 
     private static function durationInput(string $name, string $label): Group

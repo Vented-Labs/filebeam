@@ -1,0 +1,21 @@
+name: Feature request
+description: Suggest a new Filebeam capability or improvement.
+title: '[Feature]: '
+labels: [enhancement]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: What do you want?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why is this useful?
+      placeholder: Who is this for, and what problem does it solve?
+    validations:
+      required: true
+  - type: markdown
+    attributes:
+      value: Do not include secrets, share links, decrypted content, or suspected security vulnerabilities. Report vulnerabilities through the private security policy.

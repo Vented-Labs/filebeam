@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Enums\TransferDelivery;
+use App\Enums\TransferDriver;
 use App\Enums\TransferKind;
 use App\Enums\TransferStatus;
 use Carbon\CarbonImmutable;
@@ -22,6 +23,7 @@ use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 
 /**
  * @property TransferDelivery $delivery
+ * @property TransferDriver $driver
  * @property TransferKind $kind
  * @property TransferStatus $status
  * @property CarbonImmutable|null $completed_at
@@ -33,6 +35,7 @@ use Illuminate\Database\Eloquent\Relations\HasManyThrough;
     'id',
     'kind',
     'delivery',
+    'driver',
     'owner_id',
     'recipient_id',
     'plan_id',
@@ -52,10 +55,12 @@ use Illuminate\Database\Eloquent\Relations\HasManyThrough;
     'delete_token_hash',
     'read_token_hash',
     'monitor_token_hash',
+    'join_token_hash',
+    'webrtc_claimed_session_id',
     'completed_at',
     'expires_at',
 ])]
-#[Hidden(['upload_token_hash', 'delete_token_hash', 'read_token_hash', 'monitor_token_hash'])]
+#[Hidden(['upload_token_hash', 'delete_token_hash', 'read_token_hash', 'monitor_token_hash', 'join_token_hash'])]
 class Transfer extends Model
 {
     /** @use HasFactory<TransferFactory> */
@@ -149,6 +154,7 @@ class Transfer extends Model
             'filestore_ids' => 'array',
             'kind' => TransferKind::class,
             'delivery' => TransferDelivery::class,
+            'driver' => TransferDriver::class,
             'status' => TransferStatus::class,
             'burn_on_read' => 'boolean',
             'completed_at' => 'immutable_datetime',

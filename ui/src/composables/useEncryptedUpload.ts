@@ -1,5 +1,5 @@
-import { computed, onBeforeUnmount, ref } from 'vue';
-import type { FilebeamConfig, PublicRecipient } from '../types';
+import { computed, onBeforeUnmount, ref, toValue, type MaybeRefOrGetter, type Ref } from 'vue';
+import type { FilebeamConfig, PublicRecipient, TransferDriver } from '../types';
 import { sealRecipientKey } from '../lib/account-crypto';
 import type { DownloadSession, ShareResult, TransferMode, UploadEntry } from '../upload-types';
 import {
@@ -11,6 +11,9 @@ import { ciphertextBytes } from '../lib/format';
 import { AdaptiveConcurrency, fetchChunkWithRetry, transferConcurrency } from '../lib/transfer';
 import { uploadCiphertext, type UploadPhase, type UploadTransport } from '../lib/adaptive-upload';
 import { waitForWorkerMessage, type WorkerMessage } from '../lib/worker-request';
+import { enabledTransferDrivers, transferLimits } from '../lib/transfer-policy';
+import { startWebRtcSender, type WebRtcSender } from '../lib/webrtc';
+import { csrfHeaders } from '../lib/csrf';
 
 type ServerTransfer = {
     id: string;
@@ -21,6 +24,8 @@ type ServerTransfer = {
     monitor_token?: string;
     expires_at?: string;
     read_token?: string;
+    driver?: TransferDriver;
+    join_token?: string;
     upload_transport?: UploadTransport;
     items: Array<{ id: string; position: number }>;
 };
@@ -31,9 +36,12 @@ function fileType(file: File): string {
     return file.type || 'application/octet-stream';
 }
 
-export function useEncryptedUpload(config: FilebeamConfig) {
+export function useEncryptedUpload(
+    configuration: MaybeRefOrGetter<FilebeamConfig>,
+    driver: Ref<TransferDriver> = ref('http'),
+) {
     const entries = ref<UploadEntry[]>([]);
-    const status = ref<'ready' | 'uploading' | 'complete' | 'error'>('ready');
+    const status = ref<'ready' | 'uploading' | 'live' | 'complete' | 'error'>('ready');
     const progress = ref(0);
     const activity = ref('Preparing encryption');
     const error = ref('');
@@ -46,15 +54,18 @@ export function useEncryptedUpload(config: FilebeamConfig) {
     let controller: AbortController | undefined;
     let worker: Worker | undefined;
     let activeJob = '';
+    let liveReservation: ServerTransfer | undefined;
+    let liveSender: WebRtcSender | undefined;
     const waiters = new Map<string, Set<(reason: Error) => void>>();
 
-    const isUploading = computed(() => status.value === 'uploading');
+    const isUploading = computed(() => status.value === 'uploading' || status.value === 'live');
     const totalBytes = computed(() =>
         entries.value.reduce((total, entry) => total + entry.file.size, 0),
     );
     const totalCiphertextBytes = computed(() =>
         entries.value.reduce(
-            (total, entry) => total + ciphertextBytes(entry.file.size, config.chunk_bytes),
+            (total, entry) =>
+                total + ciphertextBytes(entry.file.size, toValue(configuration).chunk_bytes),
             0,
         ),
     );
@@ -63,6 +74,20 @@ export function useEncryptedUpload(config: FilebeamConfig) {
         monitorController?.abort();
         window.clearTimeout(monitorTimer);
         monitorController = undefined;
+    }
+
+    function stopLive(): void {
+        liveSender?.close();
+        liveSender = undefined;
+        const reservation = liveReservation;
+        liveReservation = undefined;
+        if (reservation)
+            void fetch(`/api/v1/transfers/${reservation.id}`, {
+                method: 'DELETE',
+                headers: { 'X-Filebeam-Delete-Token': reservation.delete_token },
+                signal: AbortSignal.timeout(10_000),
+                keepalive: true,
+            }).catch(() => undefined);
     }
 
     function startMonitoring(reservation: ServerTransfer): void {
@@ -226,7 +251,7 @@ export function useEncryptedUpload(config: FilebeamConfig) {
             chunkUrl: `/api/v1/transfers/${transfer.id}/items/${itemId}/chunks/${index}`,
             token: transfer.upload_token,
             ciphertext,
-            transport: transfer.upload_transport ?? config.upload_transport,
+            transport: transfer.upload_transport ?? toValue(configuration).upload_transport,
             signal,
             controller: adaptive,
             onProgress,
@@ -236,6 +261,7 @@ export function useEncryptedUpload(config: FilebeamConfig) {
 
     function addFiles(files: FileList | File[]): void {
         if (isUploading.value) return;
+        const config = toValue(configuration);
         const fingerprints = new Set(
             entries.value.map(
                 (entry) =>
@@ -252,9 +278,11 @@ export function useEncryptedUpload(config: FilebeamConfig) {
             fingerprints.add(fingerprint);
             return true;
         });
-        const available = config.maximum_file_count - entries.value.length;
+        const maximumFiles = transferLimits(config, driver.value).maximum_file_count;
+        const available =
+            maximumFiles === null ? additions.length : maximumFiles - entries.value.length;
         if (additions.length > available)
-            error.value = `Only ${Math.max(available, 0)} more file${available === 1 ? '' : 's'} can be added (maximum ${config.maximum_file_count}).`;
+            error.value = `Only ${Math.max(available, 0)} more file${available === 1 ? '' : 's'} can be added (maximum ${maximumFiles}).`;
         else if (duplicateCount)
             error.value = `${duplicateCount} duplicate file${duplicateCount === 1 ? ' was' : 's were'} already in the queue.`;
         else error.value = '';
@@ -275,6 +303,7 @@ export function useEncryptedUpload(config: FilebeamConfig) {
         if (!isUploading.value) entries.value = entries.value.filter((entry) => entry.id !== id);
     }
     function clear(): void {
+        stopLive();
         if (turboReservation) revokeTurbo();
         stopMonitoring();
         sessions.value = [];
@@ -300,7 +329,25 @@ export function useEncryptedUpload(config: FilebeamConfig) {
         retentionHours: number;
         burnOnRead: boolean;
         recipient?: PublicRecipient;
+        webrtcConsent?: boolean;
     }): Promise<void> {
+        const config = toValue(configuration);
+        const selectedDriver = driver.value;
+        if (!enabledTransferDrivers(config).includes(selectedDriver)) {
+            error.value = 'This transfer method is disabled by the server.';
+            return;
+        }
+        if (
+            selectedDriver === 'webrtc' &&
+            (options.recipient ||
+                !options.webrtcConsent ||
+                typeof RTCPeerConnection === 'undefined')
+        ) {
+            error.value = options.recipient
+                ? 'Inbox deliveries require HTTP.'
+                : 'WebRTC requires browser support and acknowledgement of IP address exposure.';
+            return;
+        }
         if (
             options.recipient &&
             (options.mode !== 'files' || options.password || options.burnOnRead)
@@ -324,13 +371,30 @@ export function useEncryptedUpload(config: FilebeamConfig) {
                   } satisfies UploadEntry,
               ]
             : entries.value;
+        const limits = transferLimits(config, selectedDriver);
         const maximum =
-            options.mode === 'note' ? config.maximum_note_bytes : config.maximum_transfer_bytes;
+            options.mode === 'note' ? limits.maximum_note_bytes : limits.maximum_transfer_bytes;
         const encryptedSize = uploadEntries.reduce(
             (total, entry) => total + ciphertextBytes(entry.file.size, config.chunk_bytes),
             0,
         );
-        if (!uploadEntries.length || encryptedSize > maximum || isUploading.value) return;
+        if (!uploadEntries.length || isUploading.value) return;
+        if (
+            (maximum !== null && encryptedSize > maximum) ||
+            (limits.maximum_file_count !== null && uploadEntries.length > limits.maximum_file_count)
+        ) {
+            error.value = `This transfer exceeds the ${selectedDriver === 'http' ? 'HTTP' : 'WebRTC'} limits for your plan.`;
+            return;
+        }
+        if (
+            uploadEntries.length > 100 ||
+            uploadEntries.some(({ file }) => Math.ceil(file.size / config.chunk_bytes) > 65_535) ||
+            !Number.isSafeInteger(encryptedSize)
+        ) {
+            error.value =
+                'This transfer exceeds the protocol safety limit (100 items and 65,535 chunks per item).';
+            return;
+        }
         if (
             !Number.isSafeInteger(config.chunk_bytes) ||
             config.chunk_bytes < 1 ||
@@ -348,7 +412,11 @@ export function useEncryptedUpload(config: FilebeamConfig) {
         sessions.value = [];
         monitoringUnavailable.value = false;
         stopMonitoring();
-        const turbo = options.turbo === true && options.mode === 'files' && !options.recipient;
+        const turbo =
+            selectedDriver === 'http' &&
+            options.turbo === true &&
+            options.mode === 'files' &&
+            !options.recipient;
         status.value = 'uploading';
         progress.value = 0;
         activity.value = 'Preparing encryption';
@@ -359,6 +427,7 @@ export function useEncryptedUpload(config: FilebeamConfig) {
         let masterKey: Uint8Array | undefined;
         let chunkHandler: ((event: MessageEvent) => void) | undefined;
         let activeWorker: Worker | undefined;
+        let keepLiveWorker = false;
         try {
             const uploadWorker = getWorker();
             activeWorker = uploadWorker;
@@ -378,9 +447,10 @@ export function useEncryptedUpload(config: FilebeamConfig) {
                 uploadController.signal,
                 {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: csrfHeaders(true),
                     body: JSON.stringify({
                         kind: options.mode,
+                        driver: selectedDriver,
                         protocol_version: 1,
                         chunk_bytes: config.chunk_bytes,
                         retention_hours: options.retentionHours,
@@ -399,6 +469,9 @@ export function useEncryptedUpload(config: FilebeamConfig) {
                 },
             );
             ensureActive(jobId);
+            if ((created.data.driver ?? 'http') !== selectedDriver)
+                throw new Error('The server did not apply the selected transfer method.');
+            if (selectedDriver === 'webrtc') liveReservation = created.data;
             if (turbo) {
                 turboReservation = created.data;
                 if (!created.data.monitor_token) throw new Error('Turbo Transfer is unavailable.');
@@ -447,8 +520,140 @@ export function useEncryptedUpload(config: FilebeamConfig) {
                     includeKey: options.includeKey,
                     passwordProtected: Boolean(options.password),
                     turbo,
+                    driver: selectedDriver,
                 };
             };
+            if (selectedDriver === 'webrtc') {
+                if (!created.data.join_token) throw new Error('WebRTC is unavailable.');
+                activity.value = 'Hashing files and preparing encrypted metadata';
+                const requestId = crypto.randomUUID();
+                const ready = waitFor('live-prepared', jobId, requestId);
+                const preparedByItem = new Map<string, number>();
+                const sourceBytes = uploadEntries.reduce(
+                    (total, entry) => total + entry.file.size,
+                    0,
+                );
+                chunkHandler = (event: MessageEvent) => {
+                    const message = event.data as WorkerMessage;
+                    if (
+                        activeJob !== jobId ||
+                        message.jobId !== jobId ||
+                        message.type !== 'live-preparation-progress'
+                    )
+                        return;
+                    preparedByItem.set(String(message.itemId), Number(message.loaded));
+                    progress.value = sourceBytes
+                        ? Math.min(
+                              99,
+                              ([...preparedByItem.values()].reduce(
+                                  (total, bytes) => total + bytes,
+                                  0,
+                              ) /
+                                  sourceBytes) *
+                                  100,
+                          )
+                        : 99;
+                };
+                uploadWorker.addEventListener('message', chunkHandler);
+                uploadWorker.postMessage({
+                    type: 'prepare-live',
+                    jobId,
+                    requestId,
+                    transferId: created.data.id,
+                    serverItems: created.data.items,
+                    items: uploadEntries.map(({ file, name, type }) => ({ file, name, type })),
+                    chunkBytes: created.data.chunk_bytes,
+                    masterKey,
+                    protocolVersion: 1,
+                    salt: prepared.salt,
+                    joinToken: created.data.join_token,
+                    readToken: created.data.read_token,
+                    noteTitle: options.mode === 'note' ? options.title : undefined,
+                    noteLanguage: options.mode === 'note' ? options.language : undefined,
+                });
+                const metadata = await ready;
+                ensureActive(jobId);
+                const published = await request<{ data: { expires_at: string } }>(
+                    `/api/v1/transfers/${created.data.id}/webrtc/publish`,
+                    uploadController.signal,
+                    {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-Filebeam-Upload-Token': created.data.upload_token,
+                        },
+                        body: JSON.stringify({ encrypted_manifest: metadata.encryptedManifest }),
+                    },
+                );
+                ensureActive(jobId);
+                liveSender = await startWebRtcSender({
+                    transferId: created.data.id,
+                    uploadToken: created.data.upload_token,
+                    chunkBytes: created.data.chunk_bytes,
+                    signal: uploadController.signal,
+                    items: uploadEntries.map((entry, position) => ({
+                        id: serverItems.get(position)!.id,
+                        chunk_count: Math.ceil(entry.file.size / created.data.chunk_bytes) || 1,
+                        ciphertext_bytes: ciphertextBytes(
+                            entry.file.size,
+                            created.data.chunk_bytes,
+                        ),
+                    })),
+                    readChunk: async (itemId, index) => {
+                        ensureActive(jobId);
+                        const requestId = crypto.randomUUID();
+                        const result = waitFor('live-ciphertext', jobId, requestId, 120_000);
+                        uploadWorker.postMessage({
+                            type: 'live-chunk',
+                            jobId,
+                            requestId,
+                            itemId,
+                            index,
+                        });
+                        const message = await result;
+                        ensureActive(jobId);
+                        return new Uint8Array(message.ciphertext as ArrayBuffer);
+                    },
+                    onActivity: (message) => {
+                        activity.value = message;
+                    },
+                    onError: (reason) => {
+                        error.value = reason.message;
+                    },
+                    onEnded: (reason) => {
+                        if (activeJob !== jobId) return;
+                        stopLive();
+                        cancelActiveUpload();
+                        status.value = 'error';
+                        activity.value = 'Live transfer ended';
+                        error.value = reason.message;
+                    },
+                    onSessions: (peers) => {
+                        sessions.value = peers.map((peer, index) => ({
+                            id: peer.id,
+                            number: index + 1,
+                            progress: peer.progress,
+                            status:
+                                peer.status === 'active'
+                                    ? 'downloading'
+                                    : peer.status === 'failed'
+                                      ? 'error'
+                                      : peer.status === 'completed' || peer.status === 'cancelled'
+                                        ? peer.status
+                                        : 'waiting',
+                            selection_count: uploadEntries.length,
+                            all_files: true,
+                        }));
+                    },
+                });
+                ensureActive(jobId);
+                publishShare(published.data.expires_at);
+                progress.value = 0;
+                activity.value = 'Waiting for a recipient. Keep this tab open.';
+                status.value = 'live';
+                keepLiveWorker = true;
+                return;
+            }
             let uploaded = 0;
             const sourceBytes = uploadEntries.reduce((total, entry) => total + entry.file.size, 0);
             const uploadedByItem = new Map<string, number>();
@@ -664,6 +869,7 @@ export function useEncryptedUpload(config: FilebeamConfig) {
                 uploadController.abort();
                 discardWorker(activeWorker);
                 if (turbo) revokeTurbo();
+                if (selectedDriver === 'webrtc') stopLive();
                 status.value = 'error';
                 error.value = reason instanceof Error ? reason.message : 'Upload failed.';
                 activeJob = '';
@@ -671,23 +877,29 @@ export function useEncryptedUpload(config: FilebeamConfig) {
         } finally {
             masterKey?.fill(0);
             if (chunkHandler) activeWorker?.removeEventListener('message', chunkHandler);
-            discardWorker(activeWorker);
-            waiters.delete(jobId);
-            if (controller === uploadController) controller = undefined;
+            if (!keepLiveWorker) discardWorker(activeWorker);
+            if (!keepLiveWorker) waiters.delete(jobId);
+            if (!keepLiveWorker && controller === uploadController) controller = undefined;
         }
     }
 
     function cancel(): void {
+        const wasLive = Boolean(liveReservation || share.value?.driver === 'webrtc');
+        stopLive();
+        if (wasLive) share.value = undefined;
         const wasTurbo = Boolean(turboReservation);
         if (wasTurbo) revokeTurbo();
         cancelActiveUpload();
         status.value = 'ready';
-        error.value = wasTurbo
-            ? 'Turbo Transfer cancelled. Link removal requested; any remaining encrypted data will expire automatically.'
-            : 'Upload cancelled. Encrypted data may remain until it expires.';
+        error.value = wasLive
+            ? 'Live transfer stopped. No file or note content was stored on the server.'
+            : wasTurbo
+              ? 'Turbo Transfer cancelled. Link removal requested; any remaining encrypted data will expire automatically.'
+              : 'Upload cancelled. Encrypted data may remain until it expires.';
     }
 
     onBeforeUnmount(() => {
+        stopLive();
         if (turboReservation) revokeTurbo();
         stopMonitoring();
         cancelActiveUpload();

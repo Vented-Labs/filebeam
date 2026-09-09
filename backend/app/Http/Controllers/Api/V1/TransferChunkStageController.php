@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Enums\TransferDriver;
 use App\Enums\TransferStatus;
 use App\Http\Controllers\Controller;
 use App\Models\Transfer;
@@ -327,6 +328,7 @@ class TransferChunkStageController extends Controller
 
     private function authorize(Transfer $transfer, Request $request): void
     {
+        abort_unless($transfer->driver === TransferDriver::Http, 404);
         abort_unless(Capability::matches($transfer->upload_token_hash, $request->header('X-Filebeam-Upload-Token')), 403);
     }
 

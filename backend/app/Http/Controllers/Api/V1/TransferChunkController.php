@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api\V1;
 
 use App\Enums\TransferDelivery;
+use App\Enums\TransferDriver;
 use App\Enums\TransferStatus;
 use App\Http\Controllers\Controller;
 use App\Models\Filestore;
@@ -32,6 +33,7 @@ class TransferChunkController extends Controller
      */
     public function store(Request $request, Transfer $transfer, TransferItem $item, int $position): JsonResponse
     {
+        abort_unless($transfer->driver === TransferDriver::Http, 404);
         $this->authorizeUpload($transfer, $request->header('X-Filebeam-Upload-Token'));
         abort_unless($transfer->status === TransferStatus::Pending && $transfer->expires_at->isFuture(), 404);
         abort_unless($position >= 0 && $position < $item->chunk_count, 404);
@@ -265,6 +267,7 @@ class TransferChunkController extends Controller
 
     public function show(Transfer $transfer, TransferItem $item, int $position, ChunkReader $reader): StreamedResponse|JsonResponse
     {
+        abort_unless($transfer->driver === TransferDriver::Http, 404);
         abort_unless($transfer->delivery === TransferDelivery::Link && $transfer->expires_at->isFuture(), 404);
         $isAvailable = $transfer->status === TransferStatus::Available;
         $isPublishedPendingTurbo = $transfer->status === TransferStatus::Pending && $transfer->isPublishedTurbo();

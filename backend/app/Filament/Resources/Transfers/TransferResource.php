@@ -63,9 +63,10 @@ class TransferResource extends Resource
                 TextColumn::make('id')->label('ID')->searchable()->copyable(),
                 TextColumn::make('owner.email')->label('Owner')->searchable()->placeholder('Anonymous'),
                 TextColumn::make('kind')->badge(),
+                TextColumn::make('driver')->badge(),
                 TextColumn::make('status')->badge(),
                 self::fileSizeColumn('declared_ciphertext_bytes', 'Expected size'),
-                self::fileSizeColumn('ciphertext_bytes', 'Received size')->placeholder('-'),
+                self::fileSizeColumn('ciphertext_bytes', 'Received size')->state(fn (Transfer $record): int|string => $record->driver->value === 'webrtc' ? 'Not stored' : $record->ciphertext_bytes)->placeholder('-'),
                 TextColumn::make('item_count')->label('Items')->numeric(),
                 TextColumn::make('reports_count')->label('Reports')->numeric(),
                 TextColumn::make('expires_at')->label('Expires')->since()->tooltip(fn (Transfer $record): string => $record->expires_at->toDayDateTimeString())->sortable(),
@@ -154,6 +155,7 @@ class TransferResource extends Resource
                     TextEntry::make('id')->label('ID')->copyable(),
                     TextEntry::make('kind')->badge(),
                     TextEntry::make('delivery')->badge(),
+                    TextEntry::make('driver')->badge(),
                     TextEntry::make('status')->badge(),
                     TextEntry::make('completed_at')->label('Completed')->dateTime()->placeholder('Not completed'),
                     TextEntry::make('expires_at')->label('Expires')->since()->tooltip(fn (Transfer $record): string => $record->expires_at->toDayDateTimeString()),
@@ -163,7 +165,7 @@ class TransferResource extends Resource
             Section::make('Upload progress')
                 ->schema([
                     self::fileSizeEntry('declared_ciphertext_bytes', 'Expected'),
-                    self::fileSizeEntry('ciphertext_bytes', 'Received'),
+                    self::fileSizeEntry('ciphertext_bytes', 'Received')->state(fn (Transfer $record): int|string => $record->driver->value === 'webrtc' ? 'Not stored' : $record->ciphertext_bytes),
                     TextEntry::make('expected_chunks')->label('Expected chunks')->state(fn (Transfer $record): int => (int) $record->items()->sum('chunk_count')),
                     TextEntry::make('received_chunks')->label('Received chunks')->state(fn (Transfer $record): int => (int) $record->items()->withCount('chunks')->get()->sum('chunks_count')),
                 ])
@@ -267,6 +269,10 @@ class TransferResource extends Resource
 
     private static function fileSize(int|string|null $bytes): string
     {
+        if ($bytes === 'Not stored') {
+            return $bytes;
+        }
+
         return Number::fileSize((int) ($bytes ?? 0), precision: 2);
     }
 

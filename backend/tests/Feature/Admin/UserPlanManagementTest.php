@@ -21,6 +21,10 @@ use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
 
+beforeEach(function (): void {
+    config()->set('app.key', 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=');
+});
+
 function administrator(): User
 {
     return User::factory()->create(['role' => UserRole::Admin, 'suspended_at' => null]);

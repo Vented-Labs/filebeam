@@ -57,6 +57,9 @@ class PruneTransfers extends Command
                         ->orWhere(fn (Builder $available): Builder => $available
                             ->where('status', TransferStatus::Available->value)
                             ->where('expires_at', '<=', $now))
+                        ->orWhere(fn (Builder $live): Builder => $live
+                            ->whereIn('status', [TransferStatus::Live->value, TransferStatus::Ended->value])
+                            ->where('expires_at', '<=', $now))
                         ->orWhere(fn (Builder $deleting): Builder => $deleting
                             ->where('status', TransferStatus::Deleting->value)
                             ->where('updated_at', '<=', $staleDeletingBefore));
@@ -72,7 +75,7 @@ class PruneTransfers extends Command
                             }
 
                             $isEligible = match ($lockedTransfer->status) {
-                                TransferStatus::Pending, TransferStatus::Available => $lockedTransfer->expires_at->lessThanOrEqualTo($now),
+                                TransferStatus::Pending, TransferStatus::Available, TransferStatus::Live, TransferStatus::Ended => $lockedTransfer->expires_at->lessThanOrEqualTo($now),
                                 TransferStatus::Deleting => $lockedTransfer->updated_at->lessThanOrEqualTo($staleDeletingBefore),
                             };
 

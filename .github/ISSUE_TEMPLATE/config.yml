@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/Vented-Labs/filebeam/security/advisories/new
+    about: Privately report a security issue. Do not open a public issue.
+  - name: Ask a question
+    url: https://github.com/Vented-Labs/filebeam/discussions
+    about: Questions and discussion belong in GitHub Discussions.

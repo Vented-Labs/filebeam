@@ -1,3 +1,5 @@
+import type { TransferDriver } from './types';
+
 export type TransferMode = 'files' | 'note';
 
 export type UploadFileState = 'queued' | 'encrypting' | 'uploading' | 'complete' | 'error';
@@ -22,6 +24,7 @@ export type ShareResult = {
     passwordProtected: boolean;
     turbo?: boolean;
     monitorToken?: string;
+    driver?: TransferDriver;
 };
 
 export type DownloadSession = {
