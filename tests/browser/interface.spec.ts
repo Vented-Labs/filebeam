@@ -205,6 +205,29 @@ test('unavailable state and footer version are centered and branded', async ({ p
     await expect(page.locator('.fb-footer')).toContainText('v0.1.0');
 });
 
+test('CLI dialog exposes install commands and restores its footer trigger focus', async ({
+    page,
+}) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('/');
+    const trigger = page.getByRole('button', { name: 'Get the CLI' });
+    await trigger.click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByRole('heading', { name: 'Filebeam CLI' })).toBeVisible();
+    await expect(dialog).toContainText(
+        'curl -fsSL https://releases.filebeam.io/cli/install.sh | sh',
+    );
+    await expect(dialog).toContainText('Linux x86_64 and ARM64');
+    await expect(dialog).toContainText('beam up');
+    await expect(dialog.getByRole('button', { name: 'Copy install command' })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+        true,
+    );
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+});
+
 test('editor selection stays visible when switching modes', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.goto('/');

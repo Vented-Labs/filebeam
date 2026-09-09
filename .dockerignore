@@ -6,6 +6,8 @@
 !docker/
 !docker/production/
 !docker/production/**
+!docker/cli/
+!docker/cli/**
 
 !package.json
 !package-lock.json

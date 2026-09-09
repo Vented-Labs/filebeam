@@ -1,0 +1,88 @@
+# Beam CLI
+
+`beam` is an independently released Linux CLI. It uses tags named `beam-vX.Y.Z`; these do not interact with application `vX.Y.Z` releases.
+
+Install the latest release with:
+
+```sh
+curl -fsSL https://releases.filebeam.io/cli/install.sh | sh
+```
+
+Use `--dir DIRECTORY` to choose a different state directory. The installer creates `bin`, `config.toml`, and `cache`, validates the signed release catalog and selected archive, replaces `bin/beam` atomically, and idempotently adds the selected `bin` directory to bash, zsh, and fish startup files.
+
+Local Rust commands are Docker-only and default to Rust 1.98.0, 2 GB memory and memory-swap, 2 CPUs, and one Cargo build job:
+
+```sh
+scripts/cli/check.sh
+scripts/cli/test.sh
+scripts/cli/build.sh x86_64
+BEAM_RELEASE_PUBLIC_KEY=BASE64_ED25519_PUBLIC_KEY scripts/cli/package.sh beam-v1.2.3 dist/beam
+```
+
+Set `BEAM_DOCKER_MEMORY`, `BEAM_DOCKER_MEMORY_SWAP`, `BEAM_DOCKER_CPUS`, or `CARGO_BUILD_JOBS` to change those limits. `BEAM_DOCKER_BUILD=false` reuses an already-built tooling image.
+
+## Terminal experience
+
+Run `beam` for the full-screen Send / Receive workspace. The interface uses Filebeam's violet surfaces, gradient meter, file queue, and transfer receipts. Instance information loads in the background.
+
+- `Space`: select files; `Enter`: open a folder; `Backspace`: parent folder.
+- `/`: enter search mode, `Enter`: apply, `Esc`: clear.
+- `Tab` / `Shift+Tab`: move focus between browser, queue, and action (or receive fields).
+- `1` / `2`: Send / Receive; `u`: upload; `U`: update; `?`: help.
+- `c`: request a copy of the complete result through the terminal clipboard (OSC 52).
+- `Ctrl+C`: cancel the active transfer; on an idle screen, exit. Cancellation is cooperative: an active HTTP request may need to finish or time out before stopping.
+
+`beam up` and `beam down` display compact inline progress with transferred bytes, throughput, and ETA when there is enough terminal width and measurement history. Preparing, archiving, and verification have separate activity states. Completion is shown only after server finalization or local integrity verification.
+
+Progress goes to stderr. Stdout contains the share URL or saved file paths, so `link=$(beam up file.zip)` works. Interactive share links carry an explicit OSC 8 target including the full key fragment; wrapping or a shortened TUI label does not shorten that target. Use the TUI's **Copy full link** action for a complete clipboard value.
+
+Use `--plain` for output without terminal control sequences. Redirected stderr automatically receives concise text. `--no-color` / `NO_COLOR` disable colors, and `--reduced-motion` disables decorative animation and interpolation. These preferences can also be set in `config.toml`:
+
+```toml
+no_color = false
+reduced_motion = false
+check_updates = true
+```
+
+## Sending directories
+
+```sh
+beam up ./photos                # Choose ZIP and send or Individual files
+beam up ./photos --zip           # One encrypted ZIP, counted as one file
+beam up ./photos --individual    # Each discovered file counts against the limit
+```
+
+The prompt shows the discovered file count and the instance's file limit. Plain/non-interactive directory uploads require an explicit mode. `--zip` and `--individual` are mutually exclusive.
+
+ZIP mode combines all supplied paths into one archive, preserving nested folders (including empty folders). A single directory produces `directory-name.zip`; multiple paths produce `filebeam-transfer.zip`. The temporary ZIP is removed when the worker finishes or is cancelled.
+
+Individual mode recursively sends regular files into the recipient's chosen destination folder. Duplicate basenames receive deterministic suffixes such as `readme (2).txt`. Directory traversal includes hidden files and skips nested symbolic links. The file-count limit is checked before reserving a transfer; the normal encrypted-byte limit also applies.
+
+## Verification
+
+```sh
+scripts/cli/check.sh
+scripts/cli/test.sh
+scripts/cli/build.sh
+bash scripts/cli/terminal.test.sh
+```
+
+The PTY suite runs in capped Docker and exercises slow single-chunk transfers, output redirection, resizing, key prompts, cancellation, full-screen input, directory modes, ZIP contents, and complete hyperlink/copy targets. Visual fixtures can be exported with `BEAM_VISUAL_DIR=/workspace/cli/target/visual` inside `scripts/cli/run.sh` when running the `export_visual_fixtures` Rust test.
+
+## Local installation
+
+To install a Docker-built development binary that targets the running Sail instance on port 8000:
+
+```sh
+scripts/cli/install-local.sh
+export PATH="$HOME/.filebeam/bin:$PATH"
+beam
+```
+
+Use `--instance http://localhost:PORT` or `--dir DIRECTORY` to override either local default. The current QA binary at `cli/target/release/beam` defaults to `http://localhost:8000`. `FILEBEAM_INSTANCE` overrides the compiled default. Before publishing, restore the default in `cli/src/main.rs` to `https://filebeam.io`.
+
+Publishing requires R2 and Ed25519 release credentials, then writes immutable artifacts below `cli/versions/vX.Y.Z/`, a signed `cli/index.json`, and the mutable no-cache `cli/install.sh`:
+
+```sh
+scripts/release/cli-publish.sh beam-v1.2.3 dist/beam
+```

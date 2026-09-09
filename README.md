@@ -37,3 +37,4 @@ docker compose -f backend/compose.yaml run --rm --no-deps laravel.test bash -c '
 - [Encryption protocol](encryption/README.md)
 - [Contributing](CONTRIBUTING.md)
 - [UI workspace](ui/README.md)
+- [Beam CLI](docs/beam-cli.md)
