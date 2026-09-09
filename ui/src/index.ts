@@ -4,6 +4,7 @@ export type { FilebeamConfig } from './types';
 export { default as AuthScreen } from './components/auth/AuthScreen.vue';
 export { default as AccountPanel } from './components/auth/AccountPanel.vue';
 export { default as RouteSurface } from './components/layout/RouteSurface.vue';
+export { default as AnimatedReveal } from './components/layout/AnimatedReveal.vue';
 export { default as BrandLogo } from './components/brand/BrandLogo.vue';
 export { default as Tooltip } from './components/primitives/Tooltip.vue';
 export { default as Toast } from './components/primitives/Toast.vue';

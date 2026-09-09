@@ -74,26 +74,30 @@ test('desktop composition, file queue, note editor, branding and auth navigation
         { name: 'Design references.png', mimeType: 'image/png', buffer: Buffer.from('local only') },
     ]);
     await expect(page.getByRole('heading', { name: 'Your files', exact: true })).toBeVisible();
+    const pond = page.getByTestId('file-pond');
+    await expect(pond).toBeVisible();
     await expect
         .poll(() =>
-            page.evaluate(() => {
-                const pond = document
-                    .querySelector('[data-testid="file-pond"]')!
-                    .getBoundingClientRect();
-                const queue = document.querySelector('aside')!.getBoundingClientRect();
-                return queue.left > pond.right && queue.width > 250;
+            pond.evaluate((element) => {
+                const container = element.getBoundingClientRect();
+                const queue = element.querySelector('.file-queue')!.getBoundingClientRect();
+                return (
+                    queue.left >= container.left &&
+                    queue.right <= container.right &&
+                    queue.width > container.width * 0.8
+                );
             }),
         )
         .toBe(true);
     await page
         .locator('#filebeam-picker')
         .setInputFiles({ name: 'Notes.txt', mimeType: 'text/plain', buffer: Buffer.from('draft') });
-    await expect(page.locator('aside li')).toHaveCount(3);
+    await expect(page.getByTestId('prism-file-row')).toHaveCount(3);
     await page.getByRole('button', { name: 'Remove Product brief.pdf' }).click();
-    await expect(page.locator('aside li')).toHaveCount(2);
+    await expect(page.getByTestId('prism-file-row')).toHaveCount(2);
 
     await page.getByRole('tab', { name: 'Notes' }).click();
-    await expect(page.getByTestId('file-pond')).toHaveCount(0);
+    await expect(page.getByTestId('file-pond')).toBeHidden();
     const editor = page.locator('.cm-content[contenteditable="true"]');
     await editor.fill('<?php\n\nreturn [\n    "private" => true,\n];');
     await page.getByRole('combobox', { name: 'Note language' }).click();
@@ -139,8 +143,11 @@ test('auth navigation stays in Vue and validation belongs to its field', async (
     await page.getByLabel('Email', { exact: true }).fill('validation-only@example.test');
     await page.getByLabel('Password', { exact: true }).fill('validation-only-password');
     await page.getByLabel('Confirm password', { exact: true }).fill('validation-only-password');
-    await page.locator('form').evaluate((form) => ((form as HTMLFormElement).noValidate = true));
-    await page.getByRole('button', { name: 'Create account', exact: true }).click();
+    const submit = page.getByRole('button', { name: 'Create account', exact: true });
+    await submit.evaluate((button) => {
+        button.closest('form')!.noValidate = true;
+    });
+    await submit.click();
     const username = page.getByLabel('Username', { exact: true });
     await expect(username).toHaveAttribute('aria-invalid', 'true');
     expect(
@@ -205,21 +212,17 @@ test('unavailable state and footer version are centered and branded', async ({ p
     await expect(page.locator('.fb-footer')).toContainText('v0.1.0');
 });
 
-test('CLI dialog exposes install commands and restores its footer trigger focus', async ({
-    page,
-}) => {
+test('CLI instructions stay accessible on mobile and restore header focus', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto('/');
-    const trigger = page.getByRole('button', { name: 'Get the CLI' });
+    const trigger = page.locator('header').getByRole('button', { name: 'Install CLI' });
     await trigger.click();
     const dialog = page.getByRole('dialog');
-    await expect(dialog.getByRole('heading', { name: 'Filebeam CLI' })).toBeVisible();
-    await expect(dialog).toContainText(
-        'curl -fsSL https://releases.filebeam.io/cli/install.sh | sh',
-    );
+    await expect(dialog.getByRole('heading', { name: 'Install CLI', exact: true })).toBeVisible();
     await expect(dialog).toContainText('Linux x86_64 and ARM64');
     await expect(dialog).toContainText('beam up');
-    await expect(dialog.getByRole('button', { name: 'Copy install command' })).toBeVisible();
+    await expect(dialog).toContainText('beam down <url or ulid>');
+    await expect(dialog).toContainText('https://filebeam.io');
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
         true,
     );
@@ -263,7 +266,7 @@ test('mobile queue and editor remain usable with reduced motion', async ({ page 
         .fill('API_KEY="a local-only test value"\nDEBUG=false');
     await page.getByRole('combobox', { name: 'Note language' }).click();
     await page.getByRole('option', { name: '.ENV', exact: true }).click();
-    await expect(page.getByTestId('file-pond')).toHaveCount(0);
+    await expect(page.getByTestId('file-pond')).toBeHidden();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
         true,
     );

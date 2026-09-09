@@ -112,7 +112,49 @@ test('self custody rejects a wrong key and keeps private controls usable on mobi
 test('password custody is selected by default, supports keyboard navigation, and cancel keeps profile private', async ({
     page,
 }) => {
+    let releaseKeys = (): void => undefined;
+    const keysGate = new Promise<void>((resolve) => {
+        releaseKeys = resolve;
+    });
+    await page.route('**/account/keys', async (route) => {
+        await keysGate;
+        await route.continue();
+    });
     const { username } = await register(page);
+    await expect(page.getByText('Loading account keys', { exact: true })).toBeVisible();
+    const borderSampling = page.locator('.inbox-settings__state-height').evaluate(async (outer) => {
+        let maximumOverflow = Number.NEGATIVE_INFINITY;
+        let minimumPaintClearance = Number.POSITIVE_INFINITY;
+        let samples = 0;
+        const deadline = performance.now() + 700;
+        while (performance.now() < deadline) {
+            await new Promise(requestAnimationFrame);
+            const card = outer.querySelector<HTMLElement>('.inbox-settings__activation');
+            if (!card) continue;
+            const outerRect = outer.getBoundingClientRect();
+            const cardRect = card.getBoundingClientRect();
+            const state = card.closest<HTMLElement>('.inbox-settings__state');
+            const blur = Number.parseFloat(
+                getComputedStyle(state!).filter.match(/blur\(([\d.]+)px\)/)?.[1] ?? '0',
+            );
+            const clipMargin = Number.parseFloat(
+                getComputedStyle(outer).getPropertyValue('overflow-clip-margin'),
+            );
+            maximumOverflow = Math.max(maximumOverflow, cardRect.bottom - outerRect.bottom);
+            minimumPaintClearance = Math.min(
+                minimumPaintClearance,
+                outerRect.bottom + clipMargin - cardRect.bottom - blur,
+            );
+            samples++;
+        }
+        return { maximumOverflow, minimumPaintClearance, samples };
+    });
+    releaseKeys();
+    const borderResult = await borderSampling;
+    expect(borderResult.samples).toBeGreaterThan(0);
+    expect(borderResult.maximumOverflow).toBeLessThanOrEqual(0.5);
+    expect(borderResult.minimumPaintClearance).toBeGreaterThanOrEqual(-0.5);
+    await expect(page.getByRole('heading', { name: 'Create your receiving key' })).toBeVisible();
     expect((await page.goto(`/u/${username}`))?.status()).toBe(404);
     await page.goto('/account');
     await openKeySetup(page);
@@ -121,8 +163,30 @@ test('password custody is selected by default, supports keyboard navigation, and
     const selfCustody = page.getByRole('radio', { name: /Keep the key yourself/ });
     await expect(passwordCustody).toBeChecked();
     await passwordCustody.focus();
+    const focusedPaintClearance = () =>
+        page.locator('.inbox-settings__state-height').evaluate((outer) => {
+            const card = outer.querySelector<HTMLElement>(
+                '.inbox-settings__custody-card:focus-within',
+            );
+            if (!card) return null;
+            const outerRect = outer.getBoundingClientRect();
+            const cardRect = card.getBoundingClientRect();
+            const cardStyle = getComputedStyle(card);
+            const outlineExtent =
+                Number.parseFloat(cardStyle.outlineWidth) +
+                Number.parseFloat(cardStyle.outlineOffset);
+            const clipMargin = Number.parseFloat(
+                getComputedStyle(outer).getPropertyValue('overflow-clip-margin'),
+            );
+            return {
+                left: cardRect.left - outlineExtent - (outerRect.left - clipMargin),
+                right: outerRect.right + clipMargin - (cardRect.right + outlineExtent),
+            };
+        });
+    expect((await focusedPaintClearance())?.left).toBeGreaterThanOrEqual(-0.5);
     await page.keyboard.press('ArrowDown');
     await expect(selfCustody).toBeChecked();
+    expect((await focusedPaintClearance())?.right).toBeGreaterThanOrEqual(-0.5);
     await page.keyboard.press('ArrowUp');
     await expect(passwordCustody).toBeChecked();
     await page.getByRole('button', { name: 'Cancel' }).click();

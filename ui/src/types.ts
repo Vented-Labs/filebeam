@@ -8,6 +8,7 @@ export type TransferLimits = {
 
 export type FilebeamConfig = {
     main_site_url: string;
+    cli?: CliConfig;
     github_url: string;
     copyright_holder: string;
     maximum_transfer_bytes: number;
@@ -34,6 +35,12 @@ export type FilebeamConfig = {
         default_driver: TransferDriver;
         limits: Record<TransferDriver, TransferLimits>;
     };
+};
+
+export type CliConfig = {
+    installer_url: string | null;
+    installer_interpreter: 'sh';
+    executable: 'beam';
 };
 
 export type PublicRecipient = {

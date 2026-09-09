@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head, useForm } from '@inertiajs/vue3';
-import { RouteSurface } from '@filebeam/ui';
+import { AnimatedReveal, Icon, Input, RouteSurface } from '@filebeam/ui';
 
 defineOptions({ layout: RouteSurface });
 
@@ -22,85 +22,157 @@ function submit(): void {
 </script>
 
 <template>
-    <main class="mx-auto flex min-h-screen max-w-xl items-center px-5 py-12">
+    <main class="invitation-page">
         <Head title="Accept invitation" />
-        <section class="w-full rounded-2xl border border-white/10 bg-slate-950/90 p-7 shadow-2xl">
-            <p class="text-sm font-medium text-cyan-300">Filebeam invitation</p>
-            <h1 class="mt-2 text-2xl font-semibold text-white">Create your account</h1>
-            <p class="mt-2 text-sm text-slate-300">
-                This invitation is bound to
-                <strong class="text-white">{{ email }}</strong
+        <section class="invitation-card">
+            <div class="invitation-card__emblem"><Icon name="user" :size="24" /></div>
+            <p class="invitation-card__eyebrow">Filebeam invitation</p>
+            <h1>Create your account</h1>
+            <p class="invitation-card__intro">
+                This invitation is bound to <strong>{{ email }}</strong
                 >.
             </p>
 
-            <form class="mt-7 space-y-4" @submit.prevent="submit">
-                <label class="block text-sm text-slate-200">
-                    Username
-                    <input
+            <form @submit.prevent="submit">
+                <label>
+                    <span>Username</span>
+                    <Input
                         v-model="form.username"
                         autocomplete="username"
-                        class="mt-1 block w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-white"
-                        :aria-invalid="Boolean(form.errors.username)"
+                        :invalid="Boolean(form.errors.username)"
                     />
-                    <span v-if="form.errors.username" class="mt-1 block text-xs text-red-300">{{
-                        form.errors.username
-                    }}</span>
+                    <AnimatedReveal :show="Boolean(form.errors.username)">
+                        <small>{{ form.errors.username }}</small>
+                    </AnimatedReveal>
                 </label>
-                <label class="block text-sm text-slate-200">
-                    Name (optional)
-                    <input
+                <label>
+                    <span>Name (optional)</span>
+                    <Input
                         v-model="form.name"
                         autocomplete="name"
-                        class="mt-1 block w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-white"
-                        :aria-invalid="Boolean(form.errors.name)"
+                        :invalid="Boolean(form.errors.name)"
                     />
-                    <span v-if="form.errors.name" class="mt-1 block text-xs text-red-300">{{
-                        form.errors.name
-                    }}</span>
+                    <AnimatedReveal :show="Boolean(form.errors.name)">
+                        <small>{{ form.errors.name }}</small>
+                    </AnimatedReveal>
                 </label>
-                <label class="block text-sm text-slate-200">
-                    Email
-                    <input
+                <label>
+                    <span>Email</span>
+                    <Input
                         v-model="form.email"
                         readonly
                         autocomplete="email"
-                        class="mt-1 block w-full rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-slate-300"
-                        :aria-invalid="Boolean(form.errors.email)"
+                        :invalid="Boolean(form.errors.email)"
                     />
-                    <span v-if="form.errors.email" class="mt-1 block text-xs text-red-300">{{
-                        form.errors.email
-                    }}</span>
+                    <AnimatedReveal :show="Boolean(form.errors.email)">
+                        <small>{{ form.errors.email }}</small>
+                    </AnimatedReveal>
                 </label>
-                <label class="block text-sm text-slate-200">
-                    Password
-                    <input
+                <label>
+                    <span>Password</span>
+                    <Input
                         v-model="form.password"
                         type="password"
                         autocomplete="new-password"
-                        class="mt-1 block w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-white"
-                        :aria-invalid="Boolean(form.errors.password)"
+                        :invalid="Boolean(form.errors.password)"
                     />
-                    <span v-if="form.errors.password" class="mt-1 block text-xs text-red-300">{{
-                        form.errors.password
-                    }}</span>
+                    <AnimatedReveal :show="Boolean(form.errors.password)">
+                        <small>{{ form.errors.password }}</small>
+                    </AnimatedReveal>
                 </label>
-                <label class="block text-sm text-slate-200">
-                    Confirm password
-                    <input
+                <label>
+                    <span>Confirm password</span>
+                    <Input
                         v-model="form.password_confirmation"
                         type="password"
                         autocomplete="new-password"
-                        class="mt-1 block w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 text-white"
                     />
                 </label>
                 <button
                     type="submit"
-                    class="w-full rounded-lg bg-cyan-400 px-4 py-2 font-semibold text-slate-950 disabled:opacity-50"
+                    class="fb-button fb-button--primary invitation-card__submit"
                     :disabled="form.processing"
                 >
-                    Create account
+                    <Icon name="arrow-right" :size="16" />Create account
                 </button>
             </form>
         </section>
     </main>
 </template>
+
+<style scoped>
+.invitation-page {
+    display: grid;
+    width: min(100% - 2rem, 36rem);
+    min-height: calc(100svh - 10rem);
+    place-items: center;
+    margin-inline: auto;
+    padding-block: 3rem;
+}
+.invitation-card {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 2rem;
+    border: 1px solid var(--fb-border);
+    border-radius: var(--fb-radius-panel);
+    background: var(--fb-surface);
+    box-shadow: var(--fb-shadow-panel);
+}
+.invitation-card__emblem {
+    display: grid;
+    width: 3.25rem;
+    height: 3.25rem;
+    place-items: center;
+    border: 1px solid #78598666;
+    border-radius: 0.875rem;
+    color: var(--fb-accent-text);
+    background: var(--fb-selected-surface);
+}
+.invitation-card__eyebrow {
+    margin: 1.25rem 0 0;
+    color: var(--fb-accent-text);
+    font-size: 0.6875rem;
+    font-weight: 650;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}
+.invitation-card h1 {
+    margin: 0.5rem 0 0;
+    color: var(--fb-text);
+    font-size: 1.75rem;
+    letter-spacing: -0.04em;
+}
+.invitation-card__intro {
+    margin: 0.625rem 0 0;
+    color: var(--fb-text-muted);
+    font-size: 0.875rem;
+}
+.invitation-card__intro strong {
+    color: var(--fb-text);
+}
+.invitation-card form {
+    display: grid;
+    gap: 1rem;
+    margin-top: 1.75rem;
+}
+.invitation-card label {
+    display: grid;
+    gap: 0.5rem;
+    color: var(--fb-text-muted);
+    font-size: 0.8125rem;
+    font-weight: 550;
+}
+.invitation-card small {
+    color: var(--fb-danger);
+    font-size: 0.75rem;
+}
+.invitation-card__submit {
+    width: 100%;
+    margin-top: 0.5rem;
+}
+@media (max-width: 520px) {
+    .invitation-card {
+        padding: 1.5rem;
+    }
+}
+</style>

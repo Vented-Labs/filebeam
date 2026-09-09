@@ -3,29 +3,32 @@ import { expect, test } from '@playwright/test';
 test('icons retain fixed artwork attributes while inheriting visual classes', async ({ page }) => {
     await page.goto('/');
 
-    const upload = page.locator('[data-testid="file-pond"] svg.pond-illustration');
+    const upload = page.locator('[data-testid="file-pond"] .file-pond__card--left svg.fb-icon');
     await expect(upload).toHaveAttribute('viewBox', '0 0 24 24');
     await expect(upload).toHaveAttribute('fill', 'none');
     await expect(upload).toHaveAttribute('focusable', 'false');
     await expect(upload).toHaveAttribute('aria-hidden', 'true');
-    await expect(upload).toHaveAttribute('width', '96');
-    await expect(upload).toHaveAttribute('height', '96');
+    await expect(upload).toHaveAttribute('width', '21');
+    await expect(upload).toHaveAttribute('height', '21');
     expect(
         await upload.evaluate((icon) => ({
             color: getComputedStyle(icon).color,
             shrink: getComputedStyle(icon).flexShrink,
         })),
-    ).toEqual({ color: 'rgb(168, 85, 247)', shrink: '0' });
+    ).toEqual({ color: 'rgb(178, 168, 194)', shrink: '0' });
 
-    const chooseIcon = page.getByRole('button', { name: 'Choose files' }).locator('svg.fb-icon');
-    await expect(chooseIcon).toHaveAttribute('width', '22');
-    await expect(chooseIcon).toHaveAttribute('height', '22');
+    const chooseIcon = page
+        .getByRole('button', { name: 'Choose files' })
+        .locator('svg.fb-icon')
+        .first();
+    await expect(chooseIcon).toHaveAttribute('width', '17');
+    await expect(chooseIcon).toHaveAttribute('height', '17');
     expect(
         await chooseIcon.evaluate((icon) => ({
             width: getComputedStyle(icon).width,
             height: getComputedStyle(icon).height,
         })),
-    ).toEqual({ width: '22px', height: '22px' });
+    ).toEqual({ width: '17px', height: '17px' });
 });
 
 test('transfer loader is centered and disables animation when reduced motion is requested', async ({

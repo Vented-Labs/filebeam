@@ -23,6 +23,7 @@ import Icon from '../primitives/Icon.vue';
 import FormField from '../primitives/FormField.vue';
 import Input from '../primitives/Input.vue';
 import Tooltip from '../primitives/Tooltip.vue';
+import AnimatedHeight from '../layout/AnimatedHeight.vue';
 
 type ReportFields = {
     category: string;
@@ -52,6 +53,12 @@ const fields = ref<ReportFields>({
 function closeAutoFocus(event: Event): void {
     event.preventDefault();
     (trigger.value?.$el as HTMLElement | undefined)?.focus();
+}
+
+function makeOutgoingInert(element: Element): void {
+    const pane = element as HTMLElement;
+    pane.inert = true;
+    pane.setAttribute('aria-hidden', 'true');
 }
 </script>
 
@@ -83,111 +90,167 @@ function closeAutoFocus(event: Event): void {
                         ><Icon name="x" :size="18" /></Button
                 ></DialogClose>
 
-                <div v-if="successful" class="mt-6 space-y-5">
-                    <p class="leading-6 text-[var(--fb-text-muted)]">
-                        Your report has been received and will be reviewed.
-                    </p>
-                    <div class="flex justify-end">
-                        <DialogClose as-child><Button>Close</Button></DialogClose>
-                    </div>
-                </div>
+                <AnimatedHeight class="report-state-height mt-6">
+                    <Transition name="report-state" @before-leave="makeOutgoingInert">
+                        <div :key="successful ? 'success' : 'form'" class="report-state">
+                            <div v-if="successful" class="space-y-5">
+                                <p class="leading-6 text-[var(--fb-text-muted)]">
+                                    Your report has been received and will be reviewed.
+                                </p>
+                                <div class="flex justify-end">
+                                    <DialogClose as-child><Button>Close</Button></DialogClose>
+                                </div>
+                            </div>
 
-                <form
-                    v-else
-                    class="mt-6 space-y-4"
-                    :action="actionUri"
-                    @submit.prevent="emit('submit', fields)"
-                >
-                    <FormField id="report-category" label="Category" :error="errors.category">
-                        <template #default="{ id, describedBy, invalid }">
-                            <SelectRoot v-model="fields.category" :disabled="processing">
-                                <SelectTrigger
-                                    :id="id"
-                                    :aria-describedby="describedBy"
-                                    :aria-invalid="invalid"
-                                    class="fb-select-trigger"
-                                    ><SelectValue placeholder="Select a category" /><Icon
-                                        name="chevron-down"
-                                        :size="16"
-                                /></SelectTrigger>
-                                <SelectPortal>
-                                    <SelectContent
-                                        :body-lock="false"
-                                        position="popper"
-                                        class="fb-select-content"
-                                        ><SelectViewport
-                                            ><SelectItem
-                                                v-for="category in [
-                                                    ['spam', 'Spam'],
-                                                    ['malware', 'Malware'],
-                                                    ['illegal_content', 'Illegal content'],
-                                                    ['privacy', 'Privacy'],
-                                                    ['copyright', 'Copyright'],
-                                                    ['other', 'Other'],
-                                                ]"
-                                                :key="category[0]"
-                                                :value="category[0]"
-                                                class="fb-select-item"
-                                                ><SelectItemText>{{
-                                                    category[1]
-                                                }}</SelectItemText></SelectItem
-                                            ></SelectViewport
-                                        ></SelectContent
-                                    >
-                                </SelectPortal>
-                            </SelectRoot>
-                        </template>
-                    </FormField>
+                            <form
+                                v-else
+                                class="space-y-4"
+                                :action="actionUri"
+                                @submit.prevent="emit('submit', fields)"
+                            >
+                                <FormField
+                                    id="report-category"
+                                    label="Category"
+                                    :error="errors.category"
+                                >
+                                    <template #default="{ id, describedBy, invalid }">
+                                        <SelectRoot
+                                            v-model="fields.category"
+                                            :disabled="processing"
+                                        >
+                                            <SelectTrigger
+                                                :id="id"
+                                                :aria-describedby="describedBy"
+                                                :aria-invalid="invalid"
+                                                class="fb-select-trigger"
+                                                ><SelectValue
+                                                    placeholder="Select a category" /><Icon
+                                                    name="chevron-down"
+                                                    :size="16"
+                                            /></SelectTrigger>
+                                            <SelectPortal>
+                                                <SelectContent
+                                                    :body-lock="false"
+                                                    position="popper"
+                                                    class="fb-select-content"
+                                                    ><SelectViewport
+                                                        ><SelectItem
+                                                            v-for="category in [
+                                                                ['spam', 'Spam'],
+                                                                ['malware', 'Malware'],
+                                                                [
+                                                                    'illegal_content',
+                                                                    'Illegal content',
+                                                                ],
+                                                                ['privacy', 'Privacy'],
+                                                                ['copyright', 'Copyright'],
+                                                                ['other', 'Other'],
+                                                            ]"
+                                                            :key="category[0]"
+                                                            :value="category[0]"
+                                                            class="fb-select-item"
+                                                            ><SelectItemText>{{
+                                                                category[1]
+                                                            }}</SelectItemText></SelectItem
+                                                        ></SelectViewport
+                                                    ></SelectContent
+                                                >
+                                            </SelectPortal>
+                                        </SelectRoot>
+                                    </template>
+                                </FormField>
 
-                    <FormField
-                        id="report-description"
-                        label="Description"
-                        :error="errors.description"
-                    >
-                        <template #default="{ id, describedBy, invalid }">
-                            <textarea
-                                :id="id"
-                                v-model="fields.description"
-                                :aria-describedby="describedBy"
-                                :aria-invalid="invalid"
-                                :disabled="processing"
-                                class="fb-input min-h-32"
-                                maxlength="2000"
-                                required
-                            />
-                        </template>
-                    </FormField>
+                                <FormField
+                                    id="report-description"
+                                    label="Description"
+                                    :error="errors.description"
+                                >
+                                    <template #default="{ id, describedBy, invalid }">
+                                        <textarea
+                                            :id="id"
+                                            v-model="fields.description"
+                                            :aria-describedby="describedBy"
+                                            :aria-invalid="invalid"
+                                            :disabled="processing"
+                                            class="fb-input min-h-32"
+                                            maxlength="2000"
+                                            required
+                                        />
+                                    </template>
+                                </FormField>
 
-                    <FormField
-                        id="reporter-email"
-                        label="Email address"
-                        optional
-                        :error="errors.reporter_email"
-                    >
-                        <template #default="{ id, describedBy, invalid }">
-                            <Input
-                                :id="id"
-                                v-model="fields.reporter_email"
-                                :aria-describedby="describedBy"
-                                :invalid="invalid"
-                                :disabled="processing"
-                                type="email"
-                                autocomplete="email"
-                            />
-                        </template>
-                    </FormField>
+                                <FormField
+                                    id="reporter-email"
+                                    label="Email address"
+                                    optional
+                                    :error="errors.reporter_email"
+                                >
+                                    <template #default="{ id, describedBy, invalid }">
+                                        <Input
+                                            :id="id"
+                                            v-model="fields.reporter_email"
+                                            :aria-describedby="describedBy"
+                                            :invalid="invalid"
+                                            :disabled="processing"
+                                            type="email"
+                                            autocomplete="email"
+                                        />
+                                    </template>
+                                </FormField>
 
-                    <div class="sr-only" aria-hidden="true">
-                        <input v-model="fields.website" tabindex="-1" autocomplete="off" />
-                    </div>
+                                <div class="sr-only" aria-hidden="true">
+                                    <input
+                                        v-model="fields.website"
+                                        tabindex="-1"
+                                        autocomplete="off"
+                                    />
+                                </div>
 
-                    <div class="flex justify-end">
-                        <Button type="submit" :disabled="processing">
-                            {{ processing ? 'Submitting...' : 'Submit report' }}
-                        </Button>
-                    </div>
-                </form>
+                                <div class="flex justify-end">
+                                    <Button type="submit" :disabled="processing">
+                                        {{ processing ? 'Submitting...' : 'Submit report' }}
+                                    </Button>
+                                </div>
+                            </form>
+                        </div>
+                    </Transition>
+                </AnimatedHeight>
             </DialogContent>
         </DialogPortal>
     </DialogRoot>
 </template>
+
+<style scoped>
+.report-state-height {
+    position: relative;
+}
+.report-state-enter-active,
+.report-state-leave-active {
+    transition:
+        opacity var(--fb-duration-pane) var(--fb-ease),
+        transform var(--fb-duration-pane) var(--fb-ease),
+        filter var(--fb-duration-pane) var(--fb-ease);
+}
+.report-state-leave-active {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    pointer-events: none;
+}
+.report-state-enter-from {
+    opacity: 0;
+    filter: blur(3px);
+    transform: translateY(14px);
+}
+.report-state-leave-to {
+    opacity: 0;
+    filter: blur(2px);
+    transform: translateY(-9px);
+}
+@media (prefers-reduced-motion: reduce) {
+    .report-state-enter-active,
+    .report-state-leave-active {
+        transition: none;
+    }
+}
+</style>

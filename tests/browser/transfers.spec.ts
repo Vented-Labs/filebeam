@@ -49,6 +49,13 @@ async function completeUpload(page: Page): Promise<void> {
     await expect(ready).toBeVisible({ timeout: 30_000 });
 }
 
+async function setSenderPassword(page: Page, password: string): Promise<void> {
+    await page.getByTestId('prism-password-trigger').click();
+    const popover = page.getByTestId('prism-password-popover');
+    await popover.locator('#transfer-password').fill(password);
+    await popover.getByRole('button', { name: 'Done' }).click();
+}
+
 async function uploadFile(
     page: Page,
     options: { includeKey?: boolean; password?: string; name?: string; content?: string } = {},
@@ -61,7 +68,7 @@ async function uploadFile(
         mimeType: 'text/plain',
         buffer: Buffer.from(marker),
     });
-    if (options.password) await page.locator('#transfer-password').fill(options.password);
+    if (options.password) await setSenderPassword(page, options.password);
     if (options.includeKey === false) await page.getByText('Include key in link').click();
     const sentBodies: string[] = [];
     page.on('request', (request) => {
@@ -156,7 +163,7 @@ test('round-trips a password-protected note', async ({ browser, page }) => {
     await page
         .locator('[data-testid="note-editor"] .cm-content[contenteditable="true"]')
         .fill(marker);
-    await page.locator('#transfer-password').fill(password);
+    await setSenderPassword(page, password);
     await page.getByText('Include key in link').click();
     await completeUpload(page);
     expect(sentBodies.join('\n')).not.toContain(marker);
@@ -249,7 +256,7 @@ test('retention and burn-on-read protect a titled note until successful decrypti
     await page.getByRole('option', { name: '7 days', exact: true }).click();
     await page.getByRole('switch', { name: 'Burn on read' }).click();
     await page.getByRole('switch', { name: 'Include key in link' }).click();
-    await page.locator('#transfer-password').fill('private-burn-password');
+    await setSenderPassword(page, 'private-burn-password');
     await completeUpload(page);
     const link = await page.locator('#share-link').inputValue();
     const key = await page.locator('#generated-key').inputValue();

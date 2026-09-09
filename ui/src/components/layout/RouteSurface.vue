@@ -1,9 +1,11 @@
 <script lang="ts">
-import { Head, usePage } from '@inertiajs/vue3';
+import { Head, router, usePage } from '@inertiajs/vue3';
 import { cloneVNode, defineComponent, h, provide, type VNode } from 'vue';
 import { ConfigProvider } from 'reka-ui';
 import FilebeamHome from '../FilebeamHome.vue';
+import AppShell from './AppShell.vue';
 import PageTransition from './PageTransition.vue';
+import CliProvider from '../cli/CliProvider.vue';
 import type { FilebeamConfig } from '../../types';
 
 export default defineComponent({
@@ -16,6 +18,13 @@ export default defineComponent({
         let backgroundUrl = '/';
         let wasAuthentication = false;
         provide('authReturnUrl', () => backgroundUrl);
+        function goHome(): void {
+            if (backgroundUrl === '/') {
+                window.dispatchEvent(new Event('filebeam:home'));
+                return;
+            }
+            router.visit('/');
+        }
         const scrollBody =
             typeof CSS !== 'undefined' && CSS.supports('scrollbar-gutter: stable')
                 ? { padding: 0, margin: 0 }
@@ -46,14 +55,26 @@ export default defineComponent({
             const renderedBackground = background;
 
             return h(ConfigProvider, { scrollBody }, () =>
-                h('div', [
+                h(CliProvider, { config: page.props.filebeam.cli }, () =>
                     h(
-                        PageTransition,
-                        { key: 'background', pageKey: backgroundUrl },
-                        () => renderedBackground,
+                        AppShell,
+                        {
+                            githubUrl: page.props.filebeam.github_url,
+                            copyrightHolder: page.props.filebeam.copyright_holder,
+                            user: page.props.auth.user,
+                            registrationEnabled: page.props.filebeam.registration_enabled,
+                            homeAction: goHome,
+                        },
+                        () => [
+                            h(
+                                PageTransition,
+                                { key: 'background', pageKey: backgroundUrl },
+                                () => renderedBackground,
+                            ),
+                            authentication ? h('div', { key: 'authentication' }, [child]) : null,
+                        ],
                     ),
-                    authentication ? h('div', { key: 'authentication' }, [child]) : null,
-                ]),
+                ),
             );
         };
     },

@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { Head } from '@inertiajs/vue3';
-import { BrandLogo, Icon } from '@filebeam/ui';
+import { Icon, RouteSurface } from '@filebeam/ui';
 import { computed } from 'vue';
 
 const props = defineProps<{ status: number }>();
+defineOptions({ layout: RouteSurface });
 
 const errors: Record<number, { title: string; description: string }> = {
     403: {
@@ -52,14 +53,8 @@ const error = computed(() => {
 </script>
 
 <template>
-    <div class="fb-shell">
+    <div>
         <Head :title="error.title" />
-
-        <header class="fb-header">
-            <a href="/" class="fb-header__brand" aria-label="Home">
-                <BrandLogo />
-            </a>
-        </header>
 
         <main class="grid flex-1 place-items-center px-4 py-12 sm:py-24">
             <section class="w-full max-w-xl text-center" aria-labelledby="error-title">
@@ -91,11 +86,5 @@ const error = computed(() => {
                 </a>
             </section>
         </main>
-
-        <footer
-            class="flex min-h-[4.5rem] items-center justify-center border-t border-[var(--fb-border)] px-4 text-[0.8125rem] text-[var(--fb-text-muted)]"
-        >
-            Error {{ status }}
-        </footer>
     </div>
 </template>

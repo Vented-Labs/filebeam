@@ -11,7 +11,7 @@ test.describe('WebRTC consent', () => {
     );
 
     async function selectWebRtc(page: Page): Promise<void> {
-        await page.getByRole('radio', { name: 'WebRTC (live)' }).check({ force: true });
+        await page.getByRole('radio', { name: 'WebRTC (live)' }).click();
     }
 
     test('selection changes limits without opening consent, and submit requests it before peers', async ({
@@ -38,7 +38,7 @@ test.describe('WebRTC consent', () => {
                 () => (window as Window & { __filebeamPeerCount: number }).__filebeamPeerCount,
             ),
         ).toBe(0);
-        await page.getByRole('radio', { name: 'HTTP (stored)' }).check({ force: true });
+        await page.getByRole('radio', { name: 'HTTP (stored)' }).click();
         await expect(page.getByText('2.0 MiB per transfer')).toBeVisible();
         await selectWebRtc(page);
         await page.locator('#filebeam-picker').setInputFiles({
@@ -119,7 +119,7 @@ test.describe('WebRTC consent', () => {
         }
     });
 
-    test('keeps method cards in the file pond, side by side, and hides native radio circles', async ({
+    test('keeps the semantic method rail above the pond and side by side on narrow screens', async ({
         page,
     }) => {
         await page.setViewportSize({ width: 390, height: 844 });
@@ -129,10 +129,12 @@ test.describe('WebRTC consent', () => {
         const [httpBox, rtcBox] = await Promise.all([http.boundingBox(), rtc.boundingBox()]);
         expect(httpBox?.y).toBe(rtcBox?.y);
         expect(
-            await http.evaluate((input) => input.closest('[data-testid="file-pond"]') !== null),
+            await http.evaluate((control) => control.closest('[data-testid="file-pond"]') === null),
         ).toBe(true);
-        await expect(page.getByText('Or drag and drop anywhere')).toHaveCount(0);
-        await expect(http).toHaveCSS('opacity', '0');
-        await expect(rtc).toHaveCSS('opacity', '0');
+        await expect(page.getByTestId('prism-transport-rail')).toHaveCount(1);
+        await expect(page.getByText('Or drag and drop anywhere', { exact: true })).toBeVisible();
+        await expect(http).toHaveAttribute('data-state', 'checked');
+        await expect(rtc).toHaveAttribute('data-state', 'unchecked');
+        expect(await http.evaluate((control) => control.tagName)).not.toBe('INPUT');
     });
 });

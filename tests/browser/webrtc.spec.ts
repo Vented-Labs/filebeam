@@ -58,7 +58,7 @@ test.describe('WebRTC live transfers', () => {
     async function chooseDriver(page: Page, driver: 'http' | 'webrtc'): Promise<void> {
         await page
             .getByRole('radio', { name: driver === 'http' ? 'HTTP (stored)' : 'WebRTC (live)' })
-            .check({ force: true });
+            .click();
     }
 
     async function clickWithRisk(page: Page, button: ReturnType<Page['getByRole']>): Promise<void> {
@@ -67,6 +67,13 @@ test.describe('WebRTC live transfers', () => {
         if (await dialog.isVisible().catch(() => false)) {
             await dialog.getByRole('button', { name: 'Accept and continue' }).click();
         }
+    }
+
+    async function setSenderPassword(page: Page, password: string): Promise<void> {
+        await page.getByTestId('prism-password-trigger').click();
+        const popover = page.getByTestId('prism-password-popover');
+        await popover.locator('#transfer-password').fill(password);
+        await popover.getByRole('button', { name: 'Done' }).click();
     }
 
     async function createLiveTransfer(
@@ -91,7 +98,7 @@ test.describe('WebRTC live transfers', () => {
                 })),
             );
         }
-        if (options.password) await page.locator('#transfer-password').fill(options.password);
+        if (options.password) await setSenderPassword(page, options.password);
         await chooseDriver(page, 'webrtc');
         await clickWithRisk(page, page.getByRole('button', { name: 'Encrypt and share' }));
         await expect(
@@ -164,6 +171,19 @@ test.describe('WebRTC live transfers', () => {
             { name: 'consent.txt', buffer: Buffer.from('consent') },
         ]);
         expect(await page.evaluate(() => (window as any).__filebeamPeerCount)).toBe(0);
+        await page
+            .locator('#share-link')
+            .evaluate((node) => Object.assign(window, { cliLiveLink: node }));
+        await page.locator('.fb-header').getByRole('button', { name: 'Install CLI' }).click();
+        await expect(page.getByRole('dialog', { name: 'Install CLI', exact: true })).toBeVisible();
+        await page.keyboard.press('Escape');
+        await expect(page.locator('#share-link')).toHaveValue(live.link);
+        expect(
+            await page
+                .locator('#share-link')
+                .evaluate((node) => node === (window as any).cliLiveLink),
+        ).toBe(true);
+        await expect(page.getByRole('textbox', { name: 'Download command' })).toHaveCount(0);
 
         const recipient = await newPage(browser, () => {
             const Original = window.RTCPeerConnection;
@@ -177,6 +197,14 @@ test.describe('WebRTC live transfers', () => {
             });
         });
         await unlockLive(recipient, live.link, live.key);
+        const cli = recipient.getByRole('region', { name: 'Download with CLI' });
+        await expect(cli).toContainText('Use the browser for this live transfer');
+        await expect(cli.getByRole('textbox')).toHaveCount(0);
+        await cli.getByRole('button', { name: 'Install CLI' }).click();
+        await expect(
+            recipient.getByRole('dialog', { name: 'Install CLI', exact: true }),
+        ).toBeVisible();
+        await recipient.keyboard.press('Escape');
         expect(await recipient.evaluate(() => (window as any).__filebeamPeerCount)).toBe(0);
         await clickWithRisk(recipient, recipient.getByRole('button', { name: 'Download files' }));
         await expect
@@ -387,6 +415,15 @@ test.describe('WebRTC live transfers', () => {
         });
         await unsupported.goto('/');
         await expect(unsupported.getByRole('radio', { name: 'WebRTC (live)' })).toBeDisabled();
+        await expect(
+            unsupported.getByText('WebRTC is not supported by this browser. Choose HTTP to share.'),
+        ).toBeVisible();
+        await unsupported.setViewportSize({ width: 768, height: 1024 });
+        expect(
+            await unsupported.evaluate(
+                () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+            ),
+        ).toBe(true);
 
         const sender = await newPage(browser);
         const live = await createLiveTransfer(sender, [

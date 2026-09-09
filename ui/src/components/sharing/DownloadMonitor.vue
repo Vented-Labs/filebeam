@@ -84,6 +84,8 @@ function selectionLabel(session: DownloadSession): string {
     text-align: left;
 }
 .download-monitor__row {
+    overflow: hidden;
+    max-height: 7rem;
     border: 1px solid var(--fb-border);
     border-radius: var(--fb-radius-control);
     padding: 0.75rem;
@@ -102,10 +104,14 @@ function selectionLabel(session: DownloadSession): string {
 .session-leave-active {
     transition:
         opacity 160ms ease,
-        transform 160ms ease;
+        transform 160ms ease,
+        max-height var(--fb-duration-switch) var(--fb-ease),
+        padding-block var(--fb-duration-switch) var(--fb-ease);
 }
 .session-enter-from,
 .session-leave-to {
+    max-height: 0;
+    padding-block: 0;
     opacity: 0;
     transform: translateY(4px);
 }

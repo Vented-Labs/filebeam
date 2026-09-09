@@ -43,6 +43,16 @@ permissions:
   contents: read
 
 jobs:
+  cli:
+    if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish && !inputs.metadata_only)) && needs.validate-ref.result == 'success'
+    needs: [test, validate-ref]
+    permissions:
+      contents: write
+    uses: ./.github/workflows/beam.yml
+    with:
+      tag: ${{ needs.validate-ref.outputs.tag }}
+      publish: true
+    secrets: inherit
   test:
     if: github.event_name != 'schedule' && needs.validate-ref.result == 'success'
     needs: validate-ref

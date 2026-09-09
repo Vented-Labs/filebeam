@@ -65,7 +65,7 @@ pub fn instance_info(instance: &str) -> Result<Info> {
     let client = Client::builder()
         .connect_timeout(Duration::from_secs(2))
         .timeout(Duration::from_secs(3))
-        .user_agent(concat!("beam/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("beam/", env!("BEAM_VERSION")))
         .build()?;
     get_json(&client, &format!("{instance}/api/v1/info"))
 }
@@ -341,6 +341,7 @@ pub fn download(
     control: &Control,
 ) -> Result<Vec<PathBuf>> {
     let parsed = parse_link_for_instance(raw, instance)?;
+    let instance = parsed.instance.as_str();
     control.phase(Phase::Connecting)?;
     let client = http_client()?;
     let transfer = retry_metadata(&client, instance, &parsed.id, control)?;
@@ -503,6 +504,7 @@ fn wait_response(response: &Response, control: &Control) -> Result<()> {
 pub struct Link {
     pub id: String,
     pub key: Option<Vec<u8>>,
+    pub instance: String,
 }
 #[cfg(test)]
 pub fn parse_link(input: &str) -> Result<Link> {
@@ -517,7 +519,17 @@ pub fn parse_link_for_instance(input: &str, instance: &str) -> Result<Link> {
         value = markdown.trim().trim_end_matches(')').trim();
     }
     value = value.trim_matches(|c| matches!(c, '\'' | '"' | '`' | '<' | '>'));
-    let configured = Url::parse(instance).context("configured Filebeam instance is invalid")?;
+    let explicit_url = if value.starts_with("http://") || value.starts_with("https://") {
+        Some(Url::parse(value).context("transfer link is invalid")?)
+    } else {
+        None
+    };
+    // A full share URL is authoritative. The configured instance is only needed for IDs
+    // (and the legacy scheme-less link form), never to redirect an explicit URL.
+    let configured = match &explicit_url {
+        Some(url) => Url::parse(&url.origin().ascii_serialization())?,
+        None => Url::parse(instance).context("configured Filebeam instance is invalid")?,
+    };
     if !matches!(configured.scheme(), "http" | "https")
         || configured.host_str().is_none()
         || configured.username() != ""
@@ -532,8 +544,8 @@ pub fn parse_link_for_instance(input: &str, instance: &str) -> Result<Link> {
         Some(port) => format!("{}:{port}", configured.host_str().unwrap()),
         None => configured.host_str().unwrap().to_owned(),
     };
-    let candidate_url = if value.starts_with("http://") || value.starts_with("https://") {
-        Some(Url::parse(value).context("transfer link is invalid")?)
+    let candidate_url = if explicit_url.is_some() {
+        explicit_url
     } else if value
         .get(..authority.len())
         .is_some_and(|prefix| prefix.eq_ignore_ascii_case(&authority))
@@ -547,8 +559,8 @@ pub fn parse_link_for_instance(input: &str, instance: &str) -> Result<Link> {
         None
     };
     let (id_candidate, fragment) = if let Some(url) = candidate_url {
-        if url.origin() != configured.origin() || url.query().is_some() {
-            bail!("transfer link must use the configured Filebeam instance");
+        if url.username() != "" || url.password().is_some() || url.query().is_some() {
+            bail!("transfer links must not contain URL credentials or a query");
         }
         let segments = url
             .path_segments()
@@ -590,7 +602,11 @@ pub fn parse_link_for_instance(input: &str, instance: &str) -> Result<Link> {
             Some(key)
         }
     };
-    Ok(Link { id, key })
+    Ok(Link {
+        id,
+        key,
+        instance: configured.origin().ascii_serialization(),
+    })
 }
 fn is_ulid(value: &str) -> bool {
     value.len() == 26 && matches!(value.as_bytes()[0], b'0'..=b'7') && value.bytes().skip(1).all(|c| matches!(c, b'0'..=b'9' | b'A'..=b'H' | b'J'..=b'K' | b'M'..=b'N' | b'P'..=b'T' | b'V'..=b'Z'))
@@ -710,7 +726,7 @@ fn http_client() -> Result<Client> {
     Client::builder()
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(120))
-        .user_agent(concat!("beam/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("beam/", env!("BEAM_VERSION")))
         .build()
         .context("create HTTP client")
 }
@@ -787,12 +803,46 @@ mod tests {
                 .contains("UUID")
         );
         assert!(parse_link("https://filebeam.io/01ARZ3NDEKTSV4RRFFQ69G5FAV?x=1").is_err());
+        assert!(parse_link("https://user:pass@host.test/01ARZ3NDEKTSV4RRFFQ69G5FAV").is_err());
         assert!(parse_link("01ARZ3NDEKTSV4RRFFQ69G5FAV#k=nope").is_err());
         assert!(
             parse_link("01ARZ3NDEKTSV4RRFFQ69G5FAV")
                 .unwrap()
                 .key
                 .is_none()
+        );
+    }
+    #[test]
+    fn full_links_select_their_origin_and_ids_use_the_configured_instance() {
+        let raw = "http://localhost:8000/01M23GEFKC2WNXBASCS675XJRD#k=v1.KGGOo1frIIN3t1kAgQ2STIKjGXOFPKiPBATHBKDpzxY";
+        let local = parse_link_for_instance(raw, "https://filebeam.io").unwrap();
+        assert_eq!(local.instance, "http://localhost:8000");
+        assert_eq!(local.id, "01M23GEFKC2WNXBASCS675XJRD");
+        assert_eq!(local.key.unwrap().len(), 32);
+        assert_eq!(
+            parse_link_for_instance(raw, "invalid configuration")
+                .unwrap()
+                .instance,
+            "http://localhost:8000"
+        );
+        assert_eq!(
+            parse_link_for_instance(
+                "https://other.test:8443/01M23GEFKC2WNXBASCS675XJRD",
+                "http://localhost:8000"
+            )
+            .unwrap()
+            .instance,
+            "https://other.test:8443"
+        );
+        assert_eq!(
+            parse_link_for_instance("01M23GEFKC2WNXBASCS675XJRD", "http://localhost:8000/")
+                .unwrap()
+                .instance,
+            "http://localhost:8000"
+        );
+        assert_eq!(
+            parse_link("01M23GEFKC2WNXBASCS675XJRD").unwrap().instance,
+            "https://filebeam.io"
         );
     }
     #[test]

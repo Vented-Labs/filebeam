@@ -101,7 +101,7 @@ fn notify_cached(cache: &Path) {
     let Ok(latest) = Version::parse(value.trim()) else {
         return;
     };
-    let Ok(current) = Version::parse(env!("CARGO_PKG_VERSION")) else {
+    let Ok(current) = Version::parse(env!("BEAM_VERSION")) else {
         return;
     };
     if latest > current {
@@ -132,7 +132,7 @@ fn available(config: &Config, timeout: Duration) -> Result<(u64, Option<(Version
         })
         .max_by(|left, right| left.0.cmp(&right.0))
         .context("catalog contains no valid releases")?;
-    let current = Version::parse(env!("CARGO_PKG_VERSION"))?;
+    let current = Version::parse(env!("BEAM_VERSION"))?;
     if latest.0 <= current {
         return Ok((generation, None));
     }

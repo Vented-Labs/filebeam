@@ -16,7 +16,7 @@ const props = withDefaults(
 );
 
 const state = ref<'idle' | 'pending' | 'copied' | 'error'>('idle');
-let resetTimer: ReturnType<typeof setTimeout> | undefined;
+let resetTimer: number | undefined;
 let disposed = false;
 
 function resetAfterDelay(): void {
@@ -65,7 +65,7 @@ onBeforeUnmount(() => {
                 :class="{ 'copy-button__button--icon': iconOnly }"
                 @click="copy"
             >
-                <Transition name="copy-button-state" mode="out-in">
+                <Transition name="copy-button-state">
                     <span
                         :key="state"
                         class="copy-button__content"
@@ -108,6 +108,7 @@ onBeforeUnmount(() => {
     display: inline-flex;
 }
 .copy-button__button {
+    position: relative;
     width: max-content;
     min-width: 8.5rem;
     flex: none;
@@ -132,6 +133,10 @@ onBeforeUnmount(() => {
     transition:
         opacity 160ms ease,
         transform 160ms ease;
+}
+.copy-button-state-leave-active {
+    position: absolute;
+    pointer-events: none;
 }
 .copy-button-state-enter-from,
 .copy-button-state-leave-to {

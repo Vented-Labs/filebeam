@@ -29,6 +29,12 @@ function focusFirstField(): void {
         ?.focus({ preventScroll: true });
 }
 
+function makeOutgoingInert(element: Element): void {
+    const pane = element as HTMLElement;
+    pane.inert = true;
+    pane.setAttribute('aria-hidden', 'true');
+}
+
 function closeAutoFocus(event: Event): void {
     event.preventDefault();
     if (!open.value) {
@@ -56,10 +62,10 @@ function closeAutoFocus(event: Event): void {
                     <AnimatedHeight class="focus-safe-height">
                         <Transition
                             name="auth-drawer__mode"
-                            mode="out-in"
+                            @before-leave="makeOutgoingInert"
                             @after-enter="focusFirstField"
                         >
-                            <div :key="title">
+                            <div :key="title" class="auth-drawer__pane">
                                 <DialogTitle class="auth-drawer__title">{{ title }}</DialogTitle>
                                 <DialogDescription class="auth-drawer__description">{{
                                     description

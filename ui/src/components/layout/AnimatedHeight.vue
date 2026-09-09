@@ -7,6 +7,7 @@ let observer: ResizeObserver | undefined;
 let reducedMotion: MediaQueryList | undefined;
 let initialized = false;
 let frame = 0;
+let transitionId = 0;
 
 function updateHeight(): void {
     if (!outer.value || !inner.value) return;
@@ -29,8 +30,9 @@ function updateHeight(): void {
     if (Math.abs(currentHeight - height) < 1) return;
     outer.value.style.height = `${currentHeight}px`;
     cancelAnimationFrame(frame);
+    const id = ++transitionId;
     frame = requestAnimationFrame(() => {
-        if (outer.value) outer.value.style.height = `${height}px`;
+        if (outer.value && id === transitionId) outer.value.style.height = `${height}px`;
     });
 }
 
@@ -45,6 +47,8 @@ function onTransitionEnd(event: TransitionEvent): void {
 }
 
 function onMotionChange(): void {
+    transitionId++;
+    cancelAnimationFrame(frame);
     if (outer.value && inner.value)
         outer.value.style.height = `${inner.value.getBoundingClientRect().height}px`;
 }
@@ -74,7 +78,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .animated-height {
     overflow: clip;
-    transition: height 280ms cubic-bezier(0.2, 0.75, 0.25, 1);
+    transition: height var(--fb-duration-pane) var(--fb-ease);
 }
 @media (prefers-reduced-motion: reduce) {
     .animated-height {

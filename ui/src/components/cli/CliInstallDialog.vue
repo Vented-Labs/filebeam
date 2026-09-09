@@ -7,146 +7,186 @@ import {
     DialogPortal,
     DialogRoot,
     DialogTitle,
-    DialogTrigger,
 } from 'reka-ui';
-import { nextTick, ref } from 'vue';
+import { computed } from 'vue';
+import type { CliConfig } from '../../types';
+import { buildInstallCommand, cliDefaults } from '../../lib/cli-commands';
 import Button from '../primitives/Button.vue';
-import CopyButton from '../primitives/CopyButton.vue';
 import Icon from '../primitives/Icon.vue';
+import CliCommandField from './CliCommandField.vue';
 
-const installCommand = 'curl -fsSL https://releases.filebeam.io/cli/install.sh | sh';
-const customInstallCommand = `${installCommand} -s -- --dir "$HOME/apps/filebeam"`;
-const examples = ['beam', 'beam up ./file.zip', 'beam down <link>'];
-const open = ref(false);
-const trigger = ref<HTMLElement | null>(null);
-
-function rememberTrigger(event: MouseEvent): void {
-    trigger.value = event.currentTarget as HTMLElement;
-}
-
-function restoreTriggerFocus(event: Event): void {
-    event.preventDefault();
-    nextTick(() => trigger.value?.focus());
-}
+const props = defineProps<{ config?: CliConfig }>();
+const open = defineModel<boolean>('open', { default: false });
+const emit = defineEmits<{ closeAutoFocus: [event: Event] }>();
+const installCommand = computed(() => {
+    try {
+        return buildInstallCommand(props.config ?? cliDefaults);
+    } catch {
+        return undefined;
+    }
+});
+const examples = [
+    { command: 'beam', description: 'Interactive TUI' },
+    { command: 'beam up <files...>', description: 'Upload via terminal' },
+    { command: 'beam down <url or ulid>', description: 'Download via terminal' },
+];
 </script>
 
 <template>
     <DialogRoot v-model:open="open">
-        <DialogTrigger as-child>
-            <Button variant="ghost" class="cli-install-trigger" @click="rememberTrigger"
-                ><Icon name="code" :size="16" />Get the CLI</Button
-            >
-        </DialogTrigger>
         <DialogPortal>
             <DialogOverlay class="fb-dialog__overlay" />
             <DialogContent
                 class="fb-dialog__content cli-install-dialog"
-                @close-auto-focus="restoreTriggerFocus"
+                @close-auto-focus="emit('closeAutoFocus', $event)"
             >
-                <DialogTitle class="fb-dialog__title">Filebeam CLI</DialogTitle>
-                <DialogDescription class="fb-dialog__description">
-                    Send and receive from your terminal. The installer supports Linux x86_64 and
-                    ARM64.
-                </DialogDescription>
-
-                <section class="cli-install-dialog__section" aria-labelledby="cli-install-heading">
-                    <h2 id="cli-install-heading" class="cli-install-dialog__heading">Install</h2>
-                    <div class="cli-install-dialog__command">
-                        <code class="fb-code">{{ installCommand }}</code>
-                        <CopyButton :value="installCommand" label="Copy install command" />
-                    </div>
+                <p class="cli-install-dialog__eyebrow">
+                    <Icon name="code" :size="16" />Filebeam / terminal
+                </p>
+                <DialogTitle class="fb-dialog__title">Install CLI</DialogTitle>
+                <DialogDescription class="fb-dialog__description"
+                    >Use Filebeam from your terminal.</DialogDescription
+                >
+                <section class="cli-install-dialog__installer">
+                    <h2><span>01</span>Run the shell installer</h2>
+                    <CliCommandField
+                        v-if="installCommand"
+                        :command="installCommand"
+                        label="Installer command"
+                        copy-label="Copy installer"
+                    />
+                    <p v-else class="cli-install-dialog__unavailable" role="status">
+                        Installer instructions unavailable
+                    </p>
+                    <p class="cli-install-dialog__note">
+                        For Linux x86_64 and ARM64. After installation, open a new terminal to use
+                        <code>beam</code> from your PATH.
+                    </p>
                 </section>
-
-                <section class="cli-install-dialog__section" aria-labelledby="cli-custom-heading">
-                    <h2 id="cli-custom-heading" class="cli-install-dialog__heading">
-                        Install to a custom directory
-                    </h2>
-                    <div class="cli-install-dialog__command">
-                        <code class="fb-code">{{ customInstallCommand }}</code>
-                        <CopyButton
-                            :value="customInstallCommand"
-                            label="Copy custom install command"
-                            variant="secondary"
-                        />
-                    </div>
+                <section class="cli-install-dialog__usage">
+                    <h2><span>02</span>Use the CLI</h2>
+                    <dl>
+                        <div v-for="example in examples" :key="example.command">
+                            <dt class="fb-code">{{ example.command }}</dt>
+                            <dd>{{ example.description }}</dd>
+                        </div>
+                    </dl>
+                    <p class="cli-install-dialog__note">
+                        Upload takes local files or directories. Download takes a transfer URL or
+                        ULID. The CLI prompts for a separate key or password when needed.
+                    </p>
+                    <p class="cli-install-dialog__note">
+                        Full URLs connect to their own instance. For a ULID alone, the default is
+                        https://filebeam.io; set FILEBEAM_INSTANCE to use another server.
+                    </p>
                 </section>
-
-                <section class="cli-install-dialog__section" aria-labelledby="cli-examples-heading">
-                    <h2 id="cli-examples-heading" class="cli-install-dialog__heading">
-                        Quick commands
-                    </h2>
-                    <ul class="cli-install-dialog__examples">
-                        <li v-for="example in examples" :key="example">
-                            <code class="fb-code">{{ example }}</code>
-                            <CopyButton :value="example" :label="`Copy ${example}`" icon-only />
-                        </li>
-                    </ul>
-                </section>
-
-                <DialogClose class="fb-dialog__close" aria-label="Close Filebeam CLI dialog">
-                    <Icon name="x" :size="18" />
-                </DialogClose>
+                <footer>
+                    <DialogClose as-child
+                        ><Button>Done<Icon name="check" :size="16" /></Button
+                    ></DialogClose>
+                </footer>
+                <DialogClose class="fb-dialog__close" aria-label="Close CLI instructions"
+                    ><Icon name="x" :size="18"
+                /></DialogClose>
             </DialogContent>
         </DialogPortal>
     </DialogRoot>
 </template>
 
 <style scoped>
-.cli-install-trigger {
-    color: var(--fb-text-muted);
-}
 .cli-install-dialog {
-    width: min(calc(100vw - 2rem), 42rem);
-    max-height: min(44rem, calc(100svh - 2rem));
+    width: min(calc(100vw - 2rem), 41rem);
+    max-height: calc(100svh - 2rem);
     overflow-y: auto;
+    padding: 1.625rem;
 }
-.cli-install-dialog__section {
-    margin-top: 1.5rem;
-}
-.cli-install-dialog__heading {
-    margin: 0 0 0.55rem;
-    font-size: 0.82rem;
-    font-weight: 650;
-    color: var(--fb-text-muted);
-}
-.cli-install-dialog__command,
-.cli-install-dialog__examples li {
+.cli-install-dialog__eyebrow {
     display: flex;
-    min-width: 0;
+    gap: 0.5rem;
     align-items: center;
-    gap: 0.65rem;
+    margin: 0 0 1.5rem;
+    color: var(--fb-text-subtle);
+    font-size: 0.625rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+}
+.cli-install-dialog__installer,
+.cli-install-dialog__usage {
+    margin-top: 1.25rem;
+}
+.cli-install-dialog__installer {
+    padding: 1rem;
     border: 1px solid var(--fb-border);
-    border-radius: 0.65rem;
-    padding: 0.55rem;
+    border-radius: 0.875rem;
     background: var(--fb-surface);
 }
-.cli-install-dialog__command code {
-    min-width: 0;
-    flex: 1;
-    overflow-x: auto;
-    white-space: nowrap;
+.cli-install-dialog h2 {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    margin: 0 0 0.75rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+.cli-install-dialog h2 > span {
+    padding: 0.25rem;
+    border: 1px solid var(--fb-border);
+    border-radius: 0.375rem;
+    background: var(--fb-selected-surface);
     color: var(--fb-accent-text);
+    font: 0.625rem var(--fb-font-code);
 }
-.cli-install-dialog__examples {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0.5rem;
+.cli-install-dialog__unavailable {
+    color: var(--fb-text-muted);
+    font-size: 0.875rem;
+}
+.cli-install-dialog__note {
+    margin: 0.75rem 0 0;
+    color: var(--fb-text-subtle);
+    font-size: 0.6875rem;
+    line-height: 1.7;
+}
+.cli-install-dialog dl {
     margin: 0;
-    padding: 0;
-    list-style: none;
+    border: 1px solid var(--fb-border);
+    border-radius: 0.875rem;
+    background: var(--fb-surface);
 }
-.cli-install-dialog__examples li {
+.cli-install-dialog dl > div {
+    display: flex;
+    align-items: center;
     justify-content: space-between;
+    gap: 1rem;
+    padding: 0.875rem;
 }
-.cli-install-dialog__examples code {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+.cli-install-dialog dl > div + div {
+    border-top: 1px solid var(--fb-border);
 }
-@media (max-width: 520px) {
-    .cli-install-dialog__examples {
-        grid-template-columns: 1fr;
+.cli-install-dialog dt {
+    font-size: 0.6875rem;
+    overflow-wrap: anywhere;
+}
+.cli-install-dialog dd {
+    margin: 0;
+    flex: none;
+    color: var(--fb-text-muted);
+    font-size: 0.625rem;
+}
+.cli-install-dialog footer {
+    display: flex;
+    justify-content: end;
+    margin-top: 1.25rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--fb-border);
+}
+@media (max-width: 560px) {
+    .cli-install-dialog {
+        padding: 1.25rem;
+    }
+    .cli-install-dialog dl > div {
+        align-items: start;
+        flex-direction: column;
+        gap: 0.375rem;
     }
 }
 </style>

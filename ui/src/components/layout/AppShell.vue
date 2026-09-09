@@ -16,6 +16,7 @@ import {
 import BrandLogo from '../brand/BrandLogo.vue';
 import AppLink from '../primitives/AppLink.vue';
 import AuthLink from '../auth/AuthLink.vue';
+import CliInstallButton from '../cli/CliInstallButton.vue';
 import Icon from '../primitives/Icon.vue';
 import { computed, nextTick, ref } from 'vue';
 import { useBranding } from '../../lib/branding';
@@ -119,6 +120,7 @@ function goHome(event: MouseEvent): void {
                     ><span>GitHub</span><Icon name="arrow-up-right" :size="14"
                 /></a>
             </nav>
+            <CliInstallButton class="fb-header__cli" />
             <div class="fb-header__actions">
                 <AppLink
                     v-if="user?.unread_inbox_notifications"
@@ -160,6 +162,18 @@ function goHome(event: MouseEvent): void {
                         :side-offset="8"
                         align="end"
                     >
+                        <DropdownMenuItem v-if="user" as-child>
+                            <AppLink href="/account" class="fb-select-item fb-mobile-nav__item"
+                                >Account</AppLink
+                            >
+                        </DropdownMenuItem>
+                        <DropdownMenuItem v-if="user" as-child>
+                            <AppLink
+                                href="/account/inbox"
+                                class="fb-select-item fb-mobile-nav__item"
+                                >Inbox</AppLink
+                            >
+                        </DropdownMenuItem>
                         <DropdownMenuItem v-if="!user" as-child>
                             <AuthLink href="/login" class="fb-select-item fb-mobile-nav__item"
                                 >Sign in</AuthLink
@@ -220,7 +234,6 @@ function goHome(event: MouseEvent): void {
                     >v{{ branding.version }}</span
                 >
             </div>
-            <slot name="footer" />
             <span>&copy; {{ branding.copyright_year }} {{ copyrightHolder }}</span>
         </footer>
     </div>
@@ -230,6 +243,11 @@ function goHome(event: MouseEvent): void {
 .fb-mobile-nav {
     display: none;
 }
+.fb-header__cli {
+    border: 1px solid var(--fb-border);
+    background: var(--fb-surface);
+    font-size: 0.75rem;
+}
 
 @media (max-width: 720px) {
     .fb-header {
@@ -238,6 +256,12 @@ function goHome(event: MouseEvent): void {
 
     .fb-header .fb-desktop-nav {
         display: none;
+    }
+    .fb-header {
+        gap: 0.5rem;
+    }
+    .fb-header__cli {
+        margin-left: auto;
     }
 
     .fb-header .fb-header__actions {
@@ -259,9 +283,24 @@ function goHome(event: MouseEvent): void {
         flex: none;
     }
 }
+@media (max-width: 560px) {
+    .fb-header .fb-header__actions {
+        display: none;
+    }
+    .fb-header__cli {
+        padding-inline: 0.625rem;
+        font-size: 0.6875rem;
+    }
+}
 
 .fb-mobile-nav__content {
     min-width: 10rem;
+}
+@media (max-width: 380px) {
+    .fb-header__brand :deep(.fb-brand__lockup) {
+        max-width: 7rem;
+        height: auto;
+    }
 }
 
 .fb-mobile-nav__item {

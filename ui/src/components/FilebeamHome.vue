@@ -7,23 +7,20 @@ import {
     DialogPortal,
     DialogRoot,
     DialogTitle,
-    TabsList,
-    TabsRoot,
-    TabsTrigger,
 } from 'reka-ui';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { FilebeamConfig, PublicRecipient, TransferDriver } from '../types';
 import { useEncryptedUpload } from '../composables/useEncryptedUpload';
 import { ciphertextBytes, formatBytes } from '../lib/format';
-import AppShell from './layout/AppShell.vue';
 import AnimatedHeight from './layout/AnimatedHeight.vue';
+import AnimatedReveal from './layout/AnimatedReveal.vue';
 import TrustFeatures from './layout/TrustFeatures.vue';
-import CliInstallDialog from './cli/CliInstallDialog.vue';
 import NoteComposer from './notes/NoteComposer.vue';
 import FilePond from './upload/FilePond.vue';
 import FileQueue from './upload/FileQueue.vue';
 import TransferOptions from './upload/TransferOptions.vue';
 import TransferMethod from './upload/TransferMethod.vue';
+import TransferModeTabs from './upload/TransferModeTabs.vue';
 import ShareReady from './sharing/ShareReady.vue';
 import WebRtcConsent from './sharing/WebRtcConsent.vue';
 import Icon from './primitives/Icon.vue';
@@ -54,8 +51,13 @@ const enabledDrivers = computed(() =>
         ? enabledTransferDrivers(props.config).filter((driver) => driver === 'http')
         : enabledTransferDrivers(props.config),
 );
+const defaultDriver: TransferDriver = props.recipient
+    ? 'http'
+    : (props.config.transport_policy?.default_driver ?? 'http');
 const driver = ref<TransferDriver>(
-    props.recipient ? 'http' : (props.config.transport_policy?.default_driver ?? 'http'),
+    enabledDrivers.value.includes(defaultDriver)
+        ? defaultDriver
+        : (enabledDrivers.value[0] ?? 'http'),
 );
 const webrtcConsent = ref(false);
 const webrtcConsentDialog = ref<InstanceType<typeof WebRtcConsent>>();
@@ -99,6 +101,12 @@ const activeCiphertextBytes = computed(() =>
 const hasContent = computed(() =>
     mode.value === 'files' ? filesUpload.entries.value.length > 0 : note.value.length > 0,
 );
+const activePassword = computed(() =>
+    mode.value === 'files' ? filePassword.value : notePassword.value,
+);
+const passwordValid = computed(
+    () => activePassword.value.length === 0 || Array.from(activePassword.value).length >= 8,
+);
 const canUpload = computed(() => {
     const countAllowed =
         mode.value !== 'files' ||
@@ -112,6 +120,7 @@ const canUpload = computed(() => {
         countAllowed &&
         enabledDrivers.value.includes(driver.value) &&
         (driver.value !== 'webrtc' || webRtcSupported) &&
+        passwordValid.value &&
         !isBusy.value
     );
 });
@@ -138,6 +147,37 @@ const selectedRetentionHours = computed({
         if (mode.value === 'files') fileRetentionHours.value = value;
         else noteRetentionHours.value = value;
     },
+});
+const exceedsCurrentBytes = computed(
+    () => maximumBytes.value !== null && activeCiphertextBytes.value > maximumBytes.value,
+);
+const exceedsCurrentCount = computed(
+    () =>
+        mode.value === 'files' &&
+        limits.value.maximum_file_count !== null &&
+        filesUpload.entries.value.length > limits.value.maximum_file_count,
+);
+const policyError = computed(() => {
+    if (!hasContent.value) return '';
+    if (exceedsCurrentBytes.value)
+        return `This encrypted ${driver.value === 'webrtc' ? 'WebRTC' : 'HTTP'} ${mode.value === 'files' ? 'transfer' : 'note'} exceeds the ${formatBytes(maximumBytes.value!)} limit.`;
+    if (exceedsCurrentCount.value)
+        return `This transfer exceeds the ${limits.value.maximum_file_count} file limit.`;
+    return '';
+});
+const canUseWebRtcRecovery = computed(() => {
+    if (driver.value !== 'http' || !policyError.value) return false;
+    if (!enabledDrivers.value.includes('webrtc') || !webRtcSupported) return false;
+    const webRtcLimits = transferLimits(props.config, 'webrtc');
+    const maximum =
+        mode.value === 'files'
+            ? webRtcLimits.maximum_transfer_bytes
+            : webRtcLimits.maximum_note_bytes;
+    const countAllowed =
+        mode.value !== 'files' ||
+        webRtcLimits.maximum_file_count === null ||
+        filesUpload.entries.value.length <= webRtcLimits.maximum_file_count;
+    return (maximum === null || activeCiphertextBytes.value <= maximum) && countAllowed;
 });
 
 function chooseFiles(): void {
@@ -228,9 +268,9 @@ async function removeTransfer(): Promise<void> {
 function resetActive(): void {
     if (isBusy.value) return;
     activeUpload.value.clear();
-    driver.value = props.recipient
-        ? 'http'
-        : (props.config.transport_policy?.default_driver ?? 'http');
+    driver.value = enabledDrivers.value.includes(defaultDriver)
+        ? defaultDriver
+        : (enabledDrivers.value[0] ?? 'http');
     webrtcConsent.value = false;
     if (mode.value === 'files') {
         filePassword.value = '';
@@ -248,6 +288,11 @@ function resetActive(): void {
 }
 function cancelUpload(): void {
     activeUpload.value.cancel();
+}
+function hideOutgoing(element: Element): void {
+    const pane = element as HTMLElement;
+    pane.inert = true;
+    pane.setAttribute('aria-hidden', 'true');
 }
 async function restartHttp(confirmed = false): Promise<void> {
     if (confirmed && !restartHttpOpen.value) return;
@@ -300,6 +345,7 @@ onMounted(() => {
     window.addEventListener('dragend', resetDragging);
     window.addEventListener('blur', resetDragging);
     document.addEventListener('visibilitychange', resetDraggingOnHidden);
+    window.addEventListener('filebeam:home', goToFiles);
 });
 onBeforeUnmount(() => {
     window.removeEventListener('dragenter', onDragEnter);
@@ -309,91 +355,65 @@ onBeforeUnmount(() => {
     window.removeEventListener('dragend', resetDragging);
     window.removeEventListener('blur', resetDragging);
     document.removeEventListener('visibilitychange', resetDraggingOnHidden);
+    window.removeEventListener('filebeam:home', goToFiles);
 });
 </script>
 
 <template>
-    <AppShell
-        :github-url="config.github_url"
-        :copyright-holder="config.copyright_holder"
-        :user="user"
-        :home-action="recipient ? undefined : goToFiles"
-        :registration-enabled="config.registration_enabled"
-    >
-        <section class="mx-auto w-full max-w-[1370px] px-5 pb-14 pt-8 sm:px-10">
-            <section
-                v-if="!transfersAvailable"
-                class="mx-auto max-w-xl rounded-2xl border border-[var(--fb-border)] bg-[var(--fb-surface)] px-6 py-12 text-center shadow-2xl shadow-black/30"
-            >
-                <h1 class="text-2xl font-semibold text-[var(--fb-text)]">
-                    Stored transfers unavailable
-                </h1>
-                <p class="mt-3 text-[var(--fb-text-muted)]">
-                    This recipient inbox accepts stored HTTP transfers, but HTTP is disabled by the
-                    server.
+    <section class="prism-page mx-auto w-full px-5 pb-14 pt-7 sm:px-8">
+        <section v-if="!transfersAvailable" class="prism-gate">
+            <h1>Stored transfers unavailable</h1>
+            <p>
+                This recipient inbox accepts stored HTTP transfers, but HTTP is disabled by the
+                server.
+            </p>
+        </section>
+        <section v-else-if="!canCreateTransfers" class="prism-gate">
+            <h1>Sign in to share files</h1>
+            <p>File and note sharing is available to account holders.</p>
+            <div class="prism-gate__actions">
+                <AuthLink class="fb-button fb-button--primary" href="/login">Sign in</AuthLink>
+                <AuthLink
+                    v-if="config.registration_enabled"
+                    class="fb-button fb-button--secondary"
+                    href="/register"
+                    >Register</AuthLink
+                >
+            </div>
+        </section>
+        <template v-else>
+            <header v-if="recipient" class="prism-recipient-heading">
+                <h1>Send files to @{{ recipient.username }}</h1>
+                <p>
+                    Files are encrypted in your browser for this recipient. Their private key is
+                    required to open them.
                 </p>
-            </section>
-            <section
-                v-else-if="!canCreateTransfers"
-                class="mx-auto max-w-xl rounded-2xl border border-[var(--fb-border)] bg-[var(--fb-surface)] px-6 py-12 text-center shadow-2xl shadow-black/30"
-            >
-                <h1 class="text-2xl font-semibold text-[var(--fb-text)]">Sign in to share files</h1>
-                <p class="mt-3 text-[var(--fb-text-muted)]">
-                    File and note sharing is available to account holders.
-                </p>
-                <div class="mt-6 flex justify-center gap-3">
-                    <AuthLink class="fb-button fb-button--primary" href="/login">Sign in</AuthLink>
-                    <AuthLink
-                        v-if="config.registration_enabled"
-                        class="fb-button fb-button--secondary"
-                        href="/register"
-                        >Register</AuthLink
-                    >
-                </div>
-            </section>
-            <template v-else>
-                <header v-if="recipient" class="mx-auto mb-8 max-w-2xl text-center">
-                    <h1
-                        class="break-words text-3xl font-semibold text-[var(--fb-text)] sm:text-4xl"
-                    >
-                        Send files to @{{ recipient.username }}
-                    </h1>
-                    <p class="mt-4 text-[var(--fb-text-muted)]">
-                        Files are encrypted in your browser for this recipient. Their private key is
-                        required to open them.
-                    </p>
-                    <details class="mt-4 text-xs text-[var(--fb-text-muted)]">
-                        <summary class="cursor-pointer">Recipient key fingerprint</summary>
-                        <p class="mt-2 break-all font-mono">{{ recipient.fingerprint }}</p>
-                    </details>
-                </header>
-                <TabsRoot v-else v-model="mode" class="mx-auto mb-5 block w-fit">
-                    <TabsList
-                        class="mode-tabs flex rounded-[1.5rem] border border-[var(--fb-border)] bg-[var(--fb-surface)] p-1.5"
-                        aria-label="Transfer type"
-                    >
-                        <TabsTrigger
-                            value="files"
-                            :disabled="isBusy"
-                            class="flex items-center gap-2 rounded-xl px-8 py-3 font-medium text-[var(--fb-text-muted)] transition data-[state=active]:bg-[var(--fb-action)] data-[state=active]:text-[var(--fb-on-action)]"
-                            ><Icon name="folder" :size="19" />Files</TabsTrigger
-                        >
-                        <TabsTrigger
-                            value="note"
-                            :disabled="isBusy"
-                            class="flex items-center gap-2 rounded-xl px-8 py-3 font-medium text-[var(--fb-text-muted)] transition data-[state=active]:bg-[var(--fb-action)] data-[state=active]:text-[var(--fb-on-action)]"
-                            ><Icon name="note" :size="19" />Notes</TabsTrigger
-                        >
-                    </TabsList>
-                </TabsRoot>
-                <AnimatedHeight>
-                    <Transition name="content-switch" mode="out-in">
-                        <div
-                            :key="`${activeShare && !recipient ? 'share' : activeStatus === 'complete' ? 'complete' : 'composer'}-${mode}`"
-                        >
-                            <template v-if="activeShare && !recipient">
+                <details>
+                    <summary>Recipient key fingerprint</summary>
+                    <p>{{ recipient.fingerprint }}</p>
+                </details>
+            </header>
+            <TransferModeTabs v-else v-model="mode" :disabled="isBusy" />
+
+            <section class="prism-composer" data-testid="prism-composer">
+                <TransferMethod
+                    v-model="driver"
+                    :enabled-drivers="enabledDrivers"
+                    :web-rtc-supported="webRtcSupported"
+                    :disabled="isBusy"
+                    :limits="limits"
+                    :mode="mode"
+                />
+                <AnimatedHeight class="prism-stage-height">
+                    <div class="prism-stage" data-testid="prism-stage">
+                        <Transition name="prism-card" @before-leave="hideOutgoing">
+                            <div
+                                v-if="activeShare && !recipient"
+                                class="prism-stage__pane prism-stage__pane--result"
+                            >
                                 <ShareReady
                                     :share="activeShare"
+                                    :mode="mode"
                                     :deleting="deleting"
                                     :uploading="activeIsUploading"
                                     :progress="activeProgress"
@@ -409,157 +429,151 @@ onBeforeUnmount(() => {
                                     @cancel="cancelUpload"
                                     @restart-http="restartHttp"
                                 />
-                                <p
-                                    v-if="activeError"
-                                    class="mt-3 text-center text-sm text-[var(--fb-danger)]"
-                                    aria-live="polite"
-                                >
-                                    {{ activeError }}
-                                </p>
-                            </template>
+                                <AnimatedReveal :show="Boolean(activeError)">
+                                    <p class="prism-result-error" aria-live="polite">
+                                        {{ activeError }}
+                                    </p>
+                                </AnimatedReveal>
+                            </div>
+                        </Transition>
+                        <Transition name="prism-card" @before-leave="hideOutgoing">
                             <section
-                                v-else-if="activeStatus === 'complete' && recipient"
-                                class="mx-auto max-w-xl rounded-3xl border border-[var(--fb-border)] bg-[var(--fb-surface)] p-8 text-center sm:p-12"
+                                v-if="activeStatus === 'complete' && recipient"
+                                class="prism-stage__pane prism-recipient-complete"
                             >
                                 <Icon
                                     name="check"
                                     :size="36"
                                     class="mx-auto text-[var(--fb-success)]"
                                 />
-                                <h2 class="mt-5 text-3xl font-semibold">Files sent</h2>
-                                <p class="mt-3 text-[var(--fb-text-muted)]">
+                                <h2>Files sent</h2>
+                                <p>
                                     Your encrypted files are now in @{{ recipient.username }}'s
                                     inbox.
                                 </p>
-                                <Button class="mt-6" @click="resetActive">Send more files</Button>
+                                <Button @click="resetActive">Send more files</Button>
                             </section>
-                            <template v-else>
-                                <div
-                                    v-if="mode === 'files'"
-                                    class="files-layout grid items-start gap-5"
-                                    :class="{
-                                        'files-layout--queued': filesUpload.entries.value.length,
-                                    }"
-                                >
-                                    <FilePond
-                                        :disabled="isBusy"
-                                        :dragging="dragging"
-                                        :compact="filesUpload.entries.value.length > 0"
-                                        :maximum-files="limits.maximum_file_count"
-                                        :maximum-bytes="limits.maximum_transfer_bytes"
-                                        @choose="chooseFiles"
-                                        @files="addFiles"
+                        </Transition>
+                        <div
+                            v-show="!activeShare && !(activeStatus === 'complete' && recipient)"
+                            class="prism-stage__pane prism-stage__pane--editor"
+                            :inert="
+                                Boolean(
+                                    activeShare || (activeStatus === 'complete' && recipient),
+                                ) || undefined
+                            "
+                            :aria-hidden="
+                                Boolean(
+                                    activeShare || (activeStatus === 'complete' && recipient),
+                                ) || undefined
+                            "
+                        >
+                            <div class="prism-mode-stage">
+                                <Transition name="prism-mode-card">
+                                    <div
+                                        v-show="mode === 'files'"
+                                        class="prism-mode-pane"
+                                        :inert="mode !== 'files' || undefined"
+                                        :aria-hidden="mode !== 'files' || undefined"
                                     >
-                                        <template #transfer-method>
-                                            <TransferMethod
-                                                v-model="driver"
-                                                class="mt-8 text-left"
-                                                :enabled-drivers="enabledDrivers"
-                                                :web-rtc-supported="webRtcSupported"
-                                                :disabled="isBusy"
-                                                :limits="limits"
-                                                mode="files"
-                                            />
-                                        </template>
-                                    </FilePond>
-                                    <div class="min-w-0 overflow-hidden">
-                                        <Transition name="queue-panel"
-                                            ><FileQueue
-                                                v-if="filesUpload.entries.value.length"
+                                        <FilePond
+                                            :disabled="isBusy"
+                                            :dragging="dragging"
+                                            :compact="filesUpload.entries.value.length > 0"
+                                            @choose="chooseFiles"
+                                            @files="addFiles"
+                                        >
+                                            <FileQueue
                                                 :entries="filesUpload.entries.value"
                                                 :disabled="isBusy"
                                                 @choose="chooseFiles"
                                                 @remove="filesUpload.removeFile"
-                                        /></Transition>
+                                            />
+                                        </FilePond>
                                     </div>
-                                </div>
-                                <section v-else class="mx-auto w-full max-w-[896px]">
-                                    <NoteComposer
-                                        v-model="note"
-                                        v-model:title="noteTitle"
-                                        v-model:language="language"
-                                        :disabled="isBusy"
-                                        :maximum-bytes="limits.maximum_note_bytes"
-                                        :retention-hours="noteRetentionHours"
-                                    />
-                                </section>
-                                <Transition name="queue-panel"
-                                    ><TransferOptions
-                                        v-if="hasContent || mode === 'note'"
-                                        v-model:password="selectedPassword"
-                                        v-model:include-key="selectedIncludeKey"
-                                        v-model:retention-hours="selectedRetentionHours"
-                                        v-model:burn-on-read="burnOnRead"
-                                        v-model:driver="driver"
-                                        :disabled="isBusy"
-                                        :can-upload="canUpload"
-                                        :uploading="activeIsUploading"
-                                        :mode="mode"
-                                        :recipient="Boolean(recipient)"
-                                        :enabled-drivers="enabledDrivers"
-                                        :web-rtc-supported="webRtcSupported"
-                                        :limits="limits"
-                                        :retention-options="
-                                            mode === 'files'
-                                                ? (config.file_retention_options ?? [])
-                                                : (config.note_retention_options ?? [])
-                                        "
-                                        @submit="submit()"
-                                        @turbo="submit(true)"
-                                        @cancel="cancelUpload"
-                                /></Transition>
-                                <div class="mt-3 min-h-6 text-center" aria-live="polite">
+                                </Transition>
+                                <Transition name="prism-mode-card">
+                                    <div
+                                        v-show="mode === 'note'"
+                                        class="prism-mode-pane"
+                                        :inert="mode !== 'note' || undefined"
+                                        :aria-hidden="mode !== 'note' || undefined"
+                                    >
+                                        <NoteComposer
+                                            v-model="note"
+                                            v-model:title="noteTitle"
+                                            v-model:language="language"
+                                            :disabled="isBusy"
+                                            :maximum-bytes="limits.maximum_note_bytes"
+                                            :retention-hours="noteRetentionHours"
+                                        />
+                                    </div>
+                                </Transition>
+                            </div>
+                            <AnimatedReveal
+                                :show="Boolean(activeIsUploading || activeError || policyError)"
+                            >
+                                <div
+                                    class="prism-inline-status"
+                                    :class="{
+                                        'prism-inline-status--error': activeError || policyError,
+                                    }"
+                                    :data-testid="policyError ? 'prism-policy-error' : undefined"
+                                    aria-live="polite"
+                                >
                                     <SmoothProgress
                                         v-if="activeIsUploading"
-                                        class="mx-auto max-w-md"
+                                        class="prism-inline-status__progress"
                                         :value="activeProgress"
                                         label="Encrypting and uploading"
                                     >
                                         <template #label="{ percentage }">
-                                            <p class="mb-2 text-sm text-[var(--fb-text-muted)]">
+                                            <p>
                                                 {{ activeActivity }}
                                                 <span class="tabular-nums">{{ percentage }}%</span>
                                             </p>
                                         </template>
                                     </SmoothProgress>
-                                    <p
-                                        v-else-if="activeError"
-                                        class="text-sm text-[var(--fb-danger)]"
-                                    >
-                                        {{ activeError }}
-                                    </p>
-                                    <p
-                                        v-else-if="
-                                            hasContent &&
-                                            maximumBytes !== null &&
-                                            activeCiphertextBytes > maximumBytes
-                                        "
-                                        class="text-sm text-[var(--fb-danger)]"
-                                    >
-                                        This encrypted {{ driver === 'webrtc' ? 'WebRTC' : 'HTTP' }}
-                                        {{ mode === 'files' ? 'transfer' : 'note' }} exceeds the
-                                        {{ formatBytes(maximumBytes) }} limit.
-                                    </p>
-                                    <p
-                                        v-else-if="
-                                            mode === 'files' &&
-                                            limits.maximum_file_count !== null &&
-                                            filesUpload.entries.value.length >
-                                                limits.maximum_file_count
-                                        "
-                                        class="text-sm text-[var(--fb-danger)]"
-                                    >
-                                        This transfer exceeds the
-                                        {{ limits.maximum_file_count }} file limit.
-                                    </p>
+                                    <template v-else>
+                                        <Icon name="alert" :size="16" />
+                                        <span>{{ activeError || policyError }}</span>
+                                        <Button
+                                            v-if="canUseWebRtcRecovery"
+                                            variant="secondary"
+                                            @click="driver = 'webrtc'"
+                                        >
+                                            Use WebRTC
+                                        </Button>
+                                    </template>
                                 </div>
-                            </template>
+                            </AnimatedReveal>
                         </div>
-                    </Transition>
+                    </div>
                 </AnimatedHeight>
-            </template>
-            <TrustFeatures class="mt-14" />
-        </section>
+                <TransferOptions
+                    v-if="!activeShare && !(activeStatus === 'complete' && recipient)"
+                    v-model:password="selectedPassword"
+                    v-model:include-key="selectedIncludeKey"
+                    v-model:retention-hours="selectedRetentionHours"
+                    v-model:burn-on-read="burnOnRead"
+                    v-model:driver="driver"
+                    :disabled="isBusy"
+                    :can-upload="canUpload"
+                    :uploading="activeIsUploading"
+                    :mode="mode"
+                    :recipient="Boolean(recipient)"
+                    :retention-options="
+                        mode === 'files'
+                            ? (config.file_retention_options ?? [])
+                            : (config.note_retention_options ?? [])
+                    "
+                    @submit="submit()"
+                    @turbo="submit(true)"
+                    @cancel="cancelUpload"
+                />
+            </section>
+        </template>
+        <TrustFeatures class="prism-trust" />
         <Toast
             v-model:open="transferDeletedToastOpen"
             title="Transfer deleted"
@@ -585,66 +599,216 @@ onBeforeUnmount(() => {
                 </DialogContent>
             </DialogPortal>
         </DialogRoot>
-        <template #footer><CliInstallDialog /></template>
-    </AppShell>
+    </section>
 </template>
 
 <style scoped>
-.files-layout {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0;
+.prism-page {
+    max-width: 74.5rem;
 }
-.files-layout--queued {
-    gap: 1.25rem;
+.prism-gate {
+    max-width: 36rem;
+    margin-inline: auto;
+    padding: 3rem 1.5rem;
+    border: 1px solid var(--fb-border);
+    border-radius: 1.25rem;
+    background: var(--fb-surface);
+    box-shadow: var(--fb-shadow-panel);
+    text-align: center;
 }
-.mode-tabs {
-    width: min(25rem, calc(100vw - 2.5rem));
+.prism-gate h1,
+.prism-recipient-heading h1 {
+    margin: 0;
+    color: var(--fb-text);
+    font-size: 1.75rem;
+    font-weight: 600;
+    letter-spacing: -0.035em;
 }
-.mode-tabs > button {
-    border-radius: 17px;
-    flex: 1;
+.prism-gate p,
+.prism-recipient-heading > p {
+    margin: 0.75rem 0 0;
+    color: var(--fb-text-muted);
+}
+.prism-gate__actions {
+    display: flex;
     justify-content: center;
+    gap: 0.75rem;
+    margin-top: 1.5rem;
 }
-.queue-panel-enter-active,
-.queue-panel-leave-active {
+.prism-recipient-heading {
+    max-width: 42rem;
+    margin: 0 auto 1.5rem;
+    text-align: center;
+}
+.prism-recipient-heading details {
+    margin-top: 1rem;
+    color: var(--fb-text-subtle);
+    font-size: 0.75rem;
+}
+.prism-recipient-heading summary {
+    cursor: pointer;
+}
+.prism-recipient-heading details p {
+    margin-top: 0.5rem;
+    overflow-wrap: anywhere;
+    font-family: var(--fb-font-code);
+}
+.prism-composer {
+    overflow: clip;
+    border: 1px solid var(--fb-border);
+    border-radius: var(--fb-radius-panel);
+    background: var(--fb-surface);
+    box-shadow: var(--fb-shadow-panel);
+    isolation: isolate;
+}
+.prism-stage-height,
+.prism-stage {
+    min-width: 0;
+}
+.prism-stage {
+    position: relative;
+    display: grid;
+    isolation: isolate;
+    overflow: clip;
+}
+.prism-stage__pane,
+.prism-mode-pane {
+    min-width: 0;
+}
+.prism-stage__pane {
+    grid-area: 1 / 1;
+}
+.prism-stage__pane--editor {
+    position: relative;
+    z-index: 1;
+}
+.prism-stage__pane--result,
+.prism-recipient-complete {
+    position: relative;
+    z-index: 2;
+    background: var(--fb-surface);
+}
+.prism-recipient-complete h2 {
+    margin: 1.25rem 0 0;
+    font-size: 1.875rem;
+    font-weight: 600;
+}
+.prism-recipient-complete p {
+    margin: 0.75rem 0 0;
+    color: var(--fb-text-muted);
+}
+.prism-recipient-complete .fb-button {
+    margin-top: 1.5rem;
+}
+.prism-result-error {
+    margin: 0 1.5rem 1rem;
+    color: var(--fb-danger);
+    font-size: 0.8125rem;
+    text-align: center;
+}
+.prism-recipient-complete {
+    padding: 3rem 2rem;
+    text-align: center;
+}
+.prism-mode-stage {
+    display: grid;
+    min-width: 0;
+}
+.prism-mode-pane {
+    grid-area: 1 / 1;
+    background: var(--fb-surface);
+}
+.prism-inline-status {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin: 0 1.5rem 0.9375rem;
+    padding: 0.75rem;
+    border: 1px solid #ffffff08;
+    border-radius: 0.625rem;
+    color: var(--fb-text-muted);
+    background: #ffffff03;
+    font-size: 0.75rem;
+}
+.prism-inline-status--error {
+    border-color: #ad71813d;
+    color: var(--fb-danger);
+    background: #38252b55;
+}
+.prism-inline-status > span {
+    min-width: 0;
+    flex: 1;
+}
+.prism-inline-status .fb-button {
+    min-height: 2.125rem;
+    flex: none;
+    font-size: 0.6875rem;
+}
+.prism-inline-status__progress {
+    width: 100%;
+}
+.prism-inline-status__progress p {
+    display: flex;
+    justify-content: space-between;
+    margin: 0 0 0.5rem;
+}
+.prism-trust {
+    margin-top: 1.75rem;
+    padding: 0 0.375rem 1.6875rem;
+}
+.prism-card-enter-active,
+.prism-card-leave-active,
+.prism-mode-card-enter-active,
+.prism-mode-card-leave-active {
     transition:
-        opacity 0.2s ease,
-        transform 0.2s ease;
+        opacity var(--fb-duration-pane) var(--fb-ease),
+        transform var(--fb-duration-pane) var(--fb-ease);
 }
-.queue-panel-enter-from,
-.queue-panel-leave-to {
+.prism-card-leave-active,
+.prism-mode-card-leave-active {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    pointer-events: none;
+}
+.prism-card-enter-from,
+.prism-mode-card-enter-from {
     opacity: 0;
-    transform: translateX(10px);
+    transform: translateY(16px) scale(0.995);
 }
-.content-switch-enter-active,
-.content-switch-leave-active {
-    transition:
-        opacity 0.18s ease,
-        transform 0.18s ease;
-}
-.content-switch-enter-from,
-.content-switch-leave-to {
+.prism-card-leave-to,
+.prism-mode-card-leave-to {
     opacity: 0;
-    transform: translateY(6px);
-}
-@media (min-width: 1024px) {
-    .files-layout {
-        grid-template-columns: minmax(0, 1fr) minmax(0, 0fr);
-        transition:
-            grid-template-columns 0.28s ease,
-            gap 0.28s ease;
-    }
-    .files-layout--queued {
-        grid-template-columns: minmax(0, 1fr) minmax(0, 0.58fr);
-    }
+    transform: translateY(-10px) scale(0.992);
 }
 button:disabled {
     cursor: not-allowed;
     opacity: 0.5;
 }
 @media (prefers-reduced-motion: reduce) {
-    * {
-        transition-duration: 0s !important;
+    .prism-card-enter-active,
+    .prism-card-leave-active,
+    .prism-mode-card-enter-active,
+    .prism-mode-card-leave-active {
+        transition: none;
+    }
+    .prism-card-enter-from,
+    .prism-card-leave-to,
+    .prism-mode-card-enter-from,
+    .prism-mode-card-leave-to {
+        transform: none;
+    }
+}
+@media (min-width: 1500px) {
+    .prism-page {
+        max-width: 77.75rem;
+    }
+}
+@media (max-width: 730px) {
+    .prism-inline-status {
+        align-items: flex-start;
+        flex-wrap: wrap;
+        margin-inline: 1.0625rem;
     }
 }
 </style>

@@ -14,6 +14,7 @@ import { waitForWorkerMessage, type WorkerMessage } from '../lib/worker-request'
 import { enabledTransferDrivers, transferLimits } from '../lib/transfer-policy';
 import { startWebRtcSender, type WebRtcSender } from '../lib/webrtc';
 import { csrfHeaders } from '../lib/csrf';
+import { buildShareLink } from '../lib/share-link';
 
 type ServerTransfer = {
     id: string;
@@ -508,11 +509,12 @@ export function useEncryptedUpload(
                 throw new Error('Transfer response contains duplicate item identifiers.');
             const publishShare = (expiresAt?: string) => {
                 const key = `v1.${String(prepared.shareKey)}`;
-                const url = new URL(created.data.share_url, window.location.origin)
-                    .toString()
-                    .split('#')[0];
                 share.value = {
-                    link: `${url}${options.includeKey ? `#k=${key}` : ''}`,
+                    link: buildShareLink(
+                        created.data.share_url,
+                        window.location.origin,
+                        options.includeKey ? `#k=${key}` : '',
+                    ),
                     key,
                     deleteToken: created.data.delete_token,
                     expiresAt,

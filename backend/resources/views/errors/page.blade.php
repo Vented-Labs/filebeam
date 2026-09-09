@@ -13,7 +13,7 @@
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <meta name="theme-color" content="#0b0914">
+        <meta name="theme-color" content="#100e16">
         <meta name="robots" content="noindex">
         <link rel="icon" href="{{ $faviconUrl }}">
         <title>{{ $title }} - {{ $brandName }}</title>
@@ -22,7 +22,7 @@
                 color-scheme: dark;
                 font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
                 color: #f7f5ff;
-                background: #0b0914;
+                background: #100e16;
             }
 
             * { box-sizing: border-box; }
@@ -31,9 +31,7 @@
                 min-width: 320px;
                 min-height: 100svh;
                 margin: 0;
-                background:
-                    radial-gradient(ellipse at 50% 15%, rgb(139 53 255 / 12%), transparent 58%),
-                    #0b0914;
+                background: #100e16;
             }
 
             .shell {
@@ -51,7 +49,7 @@
                 min-height: 5.35rem;
                 display: flex;
                 align-items: center;
-                border-bottom: 1px solid #352747;
+                border-bottom: 1px solid #ffffff0a;
             }
 
             .brand {
@@ -91,9 +89,9 @@
                 display: grid;
                 place-items: center;
                 margin: 0 auto 2rem;
-                border: 1px solid #352747;
+                border: 1px solid #554060;
                 border-radius: 999px;
-                background: #26163f;
+                background: #211a2b;
                 overflow: hidden;
             }
 
@@ -102,7 +100,7 @@
                 position: absolute;
                 width: 6rem;
                 height: 1px;
-                background: linear-gradient(90deg, transparent, #c084fc, transparent);
+                background: linear-gradient(90deg, transparent, #b992d6, transparent);
                 transform: rotate(-32deg);
             }
 
@@ -115,7 +113,7 @@
                 border: 1px solid #746184;
                 border-radius: .5rem;
                 color: #f7f5ff;
-                background: #131020;
+                background: #17131e;
                 font-family: "JetBrains Mono", ui-monospace, monospace;
                 font-size: .875rem;
                 font-weight: 600;
@@ -145,10 +143,10 @@
                 gap: .55rem;
                 margin-top: 2rem;
                 padding: .625rem 1rem;
-                border: 1px solid #352747;
+                border: 1px solid #554060;
                 border-radius: .75rem;
                 color: #f7f5ff;
-                background: #131020;
+                background: #211a2b;
                 font-size: .9rem;
                 font-weight: 600;
                 line-height: 1.2;
@@ -156,8 +154,8 @@
                 transition: background-color 150ms ease, border-color 150ms ease;
             }
 
-            .action:hover { border-color: #746184; background: #1b152b; }
-            .action:focus-visible { outline: 3px solid #c084fc; outline-offset: 3px; }
+            .action:hover { border-color: #785986; background: #292133; }
+            .action:focus-visible { outline: 3px solid #b992d6; outline-offset: 3px; }
             .action svg { width: 1rem; height: 1rem; }
 
             .footer {
@@ -165,7 +163,7 @@
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                border-top: 1px solid #352747;
+                border-top: 1px solid #ffffff0a;
                 color: #aaa0c0;
                 font-size: .8125rem;
             }

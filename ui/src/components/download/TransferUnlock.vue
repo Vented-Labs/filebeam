@@ -26,7 +26,7 @@ const keyError = ref('');
 
 function focusStep(): void {
     void nextTick(() => {
-        (step.value === 'key' ? keyInput.value : passwordInput.value)?.$el?.focus();
+        (step.value === 'key' ? keyInput.value : passwordInput.value)?.focus();
     });
 }
 
@@ -84,7 +84,7 @@ onBeforeUnmount(() => {
             {{ step === 'password' ? 'Enter the password' : 'Unlock this transfer' }}
         </h1>
         <AnimatedHeight class="focus-safe-height mt-3">
-            <Transition name="unlock-step" mode="out-in" @after-enter="focusStep">
+            <Transition name="unlock-step" @after-enter="focusStep">
                 <form
                     v-if="step === 'key'"
                     key="key"
@@ -161,13 +161,21 @@ onBeforeUnmount(() => {
 .unlock-step-enter-active,
 .unlock-step-leave-active {
     transition:
-        opacity 160ms ease,
-        transform 160ms ease;
+        opacity var(--fb-duration-pane) var(--fb-ease),
+        transform var(--fb-duration-pane) var(--fb-ease);
 }
-.unlock-step-enter-from,
+.unlock-step-leave-active {
+    position: absolute;
+    inset: var(--fb-focus-safe-inset);
+    pointer-events: none;
+}
+.unlock-step-enter-from {
+    opacity: 0;
+    transform: translateY(16px);
+}
 .unlock-step-leave-to {
     opacity: 0;
-    transform: translateY(4px);
+    transform: translateY(-10px);
 }
 @media (prefers-reduced-motion: reduce) {
     .unlock-step-enter-active,

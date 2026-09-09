@@ -19,11 +19,20 @@ for (const kind of ['files', 'note']) {
             });
         }
 
-        await page.locator('#transfer-password').fill('Short7!');
-        await page.getByRole('button', { name: 'Encrypt and share' }).click();
-        await expect(page.getByText('Passwords must contain at least 8 characters.')).toBeVisible();
+        await page.getByTestId('prism-password-trigger').click();
+        const popover = page.getByTestId('prism-password-popover');
+        const password = popover.locator('#transfer-password');
+        await password.fill('\u{1f512}'.repeat(7));
+        await popover.getByRole('button', { name: 'Done' }).click();
+        await expect(popover.getByText('Use at least 8 characters.')).toBeVisible();
+        await expect(page.getByTestId('prism-password-trigger')).toHaveAttribute(
+            'aria-invalid',
+            'true',
+        );
+        await expect(page.getByRole('button', { name: 'Encrypt and share' })).toBeDisabled();
 
-        await page.locator('#transfer-password').fill('Valid8!x');
+        await password.fill('\u{1f512}'.repeat(8));
+        await popover.getByRole('button', { name: 'Done' }).click();
         const creation = page.waitForResponse(
             (response) =>
                 response.request().method() === 'POST' &&

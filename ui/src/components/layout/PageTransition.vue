@@ -4,34 +4,45 @@ import { nextTick, onBeforeUnmount, ref } from 'vue';
 defineProps<{ pageKey: string }>();
 const surface = ref<HTMLElement>();
 const changing = ref(false);
-let targetHeight = 0;
 let frame = 0;
 let finishTimer: ReturnType<typeof setTimeout> | undefined;
+let transitionId = 0;
 
-function finish(): void {
+function finish(id = transitionId): void {
+    if (id !== transitionId) return;
     clearTimeout(finishTimer);
     if (surface.value) surface.value.style.height = 'auto';
     changing.value = false;
 }
 
-function beforeLeave(): void {
+function beforeLeave(element: Element): void {
+    transitionId++;
     clearTimeout(finishTimer);
+    cancelAnimationFrame(frame);
     if (surface.value)
         surface.value.style.height = `${surface.value.getBoundingClientRect().height}px`;
+    const pane = element as HTMLElement;
+    pane.inert = true;
+    pane.setAttribute('aria-hidden', 'true');
     changing.value = true;
 }
 
 function enter(element: Element): void {
+    const id = transitionId;
     void nextTick(() => {
-        if (!surface.value) return;
-        targetHeight = element.getBoundingClientRect().height;
+        if (!surface.value || id !== transitionId) return;
+        const targetHeight = element.getBoundingClientRect().height;
         cancelAnimationFrame(frame);
         frame = requestAnimationFrame(() => {
-            if (surface.value) surface.value.style.height = `${targetHeight}px`;
+            if (surface.value && id === transitionId)
+                surface.value.style.height = `${targetHeight}px`;
         });
-        // Reduced motion and equal-height pages do not emit a height transition event.
-        finishTimer = setTimeout(finish, 340);
+        finishTimer = setTimeout(() => finish(id), 520);
     });
+}
+
+function entered(): void {
+    finish();
 }
 
 function transitionEnd(event: TransitionEvent): void {
@@ -51,30 +62,52 @@ onBeforeUnmount(() => {
         :data-changing="changing || undefined"
         @transitionend="transitionEnd"
     >
-        <Transition name="fb-page" mode="out-in" @before-leave="beforeLeave" @enter="enter">
-            <div :key="pageKey"><slot /></div>
+        <Transition
+            name="fb-page"
+            @before-leave="beforeLeave"
+            @enter="enter"
+            @after-enter="entered"
+        >
+            <div :key="pageKey" class="fb-page-pane"><slot /></div>
         </Transition>
     </div>
 </template>
 
 <style scoped>
 .fb-page-transition[data-changing] {
+    position: relative;
+    isolation: isolate;
     overflow: clip;
-    transition: height 280ms cubic-bezier(0.2, 0.75, 0.25, 1);
+    transition: height var(--fb-duration-pane) var(--fb-ease);
+}
+.fb-page-pane {
+    width: 100%;
 }
 .fb-page-enter-active,
 .fb-page-leave-active {
     transition:
-        opacity 180ms ease,
-        transform 180ms ease;
+        opacity var(--fb-duration-pane) var(--fb-ease),
+        transform var(--fb-duration-pane) var(--fb-ease);
+}
+.fb-page-enter-active {
+    position: relative;
+    z-index: 2;
+}
+.fb-page-leave-active {
+    position: absolute;
+    z-index: 0;
+    inset: 0 0 auto;
+    width: 100%;
+    pointer-events: none;
+    visibility: hidden;
 }
 .fb-page-enter-from {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translateY(16px);
 }
 .fb-page-leave-to {
     opacity: 0;
-    transform: translateY(-4px);
+    transform: translateY(-10px);
 }
 @media (prefers-reduced-motion: reduce) {
     .fb-page-transition[data-changing],

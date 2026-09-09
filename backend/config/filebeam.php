@@ -108,11 +108,30 @@ if ($webrtcSessionLimit < 1 || $webrtcSessionLimit > 128 || $webrtcMaxSdpBytes <
     throw new InvalidArgumentException('WebRTC session and SDP limits are outside supported bounds.');
 }
 
+$cliInstallerUrl = env('FILEBEAM_CLI_INSTALLER_URL') ?: 'https://releases.filebeam.io/cli/install.sh';
+if (! is_string($cliInstallerUrl)
+    || ! filter_var($cliInstallerUrl, FILTER_VALIDATE_URL)
+    || parse_url($cliInstallerUrl, PHP_URL_SCHEME) !== 'https'
+    || parse_url($cliInstallerUrl, PHP_URL_USER) !== null
+    || parse_url($cliInstallerUrl, PHP_URL_PASS) !== null
+    || parse_url($cliInstallerUrl, PHP_URL_FRAGMENT) !== null
+    || preg_match('/[\x00-\x20\x7f]/', $cliInstallerUrl)
+    || preg_match('/(?:^|\.)example$/i', (string) parse_url($cliInstallerUrl, PHP_URL_HOST))) {
+    throw new InvalidArgumentException('FILEBEAM_CLI_INSTALLER_URL must be a published HTTPS URL without credentials or a fragment.');
+}
+
 return [
     'username_domain' => $usernameDomain,
     'branding' => $branding,
     'github_url' => $branding['github_url'],
     'copyright_holder' => $branding['copyright_holder'],
+
+    'cli' => [
+        // Configure only after the signed CLI release and installer are published.
+        'installer_url' => $cliInstallerUrl,
+        'installer_interpreter' => 'sh',
+        'executable' => 'beam',
+    ],
 
     'updates' => [
         'state_path' => env('FILEBEAM_CONTAINER', false)

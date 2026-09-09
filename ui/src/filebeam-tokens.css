@@ -1,41 +1,48 @@
 /* Filebeam design tokens. */
 :root {
-    --fb-bg: #0b0914;
-    --fb-surface: #131020;
-    --fb-surface-raised: #1b152b;
-    --fb-border: #352747;
-    --fb-control-border: #746184;
-    --fb-text: #f7f5ff;
-    --fb-text-muted: #aaa0c0;
+    --fb-bg: #100e16;
+    --fb-ambient-glow:
+        radial-gradient(ellipse at 49% 12%, #5731821f, transparent 57%),
+        radial-gradient(ellipse at 90% 39%, #34204313, transparent 45%);
+    --fb-dropzone-glow: radial-gradient(ellipse at 50% 24%, #a679ff13, transparent 55%);
+    --fb-surface: #191621;
+    --fb-surface-raised: #211d2a;
+    --fb-surface-sunken: #120f19;
+    --fb-footer-surface: #14111a;
+    --fb-settings-surface: #15121c;
+    --fb-border: #332d40;
+    --fb-control-border: #665576;
+    --fb-text: #f4f1fa;
+    --fb-text-muted: #b2a8c2;
+    --fb-text-subtle: #92869f;
     --fb-brand: #8b35ff;
     --fb-brand-bright: #a855f7;
     --fb-brand-tip: #c75bfa;
     --fb-brand-fold: #e7a1ff;
-    --fb-action: #7c3aed;
-    --fb-action-hover: #6d28d9;
-    --fb-action-active: #5b21b6;
-    --fb-on-action: #f7f5ff;
-    --fb-accent-text: #c084fc;
-    --fb-focus: #c084fc;
-    --fb-selected-surface: #26163f;
-    --fb-selection: #432466;
-    --fb-editor-bg: #0f0c19;
-    --fb-success: #6ee7b7;
-    --fb-warning: #fcd34d;
-    --fb-danger: #fda4af;
+    --fb-action: linear-gradient(180deg, #9250ec, #7e3dd8);
+    --fb-action-hover: linear-gradient(180deg, #a060f0, #8a47e0);
+    --fb-action-active: #7734cc;
+    --fb-action-shadow: inset 0 1px 0 #ffffff1f, 0 3px 8px #00000024;
+    --fb-on-action: #f4f1fa;
+    --fb-accent-text: #bc97ec;
+    --fb-focus: #c4a4ed;
+    --fb-selected-surface: #352346;
+    --fb-selection: #7042a9;
+    --fb-editor-bg: #120f19;
+    --fb-success: #a6d7bb;
+    --fb-warning: #e5bf91;
+    --fb-danger: #f3a9b6;
     --fb-info: #93c5fd;
-    /* Decorative only: use solid --fb-action behind normal-size button labels. */
     --fb-brand-gradient: linear-gradient(135deg, #7c3aed 0%, #8b35ff 55%, #c75bfa 100%);
-    --fb-ambient-glow: radial-gradient(ellipse at 50% 20%, rgb(139 53 255 / 10%), transparent 65%);
     --fb-font-ui:
         'Inter Variable', 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
     --fb-font-brand: 'Plus Jakarta Sans Variable', 'Plus Jakarta Sans', var(--fb-font-ui);
     --fb-font-code:
         'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Consolas,
         monospace;
-    --fb-font-body: 1rem;
-    --fb-font-small: 0.875rem;
-    --fb-font-code-size: 0.875rem;
+    --fb-font-body: 1.1rem;
+    --fb-font-small: 0.9625rem;
+    --fb-font-code-size: 0.9625rem;
     --fb-line-body: 1.5;
     --fb-line-code: 1.65;
     --fb-weight-normal: 400;
@@ -44,10 +51,25 @@
     --fb-weight-bold: 700;
     --fb-weight-brand: 800;
     --fb-radius-sm: 0.5rem;
-    --fb-radius-control: 0.75rem;
+    --fb-radius-control: 0.625rem;
     --fb-radius-panel: 1.5rem;
     --fb-space-unit: 0.25rem;
-    --fb-focus-ring: 0 0 0 3px var(--fb-focus);
-    --fb-duration-fast: 150ms;
-    --fb-duration-normal: 200ms;
+    --fb-focus-ring: 0 0 0 2px var(--fb-focus);
+    --fb-shadow-panel: 0 16px 40px #00000020;
+    --fb-shadow-popover: 0 14px 32px #0006, 0 2px 6px #0002, inset 0 1px 0 #ffffff0a;
+    --fb-ease: cubic-bezier(0.22, 1, 0.36, 1);
+    --fb-ease-hover: cubic-bezier(0.4, 0, 0.2, 1);
+    --fb-duration-control: 180ms;
+    --fb-duration-switch: 300ms;
+    --fb-duration-selection: 380ms;
+    --fb-duration-menu-in: 280ms;
+    --fb-duration-menu-out: 200ms;
+    --fb-duration-pane: 460ms;
+    --fb-duration-dialog-in: 360ms;
+    --fb-duration-dialog-out: 210ms;
+    --fb-duration-dialog-content: 400ms;
+    --fb-duration-toast-in: 280ms;
+    --fb-duration-toast-out: 180ms;
+    --fb-duration-fast: var(--fb-duration-control);
+    --fb-duration-normal: var(--fb-duration-menu-out);
 }
