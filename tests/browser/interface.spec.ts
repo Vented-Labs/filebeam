@@ -219,7 +219,15 @@ test('CLI instructions stay accessible on mobile and restore header focus', asyn
     await trigger.click();
     const dialog = page.getByRole('dialog');
     await expect(dialog.getByRole('heading', { name: 'Install CLI', exact: true })).toBeVisible();
-    await expect(dialog).toContainText('Linux x86_64 and ARM64');
+    const platform = dialog.getByRole('combobox', { name: 'Platform' });
+    await expect(platform).toHaveValue('');
+    await expect(dialog.getByRole('status')).toContainText(
+        'Choose a desktop platform to view installer instructions',
+    );
+    await platform.selectOption('linux');
+    await expect(dialog.getByLabel('Installer command')).toHaveValue(
+        "curl -fsSL 'https://releases.filebeam.io/cli/install.sh' | sh",
+    );
     await expect(dialog).toContainText('beam up');
     await expect(dialog).toContainText('beam down <url or ulid>');
     await expect(dialog).toContainText('https://filebeam.io');
