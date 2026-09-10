@@ -41,6 +41,7 @@ const attrs = useAttrs();
             </TooltipTrigger>
             <TooltipPortal :disabled="inline">
                 <TooltipContent
+                    :aria-label="content"
                     :side="side"
                     :align="align"
                     :side-offset="8"

@@ -52,8 +52,11 @@ async function register(page: Page): Promise<{ username: string; email: string }
 
 async function activateInbox(page: Page, custody: Custody): Promise<string | undefined> {
     await page.getByRole('button', { name: 'Activate secure inbox' }).click();
-    if (custody === 'self')
-        await page.getByRole('radio', { name: /Keep the key yourself/ }).click({ force: true });
+    if (custody === 'self') {
+        const selfCustody = page.getByRole('radio', { name: /Keep the key yourself/ });
+        await page.locator('label').filter({ has: selfCustody }).click();
+        await expect(selfCustody).toBeChecked();
+    }
     await page.getByRole('button', { name: 'Generate account key' }).click();
 
     if (custody === 'password') {
