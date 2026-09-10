@@ -24,16 +24,29 @@ if (-not [Environment]::Is64BitOperatingSystem -or $env:PROCESSOR_ARCHITECTURE -
 
 function Get-LimitedBytes([string] $Uri, [long] $Maximum) {
     $client = [System.Net.Http.HttpClient]::new()
+    $response = $null
+    $stream = $null
+    $output = $null
     try {
         $response = $client.GetAsync($Uri, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
         $response.EnsureSuccessStatusCode() | Out-Null
         if ($response.Content.Headers.ContentLength -and $response.Content.Headers.ContentLength -gt $Maximum) {
             throw 'Download exceeds its allowed size.'
         }
-        $bytes = $response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
-        if ($bytes.LongLength -gt $Maximum) { throw 'Download exceeds its allowed size.' }
-        return $bytes
+        $stream = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+        $output = [IO.MemoryStream]::new()
+        $buffer = [byte[]]::new(81920)
+        while ($true) {
+            $read = $stream.ReadAsync($buffer, 0, $buffer.Length).GetAwaiter().GetResult()
+            if ($read -eq 0) { break }
+            if ($output.Length + $read -gt $Maximum) { throw 'Download exceeds its allowed size.' }
+            $output.Write($buffer, 0, $read)
+        }
+        return $output.ToArray()
     } finally {
+        if ($output) { $output.Dispose() }
+        if ($stream) { $stream.Dispose() }
+        if ($response) { $response.Dispose() }
         $client.Dispose()
     }
 }
@@ -102,8 +115,18 @@ try {
     if (-not (Test-Path $config)) { New-Item -ItemType File -Path $config | Out-Null }
     $destination = Join-Path $bin 'beam.exe'
     $candidate = Join-Path $bin (".beam-{0}.exe" -f $PID)
+    $backup = Join-Path $bin 'beam.previous.exe'
     Copy-Item -LiteralPath $source -Destination $candidate
-    Move-Item -Force -LiteralPath $candidate -Destination $destination
+    try {
+        if (Test-Path $destination -PathType Leaf) {
+            Remove-Item -Force -ErrorAction SilentlyContinue $backup
+            [IO.File]::Replace($candidate, $destination, $backup)
+        } else {
+            [IO.File]::Move($candidate, $destination)
+        }
+    } finally {
+        Remove-Item -Force -ErrorAction SilentlyContinue $candidate
+    }
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
     $parts = @($userPath -split ';' | Where-Object { $_ })
     if ($parts -notcontains $bin) {

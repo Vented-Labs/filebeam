@@ -150,7 +150,8 @@ fn available(config: &Config, timeout: Duration) -> Result<(u64, Option<(Version
     if latest.0 <= current {
         return Ok((generation, None));
     }
-    let asset = select_asset(latest.1).context("no update asset exists for this architecture")?;
+    let asset = select_asset(latest.1)?
+        .context("no update asset exists for this operating system and architecture")?;
     validate_asset(&asset)?;
     Ok((generation, Some((latest.0, asset))))
 }
@@ -303,10 +304,10 @@ fn replace_binary(config: &Config, binary: &[u8]) -> Result<bool> {
 fn replace_unix_binary(candidate: &Path, destination: &Path) -> Result<()> {
     let backup = destination.with_file_name(previous_executable_name());
     let _ = fs::remove_file(&backup);
-    fs::rename(&destination, &backup)?;
-    if let Err(error) = fs::rename(&candidate, &destination) {
-        let _ = fs::rename(&backup, &destination);
-        let _ = fs::remove_file(&candidate);
+    fs::rename(destination, &backup)?;
+    if let Err(error) = fs::rename(candidate, destination) {
+        let _ = fs::rename(&backup, destination);
+        let _ = fs::remove_file(candidate);
         return Err(error.into());
     }
     Ok(())
@@ -481,37 +482,41 @@ fn validate_asset(asset: &Asset) -> Result<()> {
     Ok(())
 }
 
-fn select_asset(assets: Vec<Asset>) -> Option<Asset> {
-    assets
+fn select_asset(assets: Vec<Asset>) -> Result<Option<Asset>> {
+    let os = os()?;
+    let architecture = architecture()?;
+    Ok(assets
         .iter()
-        .find(|asset| asset.architecture == architecture() && asset.os.as_deref() == Some(os()))
+        .find(|asset| asset.architecture == architecture && asset.os.as_deref() == Some(os))
         .or_else(|| {
-            (os() == "linux").then(|| {
+            (os == "linux").then(|| {
                 assets
                     .iter()
-                    .find(|asset| asset.architecture == architecture() && asset.os.is_none())
+                    .find(|asset| asset.architecture == architecture && asset.os.is_none())
             })?
         })
-        .cloned()
+        .cloned())
 }
 
-fn os() -> &'static str {
+fn os() -> Result<&'static str> {
     if cfg!(target_os = "windows") {
-        "windows"
+        Ok("windows")
     } else if cfg!(target_os = "macos") {
-        "macos"
+        Ok("macos")
+    } else if cfg!(target_os = "linux") {
+        Ok("linux")
     } else {
-        "linux"
+        bail!("updates are unsupported on this operating system")
     }
 }
 
-fn architecture() -> &'static str {
+fn architecture() -> Result<&'static str> {
     if cfg!(target_arch = "x86_64") {
-        "x86_64"
+        Ok("x86_64")
     } else if cfg!(target_arch = "aarch64") {
-        "aarch64"
+        Ok("aarch64")
     } else {
-        "unsupported"
+        bail!("updates are unsupported on this architecture")
     }
 }
 
@@ -609,6 +614,8 @@ mod tests {
 
     #[test]
     fn selects_assets_by_os_and_architecture() {
+        let os = os().unwrap();
+        let architecture = architecture().unwrap();
         let asset = |os: Option<&str>, architecture: &str| Asset {
             os: os.map(str::to_owned),
             architecture: architecture.to_owned(),
@@ -617,26 +624,28 @@ mod tests {
             size: 1,
         };
         let selected = select_asset(vec![
-            asset(Some("windows"), architecture()),
-            asset(Some(os()), "other"),
-            asset(Some(os()), architecture()),
+            asset(Some("windows"), architecture),
+            asset(Some(os), "other"),
+            asset(Some(os), architecture),
         ])
+        .unwrap()
         .unwrap();
-        assert_eq!(selected.os.as_deref(), Some(os()));
-        assert_eq!(selected.architecture, architecture());
+        assert_eq!(selected.os.as_deref(), Some(os));
+        assert_eq!(selected.architecture, architecture);
     }
 
     #[test]
     fn legacy_osless_assets_are_linux_only() {
+        let os = os().unwrap();
         let legacy = Asset {
             os: None,
-            architecture: architecture().to_owned(),
+            architecture: architecture().unwrap().to_owned(),
             path: "versions/v0.1.1/beam.tar.gz".to_owned(),
             sha256: "a".repeat(64),
             size: 1,
         };
-        let selected = select_asset(vec![legacy]);
-        assert_eq!(selected.is_some(), os() == "linux");
+        let selected = select_asset(vec![legacy]).unwrap();
+        assert_eq!(selected.is_some(), os == "linux");
     }
 
     #[test]
