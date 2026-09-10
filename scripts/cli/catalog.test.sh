@@ -6,6 +6,7 @@ tmp=$(mktemp -d "$root/.filebeam-catalog-test.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/dist"
 touch "$tmp/dist/beam-v1.2.3-linux-x86_64.tar.gz" "$tmp/dist/beam-v1.2.3-linux-aarch64.tar.gz"
+touch "$tmp/dist/beam-v1.2.3-macos-x86_64.tar.gz" "$tmp/dist/beam-v1.2.3-macos-aarch64.tar.gz" "$tmp/dist/beam-v1.2.3-windows-x86_64.zip"
 container_tmp=/workspace/${tmp#"$root"/}
 
 "$root/scripts/cli/run.sh" bash -ceu '

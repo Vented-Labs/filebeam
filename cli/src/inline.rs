@@ -19,10 +19,6 @@ use ratatui::{
     style::Modifier,
     text::{Line, Span},
 };
-use signal_hook::{
-    consts::{SIGINT, SIGTERM},
-    low_level::unregister,
-};
 use unicode_width::UnicodeWidthStr;
 use zeroize::Zeroizing;
 
@@ -33,15 +29,6 @@ use crate::{
     presentation::{self as paint, Theme, bytes, clean, clip, duration},
     terminal::Session,
 };
-
-struct Signals(Vec<signal_hook::SigId>);
-impl Drop for Signals {
-    fn drop(&mut self) {
-        for id in self.0.drain(..) {
-            unregister(id);
-        }
-    }
-}
 
 pub fn run(config: &Config, instance: &str, request: Request, plain: bool) -> Result<Vec<String>> {
     let theme = Theme::new(config);
@@ -57,13 +44,7 @@ pub fn run(config: &Config, instance: &str, request: Request, plain: bool) -> Re
     };
     let mut view = TransferView::new(request.direction());
     let job = Job::start(instance.to_owned(), config.clone(), request);
-    let mut signals = Signals(Vec::new());
-    for signal in [SIGINT, SIGTERM] {
-        signals.0.push(signal_hook::flag::register(
-            signal,
-            job.control.cancelled.clone(),
-        )?);
-    }
+    let _interrupt = crate::terminal::watch_interrupt(job.control.cancelled.clone())?;
     let interactive =
         !plain && io::stderr().is_terminal() && std::env::var("TERM").unwrap_or_default() != "dumb";
     let mut surface = InlineSurface::default();

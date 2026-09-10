@@ -1,20 +1,26 @@
 # Beam CLI
 
-`beam` is the Linux CLI for Filebeam. Merging to `master` and pushing an application release tag such as `v0.2.0` runs the application release workflow and its reusable Beam pipeline. That pipeline builds and signs the CLI artifacts, publishes the installer/catalog to R2, smoke-tests the public installer, and creates the matching `beam-v0.2.0` GitHub release automatically. No separate CLI tag or manual Cargo version edit is needed. Standalone `beam-vX.Y.Z` tags from master remain supported.
+`beam` is the Linux, macOS, and Windows CLI for Filebeam. Merging to `master` and pushing an application release tag such as `v0.2.0` runs the application release workflow and its reusable Beam pipeline. That pipeline builds and signs the CLI artifacts, publishes the installers/catalog to R2, smoke-tests the public installer, and creates the matching `beam-v0.2.0` GitHub release automatically. No separate CLI tag or manual Cargo version edit is needed. Standalone `beam-vX.Y.Z` tags from master remain supported.
 
 Install the latest release with:
 
 ```sh
-curl -fsSL 'https://releases.filebeam.io/cli/install.sh' -o beam-install.sh && sh beam-install.sh
+curl -fsSL 'https://releases.filebeam.io/cli/install.sh' | sh
 ```
 
-Use `--dir DIRECTORY` to choose a different state directory. The installer creates `bin`, `config.toml`, and `cache`, validates the signed release catalog and selected archive, replaces `bin/beam` atomically, and idempotently adds the selected `bin` directory to bash, zsh, and fish startup files.
+On Windows, run this in PowerShell after installing Git for Windows, whose OpenSSL executable verifies the release signature:
+
+```powershell
+Invoke-RestMethod -Uri 'https://releases.filebeam.io/cli/install.ps1' | Invoke-Expression
+```
+
+Use `--dir DIRECTORY` with the shell installer or `-InstallDir DIRECTORY` when invoking the PowerShell script block directly to choose a different state directory. The installer creates `bin`, `config.toml`, and `cache`, validates the signed release catalog and selected archive, replaces the executable, and idempotently adds the selected `bin` directory to PATH. Installer scripts execute from the network stream and are not retained after installation.
 
 Open a new terminal after installation to load the PATH change.
 
 ## Web instructions
 
-The web application defaults `FILEBEAM_CLI_INSTALLER_URL` to `https://releases.filebeam.io/cli/install.sh`; self-hosted installations may override this with another verified HTTPS distribution URL. The installer uses POSIX `sh` and installs the `beam` executable. Opening the instructions does not contact the release service or run the command.
+The web application detects supported desktop operating systems and initially selects the matching command; users can always choose Linux, macOS, or Windows manually. `FILEBEAM_CLI_INSTALLER_URL` and `FILEBEAM_CLI_WINDOWS_INSTALLER_URL` configure the Unix and PowerShell HTTPS distribution URLs. Opening the instructions does not contact the release service or run the command.
 
 The web amendment's supplied `up <url or ulid>` reference differs from the parser: `beam up <files...>` uploads local paths, while `beam down <url or ulid>` receives a shared transfer. Download commands preserve the original link's key fragment, never add a separately shared key or a password, and use interactive key/password prompts. Clipboard failure leaves the command selected for manual copying.
 
@@ -101,7 +107,7 @@ beam
 
 Use `--instance http://localhost:PORT` or `--dir DIRECTORY` to override either local wrapper default. The CLI binary defaults to `https://filebeam.io`. `FILEBEAM_INSTANCE` overrides the compiled default; the local installer sets this explicitly for the development server.
 
-Publishing requires R2 and Ed25519 release credentials, then writes immutable artifacts below `cli/versions/vX.Y.Z/`, a signed `cli/index.json`, and the mutable no-cache `cli/install.sh`:
+Publishing requires R2 and Ed25519 release credentials, then writes immutable artifacts below `cli/versions/vX.Y.Z/`, a signed `cli/index.json`, and mutable no-cache `cli/install.sh` and `cli/install.ps1` entry points:
 
 ```sh
 scripts/release/cli-publish.sh beam-v1.2.3 dist/beam
@@ -109,4 +115,4 @@ scripts/release/cli-publish.sh beam-v1.2.3 dist/beam
 
 The GitHub `release` environment supplies `R2_ENDPOINT_URL`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `RELEASE_SIGNING_KEY`; `RELEASE_PUBLIC_KEY` is shared with the package build. The R2 bucket must be reachable at `https://releases.filebeam.io`. Both the CLI executable and installer embed the verification key. Production publishing only accepts a source tag reachable from `origin/master`. The `beam-v…` GitHub release is marked non-latest so it does not replace the main application release.
 
-`BEAM_RELEASE_VERSION` is supplied by packaging from the release tag. It controls `beam --version`, the HTTP User-Agent, and the CLI updater's current-version comparison; development builds use the Cargo package version. `scripts/cli/smoke-package.sh` verifies both architecture archives and executes the native package. `scripts/cli/smoke-install.sh` installs from the public signed catalog into a disposable HOME and checks the installed version and production instance default. Neither smoke test writes to a user's normal shell configuration.
+`BEAM_RELEASE_VERSION` is supplied by packaging from the release tag. It controls `beam --version`, the HTTP User-Agent, and the CLI updater's current-version comparison; development builds use the Cargo package version. Release assets cover Linux x86_64/ARM64, macOS Intel/Apple Silicon, and Windows x86_64. `scripts/cli/smoke-package.sh` verifies the Linux archives and executes the native package; native release jobs execute the macOS Apple Silicon and Windows binaries. `scripts/cli/smoke-install.sh` streams the public installer into a disposable HOME and checks the installed version and production instance default. Neither smoke test writes to a user's normal shell configuration.

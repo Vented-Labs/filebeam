@@ -8,11 +8,11 @@ base_url=${BEAM_RELEASE_BASE_URL:-https://releases.filebeam.io/cli}
 temporary=$(mktemp -d "${TMPDIR:-/tmp}/beam-install-smoke.XXXXXX")
 trap 'rm -rf "$temporary"' EXIT
 mkdir "$temporary/home"
-curl --fail --silent --show-error --retry 6 --retry-all-errors --retry-delay 5 "$base_url/install.sh" -o "$temporary/install.sh"
-! grep -q '__BEAM_RELEASE_PUBLIC_KEY__' "$temporary/install.sh"
-HOME="$temporary/home" BEAM_RELEASE_BASE_URL="$base_url" sh "$temporary/install.sh" --version "$version"
+curl --fail --silent --show-error --retry 6 --retry-all-errors --retry-delay 5 "$base_url/install.sh" \
+    | HOME="$temporary/home" BEAM_RELEASE_BASE_URL="$base_url" sh
 binary="$temporary/home/.filebeam/bin/beam"
 [[ $("$binary" --version) == "beam $version" ]]
 printf 'check_updates = false\n' > "$temporary/home/.filebeam/config.toml"
 [[ $(env -u FILEBEAM_INSTANCE "$binary" --home "$temporary/home/.filebeam" --plain) == $'beam '"$version"$'\nhttps://filebeam.io' ]]
+[[ ! -e "$temporary/home/.filebeam/bin/install.sh" ]]
 printf 'Published installer smoke passed for %s.\n' "$tag"

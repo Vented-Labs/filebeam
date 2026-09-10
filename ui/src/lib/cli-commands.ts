@@ -3,14 +3,31 @@ import type { CliConfig } from '../types';
 
 export const cliDefaults: CliConfig = {
     installer_url: 'https://releases.filebeam.io/cli/install.sh',
+    windows_installer_url: 'https://releases.filebeam.io/cli/install.ps1',
     installer_interpreter: 'sh',
     executable: 'beam',
+};
+
+export type CliPlatform = 'linux' | 'macos' | 'windows';
+
+export type UserAgentDetails = {
+    userAgentDataPlatform?: string;
+    userAgentDataMobile?: boolean;
+    platform?: string;
+    userAgent?: string;
+    maxTouchPoints?: number;
 };
 
 export function quoteShellArgument(value: string): string {
     if (!value || /\p{Cc}/u.test(value))
         throw new Error('A nonempty argument without control characters is required.');
     return `'${value.replaceAll("'", "'\"'\"'")}'`;
+}
+
+export function quotePowerShellArgument(value: string): string {
+    if (!value || /\p{Cc}/u.test(value))
+        throw new Error('A nonempty argument without control characters is required.');
+    return `'${value.replaceAll("'", "''")}'`;
 }
 
 function webUrl(value: string): URL {
@@ -22,17 +39,45 @@ function webUrl(value: string): URL {
     return url;
 }
 
-export function buildInstallCommand(config: CliConfig): string | undefined {
-    if (!config.installer_url) return;
-    const url = webUrl(config.installer_url);
-    if (
-        url.protocol !== 'https:' ||
-        url.hash ||
-        /(?:^|\.)example$/i.test(url.hostname) ||
-        config.installer_interpreter !== 'sh'
-    )
+function publishedInstallerUrl(value: string | null | undefined): string | undefined {
+    if (!value) return;
+    const url = webUrl(value);
+    if (url.protocol !== 'https:' || url.hash || /(?:^|\.)example$/i.test(url.hostname))
+        throw new Error('A published HTTPS installer is required.');
+    return value;
+}
+
+export function buildInstallCommand(
+    config: CliConfig,
+    platform: CliPlatform = 'linux',
+): string | undefined {
+    if (platform === 'windows') {
+        const url = publishedInstallerUrl(config.windows_installer_url);
+        return url && `Invoke-RestMethod -Uri ${quotePowerShellArgument(url)} | Invoke-Expression`;
+    }
+    if (config.installer_interpreter !== 'sh')
         throw new Error('A published HTTPS shell installer is required.');
-    return `curl -fsSL ${quoteShellArgument(config.installer_url)} -o beam-install.sh && sh beam-install.sh`;
+    const url = publishedInstallerUrl(config.installer_url);
+    return url && `curl -fsSL ${quoteShellArgument(url)} | sh`;
+}
+
+export function detectDesktopPlatform({
+    userAgentDataPlatform,
+    userAgentDataMobile,
+    platform,
+    userAgent,
+    maxTouchPoints,
+}: UserAgentDetails): CliPlatform | undefined {
+    const agent = userAgent ?? '';
+    if (userAgentDataMobile || /\b(?:iPad|iPhone|iPod|Android|Mobile|Windows Phone)\b/i.test(agent))
+        return;
+    for (const value of [userAgentDataPlatform, platform, agent]) {
+        if (!value) continue;
+        if (/win/i.test(value)) return 'windows';
+        if (/linux/i.test(value)) return 'linux';
+        if (/mac/i.test(value) && !((platform ?? '').includes('MacIntel') && maxTouchPoints))
+            return 'macos';
+    }
 }
 
 export function buildDownloadCommand(target: string): string {

@@ -1,10 +1,14 @@
 use std::{
     env, fs,
     io::{Cursor, Read, Write},
-    os::unix::fs::PermissionsExt,
     path::Path,
     time::Duration,
 };
+
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+#[cfg(windows)]
+use std::{path::PathBuf, process::Command, thread};
 
 use anyhow::{Context, Result, bail};
 use base64::{Engine, engine::general_purpose::STANDARD};
@@ -47,8 +51,10 @@ struct Release {
     assets: Vec<Asset>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Clone, Deserialize, Debug)]
 struct Asset {
+    #[serde(default)]
+    os: Option<String>,
     architecture: String,
     path: String,
     sha256: String,
@@ -61,12 +67,20 @@ pub fn check(config: &Config) -> Result<String> {
         store_generation(config, generation)?;
         bail!("beam is already on the latest release");
     };
-    install(config, &version, &asset)?;
+    let staged = install(config, &version, &asset)?;
     store_generation(config, generation)?;
-    Ok(format!(
-        "updated beam to {version}; the previous binary is at {}",
-        config.home.join("bin/beam.previous").display()
-    ))
+    let previous = config.home.join("bin").join(previous_executable_name());
+    if staged {
+        Ok(format!(
+            "staged beam {version}; it will replace the current binary after this command exits, and the previous binary will be at {}",
+            previous.display()
+        ))
+    } else {
+        Ok(format!(
+            "updated beam to {version}; the previous binary is at {}",
+            previous.display()
+        ))
+    }
 }
 
 pub fn notify_if_available(config: &Config) {
@@ -136,11 +150,7 @@ fn available(config: &Config, timeout: Duration) -> Result<(u64, Option<(Version
     if latest.0 <= current {
         return Ok((generation, None));
     }
-    let asset = latest
-        .1
-        .into_iter()
-        .find(|asset| asset.architecture == architecture())
-        .context("no update asset exists for this architecture")?;
+    let asset = select_asset(latest.1).context("no update asset exists for this architecture")?;
     validate_asset(&asset)?;
     Ok((generation, Some((latest.0, asset))))
 }
@@ -165,7 +175,7 @@ fn store_generation(config: &Config, generation: u64) -> Result<()> {
     Ok(())
 }
 
-fn install(config: &Config, version: &Version, asset: &Asset) -> Result<()> {
+fn install(config: &Config, version: &Version, asset: &Asset) -> Result<bool> {
     let url = Url::parse(CATALOG)?.join(&asset.path)?;
     if url.scheme() != "https"
         || url.host_str() != Some("releases.filebeam.io")
@@ -209,10 +219,22 @@ fn read_limited(response: Response, maximum: u64) -> Result<Vec<u8>> {
 }
 
 fn extract_binary(bytes: &[u8]) -> Result<Vec<u8>> {
+    #[cfg(windows)]
+    {
+        extract_zip_binary(bytes)
+    }
+    #[cfg(not(windows))]
+    {
+        extract_tar_binary(bytes)
+    }
+}
+
+#[cfg(not(windows))]
+fn extract_tar_binary(bytes: &[u8]) -> Result<Vec<u8>> {
     let mut archive = Archive::new(GzDecoder::new(Cursor::new(bytes)));
     for entry in archive.entries().context("read release archive")? {
         let mut entry = entry?;
-        if entry.path()?.as_ref() != Path::new("beam/beam") {
+        if entry.path()?.as_ref() != Path::new(executable_archive_path()) {
             continue;
         }
         if !entry.header().entry_type().is_file() || entry.size() > MAX_ARCHIVE_BYTES {
@@ -225,23 +247,61 @@ fn extract_binary(bytes: &[u8]) -> Result<Vec<u8>> {
         }
         return Ok(binary);
     }
-    bail!("release archive does not contain beam/beam")
+    bail!(
+        "release archive does not contain {}",
+        executable_archive_path()
+    )
 }
 
-fn replace_binary(config: &Config, binary: &[u8]) -> Result<()> {
+#[cfg(windows)]
+fn extract_zip_binary(bytes: &[u8]) -> Result<Vec<u8>> {
+    let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).context("read release archive")?;
+    let expected = executable_archive_path();
+    let mut entry = archive
+        .by_name(expected)
+        .with_context(|| format!("release archive does not contain {expected}"))?;
+    if entry.is_dir() || entry.size() > MAX_ARCHIVE_BYTES {
+        bail!("release archive contains an invalid beam executable");
+    }
+    let mut binary = Vec::with_capacity(entry.size() as usize);
+    entry.read_to_end(&mut binary)?;
+    if binary.is_empty() {
+        bail!("release archive contains an empty beam executable");
+    }
+    Ok(binary)
+}
+
+fn replace_binary(config: &Config, binary: &[u8]) -> Result<bool> {
     let bin = config.home.join("bin");
     fs::create_dir_all(&bin)?;
-    let destination = bin.join("beam");
+    let destination = bin.join(executable_name());
     ensure_running_installed_binary(&destination)?;
-    let candidate = bin.join(format!(".beam-update-{}", std::process::id()));
-    let backup = bin.join("beam.previous");
+    let candidate = bin.join(format!(
+        ".beam-update-{}{}",
+        std::process::id(),
+        executable_suffix()
+    ));
     let mut file = fs::OpenOptions::new()
         .create_new(true)
         .write(true)
         .open(&candidate)?;
     file.write_all(binary)?;
     file.sync_all()?;
+    #[cfg(unix)]
     fs::set_permissions(&candidate, fs::Permissions::from_mode(0o755))?;
+    #[cfg(windows)]
+    {
+        stage_windows_replacement(&candidate, &destination)?;
+        return Ok(true);
+    }
+    #[cfg(unix)]
+    replace_unix_binary(&candidate, &destination)?;
+    Ok(false)
+}
+
+#[cfg(unix)]
+fn replace_unix_binary(candidate: &Path, destination: &Path) -> Result<()> {
+    let backup = destination.with_file_name(previous_executable_name());
     let _ = fs::remove_file(&backup);
     fs::rename(&destination, &backup)?;
     if let Err(error) = fs::rename(&candidate, &destination) {
@@ -251,6 +311,97 @@ fn replace_binary(config: &Config, binary: &[u8]) -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(windows)]
+fn stage_windows_replacement(candidate: &Path, destination: &Path) -> Result<()> {
+    Command::new(candidate)
+        .arg("--beam-apply-update")
+        .arg(destination)
+        .spawn()
+        .context("start Windows update helper")?;
+    Ok(())
+}
+
+#[cfg(windows)]
+pub fn apply_staged_update() -> Result<bool> {
+    let mut arguments = env::args_os();
+    let _ = arguments.next();
+    if arguments.next().as_deref() != Some(std::ffi::OsStr::new("--beam-apply-update")) {
+        return Ok(false);
+    }
+    let destination = arguments
+        .next()
+        .map(PathBuf::from)
+        .context("Windows update helper is missing its destination")?;
+    if arguments.next().is_some() {
+        bail!("Windows update helper received unexpected arguments");
+    }
+    let candidate = env::current_exe()?;
+    let candidate_directory = candidate
+        .parent()
+        .context("Windows update helper has no executable directory")?
+        .canonicalize()?;
+    let destination_directory = destination
+        .parent()
+        .context("Windows update helper destination has no directory")?
+        .canonicalize()?;
+    if destination.file_name() != Some(std::ffi::OsStr::new(executable_name()))
+        || destination_directory != candidate_directory
+    {
+        bail!("Windows update helper destination is invalid");
+    }
+    let backup = destination.with_file_name(previous_executable_name());
+    let error_path = destination.with_file_name("beam.update-error");
+    let result = (|| {
+        for _ in 0..300 {
+            let _ = fs::remove_file(&backup);
+            match fs::rename(&destination, &backup) {
+                Ok(()) => {
+                    if let Err(error) = fs::copy(&candidate, &destination) {
+                        let _ = fs::rename(&backup, &destination);
+                        return Err(error.into());
+                    }
+                    let _ = fs::remove_file(&error_path);
+                    return Ok(());
+                }
+                Err(_) => thread::sleep(Duration::from_millis(100)),
+            }
+        }
+        bail!("timed out waiting for beam.exe to exit before applying update")
+    })();
+    if let Err(error) = result {
+        let _ = fs::write(&error_path, error.to_string());
+        return Err(error);
+    }
+    Ok(true)
+}
+
+#[cfg(windows)]
+pub fn report_staged_update_error() {
+    let Ok(executable) = env::current_exe() else {
+        return;
+    };
+    let Some(directory) = executable.parent() else {
+        return;
+    };
+    let error_path = directory.join("beam.update-error");
+    let Ok(error) = fs::read_to_string(&error_path) else {
+        return;
+    };
+    let _ = fs::remove_file(error_path);
+    eprintln!(
+        "beam update failed: {}; run `beam update` to retry",
+        error.trim()
+    );
+}
+
+#[cfg(not(windows))]
+pub fn apply_staged_update() -> Result<bool> {
+    Ok(false)
+}
+
+#[cfg(not(windows))]
+pub fn report_staged_update_error() {}
 
 fn ensure_running_installed_binary(destination: &Path) -> Result<()> {
     let current = env::current_exe()?.canonicalize()?;
@@ -317,12 +468,41 @@ fn validate_asset(asset: &Asset) -> Result<()> {
             .split('/')
             .any(|part| matches!(part, "" | "." | ".."))
         || !asset.path.starts_with("versions/")
+        || !asset.path.ends_with(archive_extension())
         || asset.size == 0
         || asset.size > MAX_ARCHIVE_BYTES
+        || asset
+            .os
+            .as_deref()
+            .is_some_and(|os| !matches!(os, "linux" | "macos" | "windows"))
     {
         bail!("signed catalog contains an unsafe asset");
     }
     Ok(())
+}
+
+fn select_asset(assets: Vec<Asset>) -> Option<Asset> {
+    assets
+        .iter()
+        .find(|asset| asset.architecture == architecture() && asset.os.as_deref() == Some(os()))
+        .or_else(|| {
+            (os() == "linux").then(|| {
+                assets
+                    .iter()
+                    .find(|asset| asset.architecture == architecture() && asset.os.is_none())
+            })?
+        })
+        .cloned()
+}
+
+fn os() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else {
+        "linux"
+    }
 }
 
 fn architecture() -> &'static str {
@@ -333,6 +513,34 @@ fn architecture() -> &'static str {
     } else {
         "unsupported"
     }
+}
+
+fn executable_name() -> &'static str {
+    if cfg!(windows) { "beam.exe" } else { "beam" }
+}
+
+fn previous_executable_name() -> &'static str {
+    if cfg!(windows) {
+        "beam.previous.exe"
+    } else {
+        "beam.previous"
+    }
+}
+
+fn executable_suffix() -> &'static str {
+    if cfg!(windows) { ".exe" } else { "" }
+}
+
+fn executable_archive_path() -> &'static str {
+    if cfg!(windows) {
+        "beam/beam.exe"
+    } else {
+        "beam/beam"
+    }
+}
+
+fn archive_extension() -> &'static str {
+    if cfg!(windows) { ".zip" } else { ".tar.gz" }
 }
 
 fn valid_sha256(value: &str) -> bool {
@@ -364,6 +572,7 @@ mod tests {
         assert!(valid_sha256(&catalog.releases[0].assets[0].sha256));
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn binary_is_extracted_only_from_expected_archive_path() {
         let mut bytes = Vec::new();
@@ -381,5 +590,65 @@ mod tests {
             archive.finish().unwrap();
         }
         assert_eq!(extract_binary(&bytes).unwrap(), b"binary");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn binary_is_extracted_only_from_expected_archive_path() {
+        let mut bytes = Cursor::new(Vec::new());
+        {
+            let mut archive = zip::ZipWriter::new(&mut bytes);
+            archive
+                .start_file("beam/beam.exe", zip::write::SimpleFileOptions::default())
+                .unwrap();
+            archive.write_all(b"binary").unwrap();
+            archive.finish().unwrap();
+        }
+        assert_eq!(extract_binary(bytes.get_ref()).unwrap(), b"binary");
+    }
+
+    #[test]
+    fn selects_assets_by_os_and_architecture() {
+        let asset = |os: Option<&str>, architecture: &str| Asset {
+            os: os.map(str::to_owned),
+            architecture: architecture.to_owned(),
+            path: "versions/v0.1.1/beam.tar.gz".to_owned(),
+            sha256: "a".repeat(64),
+            size: 1,
+        };
+        let selected = select_asset(vec![
+            asset(Some("windows"), architecture()),
+            asset(Some(os()), "other"),
+            asset(Some(os()), architecture()),
+        ])
+        .unwrap();
+        assert_eq!(selected.os.as_deref(), Some(os()));
+        assert_eq!(selected.architecture, architecture());
+    }
+
+    #[test]
+    fn legacy_osless_assets_are_linux_only() {
+        let legacy = Asset {
+            os: None,
+            architecture: architecture().to_owned(),
+            path: "versions/v0.1.1/beam.tar.gz".to_owned(),
+            sha256: "a".repeat(64),
+            size: 1,
+        };
+        let selected = select_asset(vec![legacy]);
+        assert_eq!(selected.is_some(), os() == "linux");
+    }
+
+    #[test]
+    fn executable_paths_match_the_platform() {
+        if cfg!(windows) {
+            assert_eq!(executable_archive_path(), "beam/beam.exe");
+            assert_eq!(executable_name(), "beam.exe");
+            assert_eq!(archive_extension(), ".zip");
+        } else {
+            assert_eq!(executable_archive_path(), "beam/beam");
+            assert_eq!(executable_name(), "beam");
+            assert_eq!(archive_extension(), ".tar.gz");
+        }
     }
 }

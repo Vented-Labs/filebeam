@@ -75,6 +75,10 @@ enum Command {
 }
 
 fn main() -> Result<()> {
+    if update::apply_staged_update()? {
+        return Ok(());
+    }
+    update::report_staged_update_error();
     let cli = Cli::parse();
     let mut config = config::Config::load(cli.home)?;
     config.no_color |= cli.no_color;

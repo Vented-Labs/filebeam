@@ -93,8 +93,7 @@ for (const width of [360, 390]) {
         page.on('request', (request) => requests.push(request.url()));
         await trigger.click();
         const dialog = page.getByRole('dialog', { name: 'Install CLI', exact: true });
-        const command =
-            "curl -fsSL 'https://releases.filebeam.test/cli/install.sh' -o beam-install.sh && sh beam-install.sh";
+        const command = "curl -fsSL 'https://releases.filebeam.test/cli/install.sh' | sh";
         await expect(dialog.getByRole('textbox', { name: 'Installer command' })).toHaveValue(
             command,
         );

@@ -8,9 +8,14 @@ import {
     DialogRoot,
     DialogTitle,
 } from 'reka-ui';
-import { computed } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import type { CliConfig } from '../../types';
-import { buildInstallCommand, cliDefaults } from '../../lib/cli-commands';
+import {
+    buildInstallCommand,
+    cliDefaults,
+    detectDesktopPlatform,
+    type CliPlatform,
+} from '../../lib/cli-commands';
 import Button from '../primitives/Button.vue';
 import Icon from '../primitives/Icon.vue';
 import CliCommandField from './CliCommandField.vue';
@@ -18,12 +23,26 @@ import CliCommandField from './CliCommandField.vue';
 const props = defineProps<{ config?: CliConfig }>();
 const open = defineModel<boolean>('open', { default: false });
 const emit = defineEmits<{ closeAutoFocus: [event: Event] }>();
+const selectedPlatform = ref<CliPlatform>();
 const installCommand = computed(() => {
+    if (!selectedPlatform.value) return;
     try {
-        return buildInstallCommand(props.config ?? cliDefaults);
+        return buildInstallCommand(props.config ?? cliDefaults, selectedPlatform.value);
     } catch {
         return undefined;
     }
+});
+onMounted(() => {
+    const navigatorWithUserAgentData = navigator as Navigator & {
+        userAgentData?: { platform?: string; mobile?: boolean };
+    };
+    selectedPlatform.value = detectDesktopPlatform({
+        userAgentDataPlatform: navigatorWithUserAgentData.userAgentData?.platform,
+        userAgentDataMobile: navigatorWithUserAgentData.userAgentData?.mobile,
+        platform: navigator.platform,
+        userAgent: navigator.userAgent,
+        maxTouchPoints: navigator.maxTouchPoints,
+    });
 });
 const examples = [
     { command: 'beam', description: 'Interactive TUI' },
@@ -48,7 +67,17 @@ const examples = [
                     >Use Filebeam from your terminal.</DialogDescription
                 >
                 <section class="cli-install-dialog__installer">
-                    <h2><span>01</span>Run the shell installer</h2>
+                    <h2><span>01</span>Choose your platform</h2>
+                    <label class="cli-install-dialog__platform-label" for="cli-install-platform"
+                        >Platform</label
+                    >
+                    <select id="cli-install-platform" v-model="selectedPlatform">
+                        <option :value="undefined">Select a platform</option>
+                        <option value="linux">Linux</option>
+                        <option value="macos">macOS</option>
+                        <option value="windows">Windows</option>
+                    </select>
+                    <h2><span>02</span>Run the installer</h2>
                     <CliCommandField
                         v-if="installCommand"
                         :command="installCommand"
@@ -56,15 +85,19 @@ const examples = [
                         copy-label="Copy installer"
                     />
                     <p v-else class="cli-install-dialog__unavailable" role="status">
-                        Installer instructions unavailable
+                        {{
+                            selectedPlatform
+                                ? 'Installer instructions unavailable'
+                                : 'Choose a desktop platform to view installer instructions'
+                        }}
                     </p>
                     <p class="cli-install-dialog__note">
-                        For Linux x86_64 and ARM64. After installation, open a new terminal to use
-                        <code>beam</code> from your PATH.
+                        After installation, open a new terminal to use <code>beam</code> from your
+                        PATH.
                     </p>
                 </section>
                 <section class="cli-install-dialog__usage">
-                    <h2><span>02</span>Use the CLI</h2>
+                    <h2><span>03</span>Use the CLI</h2>
                     <dl>
                         <div v-for="example in examples" :key="example.command">
                             <dt class="fb-code">{{ example.command }}</dt>
@@ -139,6 +172,22 @@ const examples = [
 .cli-install-dialog__unavailable {
     color: var(--fb-text-muted);
     font-size: 0.875rem;
+}
+.cli-install-dialog__platform-label {
+    display: block;
+    margin-bottom: 0.375rem;
+    color: var(--fb-text-muted);
+    font-size: 0.6875rem;
+}
+.cli-install-dialog select {
+    width: 100%;
+    margin-bottom: 1rem;
+    padding: 0.625rem 0.75rem;
+    border: 1px solid var(--fb-border);
+    border-radius: 0.5rem;
+    background: var(--fb-page);
+    color: var(--fb-text);
+    font: 0.8125rem var(--fb-font-sans);
 }
 .cli-install-dialog__note {
     margin: 0.75rem 0 0;

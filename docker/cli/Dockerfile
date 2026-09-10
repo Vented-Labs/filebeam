@@ -6,6 +6,7 @@ RUN apt-get update \
         gcc-aarch64-linux-gnu \
         libc6-dev-arm64-cross \
         php-cli \
+        python3 \
         tar \
     && rustup component add clippy rustfmt \
     && rustup target add x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu \

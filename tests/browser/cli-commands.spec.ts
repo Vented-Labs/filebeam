@@ -5,6 +5,8 @@ import {
     buildInstallCommand,
     cliDefaults,
     cliUnavailableReason,
+    detectDesktopPlatform,
+    quotePowerShellArgument,
     quoteShellArgument,
 } from '../../ui/src/lib/cli-commands';
 import { buildShareLink } from '../../ui/src/lib/share-link';
@@ -56,14 +58,21 @@ test('CLI targets follow the parser and preserve canonical keyed and keyless lin
         expect(() => buildDownloadCommand(target)).toThrow();
 });
 
-test('installer publication and real CLI capability gate actionable commands', () => {
+test('platform installers stream directly to the selected shell', () => {
     expect(buildInstallCommand({ ...cliDefaults, installer_url: null })).toBeUndefined();
     expect(buildInstallCommand(cliDefaults)).toBe(
-        "curl -fsSL 'https://releases.filebeam.io/cli/install.sh' -o beam-install.sh && sh beam-install.sh",
+        "curl -fsSL 'https://releases.filebeam.io/cli/install.sh' | sh",
     );
     const url = "https://releases.filebeam.test/cli/install.sh?tag=it's-ready&v=1";
     expect(buildInstallCommand({ ...cliDefaults, installer_url: url })).toBe(
-        `curl -fsSL ${quoteShellArgument(url)} -o beam-install.sh && sh beam-install.sh`,
+        `curl -fsSL ${quoteShellArgument(url)} | sh`,
+    );
+    const windowsUrl = "https://releases.filebeam.test/cli/install.ps1?tag=it's-ready";
+    expect(
+        buildInstallCommand({ ...cliDefaults, windows_installer_url: windowsUrl }, 'windows'),
+    ).toBe(`Invoke-RestMethod -Uri ${quotePowerShellArgument(windowsUrl)} | Invoke-Expression`);
+    expect(buildInstallCommand(cliDefaults, 'windows')).toBe(
+        "Invoke-RestMethod -Uri 'https://releases.filebeam.io/cli/install.ps1' | Invoke-Expression",
     );
     for (const installer_url of [
         'http://filebeam.io/install.sh',
@@ -72,6 +81,45 @@ test('installer publication and real CLI capability gate actionable commands', (
         'https://filebeam.io/install.sh#run',
     ])
         expect(() => buildInstallCommand({ ...cliDefaults, installer_url })).toThrow();
+    expect(() =>
+        buildInstallCommand(
+            { ...cliDefaults, windows_installer_url: 'http://filebeam.io/install.ps1' },
+            'windows',
+        ),
+    ).toThrow();
+});
+
+test('desktop platform detection ignores mobile and iPadOS user agents', () => {
+    expect(detectDesktopPlatform({ userAgentDataPlatform: 'Linux', platform: 'MacIntel' })).toBe(
+        'linux',
+    );
+    expect(
+        detectDesktopPlatform({ userAgentDataPlatform: 'Windows', userAgentDataMobile: true }),
+    ).toBeUndefined();
+    expect(
+        detectDesktopPlatform({
+            platform: 'MacIntel',
+            userAgent: 'Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X)',
+        }),
+    ).toBeUndefined();
+    expect(
+        detectDesktopPlatform({
+            platform: 'MacIntel',
+            userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15)',
+            maxTouchPoints: 5,
+        }),
+    ).toBeUndefined();
+    expect(detectDesktopPlatform({ platform: 'Linux x86_64' })).toBe('linux');
+    expect(detectDesktopPlatform({ userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' })).toBe(
+        'windows',
+    );
+    expect(
+        detectDesktopPlatform({ userAgent: 'Mozilla/5.0 (X11; Linux x86_64) Mobile' }),
+    ).toBeUndefined();
+    expect(detectDesktopPlatform({ platform: 'Unknown', userAgent: 'Unknown' })).toBeUndefined();
+});
+
+test('installer publication and real CLI capability gate actionable commands', () => {
     const ready = { kind: 'files' as const, driver: 'http' as const, available: true };
     expect(cliUnavailableReason(ready)).toBeUndefined();
     for (const transfer of [

@@ -108,7 +108,46 @@ jobs:
           scripts/cli/release.test.sh
           bash scripts/release/cli-release.test.sh
 
-  package:
+  native-check:
+    if: github.event_name == 'pull_request' || github.event_name == 'schedule'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: blacksmith-6vcpu-macos-15
+            target: aarch64-apple-darwin
+          - runner: blacksmith-4vcpu-windows-2025
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        shell: bash
+        run: |
+          rustup toolchain install 1.98.0 --profile minimal
+          rustup default 1.98.0
+          rustup target add "${{ matrix.target }}"
+      - name: Cache native CLI
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            cli/target
+          key: beam-check-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.98.0-${{ hashFiles('cli/Cargo.lock') }}-${{ hashFiles('cli/src/**', 'cli/build.rs', 'cli/Cargo.toml') }}
+          restore-keys: beam-check-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.98.0-${{ hashFiles('cli/Cargo.lock') }}-
+      - name: Test native CLI
+        shell: bash
+        run: cargo test --manifest-path cli/Cargo.toml --locked --target "${{ matrix.target }}"
+      - name: Validate PowerShell installer syntax
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: '[scriptblock]::Create((Get-Content -Raw scripts/cli/install.ps1)) | Out-Null'
+
+  package-linux:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     needs: [test, validate-ref]
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -150,6 +189,114 @@ jobs:
           [[ "$RELEASE_COMMIT" == "$(git rev-parse HEAD)" ]]
           [[ -n "$BEAM_RELEASE_PUBLIC_KEY" ]]
           scripts/cli/package.sh "$RELEASE_TAG" dist/beam
+          bash scripts/cli/smoke-package.sh "$RELEASE_TAG" dist/beam
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ${{ env.RELEASE_TAG }}-linux
+          path: dist/beam/
+          if-no-files-found: error
+
+  package-native:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: [test, validate-ref]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: blacksmith-6vcpu-macos-15
+            os: macos
+            architecture: aarch64
+            target: aarch64-apple-darwin
+            smoke: true
+          - runner: blacksmith-6vcpu-macos-15
+            os: macos
+            architecture: x86_64
+            target: x86_64-apple-darwin
+            smoke: false
+          - runner: blacksmith-4vcpu-windows-2025
+            os: windows
+            architecture: x86_64
+            target: x86_64-pc-windows-msvc
+            smoke: true
+    runs-on: ${{ matrix.runner }}
+    environment: release
+    timeout-minutes: 40
+    env:
+      RELEASE_TAG: ${{ needs.validate-ref.outputs.tag }}
+      RELEASE_COMMIT: ${{ needs.validate-ref.outputs.commit }}
+    steps:
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+        with:
+          persist-credentials: false
+          ref: ${{ env.RELEASE_COMMIT }}
+          fetch-depth: 0
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240
+        with:
+          php-version: '8.5'
+          extensions: sodium
+          coverage: none
+      - name: Install Rust target
+        shell: bash
+        run: |
+          rustup toolchain install 1.98.0 --profile minimal
+          rustup default 1.98.0
+          rustup target add "${{ matrix.target }}"
+      - name: Cache CLI Cargo state
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            cli/target
+          key: beam-package-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.98.0-${{ hashFiles('cli/Cargo.lock') }}-${{ hashFiles('cli/src/**', 'cli/build.rs', 'cli/Cargo.toml') }}
+          restore-keys: beam-package-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.98.0-${{ hashFiles('cli/Cargo.lock') }}-
+      - name: Derive canonical CLI public key
+        shell: bash
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+          RELEASE_PUBLIC_KEY: ${{ secrets.RELEASE_PUBLIC_KEY }}
+        run: printf 'BEAM_RELEASE_PUBLIC_KEY=%s\n' "$(php scripts/release/cli-public-key.php derive)" >> "$GITHUB_ENV"
+      - name: Build native CLI package
+        shell: bash
+        run: bash scripts/cli/package-target.sh "$RELEASE_TAG" "${{ matrix.os }}" "${{ matrix.architecture }}" dist/beam
+      - name: Smoke test native executable
+        if: matrix.smoke
+        shell: bash
+        run: cli/target/${{ matrix.target }}/release/beam${{ matrix.os == 'windows' && '.exe' || '' }} --version
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ${{ env.RELEASE_TAG }}-${{ matrix.os }}-${{ matrix.architecture }}
+          path: dist/beam/
+          if-no-files-found: error
+
+  package:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: [package-linux, package-native, validate-ref]
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    env:
+      RELEASE_TAG: ${{ needs.validate-ref.outputs.tag }}
+    steps:
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.validate-ref.outputs.commit }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          pattern: ${{ env.RELEASE_TAG }}-*
+          path: dist/beam
+          merge-multiple: true
+      - name: Validate complete CLI package
+        run: |
+          for asset in \
+            "$RELEASE_TAG-linux-x86_64.tar.gz" \
+            "$RELEASE_TAG-linux-aarch64.tar.gz" \
+            "$RELEASE_TAG-macos-x86_64.tar.gz" \
+            "$RELEASE_TAG-macos-aarch64.tar.gz" \
+            "$RELEASE_TAG-windows-x86_64.zip"; do
+            test -s "dist/beam/$asset"
+          done
+          (cd dist/beam && sha256sum "$RELEASE_TAG"-*.tar.gz "$RELEASE_TAG"-*.zip > checksums.txt)
+          php scripts/release/cli-write-release.php "$RELEASE_TAG" dist/beam dist/beam/release.json
           bash scripts/cli/smoke-package.sh "$RELEASE_TAG" dist/beam
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:

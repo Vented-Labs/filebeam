@@ -14,13 +14,15 @@ command -v php >/dev/null
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 RELEASE_PUBLIC_KEY=$(php "$root/scripts/release/cli-public-key.php" derive)
 export RELEASE_PUBLIC_KEY
-[[ -f "$output_dir/checksums.txt" && -f "$output_dir/version" && -f "$output_dir/public-key" && -f "$output_dir/install.sh" ]] || { printf 'Expected CLI package output in %s.\n' "$output_dir" >&2; exit 1; }
+[[ -f "$output_dir/checksums.txt" && -f "$output_dir/version" && -f "$output_dir/public-key" && -f "$output_dir/install.sh" && -f "$output_dir/install.ps1" ]] || { printf 'Expected CLI package output in %s.\n' "$output_dir" >&2; exit 1; }
 [[ $(<"$output_dir/public-key") == "$RELEASE_PUBLIC_KEY" ]] || { printf 'CLI package public key does not match RELEASE_SIGNING_KEY.\n' >&2; exit 1; }
 R2_ENDPOINT_URL=$(php "$root/scripts/release/r2-endpoint.php" "$R2_ENDPOINT_URL" "$R2_BUCKET")
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/beam-publish.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT
 sed "s|__BEAM_RELEASE_PUBLIC_KEY__|$RELEASE_PUBLIC_KEY|g" "$root/scripts/cli/install.sh" > "$tmp/install.sh"
+sed "s|__BEAM_RELEASE_PUBLIC_KEY__|$RELEASE_PUBLIC_KEY|g" "$root/scripts/cli/install.ps1" > "$tmp/install.ps1"
 cmp --silent "$output_dir/install.sh" "$tmp/install.sh" || { printf 'CLI package installer does not match the canonical release public key.\n' >&2; exit 1; }
+cmp --silent "$output_dir/install.ps1" "$tmp/install.ps1" || { printf 'CLI PowerShell installer does not match the canonical release public key.\n' >&2; exit 1; }
 aws_r2=(aws --endpoint-url "$R2_ENDPOINT_URL" s3api)
 export AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-auto}
 export AWS_REQUEST_CHECKSUM_CALCULATION=${AWS_REQUEST_CHECKSUM_CALCULATION:-WHEN_REQUIRED}
@@ -45,8 +47,8 @@ put_immutable() {
 
 version=${tag#beam-v}
 release_dir="cli/versions/v$version"
-for architecture in x86_64 aarch64; do
-    archive="$tag-linux-$architecture.tar.gz"
+for target in linux-x86_64.tar.gz linux-aarch64.tar.gz macos-x86_64.tar.gz macos-aarch64.tar.gz windows-x86_64.zip; do
+    archive="$tag-$target"
     [[ -f "$output_dir/$archive" ]] || { printf 'Missing %s.\n' "$output_dir/$archive" >&2; exit 1; }
     put_immutable "$release_dir/$archive" "$output_dir/$archive"
 done
@@ -74,4 +76,5 @@ else
     "${aws_r2[@]}" put-object --bucket "$R2_BUCKET" --key cli/index.json --body "$tmp/index-envelope.json" --content-type application/json --cache-control 'no-cache' --if-none-match '*' >/dev/null
 fi
 "${aws_r2[@]}" put-object --bucket "$R2_BUCKET" --key cli/install.sh --body "$tmp/install.sh" --content-type text/x-shellscript --cache-control 'no-cache' >/dev/null
+"${aws_r2[@]}" put-object --bucket "$R2_BUCKET" --key cli/install.ps1 --body "$tmp/install.ps1" --content-type text/plain --cache-control 'no-cache' >/dev/null
 printf 'Published %s.\n' "$tag"

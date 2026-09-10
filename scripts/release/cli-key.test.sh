@@ -103,11 +103,12 @@ export R2_ENDPOINT_URL=https://0123456789abcdef0123456789abcdef.r2.cloudflaresto
 export R2_BUCKET=filebeam-releases AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test
 printf '%s\n' "$canonical_public" > "$tmp/package/public-key"
 printf '0.2.0\n' > "$tmp/package/version"
-for architecture in x86_64 aarch64; do
-    printf 'archive fixture\n' > "$tmp/package/beam-v0.2.0-linux-$architecture.tar.gz"
+for target in linux-x86_64.tar.gz linux-aarch64.tar.gz macos-x86_64.tar.gz macos-aarch64.tar.gz windows-x86_64.zip; do
+    printf 'archive fixture\n' > "$tmp/package/beam-v0.2.0-$target"
 done
-(cd "$tmp/package" && sha256sum beam-v0.2.0-linux-*.tar.gz > checksums.txt)
+(cd "$tmp/package" && sha256sum beam-v0.2.0-*.tar.gz beam-v0.2.0-*.zip > checksums.txt)
 sed "s|__BEAM_RELEASE_PUBLIC_KEY__|$canonical_public|g" "$root/scripts/cli/install.sh" > "$tmp/package/install.sh"
+sed "s|__BEAM_RELEASE_PUBLIC_KEY__|$canonical_public|g" "$root/scripts/cli/install.ps1" > "$tmp/package/install.ps1"
 for format in canonical unpadded whitespace both; do
     export RELEASE_SIGNING_KEY=$(format_key "$canonical_secret" "$format")
     export RELEASE_PUBLIC_KEY=$(format_key "$canonical_public" "$format")

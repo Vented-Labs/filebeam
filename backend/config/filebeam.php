@@ -109,15 +109,18 @@ if ($webrtcSessionLimit < 1 || $webrtcSessionLimit > 128 || $webrtcMaxSdpBytes <
 }
 
 $cliInstallerUrl = env('FILEBEAM_CLI_INSTALLER_URL') ?: 'https://releases.filebeam.io/cli/install.sh';
-if (! is_string($cliInstallerUrl)
-    || ! filter_var($cliInstallerUrl, FILTER_VALIDATE_URL)
-    || parse_url($cliInstallerUrl, PHP_URL_SCHEME) !== 'https'
-    || parse_url($cliInstallerUrl, PHP_URL_USER) !== null
-    || parse_url($cliInstallerUrl, PHP_URL_PASS) !== null
-    || parse_url($cliInstallerUrl, PHP_URL_FRAGMENT) !== null
-    || preg_match('/[\x00-\x20\x7f]/', $cliInstallerUrl)
-    || preg_match('/(?:^|\.)example$/i', (string) parse_url($cliInstallerUrl, PHP_URL_HOST))) {
-    throw new InvalidArgumentException('FILEBEAM_CLI_INSTALLER_URL must be a published HTTPS URL without credentials or a fragment.');
+$cliWindowsInstallerUrl = env('FILEBEAM_CLI_WINDOWS_INSTALLER_URL') ?: 'https://releases.filebeam.io/cli/install.ps1';
+foreach (['FILEBEAM_CLI_INSTALLER_URL' => $cliInstallerUrl, 'FILEBEAM_CLI_WINDOWS_INSTALLER_URL' => $cliWindowsInstallerUrl] as $name => $installerUrl) {
+    if (! is_string($installerUrl)
+        || ! filter_var($installerUrl, FILTER_VALIDATE_URL)
+        || parse_url($installerUrl, PHP_URL_SCHEME) !== 'https'
+        || parse_url($installerUrl, PHP_URL_USER) !== null
+        || parse_url($installerUrl, PHP_URL_PASS) !== null
+        || parse_url($installerUrl, PHP_URL_FRAGMENT) !== null
+        || preg_match('/[\x00-\x20\x7f]/', $installerUrl)
+        || preg_match('/(?:^|\.)example$/i', (string) parse_url($installerUrl, PHP_URL_HOST))) {
+        throw new InvalidArgumentException("{$name} must be a published HTTPS URL without credentials or a fragment.");
+    }
 }
 
 return [
@@ -129,6 +132,7 @@ return [
     'cli' => [
         // Configure only after the signed CLI release and installer are published.
         'installer_url' => $cliInstallerUrl,
+        'windows_installer_url' => $cliWindowsInstallerUrl,
         'installer_interpreter' => 'sh',
         'executable' => 'beam',
     ],
