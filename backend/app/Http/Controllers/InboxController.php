@@ -13,7 +13,7 @@ use App\Models\TransferChunk;
 use App\Models\TransferItem;
 use App\Models\User;
 use App\Notifications\InboxTransferCompleted;
-use App\Support\ChunkReader;
+use App\Support\ChunkResponse;
 use App\Support\InstanceSettings;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -74,20 +74,13 @@ class InboxController extends Controller
         ]]], 200, ['Cache-Control' => 'no-store']);
     }
 
-    public function chunk(Request $request, Transfer $transfer, TransferItem $item, int $position, ChunkReader $reader): StreamedResponse
+    public function chunk(Request $request, Transfer $transfer, TransferItem $item, int $position, ChunkResponse $response): StreamedResponse
     {
         $this->transfer($request, $transfer);
         /** @var TransferChunk $chunk */
         $chunk = $item->chunks()->atPosition($position)->firstOrFail();
-        $stream = $reader->read($chunk);
 
-        return response()->stream(function () use ($stream): void {
-            try {
-                fpassthru($stream);
-            } finally {
-                fclose($stream);
-            }
-        }, 200, ['Cache-Control' => 'private, no-store', 'Content-Length' => (string) $chunk->ciphertext_bytes, 'Content-Type' => 'application/octet-stream', 'X-Content-Type-Options' => 'nosniff']);
+        return $response->make($request, $chunk);
     }
 
     public function destroy(Request $request, Transfer $transfer): JsonResponse

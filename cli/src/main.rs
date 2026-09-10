@@ -15,6 +15,8 @@ use std::{env, io::IsTerminal, path::PathBuf};
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
+use crate::config::{MAX_CONCURRENCY, MAX_MEMORY_LIMIT_MIB, MIN_MEMORY_LIMIT_MIB};
+
 const INSTANCE: &str = "https://filebeam.io";
 
 fn instance() -> String {
@@ -48,6 +50,12 @@ struct Cli {
     /// Disable decorative animation and progress interpolation.
     #[arg(long, global = true)]
     reduced_motion: bool,
+    /// Limit simultaneous transfer requests (1-64).
+    #[arg(long, global = true, value_parser = clap::value_parser!(u32).range(1..=MAX_CONCURRENCY as i64))]
+    max_concurrency: Option<u32>,
+    /// Total memory budget for transfer buffers in MiB (64-4096).
+    #[arg(long, global = true, value_parser = clap::value_parser!(u64).range(MIN_MEMORY_LIMIT_MIB..=MAX_MEMORY_LIMIT_MIB))]
+    memory_limit_mib: Option<u64>,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -72,6 +80,12 @@ enum Command {
     },
     /// Check the signed release catalog for an update.
     Update,
+    /// List resumable transfers stored on this device.
+    Transfers,
+    /// Resume a saved transfer.
+    Resume { id: String },
+    /// Discard a saved transfer and its local resume state.
+    Cancel { id: String },
 }
 
 fn main() -> Result<()> {
@@ -83,8 +97,18 @@ fn main() -> Result<()> {
     let mut config = config::Config::load(cli.home)?;
     config.no_color |= cli.no_color;
     config.reduced_motion |= cli.reduced_motion;
+    if let Some(value) = cli.max_concurrency {
+        config.max_concurrency = Some(value);
+    }
+    if let Some(value) = cli.memory_limit_mib {
+        config.memory_limit_mib = value;
+    }
+    config.validate_transfer_limits()?;
     let instance = instance();
-    if !matches!(&cli.command, Some(Command::Update)) {
+    if !matches!(
+        &cli.command,
+        Some(Command::Update | Command::Transfers | Command::Cancel { .. })
+    ) {
         update::notify_if_available(&config);
     }
     match cli.command {
@@ -126,6 +150,39 @@ fn main() -> Result<()> {
             }
         }
         Some(Command::Update) => println!("{}", update::check(&config)?),
+        Some(Command::Transfers) => {
+            for transfer in protocol::saved_transfers(&config.home.join("transfers"))? {
+                println!(
+                    "{}\t{}\t{}\t{}/{}",
+                    transfer.id, transfer.direction, transfer.state, transfer.done, transfer.total
+                );
+            }
+        }
+        Some(Command::Resume { id }) => {
+            let transfer = protocol::saved_transfers(&config.home.join("transfers"))?
+                .into_iter()
+                .find(|transfer| transfer.id == id)
+                .context("saved transfer was not found or is malformed")?;
+            let direction = match transfer.direction.as_str() {
+                "upload" => app::Direction::Upload,
+                "download" => app::Direction::Download,
+                _ => unreachable!("saved transfer direction is validated"),
+            };
+            for value in inline::run(
+                &config,
+                &instance,
+                app::Request::Resume {
+                    id: transfer.id,
+                    direction,
+                },
+                cli.plain,
+            )? {
+                output::result(&value, cli.plain)?;
+            }
+        }
+        Some(Command::Cancel { id }) => {
+            protocol::discard_transfer(&config.home.join("transfers"), &id)?
+        }
         None => {
             if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() || cli.plain {
                 println!("beam {}\n{}", env!("BEAM_VERSION"), instance);
@@ -139,7 +196,8 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::configured_instance;
+    use super::{Cli, Command, configured_instance};
+    use clap::Parser;
 
     #[test]
     fn production_is_the_default_and_explicit_instances_are_preserved() {
@@ -156,5 +214,14 @@ mod tests {
             configured_instance(Some("https://files.company.test/".into())),
             "https://files.company.test"
         );
+    }
+
+    #[test]
+    fn transfer_commands_and_bounds_are_parsed() {
+        let cli =
+            Cli::try_parse_from(["beam", "--max-concurrency", "4", "resume", "job-1"]).unwrap();
+        assert_eq!(cli.max_concurrency, Some(4));
+        assert!(matches!(cli.command, Some(Command::Resume { id }) if id == "job-1"));
+        assert!(Cli::try_parse_from(["beam", "--memory-limit-mib", "32", "transfers"]).is_err());
     }
 }

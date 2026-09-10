@@ -47,6 +47,15 @@ BEAM_RELEASE_PUBLIC_KEY=BASE64_ED25519_PUBLIC_KEY scripts/cli/package.sh beam-v1
 
 Set `BEAM_DOCKER_MEMORY`, `BEAM_DOCKER_MEMORY_SWAP`, `BEAM_DOCKER_CPUS`, or `CARGO_BUILD_JOBS` to change those limits. `BEAM_DOCKER_BUILD=false` reuses an already-built tooling image.
 
+Browser builds run inside Sail in the normal application workflow. Build the Rust/WASM packages with the separately capped local tooling wrapper; do not run `wasm-pack` through Sail:
+
+```sh
+scripts/cli/wasm.sh encryption
+scripts/cli/wasm.sh transfer-wasm
+```
+
+The wrapper defaults to 512 MiB, one CPU, and one Cargo job. Its Docker limits use the same `BEAM_DOCKER_MEMORY`, `BEAM_DOCKER_MEMORY_SWAP`, `BEAM_DOCKER_CPUS`, and `CARGO_BUILD_JOBS` environment variables.
+
 ## Terminal experience
 
 Run `beam` for the full-screen Send / Receive workspace. The interface uses Filebeam's violet surfaces, gradient meter, file queue, and transfer receipts. Instance information loads in the background.
@@ -70,6 +79,25 @@ reduced_motion = false
 check_updates = true
 ```
 
+## Limits And Resume State
+
+`--memory-limit-mib` and `--max-concurrency` are global options, including when resuming. The memory limit is a budget for managed transfer buffers, not a process-RSS limit: allocator overhead, executable code, OS page cache, and unrelated allocations are outside it. The default buffer budget is 512 MiB; accepted values are 64 through 4096 MiB. Concurrent requests are capped at 64 and are further limited by the server and available managed buffer budget.
+
+```sh
+beam --memory-limit-mib 256 --max-concurrency 2 up report.pdf
+beam --memory-limit-mib 256 --max-concurrency 2 resume JOB_ID
+```
+
+Resume state is private to the local user in `~/.filebeam/transfers` (or the directory selected with `--home` / `FILEBEAM_HOME`). It can include encrypted transfer metadata, credentials, and immutable ciphertext needed to continue; it is not portable state and must not be copied, logged, or shared.
+
+```sh
+beam transfers
+beam resume JOB_ID
+beam cancel JOB_ID
+```
+
+`beam transfers` prints an ID, direction, state, and completed/total bytes. `Ctrl+C` retains a running job for `beam resume`; `beam cancel` deliberately discards that job and all of its local resume material. The Transfers screen follows the same rule: `Enter` resumes and `x` discards.
+
 ## Sending directories
 
 ```sh
@@ -80,9 +108,15 @@ beam up ./photos --individual    # Each discovered file counts against the limit
 
 The prompt shows the discovered file count and the instance's file limit. Plain/non-interactive directory uploads require an explicit mode. `--zip` and `--individual` are mutually exclusive.
 
-ZIP mode combines all supplied paths into one archive, preserving nested folders (including empty folders). A single directory produces `directory-name.zip`; multiple paths produce `filebeam-transfer.zip`. The temporary ZIP is removed when the worker finishes or is cancelled.
+ZIP mode combines all supplied paths into one archive, preserving nested folders (including empty folders). A single directory produces `directory-name.zip`; multiple paths produce `filebeam-transfer.zip`. The private archive is retained with the local job while it is needed for resume, then removed when the transfer finishes or the job is explicitly discarded.
 
 Individual mode recursively sends regular files into the recipient's chosen destination folder. Duplicate basenames receive deterministic suffixes such as `readme (2).txt`. Directory traversal includes hidden files and skips nested symbolic links. The file-count limit is checked before reserving a transfer; the normal encrypted-byte limit also applies.
+
+## Receipts And Expiry
+
+A completed private-transfer receipt includes the complete share link, including its secret fragment. Treat the receipt as sensitive: anyone with the complete link can use the corresponding share capability.
+
+The server initially retains a pending upload for two hours. Each accepted pending Turbo chunk refreshes that pending lifetime to two hours from the latest accepted chunk, but never beyond 24 hours from transfer creation. Adaptive server stages have a separate one-hour default TTL. A local resume therefore remains subject to server-side stage and pending-transfer expiry; resume may need to retransmit a missing chunk and cannot revive an expired transfer.
 
 ## Verification
 

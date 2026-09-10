@@ -1,19 +1,17 @@
 {
     "$schema": "https://www.schemastore.org/package.json",
     "name": "filebeam",
+    "private": true,
     "description": "End-to-end encrypted file and note sharing by Vented.",
     "license": "MIT",
-    "private": true,
-    "engines": {
-        "node": ">=24"
-    },
     "workspaces": [
         "backend",
         "ui"
     ],
     "scripts": {
         "build:encryption": "wasm-pack build encryption --target web --release --no-opt",
-        "build": "npm run check:icons && npm run build:encryption && npm run build --workspace=backend",
+        "build:transfer": "wasm-pack build transfer-wasm --target web --release --no-opt",
+        "build": "npm run check:icons && npm run build:encryption && npm run build:transfer && npm run build --workspace=backend",
         "build:og": "node scripts/og/render.mjs",
         "preview:og": "vite --config scripts/og/vite.config.mjs",
         "test:og": "playwright test --config scripts/og/playwright.config.ts",
@@ -26,7 +24,8 @@
         "format": "npm run format --workspace=backend && vp fmt ui/src tests/browser scripts/og scripts/prism-gallery playwright.config.ts vite.config.ts",
         "test:browser": "playwright test",
         "dev": "npm run dev --workspace=backend",
-        "test:encryption": "cargo test --manifest-path encryption/Cargo.toml"
+        "test:encryption": "scripts/cli/run.sh cargo test --manifest-path encryption/Cargo.toml --locked",
+        "test:transfer": "scripts/cli/run.sh bash -ceu 'cargo test --manifest-path transfer/Cargo.toml --locked && cargo test --manifest-path transfer-native/Cargo.toml --locked && cargo test --manifest-path transfer-wasm/Cargo.toml --locked'"
     },
     "devDependencies": {
         "@fontsource-variable/inter": "^5.3.0",
@@ -39,5 +38,8 @@
         "vite-plus": "^0.3.0",
         "vue": "^3.5.42",
         "vue-tsc": "^3.3.11"
+    },
+    "engines": {
+        "node": ">=24"
     }
 }

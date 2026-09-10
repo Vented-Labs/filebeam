@@ -12,6 +12,9 @@ export default defineConfig({
             '@filebeam/encryption': fileURLToPath(
                 new URL('../encryption/pkg/filebeam_encryption.js', import.meta.url),
             ),
+            '@filebeam/transfer': fileURLToPath(
+                new URL('../transfer-wasm/pkg/filebeam_transfer_wasm.js', import.meta.url),
+            ),
         },
     },
     plugins: lazyPlugins(() => [

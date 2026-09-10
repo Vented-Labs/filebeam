@@ -32,6 +32,9 @@ Route::prefix('v1')->group(function (): void {
     Route::get('/transfers/{transfer}', [TransferController::class, 'show'])
         ->middleware('throttle:transfer-reading')
         ->name('api.transfers.show');
+    Route::get('/transfers/{transfer}/upload-status', [TransferController::class, 'uploadStatus'])
+        ->middleware('throttle:transfer-reading')
+        ->name('api.transfers.upload-status');
     Route::post('/transfers/{transfer}/complete', [TransferController::class, 'complete'])
         ->middleware(['throttle:transfer-writing', EnsureAnonymousTransferUploadsAreEnabled::class])
         ->name('api.transfers.complete');

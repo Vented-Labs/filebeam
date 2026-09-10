@@ -4,6 +4,7 @@ import { decodeBase64Url } from '../lib/base64url';
 import {
     AdaptiveConcurrency,
     fetchChunkWithRetry,
+    initialiseTransferPolicy,
     readChunkWithRetry,
     retryAfterMilliseconds,
     transferConcurrency,
@@ -32,6 +33,7 @@ export type Transfer = {
     burn_on_read: boolean;
     chunk_bytes?: number;
     download_concurrency?: number;
+    transfer_capabilities?: { download_ranges?: boolean };
     recipient_key?: RecipientKey;
     items: Array<{
         id: string;
@@ -414,7 +416,11 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
                     'Content-Type': 'application/json',
                     'X-Filebeam-Session-Token': session.token,
                 },
-                body: JSON.stringify({ sequence, progress: session.progress, status }),
+                body: JSON.stringify({
+                    sequence,
+                    progress: session.progress,
+                    status,
+                }),
                 signal: terminal
                     ? AbortSignal.timeout(5_000)
                     : AbortSignal.any([session.controller.signal, AbortSignal.timeout(5_000)]),
@@ -443,7 +449,9 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
                 signal: AbortSignal.timeout(5_000),
             });
             if (!response.ok) return;
-            const payload = (await response.json()) as { data: { id: string; token: string } };
+            const payload = (await response.json()) as {
+                data: { id: string; token: string };
+            };
             session.id = payload.data.id;
             session.token = payload.data.token;
             if (session.terminal) {
@@ -692,6 +700,7 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
                 expectedBytes,
                 onProgress,
                 onRetry,
+                transfer.value.transfer_capabilities?.download_ranges === true,
             );
             if (result !== null) return result;
             onWaiting?.();
@@ -821,6 +830,8 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
         onProgress?: (bytes: number) => void,
     ): Promise<void> {
         if (!transfer.value?.chunk_bytes) throw new Error('Transfer unavailable.');
+        await initialiseTransferPolicy();
+        ensureActive(jobId);
         const downloadController = controller!;
         const hashId = crypto.randomUUID();
         const verifyDigest = Boolean(item.digest || turbo.value);

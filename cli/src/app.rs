@@ -1,20 +1,22 @@
 use std::{
     collections::VecDeque,
-    io::{self, Read},
     path::PathBuf,
     sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
-        mpsc::{self, Receiver, Sender, TryRecvError},
+        atomic::Ordering,
+        mpsc::{self, Receiver, TryRecvError},
     },
     thread,
     time::{Duration, Instant},
 };
 
-use anyhow::{Result, bail};
-use zeroize::Zeroizing;
+use anyhow::Result;
 
 use crate::{config::Config, protocol, update, uploads::DirectoryMode};
+#[allow(unused_imports)]
+pub use filebeam_transfer_native::control::{
+    Cancelled, Control, PeerConsent, Phase, Progress, Prompt, PromptKind, SecretKind, ShareReady,
+    TransferEvent, TransferSettings,
+};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Direction {
@@ -34,230 +36,11 @@ impl Direction {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Phase {
-    #[default]
-    Connecting,
-    Preparing,
-    Archiving,
-    Encrypting,
-    Sending,
-    Receiving,
-    Verifying,
-    Finalizing,
-    Waiting,
-    Unlocking,
-    Updating,
-}
-
-impl Phase {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Connecting => "Connecting",
-            Self::Preparing => "Preparing",
-            Self::Archiving => "Creating ZIP archive",
-            Self::Encrypting => "Encrypting",
-            Self::Sending => "Uploading",
-            Self::Receiving => "Downloading",
-            Self::Verifying => "Verifying integrity",
-            Self::Finalizing => "Creating your encrypted link",
-            Self::Waiting => "Waiting for the sender",
-            Self::Unlocking => "Unlocking your transfer",
-            Self::Updating => "Verifying signed release",
-        }
-    }
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct Progress {
-    pub phase: Phase,
-    pub name: String,
-    pub index: usize,
-    pub files: usize,
-    pub total: Option<u64>,
-    pub done: u64,
-    pub committed: u64,
-    pub item_total: u64,
-    pub item_done: u64,
-    pub wire_bytes: u64,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum SecretKind {
-    ShareKey,
-    Password,
-}
-
-impl SecretKind {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::ShareKey => "Decryption key",
-            Self::Password => "Transfer password",
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-pub enum PromptKind {
-    Secret(SecretKind),
-    Directory {
-        files: usize,
-        bytes: u64,
-        maximum_files: Option<usize>,
-    },
-}
-
-impl PromptKind {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Secret(kind) => kind.label(),
-            Self::Directory { .. } => "Directory upload",
-        }
-    }
-}
-
-pub struct Prompt {
-    pub kind: PromptKind,
-    pub reply: Sender<Zeroizing<String>>,
-}
-
-#[derive(Debug, thiserror::Error)]
-#[error("Transfer cancelled")]
-pub struct Cancelled;
-
-/// The worker publishes a single latest snapshot. Large transfers never build an event backlog.
-#[derive(Clone)]
-pub struct Control {
-    progress: Arc<Mutex<Progress>>,
-    pub cancelled: Arc<AtomicBool>,
-    prompts: Sender<Prompt>,
-}
-
-impl Control {
-    pub fn check(&self) -> Result<()> {
-        if self.cancelled.load(Ordering::Relaxed) {
-            return Err(Cancelled.into());
-        }
-        Ok(())
-    }
-
-    pub fn cancel(&self) {
-        self.cancelled.store(true, Ordering::Relaxed);
-    }
-
-    pub fn snapshot(&self) -> Progress {
-        self.progress
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone()
-    }
-
-    pub fn phase(&self, phase: Phase) -> Result<()> {
-        self.check()?;
-        self.edit(|progress| progress.phase = phase);
-        Ok(())
-    }
-
-    pub fn totals(&self, bytes: u64, files: usize) {
-        self.edit(|progress| {
-            progress.total = Some(bytes);
-            progress.files = files;
-        });
-    }
-
-    pub fn item(&self, name: String, index: usize, size: u64) {
-        self.edit(|progress| {
-            progress.name = name;
-            progress.index = index;
-            progress.item_total = size;
-            progress.item_done = 0;
-        });
-    }
-
-    pub fn advance(&self, done: u64, item_done: u64, wire: u64) {
-        self.edit(|progress| {
-            progress.done = done.min(progress.total.unwrap_or(done));
-            progress.item_done = item_done.min(progress.item_total);
-            progress.wire_bytes = progress.wire_bytes.saturating_add(wire);
-        });
-    }
-
-    pub fn commit(&self, bytes: u64) {
-        self.edit(|progress| progress.committed = bytes);
-    }
-
-    pub fn secret(&self, kind: SecretKind) -> Result<Zeroizing<String>> {
-        self.phase(Phase::Unlocking)?;
-        self.ask(PromptKind::Secret(kind))
-    }
-
-    pub fn ask(&self, kind: PromptKind) -> Result<Zeroizing<String>> {
-        let (reply, receiver) = mpsc::channel();
-        self.prompts.send(Prompt { kind, reply })?;
-        loop {
-            self.check()?;
-            match receiver.recv_timeout(Duration::from_millis(100)) {
-                Ok(value) => return Ok(value),
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
-                Err(_) => bail!("Secret input was closed"),
-            }
-        }
-    }
-
-    fn edit(&self, update: impl FnOnce(&mut Progress)) {
-        update(&mut self.progress.lock().unwrap_or_else(|e| e.into_inner()));
-    }
-}
-
-/// Count bytes handed to/from HTTP, separately from server acknowledgement and verification.
-pub struct TransferReader<R> {
-    inner: R,
-    control: Control,
-    payload_size: u64,
-    read: u64,
-    total_base: u64,
-    item_base: u64,
-}
-
-impl<R: Read> TransferReader<R> {
-    pub fn new(
-        inner: R,
-        control: &Control,
-        payload_size: u64,
-        total_base: u64,
-        item_base: u64,
-    ) -> Self {
-        Self {
-            inner,
-            control: control.clone(),
-            payload_size,
-            read: 0,
-            total_base,
-            item_base,
-        }
-    }
-}
-
-impl<R: Read> Read for TransferReader<R> {
-    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
-        self.control.check().map_err(io::Error::other)?;
-        let length = buffer.len().min(64 * 1024);
-        let count = self.inner.read(&mut buffer[..length])?;
-        self.read += count as u64;
-        let payload = self.read.min(self.payload_size);
-        self.control.advance(
-            self.total_base + payload,
-            self.item_base + payload,
-            count as u64,
-        );
-        Ok(count)
-    }
-}
-
 pub enum Request {
     Upload(Vec<PathBuf>, DirectoryMode),
     Download { link: String, output: PathBuf },
     Update,
+    Resume { id: String, direction: Direction },
 }
 
 impl Request {
@@ -266,6 +49,7 @@ impl Request {
             Self::Upload(..) => Direction::Upload,
             Self::Download { .. } => Direction::Download,
             Self::Update => Direction::Update,
+            Self::Resume { direction, .. } => *direction,
         }
     }
 }
@@ -280,11 +64,15 @@ impl Job {
     pub fn start(instance: String, config: Config, request: Request) -> Self {
         let (prompts, receiver) = mpsc::channel();
         let (sender, result) = mpsc::channel();
-        let control = Control {
-            progress: Arc::new(Mutex::new(Progress::default())),
-            cancelled: Arc::new(AtomicBool::new(false)),
+        let control = Control::new(
+            TransferSettings {
+                state_home: config.home.join("transfers"),
+                max_concurrency: config.max_concurrency,
+                memory_budget: config.memory_limit_mib * 1024 * 1024,
+                client_user_agent: Some(format!("beam/{}", env!("BEAM_VERSION"))),
+            },
             prompts,
-        };
+        );
         let worker = control.clone();
         thread::spawn(move || {
             let outcome = match request {
@@ -303,6 +91,7 @@ impl Job {
                     .phase(Phase::Updating)
                     .and_then(|_| update::check(&config))
                     .map(|value| vec![value]),
+                Request::Resume { id, .. } => protocol::resume(&id, &worker),
             };
             let outcome = if worker.cancelled.load(Ordering::Relaxed) && outcome.is_err() {
                 Err(Cancelled.into())
@@ -466,22 +255,17 @@ mod tests {
     use super::*;
 
     fn control() -> Control {
-        Control {
-            progress: Arc::new(Mutex::new(Progress::default())),
-            cancelled: Arc::new(AtomicBool::new(false)),
-            prompts: mpsc::channel().0,
-        }
+        Control::test_factory()
     }
 
     #[test]
-    fn transport_counts_exclude_authentication_tags_and_require_commit() {
+    fn control_keeps_transport_and_committed_bytes_separate() {
         let control = control();
         control.totals(10, 1);
         control.item("file".into(), 1, 10);
-        let mut reader = TransferReader::new(io::Cursor::new(vec![0; 26]), &control, 10, 0, 0);
-        reader.read_exact(&mut [0; 5]).unwrap();
+        control.advance(5, 5, 13);
         assert_eq!(control.snapshot().done, 5);
-        reader.read_to_end(&mut Vec::new()).unwrap();
+        control.advance(10, 10, 13);
         let snapshot = control.snapshot();
         assert_eq!(
             (snapshot.done, snapshot.wire_bytes, snapshot.committed),
@@ -489,8 +273,6 @@ mod tests {
         );
         control.commit(10);
         assert_eq!(control.snapshot().committed, 10);
-        control.cancel();
-        assert!(reader.read(&mut [0; 1]).is_err());
     }
 
     #[test]
@@ -511,5 +293,32 @@ mod tests {
         assert!(view.eta().is_none());
         view.finish(true);
         assert_eq!(view.ratio, 1.0);
+    }
+
+    #[test]
+    fn control_exposes_configured_transfer_resources() {
+        let control = control();
+        assert_eq!(control.transfer_home(), std::path::Path::new("transfers"));
+        assert_eq!(control.max_concurrency(), None);
+        assert_eq!(control.memory_budget(), 512 * 1024 * 1024);
+    }
+
+    #[test]
+    fn resumed_jobs_keep_the_saved_direction() {
+        assert_eq!(
+            Request::Resume {
+                id: "job".into(),
+                direction: Direction::Download,
+            }
+            .direction(),
+            Direction::Download
+        );
+    }
+
+    #[test]
+    fn recovery_phases_have_safe_terminal_labels() {
+        assert_eq!(Phase::Retrying.label(), "Retrying transfer");
+        assert_eq!(Phase::Reconnecting.label(), "Reconnecting");
+        assert_eq!(Phase::Storing.label(), "Saving encrypted transfer state");
     }
 }

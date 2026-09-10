@@ -14,7 +14,7 @@ use App\Models\TransferChunk;
 use App\Models\TransferChunkUpload;
 use App\Models\TransferItem;
 use App\Support\Capability;
-use App\Support\ChunkReader;
+use App\Support\ChunkResponse;
 use App\Support\FilestoreRegistry;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -265,7 +265,7 @@ class TransferChunkController extends Controller
         TransferChunkUpload::query()->whereKey($attempt->id)->delete();
     }
 
-    public function show(Transfer $transfer, TransferItem $item, int $position, ChunkReader $reader): StreamedResponse|JsonResponse
+    public function show(Request $request, Transfer $transfer, TransferItem $item, int $position, ChunkResponse $response): StreamedResponse|JsonResponse
     {
         abort_unless($transfer->driver === TransferDriver::Http, 404);
         abort_unless($transfer->delivery === TransferDelivery::Link && $transfer->expires_at->isFuture(), 404);
@@ -278,19 +278,7 @@ class TransferChunkController extends Controller
             return response()->json(['status' => 'pending'], 202, ['Cache-Control' => 'no-store', 'Retry-After' => '2']);
         }
         abort_unless($chunk instanceof TransferChunk, 404);
-        $stream = $reader->read($chunk);
 
-        return response()->stream(function () use ($stream): void {
-            try {
-                fpassthru($stream);
-            } finally {
-                fclose($stream);
-            }
-        }, 200, [
-            'Cache-Control' => 'private, no-store',
-            'Content-Length' => (string) $chunk->ciphertext_bytes,
-            'Content-Type' => 'application/octet-stream',
-            'X-Content-Type-Options' => 'nosniff',
-        ]);
+        return $response->make($request, $chunk);
     }
 }

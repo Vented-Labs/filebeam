@@ -4,121 +4,136 @@ const MAX_RETRY_AFTER_MS = 60_000;
 
 class NonRetryableChunkError extends Error {}
 
+type TransferWasm = typeof import('@filebeam/transfer');
+
+let wasm: TransferWasm | undefined;
+let wasmInitialising: Promise<void> | undefined;
+
+type NodeProcess = { versions?: { node?: string }; cwd?: () => string };
+
+function nodeProcess(): NodeProcess | undefined {
+    return (globalThis as { process?: NodeProcess }).process;
+}
+
+function isNodeTestRuntime(): boolean {
+    return Boolean(nodeProcess()?.versions?.node);
+}
+
+async function loadTransferWasm(): Promise<TransferWasm> {
+    if (!isNodeTestRuntime()) return import('@filebeam/transfer');
+
+    // Playwright's test runner does not apply Vite aliases. Load the same generated web module
+    // directly and provide bytes because Node's fetch does not support file: URLs.
+    const root = nodeProcess()?.cwd?.();
+    if (!root) throw new Error('Node transfer policy loader requires a working directory.');
+    const urlModule = 'node:url';
+    const { pathToFileURL } = (await import(/* @vite-ignore */ urlModule)) as {
+        pathToFileURL: (path: string) => URL;
+    };
+    const packagePath = `${root}/transfer-wasm/pkg`;
+    const moduleUrl = pathToFileURL(`${packagePath}/filebeam_transfer_wasm.js`).href;
+    const module = (await import(/* @vite-ignore */ moduleUrl)) as TransferWasm;
+    const fsModule = 'node:fs/promises';
+    const { readFile } = (await import(/* @vite-ignore */ fsModule)) as {
+        readFile: (path: URL) => Promise<Uint8Array>;
+    };
+    // Node's Buffer can be backed by SharedArrayBuffer; wasm-bindgen accepts an ArrayBuffer view.
+    const wasmBytes = Uint8Array.from(
+        await readFile(pathToFileURL(`${packagePath}/filebeam_transfer_wasm_bg.wasm`)),
+    );
+    await module.default(wasmBytes);
+    return module;
+}
+
+/** Initialise scheduling policy before a transfer begins. Network and payload I/O stay in JS. */
+export function initialiseTransferPolicy(): Promise<void> {
+    wasmInitialising ??= loadTransferWasm().then(async (module) => {
+        if (!isNodeTestRuntime()) await module.default();
+        wasm = module;
+    });
+    return wasmInitialising;
+}
+
+export function transferPolicy(): TransferWasm {
+    if (!wasm)
+        throw new Error('Transfer policy is not initialized. Call initialiseTransferPolicy first.');
+    return wasm;
+}
+
 export function transferConcurrency(configured: number | undefined, chunkBytes: number): number {
     const memory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
     const constrained = memory !== undefined && memory <= 4;
-    // Leave room for plaintext, WASM, and browser networking copies as well as ciphertext.
     const byteBudget = (constrained ? 64 : 128) * 1024 * 1024;
-    const ceiling = Number.isFinite(configured) ? Math.floor(configured!) : 4;
-    const bytes = Number.isSafeInteger(chunkBytes) && chunkBytes > 0 ? chunkBytes + 16 : byteBudget;
-    return Math.max(1, Math.min(constrained ? 2 : 8, ceiling, Math.floor(byteBudget / bytes)));
+    return transferPolicy().concurrencyLimit(
+        Number.isFinite(configured) ? Math.floor(configured!) : 4,
+        chunkBytes,
+        byteBudget,
+        constrained ? 2 : 8,
+    );
 }
 
-/** Measure aggregate body throughput; additional slots are experiments, not a speed promise. */
 export class AdaptiveConcurrency {
-    private current = 1;
-    private readonly maximum: number;
-    private requests = new Map<string, number>();
-    private windowStart: number | undefined;
-    private windowBytes = 0;
-    private events = 0;
-    private measuredRate = 0;
-    private probeRate = 0;
-    private cooldownUntil = 0;
-    private successes = 0;
     partBytes: number | undefined;
+    private readonly controller: InstanceType<TransferWasm['AdaptiveConcurrencyController']>;
 
     constructor(
         maximum: number,
         private readonly onChange?: (limit: number) => void,
     ) {
-        this.maximum = Number.isFinite(maximum) ? Math.max(1, Math.min(8, Math.floor(maximum))) : 1;
+        this.controller = new (transferPolicy().AdaptiveConcurrencyController)(maximum);
     }
 
     get limit(): number {
-        return this.current;
+        return this.controller.limit;
     }
 
-    /** Bytes per millisecond, excluding idle time between requests. */
     get rate(): number {
-        return this.measuredRate;
+        return this.controller.rate;
     }
 
     sample(key: string, loaded: number): void {
-        if (!Number.isFinite(loaded) || loaded < 0) return;
-        const now = Date.now();
-        if (this.windowStart === undefined) this.windowStart = now;
-        const previous = this.requests.get(key) ?? 0;
-        this.requests.set(key, loaded);
-        if (loaded <= previous) return;
-        this.windowBytes += loaded - previous;
-        this.events++;
-        const elapsed = now - this.windowStart;
-        if (elapsed < 2_000 || this.events < 3) return;
-        const rate = this.windowBytes / elapsed;
-        this.measuredRate = this.measuredRate ? this.measuredRate * 0.5 + rate * 0.5 : rate;
-        this.windowStart = now;
-        this.windowBytes = 0;
-        this.events = 0;
-        if (now < this.cooldownUntil) return;
-        if (this.probeRate) {
-            const improved = rate >= this.probeRate * 1.1;
-            this.probeRate = 0;
-            if (!improved) {
-                this.change(Math.max(1, this.current - 1));
-                this.cooldownUntil = now + 8_000;
-                return;
-            }
-        }
-        // Low-bandwidth links benefit from finishing the earliest chunk, not splitting its uplink.
-        if (rate >= (256 * 1024) / 1_000 && this.current < this.maximum) {
-            this.probeRate = rate;
-            this.cooldownUntil = now + 2_000;
-            this.change(this.current + 1);
-        }
+        const before = this.limit;
+        this.controller.sample(key, loaded, Date.now());
+        this.changed(before);
     }
 
     forget(key: string): void {
-        this.requests.delete(key);
-        if (!this.requests.size) {
-            this.windowStart = undefined;
-            this.windowBytes = 0;
-            this.events = 0;
-        }
+        this.controller.forget(key);
     }
 
     observe(bytes: number, elapsedMs: number): void {
-        if (!Number.isFinite(bytes) || !Number.isFinite(elapsedMs) || bytes <= 0 || elapsedMs <= 0)
-            return;
-        const rate = bytes / elapsedMs;
-        // Completed short requests provide a baseline even when no sampling window has elapsed.
-        if (!this.measuredRate) this.measuredRate = rate;
-        this.successes++;
-        if (
-            this.current === 1 &&
-            this.successes >= 2 &&
-            Date.now() >= this.cooldownUntil &&
-            rate >= (256 * 1024) / 1_000 &&
-            this.maximum > 1
-        ) {
-            this.probeRate = this.measuredRate;
-            this.cooldownUntil = Date.now() + 2_000;
-            this.change(2);
-        }
+        const before = this.limit;
+        // Rust policy uses integer monotonic milliseconds. Preserve a nonzero sub-ms sample so
+        // synthetic fast links and genuinely quick small requests can still establish a baseline.
+        this.controller.observe(bytes, Math.max(1, Math.ceil(elapsedMs)), Date.now());
+        this.changed(before);
     }
 
     congested(): void {
-        this.probeRate = 0;
-        this.successes = 0;
-        this.cooldownUntil = Date.now() + 8_000;
-        this.change(Math.max(1, Math.floor(this.current / 2)));
+        const before = this.limit;
+        this.controller.congested(Date.now());
+        this.changed(before);
     }
 
-    private change(limit: number): void {
-        if (this.current === limit) return;
-        this.current = limit;
-        this.onChange?.(limit);
+    private changed(before: number): void {
+        if (before !== this.limit) this.onChange?.(this.limit);
     }
+}
+
+export function retryableStatus(status: number, staging: boolean): boolean {
+    return transferPolicy().retryableStatus(status, staging);
+}
+
+export function retryDelayMilliseconds(
+    attempt: number,
+    retryAfter: number | undefined,
+    jitterMaximum: number,
+): number {
+    return transferPolicy().retryDelayMs(
+        attempt,
+        retryAfter,
+        Math.floor(Math.random() * jitterMaximum),
+    );
 }
 
 export function retryAfterMilliseconds(value: string | null): number | undefined {
@@ -171,7 +186,7 @@ export async function fetchChunkWithRetry<T>(
             if (response.ok) return await consume(response);
             backoff = retryAfterMilliseconds(response.headers.get('Retry-After'));
             await response.body?.cancel();
-            if (response.status < 500 && response.status !== 408 && response.status !== 429)
+            if (!retryableStatus(response.status, false))
                 throw new NonRetryableChunkError(`Chunk transfer failed (${response.status}).`);
             throw new Error(`Chunk transfer failed (${response.status}).`);
         } catch (reason) {
@@ -184,7 +199,7 @@ export async function fetchChunkWithRetry<T>(
             signal.removeEventListener('abort', abort);
         }
         if (attempt < ATTEMPTS - 1)
-            await transferWait(backoff ?? 200 * 2 ** attempt + Math.random() * 200, signal);
+            await transferWait(backoff ?? retryDelayMilliseconds(attempt, undefined, 200), signal);
     }
     throw failure instanceof Error ? failure : new Error('Chunk transfer failed.');
 }
@@ -196,13 +211,22 @@ export async function readChunkWithRetry(
     expectedBytes: number,
     onProgress: (loaded: number) => unknown,
     onRetry?: () => void,
+    allowRanges = false,
 ): Promise<ArrayBuffer | null> {
     if (!Number.isSafeInteger(expectedBytes) || expectedBytes < 16 || expectedBytes > 25_000_000)
         throw new NonRetryableChunkError('Invalid ciphertext chunk size.');
     let failure: unknown;
+    let output = new Uint8Array(expectedBytes);
+    let loaded = 0;
+    let etag: string | undefined;
     for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
         signal.throwIfAborted();
-        onProgress(0);
+        const resuming = allowRanges && loaded > 0 && etag !== undefined;
+        if (!resuming) {
+            output = new Uint8Array(expectedBytes);
+            loaded = 0;
+            onProgress(0);
+        }
         const request = new AbortController();
         let idle: number | undefined;
         const touch = () => {
@@ -221,7 +245,12 @@ export async function readChunkWithRetry(
         let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
         let backoff: number | undefined;
         try {
-            const response = await fetch(url, { ...init, signal: request.signal });
+            const headers = new Headers(init.headers);
+            if (resuming) {
+                headers.set('Range', `bytes=${loaded}-`);
+                headers.set('If-Range', etag!);
+            }
+            const response = await fetch(url, { ...init, headers, signal: request.signal });
             if (response.status === 202) {
                 const pendingDelay = retryAfterMilliseconds(response.headers.get('Retry-After'));
                 await response.body?.cancel();
@@ -231,18 +260,45 @@ export async function readChunkWithRetry(
             if (!response.ok) {
                 backoff = retryAfterMilliseconds(response.headers.get('Retry-After'));
                 await response.body?.cancel();
-                if (response.status < 500 && response.status !== 408 && response.status !== 429)
+                if (!retryableStatus(response.status, false))
                     throw new NonRetryableChunkError(`Chunk transfer failed (${response.status}).`);
                 throw new Error(`Chunk transfer failed (${response.status}).`);
+            }
+            if (resuming && response.status !== 206 && response.status !== 200)
+                throw new NonRetryableChunkError('Chunk range response has an invalid status.');
+            if (response.status === 206) {
+                if (!resuming)
+                    throw new NonRetryableChunkError('Chunk range response was not requested.');
+                const contentRange = response.headers.get('Content-Range');
+                const match = contentRange?.match(/^bytes (\d+)-(\d+)\/(\d+)$/);
+                if (
+                    !match ||
+                    Number(match[1]) !== loaded ||
+                    Number(match[2]) !== expectedBytes - 1 ||
+                    Number(match[3]) !== expectedBytes ||
+                    response.headers.get('ETag') !== etag
+                )
+                    throw new NonRetryableChunkError(
+                        'Chunk range response does not match its prefix.',
+                    );
+            } else if (resuming) {
+                // Servers without range support may ignore Range. Re-download, never append 200 bytes.
+                output = new Uint8Array(expectedBytes);
+                loaded = 0;
+                onProgress(0);
             }
             reader = response.body?.getReader();
             if (!reader) throw new NonRetryableChunkError('Chunk response has no body.');
             const length = response.headers.get('Content-Length');
-            if (length !== null && (!/^\d+$/.test(length) || Number(length) !== expectedBytes))
+            const remaining = expectedBytes - loaded;
+            if (length !== null && (!/^\d+$/.test(length) || Number(length) !== remaining))
                 throw new NonRetryableChunkError('Chunk response has an invalid ciphertext size.');
+            if (!resuming && response.status === 200) {
+                const candidate = response.headers.get('ETag');
+                // If no strong ETag is advertised, retain no prefix across a later interruption.
+                etag = candidate && !candidate.startsWith('W/') ? candidate : undefined;
+            }
             touch();
-            const output = new Uint8Array(expectedBytes);
-            let loaded = 0;
             for (;;) {
                 const next = await reader.read();
                 signal.throwIfAborted();
@@ -272,7 +328,7 @@ export async function readChunkWithRetry(
         }
         if (attempt < ATTEMPTS - 1) {
             onRetry?.();
-            await transferWait(backoff ?? 200 * 2 ** attempt + Math.random() * 200, signal);
+            await transferWait(backoff ?? retryDelayMilliseconds(attempt, undefined, 200), signal);
         }
     }
     throw failure instanceof Error ? failure : new Error('Chunk transfer failed.');

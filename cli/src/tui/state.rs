@@ -17,7 +17,7 @@ use crate::{
     config::Config,
     input::Input,
     presentation::{Theme, clean},
-    protocol::{self, Info},
+    protocol::{self, Info, SavedTransfer},
 };
 
 #[derive(Clone)]
@@ -57,6 +57,7 @@ impl Entry {
 pub enum Mode {
     Send,
     Receive,
+    Transfers,
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
@@ -65,6 +66,7 @@ pub enum Focus {
     Action,
     Link,
     Destination,
+    Jobs,
 }
 
 pub struct Receipt {
@@ -99,6 +101,7 @@ pub struct State {
     pub notice: Option<(String, Instant)>,
     pub results: Vec<String>,
     pub info: Option<Result<Info, String>>,
+    pub saved_transfers: Vec<SavedTransfer>,
     pub instance: String,
     pub config: Config,
     pub now: Instant,
@@ -134,6 +137,8 @@ impl State {
             notice: None,
             results: Vec::new(),
             info: None,
+            saved_transfers: protocol::saved_transfers(&config.home.join("transfers"))
+                .unwrap_or_default(),
             instance: instance.to_owned(),
             config: config.clone(),
             now: Instant::now(),
@@ -269,8 +274,48 @@ impl State {
                     output: expand_path(&self.destination.value),
                 }
             }
+            Mode::Transfers => {
+                self.resume_selected();
+                return;
+            }
         };
         self.begin(request);
+    }
+
+    fn resume_selected(&mut self) {
+        let Some(transfer) = self.saved_transfers.get(self.queue_cursor) else {
+            self.toast("No saved transfers to resume");
+            return;
+        };
+        let direction = match transfer.direction.as_str() {
+            "upload" => crate::app::Direction::Upload,
+            "download" => crate::app::Direction::Download,
+            _ => {
+                self.toast("Saved transfer has an invalid direction");
+                return;
+            }
+        };
+        self.begin(Request::Resume {
+            id: transfer.id.clone(),
+            direction,
+        });
+    }
+
+    fn discard_selected(&mut self) {
+        let Some(transfer) = self.saved_transfers.get(self.queue_cursor) else {
+            return;
+        };
+        let id = transfer.id.clone();
+        match protocol::discard_transfer(&self.config.home.join("transfers"), &id) {
+            Ok(()) => {
+                self.saved_transfers.remove(self.queue_cursor);
+                self.queue_cursor = self
+                    .queue_cursor
+                    .min(self.saved_transfers.len().saturating_sub(1));
+                self.toast("Saved transfer discarded");
+            }
+            Err(error) => self.toast(format!("Could not discard saved transfer: {error}")),
+        }
     }
 
     fn begin(&mut self, request: Request) {
@@ -415,6 +460,23 @@ impl State {
             }
             return Ok(false);
         }
+        if self.mode == Mode::Transfers {
+            match key.code {
+                KeyCode::Down | KeyCode::Char('j') => {
+                    self.queue_cursor =
+                        (self.queue_cursor + 1).min(self.saved_transfers.len().saturating_sub(1));
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.queue_cursor = self.queue_cursor.saturating_sub(1);
+                }
+                KeyCode::Enter => self.resume_selected(),
+                KeyCode::Delete | KeyCode::Backspace | KeyCode::Char('x') => {
+                    self.discard_selected()
+                }
+                _ => {}
+            }
+            return Ok(false);
+        }
         if self.mode == Mode::Receive && matches!(self.focus, Focus::Link | Focus::Destination) {
             match key.code {
                 KeyCode::Tab => self.next_focus(false),
@@ -449,10 +511,21 @@ impl State {
                 self.mode = Mode::Receive;
                 self.focus = Focus::Link;
             }
+            KeyCode::Char('3') | KeyCode::Char('r') => {
+                self.mode = Mode::Transfers;
+                self.focus = Focus::Jobs;
+                self.saved_transfers =
+                    protocol::saved_transfers(&self.config.home.join("transfers"))
+                        .unwrap_or_default();
+                self.queue_cursor = self
+                    .queue_cursor
+                    .min(self.saved_transfers.len().saturating_sub(1));
+            }
             KeyCode::Tab => self.next_focus(false),
             KeyCode::BackTab => self.next_focus(true),
             KeyCode::Char('U') => self.begin(Request::Update),
             KeyCode::Char('u') if self.mode == Mode::Send => self.start(),
+            KeyCode::Enter if self.mode == Mode::Transfers => self.resume_selected(),
             KeyCode::Enter if self.focus == Focus::Action => self.start(),
             _ if self.mode == Mode::Send => self.browser_key(key),
             _ => {}
@@ -463,8 +536,10 @@ impl State {
     fn next_focus(&mut self, reverse: bool) {
         let focuses = if self.mode == Mode::Send {
             [Focus::Browser, Focus::Queue, Focus::Action]
-        } else {
+        } else if self.mode == Mode::Receive {
             [Focus::Link, Focus::Destination, Focus::Action]
+        } else {
+            [Focus::Jobs, Focus::Jobs, Focus::Jobs]
         };
         let position = focuses
             .iter()
@@ -582,5 +657,20 @@ mod tests {
         state.key(KeyCode::Enter.into()).unwrap();
         state.key(KeyCode::Char(' ').into()).unwrap();
         assert_eq!(state.selected.len(), 1);
+    }
+
+    #[test]
+    fn transfer_tab_cursor_is_safe_when_the_store_is_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = State::new(
+            &Config::default(),
+            "http://localhost:8000",
+            dir.path().into(),
+        )
+        .unwrap();
+        state.mode = Mode::Transfers;
+        state.key(KeyCode::Down.into()).unwrap();
+        assert_eq!(state.queue_cursor, 0);
+        assert!(state.job.is_none());
     }
 }

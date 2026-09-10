@@ -1,4 +1,11 @@
-import { AdaptiveConcurrency, retryAfterMilliseconds, transferWait } from './transfer';
+import {
+    AdaptiveConcurrency,
+    retryAfterMilliseconds,
+    retryDelayMilliseconds,
+    retryableStatus,
+    transferWait,
+} from './transfer';
+import * as transportPolicy from './transfer-wasm-policy';
 
 export type UploadTransport = {
     version: 1;
@@ -6,15 +13,9 @@ export type UploadTransport = {
     part_max_bytes: number;
     request_target_ms: number;
     request_budget_ms: number;
+    part_max_count?: number;
 };
 export type UploadPhase = 'uploading' | 'retrying' | 'storing' | 'offline';
-type Stage = {
-    id: string;
-    state: 'receiving' | 'finalizing' | 'complete';
-    offset: number;
-    ciphertext_bytes: number;
-    checksum: string;
-};
 type XhrResult = {
     status: number;
     data: unknown;
@@ -23,7 +24,6 @@ type XhrResult = {
 };
 
 const ATTEMPTS = 4;
-const MAX_RESETS = 2;
 const IDLE_TIMEOUT = 120_000;
 
 export class UploadError extends Error {
@@ -177,10 +177,7 @@ function retryable(reason: unknown): reason is UploadError {
     return (
         reason instanceof UploadError &&
         ((reason.status === undefined && reason.uncertain) ||
-            reason.status === 408 ||
-            reason.status === 423 ||
-            reason.status === 429 ||
-            (reason.status !== undefined && reason.status >= 500))
+            (reason.status !== undefined && retryableStatus(reason.status, true)))
     );
 }
 
@@ -219,28 +216,11 @@ async function request(
                 throw reason;
             onRetry?.();
             await transferWait(
-                reason.retryAfter ?? 250 * 2 ** attempt + Math.random() * 250,
+                reason.retryAfter ?? retryDelayMilliseconds(attempt, undefined, 250),
                 signal,
             );
         }
     }
-}
-
-function validateStage(value: unknown, id: string, bytes: number, checksum: string): Stage {
-    const data = (value as { data?: unknown } | null)?.data as Partial<Stage> | undefined;
-    if (
-        !data ||
-        data.id !== id ||
-        !['receiving', 'finalizing', 'complete'].includes(String(data.state)) ||
-        !Number.isSafeInteger(data.offset) ||
-        data.offset! < 0 ||
-        data.offset! > bytes ||
-        data.ciphertext_bytes !== bytes ||
-        data.checksum !== checksum ||
-        (data.state !== 'receiving' && data.offset !== bytes)
-    )
-        throw new UploadError('Upload staging returned invalid status.', 422);
-    return data as Stage;
 }
 
 function abandon(url: string, headers: Record<string, string>): void {
@@ -264,38 +244,25 @@ export async function uploadCiphertext(options: {
     options.onPhase?.(
         typeof navigator !== 'undefined' && navigator.onLine === false ? 'offline' : 'uploading',
     );
-    if (
-        transport &&
-        (transport.version !== 1 ||
-            !Number.isSafeInteger(transport.part_min_bytes) ||
-            transport.part_min_bytes < 1 ||
-            !Number.isSafeInteger(transport.part_max_bytes) ||
-            transport.part_max_bytes < transport.part_min_bytes ||
-            transport.part_max_bytes > 25_000_000 ||
-            !Number.isSafeInteger(transport.request_target_ms) ||
-            transport.request_target_ms <= 0 ||
-            !Number.isSafeInteger(transport.request_budget_ms) ||
-            transport.request_budget_ms < transport.request_target_ms)
-    )
+    try {
+        if (transport) transportPolicy.validateUploadTransport(transport);
+    } catch {
         throw new UploadError('The server supplied an invalid upload transport policy.', 422);
+    }
     const headers = {
         'Content-Type': 'application/octet-stream',
         'X-Filebeam-Upload-Token': token,
     };
     const key = `${chunkUrl}:${crypto.randomUUID()}`;
-    const partSize = (rate: number) =>
-        Math.max(
-            transport!.part_min_bytes,
-            Math.min(
-                transport!.part_max_bytes,
-                Math.floor(rate * transport!.request_target_ms * 0.75),
-            ),
-        );
+    const partSize = (rate: number) => transportPolicy.partBytes(transport!, rate);
     const predictedSlow =
         transport &&
         controller.rate > 0 &&
-        ciphertext.byteLength / (controller.rate / controller.limit) >
-            transport.request_budget_ms * 0.75;
+        transportPolicy.shouldStage(
+            transport,
+            ciphertext.byteLength,
+            controller.rate / controller.limit,
+        );
     if (!transport || (!predictedSlow && controller.partBytes === undefined)) {
         let started = performance.now();
         try {
@@ -322,8 +289,12 @@ export async function uploadCiphertext(options: {
                         elapsed >= 3_000 &&
                         loaded > 0 &&
                         loaded < ciphertext.byteLength &&
-                        ciphertext.byteLength / (loaded / elapsed) >
-                            transport.request_budget_ms * 0.8
+                        transportPolicy.shouldAbandonDirect(
+                            transport,
+                            ciphertext.byteLength,
+                            loaded,
+                            elapsed,
+                        )
                     ) {
                         controller.partBytes = partSize(loaded / elapsed);
                         throw new UploadError(
@@ -360,38 +331,49 @@ export async function uploadCiphertext(options: {
         Math.min(
             transport.part_max_bytes,
             controller.partBytes ??
-                (controller.rate > 0 ? partSize(controller.rate / controller.limit) : 1024 * 1024),
+                (controller.rate > 0
+                    ? partSize(controller.rate / controller.limit)
+                    : transportPolicy.initialPartBytes(transport, 0)),
         ),
     );
     controller.partBytes = size;
+    transportPolicy.validatePartCount(transport, ciphertext.byteLength, size);
     const checksum = await hash(ciphertext);
     signal.throwIfAborted();
-    for (let reset = 0; reset <= MAX_RESETS; reset++) {
+    let session: import('./transfer-wasm-policy').StageSession | undefined;
+    const reconcile = (value: unknown) => {
+        try {
+            return session!.reconcile(value);
+        } catch {
+            throw new UploadError('Upload staging returned invalid status.', 422);
+        }
+    };
+    for (;;) {
         const id = crypto.randomUUID();
         const url = `${chunkUrl}/uploads/${id}`;
-        const status = async () =>
-            validateStage(
-                (await request(url, null, headers, signal, () => undefined, 'GET')).data,
-                id,
-                ciphertext.byteLength,
-                checksum,
-            );
         try {
-            let state = validateStage(
+            if (session) session.reset(id);
+            else session = new transportPolicy.StageSession(id, ciphertext.byteLength, checksum);
+        } catch {
+            throw new UploadError('Upload staging exceeded its recovery limit.', 422);
+        }
+        const status = async () =>
+            reconcile((await request(url, null, headers, signal, () => undefined, 'GET')).data);
+        try {
+            let state = reconcile(
                 (
                     await request(
                         url,
-                        JSON.stringify({ ciphertext_bytes: ciphertext.byteLength, checksum }),
+                        JSON.stringify({
+                            ciphertext_bytes: ciphertext.byteLength,
+                            checksum,
+                        }),
                         { ...headers, 'Content-Type': 'application/json' },
                         signal,
                         () => undefined,
                     )
                 ).data,
-                id,
-                ciphertext.byteLength,
-                checksum,
             );
-            let failures = 0;
             while (state.state === 'receiving' && state.offset < ciphertext.byteLength) {
                 const offset = state.offset;
                 const part = ciphertext.subarray(
@@ -414,16 +396,18 @@ export async function uploadCiphertext(options: {
                         transport.request_budget_ms,
                         1,
                     );
-                    state = validateStage(result.data, id, ciphertext.byteLength, checksum);
-                    if (state.offset !== offset + part.byteLength)
-                        throw new UploadError(
-                            'Upload staging acknowledged an unexpected range.',
-                            422,
-                        );
-                    failures = 0;
+                    try {
+                        state = session.acknowledgePart(offset, part.byteLength, result.data);
+                    } catch {
+                        throw new UploadError('Upload staging returned invalid status.', 422);
+                    }
                     controller.observe(part.byteLength, result.elapsedMs);
-                    const target = partSize(part.byteLength / Math.max(1, result.elapsedMs));
-                    size = Math.min(target, Math.floor(size * 1.5));
+                    size = transportPolicy.growPart(
+                        transport,
+                        size,
+                        part.byteLength,
+                        result.elapsedMs,
+                    );
                     controller.partBytes = size;
                     onProgress(state.offset);
                 } catch (reason) {
@@ -435,25 +419,29 @@ export async function uploadCiphertext(options: {
                         throw reason;
                     controller.congested();
                     options.onPhase?.('retrying');
+                    try {
+                        session.recordRetry();
+                    } catch {
+                        throw new UploadError(
+                            'Chunk upload could not make progress after repeated retries.',
+                        );
+                    }
                     // No new range until status confirms what the server actually accepted.
                     await transferWait(
-                        reason.retryAfter ?? 250 * 2 ** Math.min(failures, 4) + Math.random() * 250,
+                        reason.retryAfter ??
+                            retryDelayMilliseconds(Math.min(session.retries, 4), undefined, 250),
                         signal,
                     );
                     state = await status();
                     if (state.offset > offset) {
-                        failures = 0;
+                        session.reprobeAfterRecovery();
                         onProgress(state.offset);
                         continue;
                     }
                     if (state.offset !== offset || reason.status === 409)
                         throw new UploadError('Upload staging has conflicting ciphertext.', 409);
-                    if (++failures >= 8)
-                        throw new UploadError(
-                            'Chunk upload could not make progress after repeated retries.',
-                        );
                     if (reason.status === undefined || reason.status === 408) {
-                        size = Math.max(transport.part_min_bytes, Math.floor(size / 2));
+                        size = transportPolicy.shrinkPart(transport, size);
                         controller.partBytes = size;
                     }
                     onProgress(offset);
@@ -476,14 +464,15 @@ export async function uploadCiphertext(options: {
                         undefined,
                         1,
                     );
-                    state = validateStage(result.data, id, ciphertext.byteLength, checksum);
+                    state = reconcile(result.data);
                     if (state.state === 'complete') return;
                     await transferWait(result.retryAfter ?? 2_000, signal);
                 } catch (reason) {
                     signal.throwIfAborted();
                     if (!retryable(reason)) throw reason;
                     await transferWait(
-                        reason.retryAfter ?? Math.min(5_000, 500 * 2 ** Math.min(poll, 4)),
+                        reason.retryAfter ??
+                            retryDelayMilliseconds(Math.min(poll, 4), undefined, 500),
                         signal,
                     );
                 }
@@ -500,7 +489,7 @@ export async function uploadCiphertext(options: {
         } catch (reason) {
             abandon(url, headers);
             signal.throwIfAborted();
-            if (reason instanceof UploadError && reason.status === 410 && reset < MAX_RESETS) {
+            if (reason instanceof UploadError && reason.status === 410) {
                 onProgress(0);
                 continue;
             }

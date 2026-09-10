@@ -1,7 +1,11 @@
 node_modules/
 encryption/target/
+transfer/target/
+transfer-native/target/
+transfer-wasm/target/
 cli/target/
 encryption/pkg/
+transfer-wasm/pkg/
 .filebeam/
 /.ai/
 /.agents/
@@ -19,6 +23,7 @@ backend/database/*.sqlite*
 /backend/public/fonts/filament/
 test-results/
 playwright-report/
+__pycache__/
 .DS_Store
 /dist/
 .idea/

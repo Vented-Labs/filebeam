@@ -39,7 +39,9 @@ test('an anonymous encrypted transfer can be uploaded and completed', function (
         'items' => [
             ['ciphertext_bytes' => 16, 'chunk_count' => 1],
         ],
-    ])->assertCreated()->assertHeader('Cache-Control', 'no-store, private');
+    ])->assertCreated()->assertHeader('Cache-Control', 'no-store, private')
+        ->assertJsonPath('data.transfer_capabilities', ['upload_status' => true, 'download_ranges' => true])
+        ->assertJsonPath('data.upload_transport.part_max_count', config('filebeam.staging.part_max_count'));
 
     $transferId = $creation->json('data.id');
     $itemId = $creation->json('data.items.0.id');
@@ -64,6 +66,7 @@ test('an anonymous encrypted transfer can be uploaded and completed', function (
 
     $this->getJson("/api/v1/transfers/{$transferId}")
         ->assertOk()
+        ->assertJsonPath('data.transfer_capabilities', ['upload_status' => true, 'download_ranges' => true])
         ->assertJsonMissing(['upload_token' => $uploadToken]);
 
     $download = $this->get("/api/v1/transfers/{$transferId}/items/{$itemId}/chunks/0");

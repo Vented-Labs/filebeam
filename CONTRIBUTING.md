@@ -23,6 +23,23 @@ Sail captures outgoing development email in Mailpit. Open [http://localhost:8025
 
 Use `backend/composer.json` for PHP commands and root `package.json` for JavaScript commands. Run the narrowest relevant checks before proposing a change.
 
+Sail includes the pinned Rust and WASM tools, so the normal frontend build and transfer checks work both on the host and inside Sail. Host transfer checks use the resource-capped Docker wrapper; Sail runs them directly because it already provides the toolchain without a Docker socket. Build the complete frontend and test shared transfer crates from the root with:
+
+```sh
+npm run build
+npm run test:transfer
+scripts/cli/check.sh
+```
+
+For a host-side WASM build with a 512 MB, one-CPU Docker limit, use the dedicated wrapper instead of `npm run build:*`:
+
+```sh
+scripts/cli/wasm.sh encryption
+scripts/cli/wasm.sh transfer-wasm
+```
+
+The wrapper keeps Cargo state in `${XDG_CACHE_HOME:-$HOME/.cache}/filebeam/wasm` (or `FILEBEAM_WASM_CACHE_DIR`) and builds its pinned tooling image only when its Docker layer cache is invalidated.
+
 ## Continuous Integration
 
 Actions use Blacksmith Ubuntu 24.04 runners for application tests and Linux packages, `blacksmith-6vcpu-macos-15` for Intel and Apple Silicon CLI packages, and `blacksmith-4vcpu-windows-2025` for the Windows x86_64 CLI package. The Beam CLI test job uses `blacksmith-8vcpu-ubuntu-2404`. CI containers have no Docker CPU or memory caps, and Cargo uses the available CPUs. Local CLI scripts retain their default limits.

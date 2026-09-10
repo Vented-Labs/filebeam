@@ -56,8 +56,10 @@ pub fn render(
         None
     } else if state.mode == Mode::Send {
         send(body, buffer, state, theme)
-    } else {
+    } else if state.mode == Mode::Receive {
         receive(body, buffer, state, theme)
+    } else {
+        transfers(body, buffer, state, theme)
     };
     footer_view(footer, buffer, state, theme);
     if state.help {
@@ -186,6 +188,7 @@ fn navigation(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) {
     for (mode, label) in [
         (Mode::Send, " 1  Send files "),
         (Mode::Receive, " 2  Receive "),
+        (Mode::Transfers, " 3  Transfers "),
     ] {
         let style = if state.mode == mode {
             theme.strong().fg(theme.accent()).bg(theme.selected())
@@ -682,6 +685,73 @@ fn receive(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) -> Opti
     link_cursor.or(destination_cursor)
 }
 
+fn transfers(
+    area: Rect,
+    buffer: &mut Buffer,
+    state: &mut State,
+    theme: Theme,
+) -> Option<(u16, u16)> {
+    let inner = paint::card(centered(area, 90, area.height), buffer, theme, true);
+    if inner.height < 4 {
+        return None;
+    }
+    paint::line(
+        at(inner, 0, 1),
+        buffer,
+        Line::styled("Saved transfers", theme.strong().fg(theme.accent())),
+    );
+    paint::line(
+        at(inner, 1, 1),
+        buffer,
+        Line::styled("Enter resumes · x discards local state", theme.dim()),
+    );
+    let rows = at(inner, 3, inner.height.saturating_sub(4));
+    let capacity = rows.height as usize;
+    ensure_scroll(&mut state.queue_scroll, state.queue_cursor, capacity);
+    if state.saved_transfers.is_empty() {
+        paint::line(
+            at(rows, 1, 1),
+            buffer,
+            Line::styled("No resumable transfers on this device.", theme.dim()),
+        );
+        return None;
+    }
+    for (offset, transfer) in state
+        .saved_transfers
+        .iter()
+        .skip(state.queue_scroll)
+        .take(capacity)
+        .enumerate()
+    {
+        let row = at(rows, offset as u16, 1);
+        let focused = state.queue_scroll + offset == state.queue_cursor;
+        Block::default()
+            .style(Style::default().bg(if focused {
+                theme.selected()
+            } else {
+                theme.surface()
+            }))
+            .render(row, buffer);
+        let total = if transfer.total == 0 {
+            "unknown size".to_owned()
+        } else {
+            format!("{} / {}", bytes(transfer.done), bytes(transfer.total))
+        };
+        paint::line(
+            row,
+            buffer,
+            Line::styled(
+                clip(
+                    &format!("{}  {}  {}", transfer.direction, transfer.state, total),
+                    row.width,
+                ),
+                if focused { theme.strong() } else { theme.dim() },
+            ),
+        );
+    }
+    None
+}
+
 fn transfer(area: Rect, buffer: &mut Buffer, state: &mut State, theme: Theme) {
     let Some(view) = state.transfer.as_ref() else {
         return;
@@ -943,6 +1013,8 @@ fn footer_view(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) {
             ("Enter", "continue"),
             ("Esc", "actions"),
         ]
+    } else if state.mode == Mode::Transfers {
+        vec![("Enter", "resume"), ("x", "discard"), ("↑↓", "choose")]
     } else {
         vec![
             ("Space", "select"),
@@ -991,7 +1063,7 @@ fn help(area: Rect, buffer: &mut Buffer, theme: Theme) {
     let items = [
         ("Your keyboard, a little more powerful.", ""),
         ("", ""),
-        ("1 / 2", "Send files / receive a link"),
+        ("1 / 2 / 3", "Send files / receive a link / saved transfers"),
         ("Tab / Shift+Tab", "Move between panels or form fields"),
         ("↑↓ / j k", "Move through files"),
         ("Space", "Add or remove a file"),
@@ -1119,6 +1191,43 @@ mod tests {
         let text: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
         assert!(text.contains("file-79.txt"));
         assert!(state.scroll > 0);
+    }
+
+    #[test]
+    fn saved_transfers_render_without_a_transfer_job() {
+        let directory = tempfile::tempdir().unwrap();
+        let config = Config::default();
+        let mut state =
+            State::new(&config, "http://localhost:8000", directory.path().into()).unwrap();
+        state.mode = Mode::Transfers;
+        state.saved_transfers.push(crate::protocol::SavedTransfer {
+            id: "job-1".into(),
+            direction: "upload".into(),
+            state: "retrying".into(),
+            done: 10,
+            total: 100,
+        });
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 80, 24));
+        render(buffer.area, &mut buffer, &mut state, Theme::fixture());
+        let text: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+        assert!(text.contains("retrying"));
+    }
+
+    #[test]
+    fn cancelled_download_receipt_has_a_stable_header() {
+        let directory = tempfile::tempdir().unwrap();
+        let config = Config::default();
+        let mut state =
+            State::new(&config, "http://localhost:8000", directory.path().into()).unwrap();
+        state.transfer = Some(TransferView::new(Direction::Download));
+        state.receipt = Some(Receipt {
+            result: Err("Transfer cancelled".into()),
+            cancelled: true,
+        });
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 80, 24));
+        render(buffer.area, &mut buffer, &mut state, Theme::fixture());
+        let text: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+        assert!(text.contains("Transfer cancelled"));
     }
 
     /// Set BEAM_VISUAL_DIR when reviewing actual cell colors, hierarchy and wrapping in a browser.

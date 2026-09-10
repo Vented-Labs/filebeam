@@ -89,11 +89,23 @@ jobs:
           sparse-checkout: .github/actions
       - uses: ./.ci-workflow/.github/actions/setup-rust
       - name: Check Rust formatting
-        run: cargo fmt --manifest-path encryption/Cargo.toml --check
+        run: |
+          cargo fmt --manifest-path encryption/Cargo.toml --check
+          cargo fmt --manifest-path transfer/Cargo.toml --check
+          cargo fmt --manifest-path transfer-native/Cargo.toml --check
+          cargo fmt --manifest-path transfer-wasm/Cargo.toml --check
       - name: Lint Rust
-        run: cargo clippy --manifest-path encryption/Cargo.toml --all-targets -- -D warnings
+        run: |
+          cargo clippy --manifest-path encryption/Cargo.toml --all-targets --locked -- -D warnings
+          cargo clippy --manifest-path transfer/Cargo.toml --all-targets --locked -- -D warnings
+          cargo clippy --manifest-path transfer-native/Cargo.toml --all-targets --locked -- -D warnings
+          cargo clippy --manifest-path transfer-wasm/Cargo.toml --all-targets --locked -- -D warnings
       - name: Test Rust
-        run: cargo test --manifest-path encryption/Cargo.toml
+        run: |
+          cargo test --manifest-path encryption/Cargo.toml --locked
+          cargo test --manifest-path transfer/Cargo.toml --locked
+          cargo test --manifest-path transfer-native/Cargo.toml --locked
+          cargo test --manifest-path transfer-wasm/Cargo.toml --locked
 
   php-static:
     name: PHP static checks

@@ -17,6 +17,7 @@ use App\Models\AccountKeyBundle;
 use App\Models\Filestore;
 use App\Models\Plan;
 use App\Models\Transfer;
+use App\Models\TransferChunk;
 use App\Models\TransferItem;
 use App\Models\TransferKeyEnvelope;
 use App\Models\User;
@@ -28,6 +29,7 @@ use App\Support\FilestoreRegistry;
 use App\Support\InstanceSettings;
 use App\Support\TransportPolicy;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -197,6 +199,7 @@ class TransferController extends Controller
                 'expires_at' => $transfer->expires_at->toIso8601String(),
                 'chunk_bytes' => $transfer->chunk_bytes,
                 'upload_transport' => $transfer->driver === TransferDriver::Http ? app(ChunkStaging::class)->transport($transfer->chunk_bytes) : null,
+                'transfer_capabilities' => ['upload_status' => true, 'download_ranges' => true],
                 'driver' => $transfer->driver->value,
                 'items' => $transfer->items->map(fn (TransferItem $item): array => [
                     'id' => $item->id,
@@ -245,6 +248,85 @@ class TransferController extends Controller
         );
 
         return new TransferResource($transfer->load('items'));
+    }
+
+    public function uploadStatus(Request $request, Transfer $transfer): JsonResponse
+    {
+        $this->authorizeCapability($transfer->upload_token_hash, $request->header('X-Filebeam-Upload-Token'));
+        $data = $request->validate([
+            'after' => ['nullable', 'string', 'max:128'],
+            'limit' => ['nullable', 'integer', 'min:1', 'max:500'],
+        ]);
+        abort_unless(
+            $transfer->driver === TransferDriver::Http
+                && in_array($transfer->status, [TransferStatus::Pending, TransferStatus::Available], true)
+                && $transfer->expires_at->isFuture(),
+            404,
+        );
+        $cursor = isset($data['after']) ? $this->decodeUploadCursor($data['after']) : null;
+        $limit = $data['limit'] ?? 500;
+        $required = $transfer->filestore_ids ?? [];
+        $chunks = TransferChunk::query()
+            ->select('transfer_chunks.*')
+            ->join('transfer_items', 'transfer_chunks.transfer_item_id', '=', 'transfer_items.id')
+            ->where('transfer_items.transfer_id', $transfer->id)
+            ->when($required === [], fn ($query) => $query->whereIn('transfer_chunks.id', []))
+            ->when($transfer->placement_mode === 'replicate', function ($query) use ($required): void {
+                foreach ($required as $filestoreId) {
+                    $query->whereHas('locations', fn ($locations) => $locations->where('filestore_id', $filestoreId));
+                }
+            })
+            ->when($transfer->placement_mode !== 'replicate', fn ($query) => $query->has('locations', '=', 1)
+                ->whereHas('locations', fn ($locations) => $locations->whereIn('filestore_id', $required)))
+            ->when($cursor !== null, fn ($query) => $query->where(function ($query) use ($cursor): void {
+                $query->where('transfer_items.position', '>', $cursor['item'])
+                    ->orWhere(function ($query) use ($cursor): void {
+                        $query->where('transfer_items.position', $cursor['item'])
+                            ->where('transfer_chunks.position', '>', $cursor['chunk']);
+                    });
+            }))
+            ->with('item:id,transfer_id,position')
+            ->orderBy('transfer_items.position')
+            ->orderBy('transfer_chunks.position')
+            ->limit($limit + 1)
+            ->get();
+        $next = $chunks->count() > $limit ? $chunks->pop() : null;
+
+        return response()->json(['data' => [
+            'id' => $transfer->id,
+            'status' => $transfer->status->value,
+            'protocol_version' => $transfer->protocol_version,
+            'chunk_bytes' => $transfer->chunk_bytes,
+            'expires_at' => $transfer->expires_at->toIso8601String(),
+            'upload_transport' => app(ChunkStaging::class)->transport($transfer->chunk_bytes),
+            'items' => $transfer->items()->get(['id', 'position', 'chunk_count', 'declared_ciphertext_bytes'])->map(fn (TransferItem $item): array => [
+                'id' => $item->id, 'position' => $item->position, 'chunk_count' => $item->chunk_count,
+                'declared_ciphertext_bytes' => $item->declared_ciphertext_bytes,
+            ])->all(),
+            'chunks' => $chunks->map(fn (TransferChunk $chunk): array => [
+                'item_id' => $chunk->transfer_item_id, 'position' => $chunk->position,
+                'ciphertext_bytes' => $chunk->ciphertext_bytes, 'checksum' => $chunk->checksum,
+            ])->all(),
+            'next_cursor' => $next === null ? null : $this->encodeUploadCursor($chunks->last()),
+        ]], 200, ['Cache-Control' => 'no-store, private']);
+    }
+
+    /** @return array{item: int, chunk: int} */
+    private function decodeUploadCursor(string $cursor): array
+    {
+        $decoded = base64_decode(strtr($cursor, '-_', '+/'), true);
+        $value = $decoded === false ? null : json_decode($decoded, true);
+        abort_unless(is_array($value) && isset($value['i'], $value['p']) && is_int($value['i']) && is_int($value['p']) && $value['i'] >= 0 && $value['p'] >= 0, 422);
+
+        return ['item' => $value['i'], 'chunk' => $value['p']];
+    }
+
+    private function encodeUploadCursor(TransferChunk $chunk): string
+    {
+        $item = $chunk->item;
+        assert($item instanceof TransferItem);
+
+        return rtrim(strtr(base64_encode(json_encode(['i' => $item->position, 'p' => $chunk->position], JSON_THROW_ON_ERROR)), '+/', '-_'), '=');
     }
 
     /**

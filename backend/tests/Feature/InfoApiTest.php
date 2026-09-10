@@ -42,6 +42,7 @@ test('anonymous clients receive the effective default transfer configuration', f
             'chunk_bytes' => 1_048_560,
             'upload_concurrency' => 3,
             'download_concurrency' => 5,
+            'transfer_capabilities' => ['upload_status' => true, 'download_ranges' => true],
             'maximum_transfer_bytes' => 123_456,
             'maximum_file_count' => 4,
             'file_retention_hours' => 12,

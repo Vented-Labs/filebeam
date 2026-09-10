@@ -32,6 +32,11 @@ use crate::{
 
 pub fn run(config: &Config, instance: &str, request: Request, plain: bool) -> Result<Vec<String>> {
     let theme = Theme::new(config);
+    let resuming = matches!(request, Request::Resume { .. });
+    let resumable = matches!(
+        request,
+        Request::Upload(..) | Request::Download { .. } | Request::Resume { .. }
+    );
     let label = match &request {
         Request::Upload(files, _) if files.len() == 1 => files[0]
             .file_name()
@@ -41,6 +46,7 @@ pub fn run(config: &Config, instance: &str, request: Request, plain: bool) -> Re
         Request::Upload(files, _) => format!("{} files", files.len()),
         Request::Download { .. } => "Encrypted transfer".into(),
         Request::Update => "beam".into(),
+        Request::Resume { id, .. } => format!("Saved transfer {}", clean(id)),
     };
     let mut view = TransferView::new(request.direction());
     let job = Job::start(instance.to_owned(), config.clone(), request);
@@ -56,7 +62,13 @@ pub fn run(config: &Config, instance: &str, request: Request, plain: bool) -> Re
             view.tick(job.control.snapshot(), true, Instant::now());
             view.finish(outcome.is_ok());
             surface.clear()?;
-            let values = outcome?;
+            let values = match outcome {
+                Err(error) if error.is::<Cancelled>() => {
+                    eprintln!("{}", cancellation_message(resuming, resumable));
+                    return Err(error);
+                }
+                result => result?,
+            };
             let target = if view.progress.files > 1 {
                 format!("{} files", view.progress.files)
             } else if view.progress.name.is_empty() {
@@ -120,6 +132,16 @@ pub fn run(config: &Config, instance: &str, request: Request, plain: bool) -> Re
             }
         }
         thread::sleep(Duration::from_millis(if theme.motion { 70 } else { 200 }));
+    }
+}
+
+fn cancellation_message(resuming: bool, resumable: bool) -> &'static str {
+    if resuming {
+        "Transfer cancelled. Run `beam transfers` to resume it later."
+    } else if resumable {
+        "Transfer cancelled. Run `beam transfers` to see resumable jobs."
+    } else {
+        "Transfer cancelled."
     }
 }
 
@@ -455,5 +477,18 @@ mod tests {
             );
             assert_eq!(buffer.area.width, width);
         }
+    }
+
+    #[test]
+    fn cancellation_hints_resumable_jobs_without_claiming_a_checkpoint_exists() {
+        assert_eq!(
+            cancellation_message(false, true),
+            "Transfer cancelled. Run `beam transfers` to see resumable jobs."
+        );
+        assert_eq!(
+            cancellation_message(true, true),
+            "Transfer cancelled. Run `beam transfers` to resume it later."
+        );
+        assert_eq!(cancellation_message(false, false), "Transfer cancelled.");
     }
 }
