@@ -584,6 +584,7 @@ final class State
         }
     }
 
+    /** @return int<1, 33554432> */
     private function sizeLimit(string $name): int
     {
         return $name === 'journal.json' ? self::MAX_JOURNAL_BYTES : self::MAX_STATE_BYTES;
