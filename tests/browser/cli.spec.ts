@@ -58,7 +58,10 @@ test('platform logo radios support tooltips, keyboard selection, and retained ov
     const windows = group.getByRole('radio', { name: 'Windows', exact: true });
     await expect(linux).toBeChecked();
     await windows.hover();
-    await expect(page.getByRole('tooltip')).toHaveText('Windows');
+    // Reka exposes the description through an aria-hidden, referenced tooltip node.
+    await expect(page.getByRole('tooltip', { includeHidden: true })).toHaveText('Windows');
+    await expect(page.locator('.fb-tooltip')).toBeVisible();
+    await expect(windows).toHaveAccessibleDescription('Windows');
     await windows.click();
     await expect(windows).toBeChecked();
     await expect(dialog.getByLabel('Installer command')).toHaveValue(
