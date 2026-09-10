@@ -321,7 +321,7 @@ jobs:
         run: sudo sysctl -w vm.overcommit_memory=1
       - id: digest
         name: Resolve tested staging image digest
-        run: printf 'digest=%s\n' "$(docker buildx imagetools inspect "$IMAGE:$IMAGE_TAG" --format '{{.Manifest.Digest}}')" >> "$GITHUB_OUTPUT"
+        run: printf 'digest=sha256:%s\n' "$(docker buildx imagetools inspect "$IMAGE:$IMAGE_TAG" --raw | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - name: Test published artifact
         env:
           FILEBEAM_IMAGE: ${{ env.IMAGE }}@${{ steps.digest.outputs.digest }}
@@ -390,7 +390,7 @@ jobs:
 
             # Buildx flattens the two staged indexes into one index while retaining attestations.
             docker buildx imagetools create --tag "$image:$REVISION" "$amd64_ref" "$arm64_ref"
-            index_digest=$(docker buildx imagetools inspect "$image:$REVISION" --format '{{.Manifest.Digest}}')
+            index_digest="sha256:$(docker buildx imagetools inspect "$image:$REVISION" --raw | sha256sum | cut -d' ' -f1)"
             [[ $(platform_digest "$image@$index_digest" amd64) == "$amd64_digest" ]]
             [[ $(platform_digest "$image@$index_digest" arm64) == "$arm64_digest" ]]
             final_attestations=$(attestation_digests "$image@$index_digest")
@@ -411,8 +411,8 @@ jobs:
           done
 
   github-release:
-    if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.publish && !inputs.metadata_only)) && needs.package.result == 'success' && needs.publish.result == 'success' && needs.docker-publish.result == 'success' && needs.validate-ref.result == 'success'
-    needs: [package, publish, docker-publish, validate-ref]
+    if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.publish && !inputs.metadata_only)) && needs.package.result == 'success' && needs.publish.result == 'success' && needs.docker-publish.result == 'success' && needs.cli.result == 'success' && needs.validate-ref.result == 'success'
+    needs: [package, publish, docker-publish, cli, validate-ref]
     permissions:
       contents: write
     environment: release
@@ -434,9 +434,15 @@ jobs:
         with:
           name: release-${{ env.RELEASE_TAG }}
           path: dist/release
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: beam-${{ env.RELEASE_TAG }}
+          path: dist/beam
       - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240
         with:
           php-version: '8.5'
           coverage: none
       - name: Publish verified GitHub release
-        run: scripts/release/github-release.sh "$RELEASE_TAG" "$RELEASE_COMMIT" dist/release
+        run: |
+          scripts/release/github-release.sh "$RELEASE_TAG" "$RELEASE_COMMIT" dist/release
+          scripts/release/cli-github-release.sh "beam-$RELEASE_TAG" "$RELEASE_COMMIT" dist/beam "$RELEASE_TAG"

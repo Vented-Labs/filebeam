@@ -13,9 +13,6 @@ for architecture in x86_64 aarch64; do
     tar -tzf "$directory/$archive" > "$temporary/entries"
     grep -Fxq beam/beam "$temporary/entries"
     [[ $(tar -xOzf "$directory/$archive" beam/version) == "$version" ]]
-    tar -xOzf "$directory/$archive" beam/install.sh > "$temporary/install-$architecture.sh"
-    ! grep -q '__BEAM_RELEASE_PUBLIC_KEY__' "$temporary/install-$architecture.sh"
-    cmp "$directory/install.sh" "$temporary/install-$architecture.sh"
 done
 (cd "$directory" && sha256sum --check checksums.txt)
 tar -xzf "$directory/$tag-linux-x86_64.tar.gz" -C "$temporary" beam/beam

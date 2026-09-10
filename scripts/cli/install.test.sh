@@ -11,6 +11,9 @@ cp "$root/scripts/cli/install.sh" "$tmp/package/beam/install.sh"
 printf '1.2.3\n' > "$tmp/package/beam/version"
 tar -C "$tmp/package" -czf "$tmp/release/beam-v1.2.3-linux-x86_64.tar.gz" beam
 cp "$tmp/release/beam-v1.2.3-linux-x86_64.tar.gz" "$tmp/release/beam-v1.2.3-linux-aarch64.tar.gz"
+cp "$tmp/release/beam-v1.2.3-linux-x86_64.tar.gz" "$tmp/release/beam-v1.2.3-macos-x86_64.tar.gz"
+cp "$tmp/release/beam-v1.2.3-linux-x86_64.tar.gz" "$tmp/release/beam-v1.2.3-macos-aarch64.tar.gz"
+cp "$tmp/release/beam-v1.2.3-linux-x86_64.tar.gz" "$tmp/release/beam-v1.2.3-windows-x86_64.zip"
 (cd "$tmp/release" && sha256sum beam-v1.2.3-linux-x86_64.tar.gz > checksums.txt)
 cat > "$tmp/bin/curl" <<'EOF'
 #!/bin/sh
@@ -49,7 +52,7 @@ fi
 sh "$1/signed-install.sh" --dir "$HOME/custom" --version 1.2.3
 sh "$1/signed-install.sh" --dir "$HOME/custom" --version 1.2.3
 test -x "$HOME/custom/bin/beam"
-test -x "$HOME/custom/bin/install.sh"
+test ! -e "$HOME/custom/bin/install.sh"
 test -f "$HOME/custom/config.toml"
 test -d "$HOME/custom/cache"
 test "$(grep -Fc "export PATH=\"$HOME/custom/bin:\$PATH\"" "$HOME/.bashrc")" = 1

@@ -16,11 +16,15 @@ read -r RELEASE_PUBLIC_KEY RELEASE_SIGNING_KEY <<< "$keypair"
 export RELEASE_PUBLIC_KEY RELEASE_SIGNING_KEY
 # A copied secret may contain whitespace or omit padding; Docker receives canonical Base64.
 BEAM_RELEASE_PUBLIC_KEY=$' \n'"${RELEASE_PUBLIC_KEY%=}"$'\t\r\n' "$root/scripts/cli/package.sh" beam-v0.2.0 "$temporary/package"
+cp "$temporary/package/beam-v0.2.0-linux-x86_64.tar.gz" "$temporary/package/beam-v0.2.0-macos-x86_64.tar.gz"
+cp "$temporary/package/beam-v0.2.0-linux-aarch64.tar.gz" "$temporary/package/beam-v0.2.0-macos-aarch64.tar.gz"
+cp "$temporary/package/beam-v0.2.0-linux-x86_64.tar.gz" "$temporary/package/beam-v0.2.0-windows-x86_64.zip"
 [[ $(<"$temporary/package/public-key") == "$RELEASE_PUBLIC_KEY" ]]
 bash "$root/scripts/cli/smoke-package.sh" beam-v0.2.0 "$temporary/package"
 
 mkdir -p "$temporary/public/cli/versions/v0.2.0"
 cp "$temporary/package/"*.tar.gz "$temporary/public/cli/versions/v0.2.0/"
+cp "$temporary/package/"*.zip "$temporary/public/cli/versions/v0.2.0/"
 cp "$temporary/package/install.sh" "$temporary/public/cli/install.sh"
 php "$root/scripts/release/cli-write-release.php" beam-v0.2.0 "$temporary/package" "$temporary/release.json"
 php "$root/scripts/release/cli-update-index.php" /dev/null "$temporary/release.json" > "$temporary/index.json"

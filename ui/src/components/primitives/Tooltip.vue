@@ -18,11 +18,13 @@ withDefaults(
         delay?: number;
         toggleOnClick?: boolean;
         disabled?: boolean;
+        inline?: boolean;
     }>(),
     { side: 'top', align: 'center', delay: 300, toggleOnClick: false, disabled: false },
 );
 
 const open = defineModel<boolean>('open', { default: false });
+const emit = defineEmits<{ escapeKeyDown: [event: KeyboardEvent] }>();
 const attrs = useAttrs();
 </script>
 
@@ -37,8 +39,15 @@ const attrs = useAttrs();
             <TooltipTrigger as-child v-bind="attrs" @click="open = toggleOnClick ? !open : false">
                 <slot />
             </TooltipTrigger>
-            <TooltipPortal>
-                <TooltipContent :side="side" :align="align" :side-offset="8" class="fb-tooltip">
+            <TooltipPortal :disabled="inline">
+                <TooltipContent
+                    :aria-label="content"
+                    :side="side"
+                    :align="align"
+                    :side-offset="8"
+                    class="fb-tooltip"
+                    @escape-key-down="emit('escapeKeyDown', $event)"
+                >
                     {{ content }}
                 </TooltipContent>
             </TooltipPortal>

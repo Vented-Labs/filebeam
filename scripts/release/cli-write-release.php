@@ -14,14 +14,22 @@ if (preg_match('/^beam-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/', $t
 }
 
 $assets = [];
-foreach (['x86_64', 'aarch64'] as $architecture) {
-    $name = "{$tag}-linux-{$architecture}.tar.gz";
+$targets = [
+    ['linux', 'x86_64', 'tar.gz'],
+    ['linux', 'aarch64', 'tar.gz'],
+    ['macos', 'x86_64', 'tar.gz'],
+    ['macos', 'aarch64', 'tar.gz'],
+    ['windows', 'x86_64', 'zip'],
+];
+foreach ($targets as [$os, $architecture, $extension]) {
+    $name = "{$tag}-{$os}-{$architecture}.{$extension}";
     $path = $directory.'/'.$name;
     if (! is_file($path)) {
         throw new RuntimeException("Missing {$name}.");
     }
     $assets[] = [
         'architecture' => $architecture,
+        'os' => $os,
         'path' => "versions/v{$matches[1]}.{$matches[2]}.{$matches[3]}/{$name}",
         'sha256' => hash_file('sha256', $path),
         'size' => filesize($path),

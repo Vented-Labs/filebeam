@@ -78,19 +78,23 @@ verify_catalog() {
     }
 }
 
+case "$(uname -s)" in
+    Linux) os=linux ;;
+    Darwin) os=macos ;;
+    *) printf 'Unsupported operating system: %s\n' "$(uname -s)" >&2; exit 1 ;;
+esac
 case "$(uname -m)" in
     x86_64|amd64) architecture=x86_64 ;;
     aarch64|arm64) architecture=aarch64 ;;
-    *) printf 'Unsupported Linux architecture: %s\n' "$(uname -m)" >&2; exit 1 ;;
+    *) printf 'Unsupported architecture: %s\n' "$(uname -m)" >&2; exit 1 ;;
 esac
-[ "$(uname -s)" = Linux ] || { printf '%s\n' 'Only Linux is currently supported.' >&2; exit 1; }
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/beam-install.XXXXXX")
 trap 'rm -rf "$tmp"' EXIT HUP INT TERM
 fetch "$base_url/index.json" "$tmp/index-envelope.json" 1048576
 verify_catalog "$tmp/index-envelope.json"
 expires_at=$(sed -n 's/.*"expires_at"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$tmp/index.json" | awk 'NR == 1 { print; exit }')
-expires_epoch=$(date -u -d "$expires_at" +%s 2>/dev/null || true)
+expires_epoch=$(date -u -d "$expires_at" +%s 2>/dev/null || date -j -u -f '%Y-%m-%dT%H:%M:%SZ' "$expires_at" +%s 2>/dev/null || true)
 [ -n "$expires_epoch" ] && [ "$expires_epoch" -gt "$(date -u +%s)" ] || {
     printf '%s\n' 'The signed release catalog has expired.' >&2
     exit 1
@@ -101,14 +105,18 @@ if [ "$requested_version" = latest ]; then
 fi
 case "$requested_version" in [0-9]*.[0-9]*.[0-9]*) ;; *) printf '%s\n' 'Version must be X.Y.Z.' >&2; exit 64 ;; esac
 tag="beam-v$requested_version"
-archive="$tag-linux-$architecture.tar.gz"
+archive="$tag-$os-$architecture.tar.gz"
 release_url="$base_url/versions/v$requested_version"
-asset=$(awk -v wanted_version="$requested_version" -v wanted_arch="$architecture" '
+asset=$(awk -v wanted_version="$requested_version" -v wanted_os="$os" -v wanted_arch="$architecture" '
         /"version"[[:space:]]*:/ {
             version=$0; sub(/^.*"version"[[:space:]]*:[[:space:]]*"/, "", version); sub(/".*$/, "", version)
         }
         /"architecture"[[:space:]]*:/ {
+            os=""
             architecture=$0; sub(/^.*"architecture"[[:space:]]*:[[:space:]]*"/, "", architecture); sub(/".*$/, "", architecture)
+        }
+        /"os"[[:space:]]*:/ {
+            os=$0; sub(/^.*"os"[[:space:]]*:[[:space:]]*"/, "", os); sub(/".*$/, "", os)
         }
         /"path"[[:space:]]*:/ {
             path=$0; sub(/^.*"path"[[:space:]]*:[[:space:]]*"/, "", path); sub(/".*$/, "", path)
@@ -118,7 +126,7 @@ asset=$(awk -v wanted_version="$requested_version" -v wanted_arch="$architecture
         }
         /"size"[[:space:]]*:/ {
             size=$0; sub(/^.*"size"[[:space:]]*:[[:space:]]*/, "", size); sub(/[^0-9].*$/, "", size)
-            if (version == wanted_version && architecture == wanted_arch) { print path "|" checksum "|" size; exit }
+            if (version == wanted_version && architecture == wanted_arch && (os == wanted_os || (wanted_os == "linux" && os == ""))) { print path "|" checksum "|" size; exit }
         }
     ' "$tmp/index.json")
 expected_path=${asset%%|*}
@@ -139,15 +147,13 @@ fetch "$release_url/$archive" "$tmp/$archive" "$expected_size"
 [ "$(wc -c < "$tmp/$archive")" -eq "$expected_size" ] || { printf '%s\n' 'Archive size mismatch.' >&2; exit 1; }
 [ "$(sha256 "$tmp/$archive")" = "$expected" ] || { printf '%s\n' 'Archive checksum mismatch.' >&2; exit 1; }
 tar -xOzf "$tmp/$archive" beam/beam > "$tmp/beam"
-tar -xOzf "$tmp/$archive" beam/install.sh > "$tmp/install.sh"
-[ -s "$tmp/beam" ] && [ -s "$tmp/install.sh" ] || { printf '%s\n' 'Archive does not contain beam.' >&2; exit 1; }
+[ -s "$tmp/beam" ] || { printf '%s\n' 'Archive does not contain beam.' >&2; exit 1; }
 
 mkdir -p "$install_dir/bin" "$install_dir/cache"
 [ -f "$install_dir/config.toml" ] || : > "$install_dir/config.toml"
 candidate="$install_dir/bin/.beam.$$"
 install -m 0755 "$tmp/beam" "$candidate"
 mv -f "$candidate" "$install_dir/bin/beam"
-install -m 0755 "$tmp/install.sh" "$install_dir/bin/install.sh"
 
 add_path() {
     file=$1

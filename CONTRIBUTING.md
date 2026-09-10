@@ -25,7 +25,7 @@ Use `backend/composer.json` for PHP commands and root `package.json` for JavaScr
 
 ## Continuous Integration
 
-All Actions jobs use Blacksmith's Ubuntu 24.04 runners: `blacksmith-4vcpu-ubuntu-2404` for AMD64, `blacksmith-4vcpu-ubuntu-2404-arm` for ARM64 Docker coverage, and `blacksmith-8vcpu-ubuntu-2404` for the Beam CLI test job. CI containers have no Docker CPU or memory caps, and Cargo uses the available CPUs. Local CLI scripts retain their default limits.
+Actions use Blacksmith Ubuntu 24.04 runners for application tests and Linux packages, `blacksmith-6vcpu-macos-15` for Intel and Apple Silicon CLI packages, and `blacksmith-4vcpu-windows-2025` for the Windows x86_64 CLI package. The Beam CLI test job uses `blacksmith-8vcpu-ubuntu-2404`. CI containers have no Docker CPU or memory caps, and Cargo uses the available CPUs. Local CLI scripts retain their default limits.
 
 Tests run when a PR is opened, updated, or reopened, and on pushes to `master`. Release workflows call the same suite with the validated release commit; tag pushes do not start a second standalone Tests run. New PR updates cancel superseded Tests, Docker, and Beam CLI runs.
 

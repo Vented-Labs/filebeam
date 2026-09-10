@@ -7,24 +7,62 @@ import {
     DialogPortal,
     DialogRoot,
     DialogTitle,
+    RadioGroupItem,
+    RadioGroupRoot,
 } from 'reka-ui';
-import { computed } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import type { CliConfig } from '../../types';
-import { buildInstallCommand, cliDefaults } from '../../lib/cli-commands';
+import {
+    buildInstallCommand,
+    cliDefaults,
+    detectDesktopPlatform,
+    type CliPlatform,
+} from '../../lib/cli-commands';
 import Button from '../primitives/Button.vue';
 import Icon from '../primitives/Icon.vue';
+import Tooltip from '../primitives/Tooltip.vue';
 import CliCommandField from './CliCommandField.vue';
 
 const props = defineProps<{ config?: CliConfig }>();
 const open = defineModel<boolean>('open', { default: false });
 const emit = defineEmits<{ closeAutoFocus: [event: Event] }>();
+const selectedPlatform = ref<CliPlatform>();
+const dialogTitle = ref<HTMLElement>();
+const platforms = [
+    { value: 'linux', label: 'Linux' },
+    { value: 'macos', label: 'macOS' },
+    { value: 'windows', label: 'Windows' },
+] as const;
 const installCommand = computed(() => {
+    if (!selectedPlatform.value) return;
     try {
-        return buildInstallCommand(props.config ?? cliDefaults);
+        return buildInstallCommand(props.config ?? cliDefaults, selectedPlatform.value);
     } catch {
         return undefined;
     }
 });
+onMounted(() => {
+    const navigatorWithUserAgentData = navigator as Navigator & {
+        userAgentData?: { platform?: string; mobile?: boolean };
+    };
+    selectedPlatform.value = detectDesktopPlatform({
+        userAgentDataPlatform: navigatorWithUserAgentData.userAgentData?.platform,
+        userAgentDataMobile: navigatorWithUserAgentData.userAgentData?.mobile,
+        platform: navigator.platform,
+        userAgent: navigator.userAgent,
+        maxTouchPoints: navigator.maxTouchPoints,
+    });
+});
+function selectPlatformWithKeyboard(event: KeyboardEvent): void {
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+    const current = Math.max(
+        0,
+        platforms.findIndex((platform) => platform.value === selectedPlatform.value),
+    );
+    const forward = event.key === 'ArrowRight' || event.key === 'ArrowDown';
+    const next = (current + (forward ? 1 : -1) + platforms.length) % platforms.length;
+    selectedPlatform.value = platforms[next]!.value;
+}
 const examples = [
     { command: 'beam', description: 'Interactive TUI' },
     { command: 'beam up <files...>', description: 'Upload via terminal' },
@@ -38,17 +76,45 @@ const examples = [
             <DialogOverlay class="fb-dialog__overlay" />
             <DialogContent
                 class="fb-dialog__content cli-install-dialog"
+                @open-auto-focus.prevent="dialogTitle?.focus()"
                 @close-auto-focus="emit('closeAutoFocus', $event)"
             >
                 <p class="cli-install-dialog__eyebrow">
                     <Icon name="code" :size="16" />Filebeam / terminal
                 </p>
-                <DialogTitle class="fb-dialog__title">Install CLI</DialogTitle>
+                <DialogTitle as-child>
+                    <h2 ref="dialogTitle" class="fb-dialog__title" tabindex="-1">Install CLI</h2>
+                </DialogTitle>
                 <DialogDescription class="fb-dialog__description"
                     >Use Filebeam from your terminal.</DialogDescription
                 >
                 <section class="cli-install-dialog__installer">
-                    <h2><span>01</span>Run the shell installer</h2>
+                    <h2><span>01</span>Choose your platform</h2>
+                    <RadioGroupRoot
+                        v-model="selectedPlatform"
+                        class="cli-install-dialog__platforms"
+                        orientation="horizontal"
+                        aria-label="Platform"
+                        @keydown="selectPlatformWithKeyboard"
+                    >
+                        <Tooltip
+                            v-for="platform in platforms"
+                            :key="platform.value"
+                            :content="platform.label"
+                            :delay="150"
+                            inline
+                            @escape-key-down="open = false"
+                        >
+                            <RadioGroupItem
+                                :value="platform.value"
+                                class="cli-install-dialog__platform"
+                                :aria-label="platform.label"
+                            >
+                                <Icon :name="`os-${platform.value}`" :size="26" />
+                            </RadioGroupItem>
+                        </Tooltip>
+                    </RadioGroupRoot>
+                    <h2><span>02</span>Run the installer</h2>
                     <CliCommandField
                         v-if="installCommand"
                         :command="installCommand"
@@ -56,15 +122,19 @@ const examples = [
                         copy-label="Copy installer"
                     />
                     <p v-else class="cli-install-dialog__unavailable" role="status">
-                        Installer instructions unavailable
+                        {{
+                            selectedPlatform
+                                ? 'Installer instructions unavailable'
+                                : 'Choose a desktop platform to view installer instructions'
+                        }}
                     </p>
                     <p class="cli-install-dialog__note">
-                        For Linux x86_64 and ARM64. After installation, open a new terminal to use
-                        <code>beam</code> from your PATH.
+                        After installation, open a new terminal to use <code>beam</code> from your
+                        PATH.
                     </p>
                 </section>
                 <section class="cli-install-dialog__usage">
-                    <h2><span>02</span>Use the CLI</h2>
+                    <h2><span>03</span>Use the CLI</h2>
                     <dl>
                         <div v-for="example in examples" :key="example.command">
                             <dt class="fb-code">{{ example.command }}</dt>
@@ -120,7 +190,8 @@ const examples = [
     border-radius: 0.875rem;
     background: var(--fb-surface);
 }
-.cli-install-dialog h2 {
+.cli-install-dialog__installer h2,
+.cli-install-dialog__usage h2 {
     display: flex;
     align-items: center;
     gap: 0.625rem;
@@ -128,7 +199,8 @@ const examples = [
     font-size: 0.75rem;
     font-weight: 500;
 }
-.cli-install-dialog h2 > span {
+.cli-install-dialog__installer h2 > span,
+.cli-install-dialog__usage h2 > span {
     padding: 0.25rem;
     border: 1px solid var(--fb-border);
     border-radius: 0.375rem;
@@ -139,6 +211,56 @@ const examples = [
 .cli-install-dialog__unavailable {
     color: var(--fb-text-muted);
     font-size: 0.875rem;
+}
+.cli-install-dialog__platforms {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.375rem;
+    margin-bottom: 1rem;
+    padding: 0.3rem;
+    border: 1px solid var(--fb-border);
+    border-radius: 0.75rem;
+    background: var(--fb-surface-sunken);
+    box-shadow: inset 0 1px 2px #0003;
+}
+.cli-install-dialog__platform {
+    position: relative;
+    display: grid;
+    min-width: 0;
+    height: 3.25rem;
+    place-items: center;
+    border: 1px solid transparent;
+    border-radius: 0.55rem;
+    background: transparent;
+    color: var(--fb-text-subtle);
+    cursor: pointer;
+    transition:
+        border-color var(--fb-duration-control) ease,
+        background var(--fb-duration-control) ease,
+        color var(--fb-duration-control) ease,
+        transform var(--fb-duration-control) var(--fb-ease);
+}
+.cli-install-dialog__platform:hover {
+    background: #ffffff06;
+    color: var(--fb-text);
+}
+.cli-install-dialog__platform:active {
+    transform: scale(0.97);
+}
+.cli-install-dialog__platform:focus-visible {
+    outline: 2px solid var(--fb-focus);
+    outline-offset: 2px;
+}
+.cli-install-dialog__platform[aria-checked='true'] {
+    border-color: #806191;
+    background: #32253f;
+    color: #d4b3fa;
+    box-shadow: inset 0 1px 0 #ffffff0a;
+}
+@media (prefers-reduced-motion: reduce) {
+    .cli-install-dialog__platform {
+        transition: none;
+    }
 }
 .cli-install-dialog__note {
     margin: 0.75rem 0 0;

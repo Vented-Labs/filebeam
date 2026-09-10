@@ -33,6 +33,7 @@ test('CLI installer instructions use public configuration without fetching artif
     config()->set('filebeam.cli.installer_url', null);
     $this->get('/')->assertInertia(fn (Assert $page) => $page
         ->where('filebeam.cli.installer_url', null)
+        ->where('filebeam.cli.windows_installer_url', 'https://releases.filebeam.io/cli/install.ps1')
         ->where('filebeam.cli.installer_interpreter', 'sh')
         ->where('filebeam.cli.executable', 'beam'));
 

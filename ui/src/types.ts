@@ -39,6 +39,7 @@ export type FilebeamConfig = {
 
 export type CliConfig = {
     installer_url: string | null;
+    windows_installer_url?: string | null;
     installer_interpreter: 'sh';
     executable: 'beam';
 };
