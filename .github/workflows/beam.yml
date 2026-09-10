@@ -342,6 +342,7 @@ jobs:
       - name: Smoke test the public signed installer
         run: bash scripts/cli/smoke-install.sh "$RELEASE_TAG"
       - name: Create matching CLI release
+        if: startsWith(inputs.tag || github.ref_name, 'beam-v')
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash scripts/release/cli-github-release.sh "$RELEASE_TAG" "$RELEASE_COMMIT" dist/beam
