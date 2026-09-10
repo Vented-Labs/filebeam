@@ -116,8 +116,13 @@ jobs:
         include:
           - runner: blacksmith-6vcpu-macos-15
             target: aarch64-apple-darwin
+            test: true
+          - runner: blacksmith-6vcpu-macos-15
+            target: x86_64-apple-darwin
+            test: false
           - runner: blacksmith-4vcpu-windows-2025
             target: x86_64-pc-windows-msvc
+            test: true
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
@@ -140,8 +145,13 @@ jobs:
           key: beam-check-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.98.0-${{ hashFiles('cli/Cargo.lock') }}-${{ hashFiles('cli/src/**', 'cli/build.rs', 'cli/Cargo.toml') }}
           restore-keys: beam-check-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.98.0-${{ hashFiles('cli/Cargo.lock') }}-
       - name: Test native CLI
+        if: matrix.test
         shell: bash
         run: cargo test --manifest-path cli/Cargo.toml --locked --target "${{ matrix.target }}"
+      - name: Build cross-architecture CLI
+        if: ${{ !matrix.test }}
+        shell: bash
+        run: cargo build --manifest-path cli/Cargo.toml --locked --target "${{ matrix.target }}"
       - name: Validate PowerShell installer syntax
         if: runner.os == 'Windows'
         shell: pwsh

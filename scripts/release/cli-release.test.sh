@@ -38,4 +38,40 @@ cmp "$temporary/first.json" "$temporary/second.json"
 php -r '$release=json_decode(file_get_contents($argv[1]), true, 512, JSON_THROW_ON_ERROR); if ($release["published_at"] !== "2023-11-14T22:13:20Z") exit(1);' "$temporary/first.json"
 printf 'CLI release metadata is stable across publication retries.\n'
 
+printf 'checksums\n' > "$temporary/checksums.txt"
+printf 'installer\n' > "$temporary/install.sh"
+printf 'installer\n' > "$temporary/install.ps1"
+mkdir "$temporary/bin"
+cat > "$temporary/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "$MOCK_LOG"
+case "$1 $2" in
+    'api repos/{owner}/{repo}/commits/'*) printf '%s\n' "$MOCK_COMMIT" ;;
+    'release view')
+        if [[ $* == *'--json assets'* ]]; then exit 0; fi
+        [[ ${MOCK_RELEASE_EXISTS:-false} == true || -f $MOCK_CREATED ]]
+        ;;
+    'release create') touch "$MOCK_CREATED" ;;
+    'release upload') ;;
+    *) exit 1 ;;
+esac
+EOF
+chmod +x "$temporary/bin/gh"
+export MOCK_COMMIT="$commit" MOCK_LOG="$temporary/gh.log" MOCK_CREATED="$temporary/created"
+git -C "$temporary" checkout --quiet --detach "$commit"
+(
+    cd "$temporary"
+    MOCK_RELEASE_EXISTS=true PATH="$temporary/bin:$PATH" bash "$root/scripts/release/cli-github-release.sh" beam-v0.2.0 "$commit" "$temporary" v0.2.0
+)
+! grep -Fq 'release create' "$MOCK_LOG"
+grep -Fq 'release upload v0.2.0' "$MOCK_LOG"
+: > "$MOCK_LOG"
+(
+    cd "$temporary"
+    MOCK_RELEASE_EXISTS=false PATH="$temporary/bin:$PATH" bash "$root/scripts/release/cli-github-release.sh" beam-v0.2.0 "$commit" "$temporary"
+)
+grep -Fq 'release create beam-v0.2.0 --verify-tag' "$MOCK_LOG"
+printf 'CLI GitHub assets use existing protected tags.\n'
+
 bash "$root/scripts/release/cli-key.test.sh"

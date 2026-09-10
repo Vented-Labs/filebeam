@@ -411,8 +411,8 @@ jobs:
           done
 
   github-release:
-    if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.publish && !inputs.metadata_only)) && needs.package.result == 'success' && needs.publish.result == 'success' && needs.docker-publish.result == 'success' && needs.validate-ref.result == 'success'
-    needs: [package, publish, docker-publish, validate-ref]
+    if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.publish && !inputs.metadata_only)) && needs.package.result == 'success' && needs.publish.result == 'success' && needs.docker-publish.result == 'success' && needs.cli.result == 'success' && needs.validate-ref.result == 'success'
+    needs: [package, publish, docker-publish, cli, validate-ref]
     permissions:
       contents: write
     environment: release
