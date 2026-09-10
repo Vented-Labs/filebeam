@@ -99,7 +99,7 @@ final class PostgresBackup
                 '--port='.$this->settings['port'],
                 '--username='.$this->settings['username'],
                 '--dbname='.$this->settings['database'],
-            ], $environment, $this->timeout);
+            ], $environment, $this->timeout, 'pg_dump backup');
 
             $header = file_get_contents($partial, false, null, 0, 5);
             if ($header !== 'PGDMP') {
@@ -107,8 +107,8 @@ final class PostgresBackup
             }
 
             // Listing validates the archive catalog; generating SQL to /dev/null reads its data sections too.
-            $this->run([$this->restoreBinary, '--list', $partial], $environment, self::COMMAND_TIMEOUT);
-            $this->run([$this->restoreBinary, '--file=/dev/null', $partial], $environment, $this->timeout);
+            $this->run([$this->restoreBinary, '--list', $partial], $environment, self::COMMAND_TIMEOUT, 'pg_restore archive catalog validation');
+            $this->run([$this->restoreBinary, '--file=/dev/null', $partial], $environment, $this->timeout, 'pg_restore archive data validation');
 
             if (! rename($partial, $target)) {
                 throw new RuntimeException('Unable to finalize PostgreSQL backup.');
@@ -197,7 +197,7 @@ final class PostgresBackup
 
     private function commandMajor(string $binary): int
     {
-        $result = $this->run([$binary, '--version'], $this->environment(null), self::COMMAND_TIMEOUT, true);
+        $result = $this->run([$binary, '--version'], $this->environment(null), self::COMMAND_TIMEOUT, basename($binary).' version check', true);
         if (preg_match('/\b(\d+)(?:\.\d+){0,2}\b/', $result, $matches) !== 1) {
             throw new RuntimeException('Unable to determine PostgreSQL client tool version.');
         }
@@ -289,7 +289,7 @@ final class PostgresBackup
      * @param  list<string>  $command
      * @param  array<string, string>  $environment
      */
-    private function run(array $command, array $environment, int $timeout, bool $captureOutput = false): string
+    private function run(array $command, array $environment, int $timeout, string $operation, bool $captureOutput = false): string
     {
         $process = @proc_open($command, [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, null, $environment, ['bypass_shell' => true]);
         if (! is_resource($process)) {
@@ -299,6 +299,9 @@ final class PostgresBackup
         stream_set_blocking($pipes[1], false);
         stream_set_blocking($pipes[2], false);
         $output = '';
+        $error = '';
+        // Keep enough lookahead to redact a credential crossing the displayed boundary.
+        $errorLimit = 65536 + 3 * strlen($this->settings['password']);
         $deadline = microtime(true) + $timeout;
         $reportedExit = -1;
         $exit = -1;
@@ -310,7 +313,10 @@ final class PostgresBackup
                 @stream_select($read, $write, $except, 0, 200000);
                 foreach ($read as $stream) {
                     $chunk = fread($stream, 8192);
-                    if ($captureOutput && $chunk !== false && strlen($output) < 65536) {
+                    if ($stream === $pipes[2] && $chunk !== false && strlen($error) < $errorLimit) {
+                        $error .= substr($chunk, 0, $errorLimit - strlen($error));
+                    }
+                    if ($stream === $pipes[1] && $captureOutput && $chunk !== false && strlen($output) < 65536) {
                         $output .= substr($chunk, 0, 65536 - strlen($output));
                     }
                 }
@@ -322,7 +328,7 @@ final class PostgresBackup
                 }
                 if (microtime(true) >= $deadline) {
                     proc_terminate($process, 9);
-                    throw new RuntimeException('PostgreSQL client tool timed out.');
+                    throw new RuntimeException('PostgreSQL client tool timed out. Operation: '.$operation.'.'.$this->diagnostic($error));
                 }
             }
             foreach ([$pipes[1], $pipes[2]] as $pipe) {
@@ -331,7 +337,10 @@ final class PostgresBackup
                     if ($chunk === false || $chunk === '') {
                         break;
                     }
-                    if ($captureOutput && strlen($output) < 65536) {
+                    if ($pipe === $pipes[2] && strlen($error) < $errorLimit) {
+                        $error .= substr($chunk, 0, $errorLimit - strlen($error));
+                    }
+                    if ($pipe === $pipes[1] && $captureOutput && strlen($output) < 65536) {
                         $output .= substr($chunk, 0, 65536 - strlen($output));
                     }
                 }
@@ -345,9 +354,26 @@ final class PostgresBackup
             $exit = $reportedExit;
         }
         if ($exit !== 0) {
-            throw new RuntimeException('PostgreSQL client tool failed.');
+            throw new RuntimeException('PostgreSQL client tool failed. Operation: '.$operation.'; exit code: '.$exit.'.'.$this->diagnostic($error));
         }
 
         return $output;
+    }
+
+    private function diagnostic(string $error): string
+    {
+        $password = $this->settings['password'];
+        if ($password !== '') {
+            $secrets = array_unique([$password, rawurlencode($password), urlencode($password), $this->escapePassfileField($password)]);
+            usort($secrets, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
+            $error = str_replace($secrets, '[redacted]', $error);
+        }
+        // Keep diagnostics printable and JSON-safe for status.json, even with binary stderr.
+        $error = trim(preg_replace('/[^\x20-\x7e\n\t]/', '?', $error) ?? '');
+        if ($error === '') {
+            return '';
+        }
+
+        return ' stderr: '.substr($error, 0, 4096).(strlen($error) > 4096 ? ' [truncated]' : '');
     }
 }

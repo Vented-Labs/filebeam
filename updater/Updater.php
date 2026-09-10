@@ -96,10 +96,12 @@ final class Command
         require_once __DIR__.'/ActivityLock.php';
         $activity = new ActivityLock($this->root.'/backend/storage/app/update-activity.lock');
         $exclusive = null;
+        $started = false;
         try {
             if ($this->state->read('journal.json') !== null) {
                 throw new RuntimeException('An interrupted update journal exists. Run php update.php --recover or complete the documented manual recovery before another update.');
             }
+            $started = true;
             if ($fromCron) {
                 $this->state->write('heartbeat.json', ['at' => gmdate('c'), 'pid' => getmypid()]);
                 $pending = $this->state->read('pending.json');
@@ -172,7 +174,9 @@ final class Command
                 } catch (\Throwable) {
                 }
             }
-            $this->state->write('status.json', ['state' => 'failed', 'error' => $e->getMessage(), 'at' => gmdate('c')]);
+            if ($started) {
+                $this->state->write('status.json', ['state' => 'failed', 'error' => $e->getMessage(), 'at' => gmdate('c')]);
+            }
             throw $e;
         } finally {
             if (is_resource($exclusive)) {
@@ -505,6 +509,11 @@ final class Command
 
 final class State
 {
+    private const MAX_STATE_BYTES = 1048576;
+
+    // Journals contain both package file lists, including bundled dependencies.
+    private const MAX_JOURNAL_BYTES = 33554432;
+
     private string $dir;
 
     public function __construct(string $root)
@@ -539,9 +548,13 @@ final class State
         if (! is_file($file)) {
             return null;
         }
-        $contents = file_get_contents($file);
-        if ($contents === false || strlen($contents) > 1048576) {
+        $limit = $this->sizeLimit($name);
+        $contents = @file_get_contents($file, false, null, 0, $limit + 1);
+        if ($contents === false) {
             throw new RuntimeException('Cannot read updater state file '.$name);
+        }
+        if (strlen($contents) > $limit) {
+            throw new RuntimeException('Updater state file '.$name.' exceeds the '.$limit.' byte size limit.');
         }
         $value = json_decode($contents, true, 64, JSON_THROW_ON_ERROR);
 
@@ -554,6 +567,9 @@ final class State
         $file = $this->path($name);
         $temporary = $file.'.'.bin2hex(random_bytes(8)).'.tmp';
         $contents = json_encode($value, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+        if (strlen($contents) > $this->sizeLimit($name)) {
+            throw new RuntimeException('Updater state file '.$name.' exceeds the '.$this->sizeLimit($name).' byte size limit.');
+        }
         if (file_put_contents($temporary, $contents, LOCK_EX) === false || ! chmod($temporary, 0600) || ! rename($temporary, $file)) {
             @unlink($temporary);
             throw new RuntimeException('Cannot write updater state file '.$name);
@@ -566,6 +582,11 @@ final class State
         if (is_file($file) && ! unlink($file)) {
             throw new RuntimeException('Cannot remove updater state file '.$name);
         }
+    }
+
+    private function sizeLimit(string $name): int
+    {
+        return $name === 'journal.json' ? self::MAX_JOURNAL_BYTES : self::MAX_STATE_BYTES;
     }
 
     /** @return resource */
@@ -609,8 +630,9 @@ final class Recovery
                 throw new RuntimeException('Interrupted update journal has an unsafe file path.');
             }
         }
+        $oldFileSet = array_fill_keys($oldFiles, true);
         foreach ($newFiles as $relative) {
-            if (! in_array($relative, $oldFiles, true)) {
+            if (! isset($oldFileSet[$relative])) {
                 $target = $this->root.'/'.$relative;
                 if ((is_file($target) || is_link($target)) && ! unlink($target)) {
                     throw new RuntimeException('Unable to remove newly installed '.$relative);

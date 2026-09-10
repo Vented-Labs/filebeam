@@ -13,7 +13,7 @@ beforeEach(function (): void {
     $this->dump = $this->backupRoot.'/pg_dump';
     $this->restore = $this->backupRoot.'/pg_restore';
     $this->environment = [];
-    foreach (['POSTGRES_BACKUP_TEST_LOG', 'POSTGRES_BACKUP_TEST_TRUNCATE', 'POSTGRES_BACKUP_TEST_FAIL_RESTORE', 'POSTGRES_BACKUP_TEST_FAIL_DUMP', 'POSTGRES_BACKUP_TEST_SLEEP', 'PGPASSWORD', 'PGOPTIONS'] as $key) {
+    foreach (['POSTGRES_BACKUP_TEST_LOG', 'POSTGRES_BACKUP_TEST_TRUNCATE', 'POSTGRES_BACKUP_TEST_FAIL_RESTORE', 'POSTGRES_BACKUP_TEST_FAIL_DUMP', 'POSTGRES_BACKUP_TEST_SLEEP', 'POSTGRES_BACKUP_TEST_DIAGNOSTIC', 'PGPASSWORD', 'PGOPTIONS'] as $key) {
         $this->environment[$key] = getenv($key);
     }
     $script = <<<'PHP'
@@ -25,6 +25,12 @@ if (in_array('--version', $argv, true)) { echo "pg tool (PostgreSQL) 16.15\n"; e
 $passfile = getenv('PGPASSFILE');
 $record = ['argv' => $argv, 'passfile' => $passfile, 'passfile_contents' => $passfile ? file_get_contents($passfile) : null, 'passfile_mode' => $passfile ? (fileperms($passfile) & 0777) : null, 'pgpassword' => getenv('PGPASSWORD'), 'pgoptions' => getenv('PGOPTIONS'), 'sslmode' => getenv('PGSSLMODE'), 'sslrootcert' => getenv('PGSSLROOTCERT')];
 file_put_contents($log, json_encode($record)."\n", FILE_APPEND);
+$operation = basename($argv[0]) === 'pg_dump' ? 'dump' : (in_array('--list', $argv, true) ? 'catalog' : 'data');
+if (getenv('POSTGRES_BACKUP_TEST_DIAGNOSTIC') === $operation) {
+    fwrite(STDOUT, "stdout must not appear in diagnostics\n");
+    fwrite(STDERR, "permission denied: secret:with space / secret%3Awith%20space / secret%3Awith+space / secret\\:with space\n".str_repeat('x', 4080)."secret:with space".str_repeat('x', 70000));
+    exit(7);
+}
 if (getenv('POSTGRES_BACKUP_TEST_FAIL_DUMP') && basename($argv[0]) === 'pg_dump') { exit(1); }
 if (getenv('POSTGRES_BACKUP_TEST_SLEEP')) { sleep((int) getenv('POSTGRES_BACKUP_TEST_SLEEP')); }
 if (basename($argv[0]) === 'pg_dump') { foreach ($argv as $argument) { if (str_starts_with($argument, '--file=')) { file_put_contents(substr($argument, 7), getenv('POSTGRES_BACKUP_TEST_TRUNCATE') ? 'bad' : 'PGDMPtest'); exit(0); } } }
@@ -116,3 +122,23 @@ test('rejects unsafe credentials and connection-string database names', function
     expect(fn () => new PostgresBackup(['database' => 'postgresql://host/db', 'username' => 'backup'], $this->backupRoot, $this->dump, $this->restore))->toThrow(RuntimeException::class)
         ->and(fn () => new PostgresBackup(['database' => 'filebeam', 'username' => 'backup', 'password' => "line\nbreak"], $this->backupRoot, $this->dump, $this->restore))->toThrow(RuntimeException::class);
 });
+
+test('reports the failed backup operation and bounded redacted stderr', function (string $stage, string $operation): void {
+    putenv('POSTGRES_BACKUP_TEST_DIAGNOSTIC='.$stage);
+    $backup = new PostgresBackup(['database' => 'filebeam', 'username' => 'backup', 'password' => 'secret:with space'], $this->backupRoot.'/diagnostic', $this->dump, $this->restore);
+
+    try {
+        $backup->backup();
+        $this->fail('Expected backup failure.');
+    } catch (RuntimeException $exception) {
+        expect($exception->getMessage())->toContain('Operation: '.$operation, 'exit code: 7', 'permission denied', '[redacted]', '[truncated]')
+            ->not->toContain('secret', 'stdout must not appear');
+        expect(strlen($exception->getMessage()))->toBeLessThan(4400);
+    }
+    expect(glob($this->backupRoot.'/diagnostic/*'))->toBe([])
+        ->and(glob($this->backupRoot.'/diagnostic/.pgpass-*'))->toBe([]);
+})->with([
+    ['dump', 'pg_dump backup'],
+    ['catalog', 'pg_restore archive catalog validation'],
+    ['data', 'pg_restore archive data validation'],
+]);
