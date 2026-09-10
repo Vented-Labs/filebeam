@@ -219,8 +219,10 @@ test('CLI instructions stay accessible on mobile and restore header focus', asyn
     await trigger.click();
     const dialog = page.getByRole('dialog');
     await expect(dialog.getByRole('heading', { name: 'Install CLI', exact: true })).toBeVisible();
-    const platform = dialog.getByRole('combobox', { name: 'Platform' });
-    await expect(platform).toHaveValue('linux');
+    const platforms = dialog.getByRole('radiogroup', { name: 'Platform' });
+    await expect(platforms.getByRole('radio', { name: 'Linux' })).toBeChecked();
+    await expect(platforms.getByRole('radio', { name: 'macOS' })).not.toBeChecked();
+    await expect(platforms.getByRole('radio', { name: 'Windows' })).not.toBeChecked();
     await expect(dialog.getByLabel('Installer command')).toHaveValue(
         "curl -fsSL 'https://releases.filebeam.io/cli/install.sh' | sh",
     );

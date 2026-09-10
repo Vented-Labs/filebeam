@@ -172,11 +172,18 @@ async function checkApprovedSource() {
         catalog[source]?.[approvedSource.style]?.replace(/^<svg\b[^>]*>/, '').replace(/<\/svg>$/, '').replaceAll('white', 'currentColor').replace(/\s+/g, ' ').trim(),
     ]);
     if (entries.some(([, markup]) => typeof markup !== 'string')) add(errors, 'icons/approved.json', 'contains an icon missing from the immutable Twotone source');
+    for (const [name, brand] of Object.entries(manifest.brandIcons ?? {})) {
+        if (name !== 'os-linux' || !brand.description || typeof brand.markup !== 'string') {
+            add(errors, 'icons/approved.json', 'unapproved brand identity entry');
+            continue;
+        }
+        entries.push([name, brand.markup]);
+    }
     const digest = createHash('sha256').update(JSON.stringify(entries)).digest('hex');
     const vue = await readFile(join(root, 'ui/src/components/primitives/icons.generated.ts'), 'utf8');
     const php = await readFile(join(root, 'backend/app/Support/Icons/Iconsax.php'), 'utf8');
     if (!new RegExp(`iconsaxSourceDigest\\s*=\\s*'${digest}'`).test(vue) || !new RegExp(`SOURCE_DIGEST\\s*=\\s*'${digest}'`).test(php)) add(errors, 'generated icon registries', 'source digest does not match the installed immutable Iconsax source');
-    const expectedAssets = new Set(Object.keys(manifest.icons).map((name) => `${name}.svg`));
+    const expectedAssets = new Set(entries.map(([name]) => `${name}.svg`));
     const actualAssets = (await readdir(join(root, 'backend/resources/icons/iconsax'))).filter((name) => name.endsWith('.svg'));
     for (const name of actualAssets) if (!expectedAssets.delete(name)) add(errors, `backend/resources/icons/iconsax/${name}`, 'unapproved generated icon asset');
     for (const name of expectedAssets) add(errors, `backend/resources/icons/iconsax/${name}`, 'missing approved generated icon asset');

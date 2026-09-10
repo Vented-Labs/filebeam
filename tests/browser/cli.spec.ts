@@ -27,6 +27,7 @@ async function installerFixture(page: Page, installerUrl: string | null): Promis
         const data = JSON.parse(match[2]);
         data.props.filebeam.cli = {
             installer_url: installerUrl,
+            windows_installer_url: 'https://releases.filebeam.test/cli/install.ps1',
             installer_interpreter: 'sh',
             executable: 'beam',
         };
@@ -36,6 +37,47 @@ async function installerFixture(page: Page, installerUrl: string | null): Promis
         });
     });
 }
+
+test('platform logo radios support tooltips, keyboard selection, and retained overrides', async ({
+    page,
+}) => {
+    await page.addInitScript(() => {
+        Object.defineProperty(navigator, 'userAgentData', {
+            value: { platform: 'Linux', mobile: false },
+            configurable: true,
+        });
+    });
+    await installerFixture(page, 'https://releases.filebeam.test/cli/install.sh');
+    await page.goto('/');
+    const trigger = page.locator('header').getByRole('button', { name: 'Install CLI' });
+    await trigger.click();
+    const dialog = page.getByRole('dialog', { name: 'Install CLI', exact: true });
+    const group = dialog.getByRole('radiogroup', { name: 'Platform' });
+    const linux = group.getByRole('radio', { name: 'Linux', exact: true });
+    const macos = group.getByRole('radio', { name: 'macOS', exact: true });
+    const windows = group.getByRole('radio', { name: 'Windows', exact: true });
+    await expect(linux).toBeChecked();
+    await windows.hover();
+    await expect(page.getByRole('tooltip')).toHaveText('Windows');
+    await windows.click();
+    await expect(windows).toBeChecked();
+    await expect(dialog.getByLabel('Installer command')).toHaveValue(
+        "Invoke-RestMethod -Uri 'https://releases.filebeam.test/cli/install.ps1' | Invoke-Expression",
+    );
+    await windows.press('ArrowLeft');
+    await expect(macos).toBeFocused();
+    await expect(macos).toBeChecked();
+    await expect(dialog.getByLabel('Installer command')).toHaveValue(
+        "curl -fsSL 'https://releases.filebeam.test/cli/install.sh' | sh",
+    );
+    await dialog.getByRole('button', { name: 'Done', exact: true }).click();
+    await trigger.click();
+    await expect(macos).toBeChecked();
+    await expect(linux).not.toBeChecked();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
+    await expect(trigger).toBeFocused();
+});
 
 test('unconfigured installer stays non-actionable and instructions preserve the mounted draft', async ({
     page,
