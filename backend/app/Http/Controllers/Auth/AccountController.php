@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Services\FilebeamUrlGenerator;
+use App\Support\Branding;
 use App\Support\InstanceSettings;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -21,9 +22,11 @@ class AccountController extends Controller
 
         $username = $user->username;
 
+        $branding = app(Branding::class)->resolve();
+
         return Inertia::render('Account', [
-            'githubUrl' => config('filebeam.github_url'),
-            'copyrightHolder' => config('filebeam.copyright_holder'),
+            'githubUrl' => $branding['github_url'],
+            'copyrightHolder' => $branding['copyright_holder'],
             'user' => [
                 'id' => $user->id,
                 'name' => $user->name,

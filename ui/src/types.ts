@@ -6,11 +6,36 @@ export type TransferLimits = {
     maximum_note_bytes: number | null;
 };
 
+export type SocialPlatform =
+    | 'discord'
+    | 'x'
+    | 'bluesky'
+    | 'mastodon'
+    | 'threads'
+    | 'github'
+    | 'youtube'
+    | 'instagram'
+    | 'facebook'
+    | 'linkedin'
+    | 'reddit'
+    | 'telegram'
+    | 'tiktok'
+    | 'twitch'
+    | 'website';
+
+export type CommunityLink = {
+    platform: SocialPlatform;
+    label: string;
+    url: string;
+};
+
 export type FilebeamConfig = {
     main_site_url: string;
     cli?: CliConfig;
     github_url: string;
     copyright_holder: string;
+    copyright_url?: string | null;
+    community_links?: CommunityLink[];
     maximum_transfer_bytes: number;
     maximum_file_count: number;
     maximum_note_bytes: number;

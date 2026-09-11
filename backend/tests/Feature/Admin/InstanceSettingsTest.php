@@ -8,7 +8,6 @@ use App\Filament\Pages\InstanceSettings as InstanceSettingsPage;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Models\AdminAudit;
 use App\Models\InstanceSetting;
-use App\Models\InstanceTransportPolicy;
 use App\Models\Plan;
 use App\Models\User;
 use App\Support\InstanceSettings;
@@ -23,7 +22,8 @@ use Livewire\Livewire;
 beforeEach(function (): void {
     config()->set('app.key', 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=');
     config()->set('installation.environment_path', base_path('composer.json'));
-    config()->set('filebeam.transport_policy.environment', ['enabled_drivers' => null, 'default_driver' => null]);
+    config()->set('filebeam.instance_settings.environment.enabled_drivers', null);
+    config()->set('filebeam.instance_settings.environment.default_driver', null);
     Filament::setCurrentPanel(Filament::getPanel('admin'));
 });
 
@@ -104,7 +104,7 @@ test('admins can save an override and inherit the PHP fallback again', function 
 
     app(ManageInstanceSettings::class)->update($admin, ['registration' => false]);
 
-    $this->assertDatabaseHas('instance_settings', ['key' => 'registration', 'value' => false]);
+    $this->assertDatabaseHas('instance_settings', ['key' => 'registration', 'value' => 'false']);
     $this->assertDatabaseHas('admin_audits', [
         'actor_id' => $admin->id,
         'action' => 'instance_setting.updated',
@@ -158,7 +158,7 @@ test('only admins can access and update the instance settings page', function ()
         ->call('save')
         ->assertHasNoFormErrors();
 
-    $this->assertDatabaseHas('instance_settings', ['key' => 'registration', 'value' => false]);
+    $this->assertDatabaseHas('instance_settings', ['key' => 'registration', 'value' => 'false']);
 });
 
 test('the admin transport form saves every allowed driver mode and default', function (array $enabledDrivers, string $defaultDriver): void {
@@ -172,8 +172,8 @@ test('the admin transport form saves every allowed driver mode and default', fun
         ->call('save')
         ->assertHasNoFormErrors();
 
-    expect(InstanceTransportPolicy::query()->findOrFail(1)->enabled_drivers)->toBe($enabledDrivers)
-        ->and(InstanceTransportPolicy::query()->findOrFail(1)->default_driver)->toBe($defaultDriver)
+    expect(InstanceSetting::query()->findOrFail('enabled_drivers')->value)->toBe($enabledDrivers)
+        ->and(InstanceSetting::query()->findOrFail('default_driver')->value)->toBe($defaultDriver)
         ->and(app(TransportPolicy::class)->resolve())->toBe(['enabled_drivers' => $enabledDrivers, 'default_driver' => $defaultDriver]);
 })->with([
     'HTTP only' => [['http'], 'http'],
@@ -192,15 +192,14 @@ test('the admin transport form audits persisted changes', function (): void {
         ->call('save')
         ->assertHasNoFormErrors();
 
-    expect(AdminAudit::query()->where('action', 'instance_transport_policy.updated')->latest()->value('changes'))->toMatchArray([
-        'enabled_drivers' => ['from' => ['http'], 'to' => ['http', 'webrtc']],
-        'default_driver' => ['from' => 'http', 'to' => 'webrtc'],
-    ]);
+    expect(AdminAudit::query()->where('action', 'instance_setting.updated')->where('target_id', 'enabled_drivers')->value('changes'))->toBe(['value' => ['from' => null, 'to' => ['http', 'webrtc']]])
+        ->and(AdminAudit::query()->where('action', 'instance_setting.updated')->where('target_id', 'default_driver')->value('changes'))->toBe(['value' => ['from' => null, 'to' => 'webrtc']]);
 });
 
 test('environment locked transport form fields cannot change the persisted policy', function (): void {
     $admin = User::factory()->create(['role' => UserRole::Admin]);
-    config()->set('filebeam.transport_policy.environment', ['enabled_drivers' => ['webrtc'], 'default_driver' => 'webrtc']);
+    config()->set('filebeam.instance_settings.environment.enabled_drivers', ['webrtc']);
+    config()->set('filebeam.instance_settings.environment.default_driver', 'webrtc');
     $this->actingAs($admin, 'admin');
 
     Livewire::test(InstanceSettingsPage::class)
@@ -211,8 +210,7 @@ test('environment locked transport form fields cannot change the persisted polic
         ->call('save')
         ->assertHasNoFormErrors();
 
-    expect(InstanceTransportPolicy::query()->findOrFail(1)->enabled_drivers)->toBe(['http'])
-        ->and(InstanceTransportPolicy::query()->findOrFail(1)->default_driver)->toBe('http')
+    expect(InstanceSetting::query()->whereKey(['enabled_drivers', 'default_driver'])->exists())->toBeFalse()
         ->and(app(TransportPolicy::class)->resolve())->toBe(['enabled_drivers' => ['webrtc'], 'default_driver' => 'webrtc'])
-        ->and(AdminAudit::query()->where('action', 'instance_transport_policy.updated')->exists())->toBeFalse();
+        ->and(AdminAudit::query()->where('action', 'instance_setting.updated')->exists())->toBeFalse();
 });

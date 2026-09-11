@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\RegisterRequest;
 use App\Models\Plan;
 use App\Models\User;
+use App\Support\Branding;
 use App\Support\InstanceSettings;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Http\RedirectResponse;
@@ -21,10 +22,12 @@ class RegisteredUserController extends Controller
     {
         abort_unless(app(InstanceSettings::class)->boolean('registration'), 404);
 
+        $branding = app(Branding::class)->resolve();
+
         return Inertia::render('auth/AuthScreen', [
             'mode' => 'register',
-            'githubUrl' => config('filebeam.github_url'),
-            'copyrightHolder' => config('filebeam.copyright_holder'),
+            'githubUrl' => $branding['github_url'],
+            'copyrightHolder' => $branding['copyright_holder'],
             'registrationEnabled' => true,
         ]);
     }

@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\LoginRequest;
 use App\Support\AuthIdentifier;
+use App\Support\Branding;
 use App\Support\InstanceSettings;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -20,10 +21,12 @@ class AuthenticatedSessionController extends Controller
 {
     public function create(): Response
     {
+        $branding = app(Branding::class)->resolve();
+
         return Inertia::render('auth/AuthScreen', [
             'mode' => 'login',
-            'githubUrl' => config('filebeam.github_url'),
-            'copyrightHolder' => config('filebeam.copyright_holder'),
+            'githubUrl' => $branding['github_url'],
+            'copyrightHolder' => $branding['copyright_holder'],
             'registrationEnabled' => app(InstanceSettings::class)->boolean('registration'),
         ]);
     }

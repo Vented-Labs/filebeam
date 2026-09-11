@@ -4,9 +4,14 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Casts\JsonValue;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 
+/**
+ * @property string $key
+ * @property mixed $value
+ */
 #[Fillable(['key', 'value'])]
 class InstanceSetting extends Model
 {
@@ -20,7 +25,7 @@ class InstanceSetting extends Model
     protected function casts(): array
     {
         return [
-            'value' => 'boolean',
+            'value' => JsonValue::class,
         ];
     }
 }

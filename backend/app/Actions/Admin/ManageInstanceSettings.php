@@ -8,15 +8,18 @@ use App\Models\AdminAudit;
 use App\Models\InstanceSetting;
 use App\Models\User;
 use App\Support\InstanceSettings;
+use App\Support\InstanceSettingValue;
+use App\Support\TransportPolicy;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use InvalidArgumentException;
 use Throwable;
 
 class ManageInstanceSettings
 {
     /**
-     * @param  array<string, mixed>  $values
+     * @param  array<string, mixed>  $values  keyed by registered setting; null or '' removes the database override
      *
      * @throws AuthorizationException
      * @throws ValidationException
@@ -43,15 +46,21 @@ class ManageInstanceSettings
                 throw ValidationException::withMessages([$key => 'This setting is controlled by the environment and cannot be overridden in Admin.']);
             }
 
-            $normalizedValues[$key] = $this->normalizeBoolean($key, $value);
+            try {
+                $normalizedValues[$key] = InstanceSettingValue::normalize($definitions[$key]['type'], $value);
+            } catch (InvalidArgumentException $exception) {
+                throw ValidationException::withMessages([$key => $exception->getMessage()]);
+            }
         }
 
-        DB::transaction(function () use ($actor, $normalizedValues): void {
+        DB::transaction(function () use ($actor, $settings, $normalizedValues): void {
             $lockedActor = User::query()->whereKey($actor->getKey())->lockForUpdate()->firstOrFail();
 
             if (! $lockedActor->isAdmin()) {
                 throw new AuthorizationException;
             }
+
+            $this->assertTransportPolicy($settings, $normalizedValues);
 
             foreach ($normalizedValues as $key => $value) {
                 $setting = InstanceSetting::query()->lockForUpdate()->find($key);
@@ -78,25 +87,33 @@ class ManageInstanceSettings
         });
     }
 
-    /** @throws ValidationException */
-    private function normalizeBoolean(string $key, mixed $value): ?bool
+    /**
+     * The transport keys are validated together so the effective default driver stays enabled.
+     *
+     * @param  array<string, mixed>  $submitted
+     *
+     * @throws ValidationException
+     */
+    private function assertTransportPolicy(InstanceSettings $settings, array $submitted): void
     {
-        if ($value === null || $value === '') {
-            return null;
+        $keys = ['enabled_drivers', 'default_driver'];
+
+        if (array_intersect(array_keys($submitted), $keys) === []) {
+            return;
         }
 
-        if (is_bool($value)) {
-            return $value;
+        $effective = $settings->values($keys);
+
+        foreach ($keys as $key) {
+            if (array_key_exists($key, $submitted) && $submitted[$key] !== null) {
+                $effective[$key] = $submitted[$key];
+            }
         }
 
-        if ($value === '1' || $value === 1) {
-            return true;
+        try {
+            app(TransportPolicy::class)->validate($effective['enabled_drivers'], $effective['default_driver']);
+        } catch (InvalidArgumentException $exception) {
+            throw ValidationException::withMessages(['transport_policy' => $exception->getMessage()]);
         }
-
-        if ($value === '0' || $value === 0) {
-            return false;
-        }
-
-        throw ValidationException::withMessages([$key => 'Select Enabled, Disabled, or Inherit.']);
     }
 }

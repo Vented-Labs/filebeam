@@ -31,6 +31,7 @@ class AuditPresentation
             'user.admin_created_via_cli' => 'Administrator created from console',
             'user.admin_granted_via_cli' => 'Administrator access granted from console',
             'plan.updated' => 'Plan settings updated',
+            'instance_setting.updated' => 'Instance setting updated',
             default => Str::headline(str_replace('.', ' ', $action)),
         };
     }

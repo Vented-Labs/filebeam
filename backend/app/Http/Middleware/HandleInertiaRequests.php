@@ -6,10 +6,12 @@ namespace App\Http\Middleware;
 
 use App\Models\User;
 use App\Notifications\InboxTransferCompleted;
+use App\Support\Branding;
 use App\Support\EffectivePlan;
 use App\Support\InstanceSettings;
 use App\Support\TransportPolicy;
 use Illuminate\Http\Request;
+use Illuminate\Support\Arr;
 use Inertia\Middleware;
 
 class HandleInertiaRequests extends Middleware
@@ -26,11 +28,14 @@ class HandleInertiaRequests extends Middleware
     public function share(Request $request): array
     {
         $plan = app(EffectivePlan::class)->default();
-        $settings = app(InstanceSettings::class)->booleans([
+        $settings = app(InstanceSettings::class)->values([
             'registration',
             'anonymous_uploads',
             'username_routing',
+            ...Branding::KEYS,
         ]);
+        $branding = app(Branding::class)->resolve($settings);
+        $enabled = static fn (string $key): bool => filter_var($settings[$key], FILTER_VALIDATE_BOOLEAN);
 
         return [
             ...parent::share($request),
@@ -49,14 +54,17 @@ class HandleInertiaRequests extends Middleware
             'flash' => ['status' => fn () => $request->session()->get('status')],
             'branding' => [
                 ...config('filebeam.branding'),
+                ...Arr::except($branding, ['community_links']),
                 'default_logo_url' => asset('brand/filebeam-logo-header.svg'),
                 'default_mark_url' => asset('brand/filebeam-mark.svg'),
             ],
             'filebeam' => [
                 'main_site_url' => config('app.url'),
                 'cli' => config('filebeam.cli'),
-                'github_url' => config('filebeam.github_url'),
-                'copyright_holder' => config('filebeam.copyright_holder'),
+                'github_url' => $branding['github_url'],
+                'copyright_holder' => $branding['copyright_holder'],
+                'copyright_url' => $branding['copyright_url'],
+                'community_links' => $branding['community_links'],
                 'maximum_transfer_bytes' => $plan->maximum_transfer_bytes ?? config('filebeam.default_plan.maximum_transfer_bytes'),
                 'maximum_file_count' => $plan->maximum_file_count ?? config('filebeam.default_plan.maximum_file_count'),
                 'maximum_note_bytes' => $plan->maximum_note_bytes ?? config('filebeam.default_plan.maximum_note_bytes'),
@@ -73,9 +81,9 @@ class HandleInertiaRequests extends Middleware
                 'chunk_bytes' => config('filebeam.transfers.chunk_bytes'),
                 'upload_concurrency' => config('filebeam.transfers.upload_concurrency'),
                 'download_concurrency' => config('filebeam.transfers.download_concurrency'),
-                'registration_enabled' => $settings['registration'],
-                'anonymous_uploads_enabled' => $settings['anonymous_uploads'],
-                'username_routing_enabled' => $settings['username_routing'],
+                'registration_enabled' => $enabled('registration'),
+                'anonymous_uploads_enabled' => $enabled('anonymous_uploads'),
+                'username_routing_enabled' => $enabled('username_routing'),
                 'transport_policy' => fn (): array => app(TransportPolicy::class)->configuration($request->user() instanceof User ? $request->user() : null),
             ],
         ];
