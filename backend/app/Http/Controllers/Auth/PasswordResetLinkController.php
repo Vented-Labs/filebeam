@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Auth;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\ForgotPasswordRequest;
 use App\Support\AuthIdentifier;
+use App\Support\Branding;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Password;
 use Inertia\Inertia;
@@ -16,10 +17,12 @@ class PasswordResetLinkController extends Controller
 {
     public function create(): Response
     {
+        $branding = app(Branding::class)->resolve();
+
         return Inertia::render('auth/AuthScreen', [
             'mode' => 'forgot',
-            'githubUrl' => config('filebeam.github_url'),
-            'copyrightHolder' => config('filebeam.copyright_holder'),
+            'githubUrl' => $branding['github_url'],
+            'copyrightHolder' => $branding['copyright_holder'],
         ]);
     }
 

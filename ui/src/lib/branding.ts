@@ -10,6 +10,7 @@ export type Branding = {
     version: string;
     copyright_holder: string;
     copyright_year: number;
+    copyright_url?: string | null;
     github_url: string;
 };
 
@@ -22,6 +23,7 @@ const defaultBranding: Branding = {
     version: '0.1.0',
     copyright_holder: 'Vented',
     copyright_year: 2026,
+    copyright_url: null,
     github_url: 'https://github.com/Vented-Labs/filebeam',
 };
 

@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Support;
 
 use App\Enums\TransferDriver;
-use App\Models\InstanceTransportPolicy;
 use App\Models\Plan;
 use App\Models\User;
 use InvalidArgumentException;
@@ -15,15 +14,9 @@ class TransportPolicy
     /** @return array{enabled_drivers: list<string>, default_driver: string} */
     public function resolve(): array
     {
-        $stored = InstanceTransportPolicy::query()->find(1);
-        $enabledDrivers = config('filebeam.transport_policy.environment.enabled_drivers')
-            ?? ($stored === null ? null : $stored->enabled_drivers)
-            ?? config('filebeam.transport_policy.defaults.enabled_drivers');
-        $defaultDriver = config('filebeam.transport_policy.environment.default_driver')
-            ?? ($stored === null ? null : $stored->default_driver)
-            ?? config('filebeam.transport_policy.defaults.default_driver');
+        $values = app(InstanceSettings::class)->values(['enabled_drivers', 'default_driver']);
 
-        return $this->validate($enabledDrivers, $defaultDriver);
+        return $this->validate($values['enabled_drivers'], $values['default_driver']);
     }
 
     public function allows(TransferDriver $driver): bool

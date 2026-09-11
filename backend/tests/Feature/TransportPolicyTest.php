@@ -2,14 +2,14 @@
 
 declare(strict_types=1);
 
+use App\Actions\Admin\ManageInstanceSettings;
 use App\Actions\Admin\ManagePlan;
-use App\Actions\Admin\ManageTransportPolicy;
 use App\Enums\TransferDriver;
 use App\Enums\UserRole;
 use App\Filament\Resources\Plans\Pages\EditPlan;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Models\AdminAudit;
-use App\Models\InstanceTransportPolicy;
+use App\Models\InstanceSetting;
 use App\Models\Plan;
 use App\Models\User;
 use App\Support\TransportPolicy;
@@ -18,6 +18,7 @@ use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
 
@@ -26,6 +27,13 @@ uses(RefreshDatabase::class);
 function transportPolicyAdmin(): User
 {
     return User::factory()->create(['role' => UserRole::Admin]);
+}
+
+/** @param  list<string>  $enabledDrivers */
+function transportPolicySettings(array $enabledDrivers, string $defaultDriver): void
+{
+    InstanceSetting::query()->updateOrCreate(['key' => 'enabled_drivers'], ['value' => $enabledDrivers]);
+    InstanceSetting::query()->updateOrCreate(['key' => 'default_driver'], ['value' => $defaultDriver]);
 }
 
 /** @return array<string, bool|int|null> */
@@ -81,7 +89,8 @@ function loadFilebeamConfigWithEnvironment(array $values): array
 
 beforeEach(function (): void {
     config()->set('app.key', 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=');
-    config()->set('filebeam.transport_policy.environment', ['enabled_drivers' => null, 'default_driver' => null]);
+    config()->set('filebeam.instance_settings.environment.enabled_drivers', null);
+    config()->set('filebeam.instance_settings.environment.default_driver', null);
 });
 
 test('transport policy defaults to HTTP and applies environment then database then fallback precedence', function (): void {
@@ -89,11 +98,11 @@ test('transport policy defaults to HTTP and applies environment then database th
 
     expect($resolver->resolve())->toBe(['enabled_drivers' => ['http'], 'default_driver' => 'http']);
 
-    InstanceTransportPolicy::query()->findOrFail(1)->update(['enabled_drivers' => ['http', 'webrtc'], 'default_driver' => 'webrtc']);
+    transportPolicySettings(['http', 'webrtc'], 'webrtc');
     expect($resolver->resolve())->toBe(['enabled_drivers' => ['http', 'webrtc'], 'default_driver' => 'webrtc']);
 
-    config()->set('filebeam.transport_policy.environment.enabled_drivers', ['http']);
-    config()->set('filebeam.transport_policy.environment.default_driver', 'http');
+    config()->set('filebeam.instance_settings.environment.enabled_drivers', ['http']);
+    config()->set('filebeam.instance_settings.environment.default_driver', 'http');
     expect($resolver->resolve())->toBe(['enabled_drivers' => ['http'], 'default_driver' => 'http']);
 });
 
@@ -133,28 +142,29 @@ test('WebRTC ICE configuration uses the Vented STUN fallback only when ICE and T
 ]);
 
 test('transport policy admin changes are authorized, atomic, and audited', function (): void {
-    $manager = app(ManageTransportPolicy::class);
+    $manager = app(ManageInstanceSettings::class);
     $user = User::factory()->create();
     $admin = transportPolicyAdmin();
 
     expect(fn () => $manager->update($user, ['enabled_drivers' => ['webrtc'], 'default_driver' => 'webrtc']))->toThrow(AuthorizationException::class);
     expect(fn () => $manager->update($admin, ['enabled_drivers' => [], 'default_driver' => 'webrtc']))->toThrow(ValidationException::class);
-    expect(InstanceTransportPolicy::query()->findOrFail(1)->default_driver)->toBe('http');
+    expect(app(TransportPolicy::class)->resolve()['default_driver'])->toBe('http');
 
     $manager->update($admin, ['enabled_drivers' => ['webrtc'], 'default_driver' => 'webrtc']);
 
-    expect(InstanceTransportPolicy::query()->findOrFail(1)->enabled_drivers)->toBe(['webrtc'])
-        ->and(AdminAudit::query()->where('action', 'instance_transport_policy.updated')->where('actor_id', $admin->id)->exists())->toBeTrue();
+    expect(app(TransportPolicy::class)->resolve()['enabled_drivers'])->toBe(['webrtc'])
+        ->and(AdminAudit::query()->where('action', 'instance_setting.updated')->where('actor_id', $admin->id)->exists())->toBeTrue();
 });
 
 test('environment controlled transport values cannot be overridden and invalid effective combinations are rejected', function (): void {
     $admin = transportPolicyAdmin();
-    config()->set('filebeam.transport_policy.environment.enabled_drivers', ['http']);
+    config()->set('filebeam.instance_settings.environment.enabled_drivers', ['http']);
 
-    expect(fn () => app(ManageTransportPolicy::class)->update($admin, ['enabled_drivers' => ['webrtc']]))->toThrow(ValidationException::class)
-        ->and(fn () => app(ManageTransportPolicy::class)->update($admin, ['default_driver' => 'webrtc']))->toThrow(ValidationException::class);
+    expect(fn () => app(ManageInstanceSettings::class)->update($admin, ['enabled_drivers' => ['webrtc']]))->toThrow(ValidationException::class)
+        ->and(fn () => app(ManageInstanceSettings::class)->update($admin, ['default_driver' => 'webrtc']))->toThrow(ValidationException::class);
 
-    config()->set('filebeam.transport_policy.environment', ['enabled_drivers' => ['http'], 'default_driver' => 'webrtc']);
+    config()->set('filebeam.instance_settings.environment.enabled_drivers', ['http']);
+    config()->set('filebeam.instance_settings.environment.default_driver', 'webrtc');
     expect(fn () => app(TransportPolicy::class)->resolve())->toThrow(InvalidArgumentException::class);
 });
 
@@ -182,7 +192,8 @@ test('transport migration backfills WebRTC limits from existing finite HTTP limi
     expect($limits->webrtc_maximum_transfer_bytes)->toBe(123_456)
         ->and($limits->webrtc_maximum_file_count)->toBe(17)
         ->and($limits->webrtc_maximum_note_bytes)->toBe(789)
-        ->and(InstanceTransportPolicy::query()->findOrFail(1)->enabled_drivers)->toBe(['http']);
+        ->and(DB::table('instance_transport_policies')->where('id', 1)->value('enabled_drivers'))->toBe(json_encode(['http']));
+    Schema::dropIfExists('instance_transport_policies');
 });
 
 test('public shared props expose resolved policy and independent effective plan limits', function (): void {
@@ -193,7 +204,7 @@ test('public shared props expose resolved policy and independent effective plan 
         'webrtc_maximum_file_count' => 3,
         'webrtc_maximum_note_bytes' => null,
     ]);
-    InstanceTransportPolicy::query()->findOrFail(1)->update(['enabled_drivers' => ['http', 'webrtc'], 'default_driver' => 'webrtc']);
+    transportPolicySettings(['http', 'webrtc'], 'webrtc');
     $shared = app(HandleInertiaRequests::class)->share(Request::create('/'));
     $configuration = $shared['filebeam']['transport_policy']();
 
@@ -256,7 +267,7 @@ test('the plan editor serializes finite WebRTC limits and Unlimited independentl
 test('WebRTC plan limits are independently nullable and WebRTC-only plans may clear filestores', function (): void {
     $admin = transportPolicyAdmin();
     $plan = Plan::factory()->create();
-    InstanceTransportPolicy::query()->findOrFail(1)->update(['enabled_drivers' => ['webrtc'], 'default_driver' => 'webrtc']);
+    transportPolicySettings(['webrtc'], 'webrtc');
     $attributes = transportPlanAttributes($plan);
     $attributes['webrtc_maximum_transfer_bytes'] = null;
     $attributes['webrtc_maximum_file_count'] = 7;

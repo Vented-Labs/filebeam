@@ -16,8 +16,8 @@ beforeEach(function (): void {
     $this->withoutMiddleware(RequireInstallation::class);
     Plan::factory()->create(['slug' => 'default']);
     $this->seed(FilestoreSeeder::class);
-    config()->set('filebeam.transport_policy.environment.enabled_drivers', ['http', 'webrtc']);
-    config()->set('filebeam.transport_policy.environment.default_driver', 'http');
+    config()->set('filebeam.instance_settings.environment.enabled_drivers', ['http', 'webrtc']);
+    config()->set('filebeam.instance_settings.environment.default_driver', 'http');
     config()->set('cache.default', 'array');
     config()->set('cache.stores.array.serialize', true);
 });
@@ -122,12 +122,12 @@ test('an expired claimed session cannot consume a burn note after a sender heart
 
 test('policy gates pending publication and future joins without interrupting live sender sessions', function (): void {
     $transfer = reserveWebRtc();
-    config()->set('filebeam.transport_policy.environment.enabled_drivers', ['http']);
+    config()->set('filebeam.instance_settings.environment.enabled_drivers', ['http']);
     $this->putJson("/api/v1/transfers/{$transfer['id']}/webrtc/publish", ['encrypted_manifest' => 'encrypted-manifest'], ['X-Filebeam-Upload-Token' => $transfer['upload_token']])->assertNotFound();
-    config()->set('filebeam.transport_policy.environment.enabled_drivers', ['http', 'webrtc']);
+    config()->set('filebeam.instance_settings.environment.enabled_drivers', ['http', 'webrtc']);
     publishWebRtc($transfer);
     $session = registerWebRtc($transfer);
-    config()->set('filebeam.transport_policy.environment.enabled_drivers', ['http']);
+    config()->set('filebeam.instance_settings.environment.enabled_drivers', ['http']);
     $this->getJson("/api/v1/transfers/{$transfer['id']}/webrtc/sessions", ['X-Filebeam-Upload-Token' => $transfer['upload_token']])->assertOk();
     $this->getJson("/api/v1/transfers/{$transfer['id']}/webrtc/sessions/{$session['id']}", ['X-Filebeam-Session-Token' => $session['token']])->assertOk();
     $this->postJson("/api/v1/transfers/{$transfer['id']}/webrtc/sessions", [], ['X-Filebeam-Join-Token' => $transfer['join_token']])->assertNotFound();
@@ -163,7 +163,7 @@ test('webrtc nullable quotas are independent and disabled driver is rejected', f
     Plan::query()->where('slug', 'default')->sole()->update(['webrtc_maximum_transfer_bytes' => null, 'webrtc_maximum_file_count' => 1, 'webrtc_maximum_note_bytes' => 15]);
     reserveWebRtc();
     $this->postJson('/api/v1/transfers', ['kind' => 'note', 'driver' => 'webrtc', 'protocol_version' => 1, 'chunk_bytes' => config('filebeam.transfers.chunk_bytes'), 'items' => [['ciphertext_bytes' => 16, 'chunk_count' => 1]]])->assertUnprocessable()->assertJsonValidationErrors('items');
-    config()->set('filebeam.transport_policy.environment.enabled_drivers', ['http']);
+    config()->set('filebeam.instance_settings.environment.enabled_drivers', ['http']);
     $this->postJson('/api/v1/transfers', ['kind' => 'files', 'driver' => 'webrtc', 'protocol_version' => 1, 'chunk_bytes' => config('filebeam.transfers.chunk_bytes'), 'items' => [['ciphertext_bytes' => 16, 'chunk_count' => 1]]])->assertUnprocessable()->assertJsonValidationErrors('driver');
 });
 

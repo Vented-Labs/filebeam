@@ -5,19 +5,20 @@ declare(strict_types=1);
 namespace App\Filament\Pages;
 
 use App\Actions\Admin\ManageInstanceSettings;
-use App\Actions\Admin\ManageTransportPolicy;
-use App\Models\InstanceSetting;
-use App\Models\InstanceTransportPolicy;
+use App\Enums\SocialPlatform;
 use App\Models\User;
 use App\Support\InstanceSettings as InstanceSettingsResolver;
+use App\Support\InstanceSettingValue;
+use App\Support\LinkUrl;
 use BackedEnum;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
-use Illuminate\Support\Facades\DB;
 use Throwable;
 use UnitEnum;
 
@@ -52,16 +53,17 @@ class InstanceSettings extends Page
     private function fillForm(): void
     {
         $settings = app(InstanceSettingsResolver::class);
-        $overrides = InstanceSetting::query()->pluck('value', 'key')->all();
+        $keys = array_keys($settings->definitions());
+        $stored = $settings->stored($keys);
         $data = [];
 
-        foreach (array_keys($settings->definitions()) as $key) {
-            $data[$key] = $settings->environmentValue($key) ?? ($overrides[$key] ?? null);
+        foreach ($keys as $key) {
+            $data[$key] = $settings->environmentValue($key) ?? $stored[$key];
         }
-        $policy = InstanceTransportPolicy::query()->find(1);
-        $environment = config('filebeam.transport_policy.environment');
-        $data['enabled_drivers'] = $environment['enabled_drivers'] ?? ($policy === null ? null : $policy->enabled_drivers) ?? config('filebeam.transport_policy.defaults.enabled_drivers');
-        $data['default_driver'] = $environment['default_driver'] ?? ($policy === null ? null : $policy->default_driver) ?? config('filebeam.transport_policy.defaults.default_driver');
+        // The transport selects are required, so show the effective fallback instead of an empty control.
+        foreach (['enabled_drivers', 'default_driver'] as $key) {
+            $data[$key] ??= config($settings->definition($key)['fallback']);
+        }
 
         $this->form->fill($data);
     }
@@ -69,7 +71,9 @@ class InstanceSettings extends Page
     public function form(Schema $schema): Schema
     {
         $settings = app(InstanceSettingsResolver::class);
-        $environment = config('filebeam.transport_policy.environment');
+        $locked = static fn (string $key): bool => $settings->environmentValue($key) !== null;
+        $help = static fn (string $key, string $inherit): string => $locked($key) ? 'Source: environment; this setting is locked.' : $inherit;
+        $flags = array_filter($settings->definitions(), static fn (array $definition): bool => $definition['type'] === 'boolean');
 
         return $schema
             ->components([
@@ -87,7 +91,7 @@ class InstanceSettings extends Page
                                 : $definition['description'].' Source: environment ('.($environmentValue ? 'Enabled' : 'Disabled').'); this setting is locked.')
                             ->disabled($environmentValue !== null)
                             ->native(false);
-                    }, array_keys($settings->definitions()), $settings->definitions())),
+                    }, array_keys($flags), $flags)),
                 Section::make('Public transfer transport')
                     ->description('HTTP uses configured storage. WebRTC is storage-free and applies only to public file links and notes. Environment values always take precedence.')
                     ->schema([
@@ -97,16 +101,71 @@ class InstanceSettings extends Page
                             ->multiple()
                             ->minItems(1)
                             ->required()
-                            ->helperText($environment['enabled_drivers'] === null ? 'Source: database override or HTTP-only fallback.' : 'Source: environment; this setting is locked.')
-                            ->disabled($environment['enabled_drivers'] !== null)
+                            ->helperText($help('enabled_drivers', 'Source: database override or HTTP-only fallback.'))
+                            ->disabled($locked('enabled_drivers'))
                             ->native(false),
                         Select::make('default_driver')
                             ->label('Default driver')
                             ->options(['http' => 'HTTP', 'webrtc' => 'WebRTC'])
                             ->required()
-                            ->helperText($environment['default_driver'] === null ? 'Source: database override or HTTP-only fallback.' : 'Source: environment; this setting is locked.')
-                            ->disabled($environment['default_driver'] !== null)
+                            ->helperText($help('default_driver', 'Source: database override or HTTP-only fallback.'))
+                            ->disabled($locked('default_driver'))
                             ->native(false),
+                    ])->columns(['default' => 1, 'sm' => 2]),
+                Section::make('Branding')
+                    ->description('The copyright line, project link, and community links shown on public pages. Environment values always take precedence.')
+                    ->schema([
+                        TextInput::make('copyright_holder')
+                            ->label('Copyright holder')
+                            ->maxLength(InstanceSettingValue::MAX_TEXT_LENGTH)
+                            ->placeholder((string) config('filebeam.branding.copyright_holder'))
+                            ->helperText($help('copyright_holder', 'Leave empty to use the PHP fallback.'))
+                            ->disabled($locked('copyright_holder')),
+                        TextInput::make('copyright_year')
+                            ->label('Copyright year')
+                            ->integer()
+                            ->minValue(1970)
+                            ->maxValue(2100)
+                            ->placeholder((string) config('filebeam.branding.copyright_year'))
+                            ->helperText($help('copyright_year', 'Leave empty to use the PHP fallback.'))
+                            ->disabled($locked('copyright_year')),
+                        TextInput::make('copyright_url')
+                            ->label('Copyright link')
+                            ->url()
+                            ->maxLength(LinkUrl::MAX_LENGTH)
+                            ->placeholder('https://')
+                            ->helperText($help('copyright_url', 'Optional. Turns the copyright holder into a link.'))
+                            ->disabled($locked('copyright_url')),
+                        TextInput::make('github_url')
+                            ->label('GitHub link')
+                            ->url()
+                            ->maxLength(LinkUrl::MAX_LENGTH)
+                            ->placeholder((string) config('filebeam.branding.github_url'))
+                            ->helperText($help('github_url', 'Shown in the header navigation. Leave empty to use the PHP fallback.'))
+                            ->disabled($locked('github_url')),
+                        Repeater::make('community_links')
+                            ->label('Community links')
+                            ->helperText('Shown in this order. Each platform can be linked once.'.($locked('community_links') ? ' Source: environment; these links are locked.' : ''))
+                            ->columnSpanFull()
+                            ->schema([
+                                Select::make('platform')
+                                    ->label('Platform')
+                                    ->options(SocialPlatform::options())
+                                    ->required()
+                                    ->distinct()
+                                    ->native(false),
+                                TextInput::make('url')
+                                    ->label('URL')
+                                    ->url()
+                                    ->required()
+                                    ->maxLength(LinkUrl::MAX_LENGTH)
+                                    ->placeholder('https://'),
+                            ])
+                            ->columns(['default' => 1, 'sm' => 2])
+                            ->addActionLabel('Add link')
+                            ->defaultItems(0)
+                            ->maxItems(count(SocialPlatform::cases()))
+                            ->disabled($locked('community_links')),
                     ])->columns(['default' => 1, 'sm' => 2]),
             ])
             ->statePath('data');
@@ -121,19 +180,20 @@ class InstanceSettings extends Page
         abort_unless($actor instanceof User, 403);
 
         $state = $this->form->getState();
-        $transportValues = [];
-        $environment = config('filebeam.transport_policy.environment');
-        foreach (['enabled_drivers', 'default_driver'] as $key) {
-            if ($environment[$key] === null) {
-                $transportValues[$key] = $state[$key];
+        $settings = app(InstanceSettingsResolver::class);
+        $values = [];
+
+        foreach (array_keys($settings->definitions()) as $key) {
+            if ($settings->environmentValue($key) !== null) {
+                continue;
             }
-            unset($state[$key]);
+
+            $values[$key] = $key === 'community_links'
+                ? array_values(is_array($state[$key] ?? null) ? $state[$key] : [])
+                : ($state[$key] ?? null);
         }
 
-        DB::transaction(function () use ($actor, $state, $transportValues): void {
-            app(ManageInstanceSettings::class)->update($actor, $state);
-            app(ManageTransportPolicy::class)->update($actor, $transportValues);
-        });
+        app(ManageInstanceSettings::class)->update($actor, $values);
         $this->fillForm();
 
         Notification::make()->title('Instance settings updated')->success()->send();

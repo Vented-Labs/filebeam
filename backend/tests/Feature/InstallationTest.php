@@ -201,7 +201,7 @@ test('final submission requires chunk warning acknowledgement and permanently cl
     expect($state->isCompleted())->toBeTrue();
     expect(DB::connection('installation')->table('users')->count())->toBe(1);
     expect(Hash::check($input['admin']['password'], DB::connection('installation')->table('users')->value('password')))->toBeTrue();
-    expect(DB::connection('installation')->table('instance_settings')->where('key', 'anonymous_uploads')->value('value'))->toBe(1);
+    expect(DB::connection('installation')->table('instance_settings')->where('key', 'anonymous_uploads')->value('value'))->toBe('true');
     $this->postJson('/install/complete', $input)->assertNotFound();
     $this->get('/install')->assertNotFound();
     $values = Dotenv::createArrayBacked($this->installationDirectory)->load();

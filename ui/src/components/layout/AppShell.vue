@@ -17,24 +17,48 @@ import BrandLogo from '../brand/BrandLogo.vue';
 import AppLink from '../primitives/AppLink.vue';
 import AuthLink from '../auth/AuthLink.vue';
 import CliInstallButton from '../cli/CliInstallButton.vue';
-import Icon from '../primitives/Icon.vue';
+import Icon, { type IconName } from '../primitives/Icon.vue';
 import { computed, nextTick, ref } from 'vue';
 import { useBranding } from '../../lib/branding';
+import type { CommunityLink, SocialPlatform } from '../../types';
 
 type User = { name: string; username?: string | null; unread_inbox_notifications?: number };
 const props = withDefaults(
     defineProps<{
         githubUrl?: string;
         copyrightHolder?: string;
+        copyrightUrl?: string | null;
         user?: User | null;
         homeAction?: () => void;
         registrationEnabled?: boolean;
+        communityLinks?: CommunityLink[];
     }>(),
-    { user: null, registrationEnabled: true },
+    { user: null, registrationEnabled: true, communityLinks: () => [] },
 );
+const socialIcons: Record<SocialPlatform, IconName> = {
+    discord: 'social-discord',
+    x: 'social-x',
+    bluesky: 'social-bluesky',
+    mastodon: 'social-mastodon',
+    threads: 'social-threads',
+    github: 'social-github',
+    youtube: 'social-youtube',
+    instagram: 'social-instagram',
+    facebook: 'social-facebook',
+    linkedin: 'social-linkedin',
+    reddit: 'social-reddit',
+    telegram: 'social-telegram',
+    tiktok: 'social-tiktok',
+    twitch: 'social-twitch',
+    website: 'globe',
+};
+function socialIcon(link: CommunityLink): IconName {
+    return socialIcons[link.platform] ?? 'globe';
+}
 const branding = useBranding();
 const githubUrl = computed(() => props.githubUrl ?? branding.value.github_url);
 const copyrightHolder = computed(() => props.copyrightHolder ?? branding.value.copyright_holder);
+const copyrightUrl = computed(() => props.copyrightUrl ?? branding.value.copyright_url ?? null);
 
 const information = [
     {
@@ -234,7 +258,34 @@ function goHome(event: MouseEvent): void {
                     >v{{ branding.version }}</span
                 >
             </div>
-            <span>&copy; {{ branding.copyright_year }} {{ copyrightHolder }}</span>
+            <nav
+                v-if="communityLinks.length"
+                class="fb-footer__community"
+                aria-label="Community links"
+            >
+                <a
+                    v-for="link in communityLinks"
+                    :key="link.platform"
+                    class="fb-footer__community-link"
+                    :href="link.url"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    :aria-label="link.label"
+                    :title="link.label"
+                    ><Icon :name="socialIcon(link)" :size="16"
+                /></a>
+            </nav>
+            <span class="fb-footer__copyright"
+                >&copy; {{ branding.copyright_year }}
+                <a
+                    v-if="copyrightUrl"
+                    class="fb-footer__copyright-link"
+                    :href="copyrightUrl"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    >{{ copyrightHolder }}</a
+                ><template v-else>{{ copyrightHolder }}</template></span
+            >
         </footer>
     </div>
 </template>

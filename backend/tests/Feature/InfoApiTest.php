@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 use App\Http\Middleware\RequireInstallation;
 use App\Models\InstanceSetting;
-use App\Models\InstanceTransportPolicy;
 use App\Models\Plan;
 
 beforeEach(function (): void {
@@ -25,10 +24,8 @@ test('anonymous clients receive the effective default transfer configuration', f
         'default_file_retention_hours' => 12,
         'maximum_file_retention_hours' => 168,
     ]);
-    InstanceTransportPolicy::query()->findOrFail(1)->update([
-        'enabled_drivers' => ['http', 'webrtc'],
-        'default_driver' => 'webrtc',
-    ]);
+    InstanceSetting::query()->create(['key' => 'enabled_drivers', 'value' => ['http', 'webrtc']]);
+    InstanceSetting::query()->create(['key' => 'default_driver', 'value' => 'webrtc']);
     InstanceSetting::query()->create(['key' => 'anonymous_uploads', 'value' => false]);
 
     $this->getJson('/api/v1/info')
