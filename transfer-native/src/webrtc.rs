@@ -794,6 +794,48 @@ async fn wait_for_open(channel: &Arc<dyn DataChannel>) -> Result<()> {
     .context("timed out opening WebRTC data channel")?
 }
 
+/// An on-device diagnostic for the complete native UDP/ICE/DTLS/data-channel
+/// stack. Kept here so Android and future native hosts exercise the real framing.
+pub fn loopback_self_test() -> Result<bool> {
+    use filebeam_encryption::{
+        decrypt_chunk, encrypt_chunk, generate_nonce_prefix, generate_transfer_key,
+    };
+    crate::runtime::shared_tokio_runtime().block_on(async {
+        let receiver =
+            NativePeer::with_udp_addrs_and_policy(&[], vec!["127.0.0.1:0".into()], false).await?;
+        let sender =
+            NativePeer::with_udp_addrs_and_policy(&[], vec!["127.0.0.1:0".into()], false).await?;
+        let outcome = timeout(CONNECT_TIMEOUT, async {
+            let (offer, channel) = receiver.offer_channel().await?;
+            let answer = sender.answer(&offer).await?;
+            receiver.accept_answer(&answer).await?;
+            let sending = sender.receiver_channel().await?;
+            wait_for_open(&channel).await?;
+            wait_for_open(&sending).await?;
+            let key = generate_transfer_key()?;
+            let prefix = generate_nonce_prefix()?;
+            let plain = vec![0x59; FRAME_PAYLOAD_BYTES + 17];
+            let cipher = encrypt_chunk(&key, &prefix, 0, &plain, b"native-self-test")?;
+            let length = cipher.len() as u64;
+            let serving = tokio::spawn(serve_channel(
+                sending,
+                HashMap::from([(("probe".into(), 0), cipher)]),
+            ));
+            let received = request_chunk(channel.clone(), 1, "probe".into(), 0, length).await?;
+            channel.close().await?;
+            let _ = serving.await?;
+            Ok::<_, anyhow::Error>(
+                decrypt_chunk(&key, &prefix, 0, &received, b"native-self-test")? == plain,
+            )
+        })
+        .await
+        .context("local WebRTC diagnostic timed out")?;
+        receiver.close().await;
+        sender.close().await;
+        outcome
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

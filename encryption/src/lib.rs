@@ -24,6 +24,7 @@ const HPKE_ENVELOPE_BYTES: usize = HPKE_ENCAPSULATED_KEY_BYTES + KEY_BYTES + AEA
 const PROTOCOL_VERSION: u16 = 1;
 const HPKE_INFO: &[u8] = b"filebeam:v1:recipient-envelope";
 const ITEM_KEY_INFO_PREFIX: &[u8] = b"filebeam:v1:item-key:";
+const ACCOUNT_KEY_INFO_PREFIX: &[u8] = b"filebeam:v1:item-key:account-key-v1:";
 const ARGON2_MEMORY_KIB: u32 = 65_536;
 const ARGON2_ITERATIONS: u32 = 3;
 const ARGON2_PARALLELISM: u32 = 1;
@@ -253,6 +254,27 @@ pub fn generate_account_keypair() -> ApiResult<Vec<u8>> {
     keypair.extend_from_slice(public_key.as_bytes());
 
     Ok(keypair.to_vec())
+}
+
+/// Derives the browser-compatible key used to wrap a password-custody account key.
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+pub fn derive_account_wrapping_key(password_key: &[u8], public_key: &str) -> ApiResult<Vec<u8>> {
+    validate_key(password_key, "password key")?;
+    if public_key.len() != 43
+        || !public_key
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        return Err(error("account public key must be canonical base64url"));
+    }
+    let mut info = Vec::with_capacity(ACCOUNT_KEY_INFO_PREFIX.len() + public_key.len());
+    info.extend_from_slice(ACCOUNT_KEY_INFO_PREFIX);
+    info.extend_from_slice(public_key.as_bytes());
+    let mut output = Zeroizing::new([0_u8; KEY_BYTES]);
+    Hkdf::<Sha256>::new(Some(&[]), password_key)
+        .expand(&info, output.as_mut())
+        .map_err(|_| error("account key derivation failed"))?;
+    Ok(output.to_vec())
 }
 
 /// Seals a 32-byte transfer key using base-mode HPKE.

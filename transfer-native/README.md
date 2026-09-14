@@ -1,11 +1,12 @@
 # filebeam-transfer-native
 
-Native transfer orchestration for the CLI and future adapter implementations.
+Native transfer orchestration for the CLI, Android, and future native clients.
 `protocol` owns HTTP upload/download workflows, recovery, manifest handling,
 and cryptographic orchestration using `filebeam-encryption`. `uploads` prepares
 file selections, and `control` exposes platform-independent settings, progress,
-cancellation, and prompt channels. CLI modules are thin adapters around these
-APIs. The pure `filebeam-transfer` crate supplies policy; its WASM bindings
+cancellation, and prompt channels. `client-core` owns shared worker lifetimes and
+UI snapshots; the CLI and Android's UniFFI bindings adapt those APIs. The pure
+`filebeam-transfer` crate supplies policy; its WASM bindings
 provide that same policy to browser transport adapters.
 
 Native WebRTC file transport is implemented for the CLI. A sender encrypts its

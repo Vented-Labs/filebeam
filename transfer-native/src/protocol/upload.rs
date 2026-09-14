@@ -6,9 +6,9 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    fs::{self, File},
+    fs::{self},
     io::{Read, Seek, SeekFrom},
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -22,7 +22,8 @@ use anyhow::{Context, Result, bail};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use bytes::Bytes;
 use filebeam_encryption::{
-    derive_item_key, encrypt_chunk, encrypt_manifest, generate_nonce_prefix, generate_transfer_key,
+    derive_item_key, derive_password_key, derive_password_protected_key, encrypt_chunk,
+    encrypt_manifest, generate_nonce_prefix, generate_transfer_key,
 };
 use filebeam_transfer::{
     AdaptiveConcurrency, StageAction, StageSession, StageStatus, TransferMemoryBudget,
@@ -31,17 +32,18 @@ use filebeam_transfer::{
 use futures_util::stream;
 use reqwest::{
     Body, Client, StatusCode,
-    header::{CONTENT_LENGTH, CONTENT_TYPE, RETRY_AFTER},
+    header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, HeaderValue, RETRY_AFTER},
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use time::{OffsetDateTime, format_description::well_known::Rfc2822};
-use tokio::{io::AsyncReadExt, runtime::Builder, sync::watch, task::JoinSet};
+use tokio::{io::AsyncReadExt, sync::watch, task::JoinSet};
 use uuid::Uuid;
 use zeroize::Zeroize;
 
 use crate::{
     control::{Control, PeerFailed, Phase, TransferEvent},
+    source::{self, SourceSpec, UploadSource},
     uploads::{self, DirectoryMode},
     webrtc::{self, Signaling},
 };
@@ -73,6 +75,10 @@ pub(super) struct UploadJob {
     transfer_id: Option<String>,
     upload_token: Option<String>,
     share_url: Option<String>,
+    delete_token: Option<String>,
+    share_key: Vec<u8>,
+    password_salt: Option<String>,
+    #[serde(skip, default)]
     master_key: Vec<u8>,
     chunk_bytes: u64,
     server_concurrency: u32,
@@ -84,6 +90,7 @@ pub(super) struct UploadJob {
     join_token: Option<String>,
     exact_manifest: Option<String>,
     receipt: Option<String>,
+    recipient: Option<Recipient>,
     items: Vec<Item>,
     chunks: Vec<Chunk>,
 }
@@ -102,12 +109,17 @@ struct Item {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct Source {
-    path: PathBuf,
+    spec: SourceSpec,
     bytes: u64,
     modified_ns: u128,
     digest: String,
     #[serde(default)]
     chunk_digests: Vec<String>,
+}
+
+enum Inputs<'a> {
+    Paths(&'a [PathBuf]),
+    Sources(&'a [UploadSource]),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -121,6 +133,15 @@ struct Chunk {
     artifact: PathBuf,
     complete: bool,
     stage: Option<StageSession>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct Recipient {
+    username: String,
+    user_id: u64,
+    account_key_bundle_id: u64,
+    public_key: String,
+    encrypted_key: Option<String>,
 }
 
 struct PreparedCiphertext {
@@ -139,6 +160,7 @@ struct PreparedInput {
     prefix: Vec<u8>,
     key: Vec<u8>,
     transfer: String,
+    control: Control,
 }
 
 struct UploadContext {
@@ -228,8 +250,12 @@ struct Info {
     enabled_drivers: Vec<String>,
     chunk_bytes: u64,
     file_retention_hours: u64,
+    #[serde(default)]
+    file_retention_options: Vec<u64>,
     maximum_transfer_bytes: Option<u64>,
     maximum_file_count: Option<usize>,
+    #[serde(default)]
+    transport_limits: HashMap<String, super::DriverLimits>,
     #[serde(default)]
     upload_concurrency: Option<u32>,
     #[serde(default)]
@@ -247,6 +273,10 @@ struct Create<'a> {
     protocol_version: u8,
     chunk_bytes: u64,
     retention_hours: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    recipient_username: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    account_key_bundle_id: Option<u64>,
     items: Vec<CreateItem>,
 }
 #[derive(Serialize)]
@@ -263,6 +293,7 @@ struct Created {
     upload_transport: Option<UploadTransport>,
     items: Vec<CreatedItem>,
     upload_token: String,
+    delete_token: String,
     #[serde(default)]
     driver: String,
     #[serde(default)]
@@ -295,18 +326,19 @@ pub(super) fn run(
     instance: &str,
     paths: &[PathBuf],
     mode: DirectoryMode,
+    options: super::UploadOptions,
     control: &Control,
 ) -> Result<String> {
-    let root = control.transfer_home();
     let id = Uuid::new_v4().to_string();
-    let store = Store::create(&root, &id)?;
-    runtime()?.block_on(run_new(
+    let store = control.create_checkpoint_store(&id)?;
+    crate::runtime::shared_tokio_runtime().block_on(run_new(
         instance,
-        paths,
+        Inputs::Paths(paths),
         mode,
         control,
         Arc::new(store),
         "http",
+        options,
     ))
 }
 
@@ -317,23 +349,52 @@ pub(super) fn run_webrtc(
     instance: &str,
     paths: &[PathBuf],
     mode: DirectoryMode,
+    options: super::UploadOptions,
     control: &Control,
 ) -> Result<String> {
-    let root = control.transfer_home();
     let id = Uuid::new_v4().to_string();
-    let store = Store::create(&root, &id)?;
-    runtime()?.block_on(run_new(
+    let store = control.create_checkpoint_store(&id)?;
+    crate::runtime::shared_tokio_runtime().block_on(run_new(
         instance,
-        paths,
+        Inputs::Paths(paths),
         mode,
         control,
         Arc::new(store),
         "webrtc",
+        options,
+    ))
+}
+
+pub(super) fn run_sources(
+    instance: &str,
+    sources: &[UploadSource],
+    mode: DirectoryMode,
+    options: super::UploadOptions,
+    control: &Control,
+) -> Result<String> {
+    if sources.is_empty() {
+        bail!("Select at least one source");
+    }
+    if mode == DirectoryMode::Zip {
+        bail!(
+            "provider sources cannot be archived until their host exposes a document tree snapshot"
+        );
+    }
+    let id = Uuid::new_v4().to_string();
+    let store = control.create_checkpoint_store(&id)?;
+    crate::runtime::shared_tokio_runtime().block_on(run_new(
+        instance,
+        Inputs::Sources(sources),
+        mode,
+        control,
+        Arc::new(store),
+        "http",
+        options,
     ))
 }
 
 pub(super) fn resume(store: Store, control: &Control) -> Result<Vec<String>> {
-    runtime()?.block_on(async move {
+    crate::runtime::shared_tokio_runtime().block_on(async move {
         let job = store
             .load::<UploadJob>()?
             .context("saved upload checkpoint is empty")?;
@@ -342,45 +403,60 @@ pub(super) fn resume(store: Store, control: &Control) -> Result<Vec<String>> {
     })
 }
 
-fn runtime() -> Result<tokio::runtime::Runtime> {
-    Builder::new_multi_thread()
-        .worker_threads(2)
-        .max_blocking_threads(4)
-        .enable_all()
-        .build()
-        .context("create async upload runtime")
-}
-
 async fn run_new(
     instance: &str,
-    paths: &[PathBuf],
+    inputs: Inputs<'_>,
     mode: DirectoryMode,
     control: &Control,
     store: Arc<Store>,
     driver: &str,
+    options: super::UploadOptions,
 ) -> Result<String> {
     control.phase(Phase::Connecting)?;
-    let client = client(control)?;
+    if options.recipient.is_some() && (driver != "http" || options.password) {
+        bail!("inbox delivery requires HTTP without password protection");
+    }
+    let client = client(control, &options.authentication)?;
     let info: Info = json(
         control,
         request(control, client.get(format!("{instance}/api/v1/info"))).await?,
     )
     .await?;
-    if !info.anonymous_uploads_enabled
+    if (!info.anonymous_uploads_enabled
+        && matches!(
+            &options.authentication,
+            super::UploadAuthentication::Anonymous
+        ))
         || !info.enabled_drivers.iter().any(|enabled| enabled == driver)
     {
-        bail!("this instance does not allow anonymous {driver} uploads");
+        bail!("this instance does not allow {driver} uploads with this authentication");
     }
     if info.chunk_bytes == 0 || info.chunk_bytes > 24_999_984 {
         bail!("server supplied an invalid chunk size");
     }
-    let mut prepared = uploads::prepare(paths, mode, info.maximum_file_count, control)?;
+    let retention_hours = select_retention(
+        info.file_retention_hours,
+        &info.file_retention_options,
+        options.retention_hours,
+    )?;
+    let limits = super::DriverLimits::select(
+        driver,
+        &info.transport_limits,
+        info.maximum_transfer_bytes,
+        info.maximum_file_count,
+    );
+    let mut prepared = match inputs {
+        Inputs::Paths(paths) => uploads::prepare(paths, mode, limits.maximum_file_count, control)?,
+        Inputs::Sources(sources) => {
+            uploads::Prepared::from_sources(sources, limits.maximum_file_count)?
+        }
+    };
     prepared.retain_archive(store.path())?;
     // Validate declared sizes before reading potentially huge sources.
     let metadata = prepared
         .files
         .iter()
-        .map(|file| source_metadata(&file.path).map(|source| (file.name.clone(), source)))
+        .map(|file| source_metadata(&file.spec, control).map(|source| (file.name.clone(), source)))
         .collect::<Result<Vec<_>>>()?;
     let total = metadata.iter().try_fold(0u64, |n, (_, source)| {
         n.checked_add(source.bytes)
@@ -390,7 +466,7 @@ async fn run_new(
         n.checked_add(ciphertext_bytes(source.bytes, info.chunk_bytes)?)
             .ok_or_else(|| anyhow::anyhow!("selected files are too large"))
     })?;
-    if info
+    if limits
         .maximum_transfer_bytes
         .is_some_and(|limit| declared > limit)
     {
@@ -400,7 +476,7 @@ async fn run_new(
         .files
         .iter()
         .map(|file| {
-            fingerprint(&file.path, info.chunk_bytes, &control.cancelled)
+            fingerprint(&file.spec, info.chunk_bytes, &control.cancelled, control)
                 .map(|source| (file.name.clone(), source))
         })
         .collect::<Result<Vec<_>>>()?;
@@ -421,7 +497,14 @@ async fn run_new(
         transfer_id: None,
         upload_token: None,
         share_url: None,
-        master_key: generate_transfer_key()?.to_vec(),
+        delete_token: None,
+        share_key: generate_transfer_key()?.to_vec(),
+        password_salt: if options.password {
+            Some(encode(&generate_nonce_prefix()?))
+        } else {
+            None
+        },
+        master_key: Vec::new(),
         chunk_bytes: info.chunk_bytes,
         server_concurrency: info.upload_concurrency.unwrap_or(8).clamp(1, 8),
         upload_status: info.transfer_capabilities.upload_status,
@@ -430,6 +513,13 @@ async fn run_new(
         join_token: None,
         exact_manifest: None,
         receipt: None,
+        recipient: options.recipient.as_ref().map(|recipient| Recipient {
+            username: recipient.username.clone(),
+            user_id: recipient.user_id,
+            account_key_bundle_id: recipient.account_key_bundle_id,
+            public_key: recipient.public_key.clone(),
+            encrypted_key: None,
+        }),
         items: Vec::new(),
         chunks: Vec::new(),
     };
@@ -439,7 +529,15 @@ async fn run_new(
         driver,
         protocol_version: 1,
         chunk_bytes: info.chunk_bytes,
-        retention_hours: info.file_retention_hours,
+        retention_hours,
+        recipient_username: job
+            .recipient
+            .as_ref()
+            .map(|recipient| recipient.username.as_str()),
+        account_key_bundle_id: job
+            .recipient
+            .as_ref()
+            .map(|recipient| recipient.account_key_bundle_id),
         items: sources
             .iter()
             .map(|(_, s)| {
@@ -477,9 +575,23 @@ async fn run_new(
     }
     job.transfer_id = Some(created.id.clone());
     job.upload_token = Some(created.upload_token);
+    job.delete_token = Some(created.delete_token);
     job.share_url = Some(created.share_url);
     job.transport = created.upload_transport;
     job.join_token = created.join_token;
+    if let Some(recipient) = &mut job.recipient {
+        let public_key =
+            decode(&recipient.public_key).context("recipient public key is invalid")?;
+        let aad = format!(
+            "filebeam:recipient:v1:{}:{}:{}",
+            created.id, recipient.user_id, recipient.account_key_bundle_id
+        );
+        recipient.encrypted_key = Some(encode(&filebeam_encryption::seal_key_for_recipient(
+            &public_key,
+            &job.share_key,
+            aad.as_bytes(),
+        )?));
+    }
     if job.driver == "webrtc" && job.join_token.as_deref().unwrap_or_default().is_empty() {
         bail!("server did not provide a live transfer join token");
     }
@@ -502,6 +614,7 @@ async fn run_new(
     store.save(&job)?; // Reservation credentials and nonce material are durable before encryption.
     job.state = "preparing".into();
     store.save(&job)?;
+    control.set_checkpoint_id(job.id.clone());
     // Keep the prepared ZIP owner alive while the producer reads it.
     let _prepared = prepared;
     continue_job(job, store, control).await
@@ -514,6 +627,10 @@ async fn continue_job(mut job: UploadJob, store: Arc<Store>, control: &Control) 
             .receipt
             .context("completed upload receipt is unavailable");
     }
+    if job.state == "ended" {
+        return receipt(&job);
+    }
+    unlock_job(&mut job, control)?;
     // Existing fully-spooled checkpoints remain resumable without their ZIP
     // tempfile. Interleaved checkpoints must prove source identity before any
     // missing record is prepared or an orphan is adopted.
@@ -529,7 +646,7 @@ async fn continue_job(mut job: UploadJob, store: Arc<Store>, control: &Control) 
         .upload_token
         .clone()
         .context("upload token is unavailable")?;
-    let client = client(control)?;
+    let client = client(control, &super::UploadAuthentication::Anonymous)?;
     if job.driver == "http" && job.upload_status {
         reconcile(&mut job, &client, &transfer, &token, control).await?;
         store.save(&job)?;
@@ -555,7 +672,7 @@ async fn continue_job(mut job: UploadJob, store: Arc<Store>, control: &Control) 
         }
         if job.state == "sending" {
             if job.exact_manifest.is_none() {
-                job.exact_manifest = Some(encrypted_manifest(&job)?);
+                job.exact_manifest = Some(encrypted_manifest(&job, control)?);
                 store.save(&job)?;
             }
             let manifest = job
@@ -645,16 +762,19 @@ async fn continue_job(mut job: UploadJob, store: Arc<Store>, control: &Control) 
                 control.phase(Phase::Encrypting)?;
             }
             let producer_transfer = transfer.clone();
+            let producer_control = (*control).clone();
+            let producer_chunk_bytes = job.chunk_bytes;
             producer = Some(tokio::task::spawn_blocking(move || {
                 prepare_one(PreparedInput {
                     source,
                     item,
                     item_id,
                     position,
-                    chunk_bytes: job.chunk_bytes,
+                    chunk_bytes: producer_chunk_bytes,
                     prefix,
                     key,
                     transfer: producer_transfer,
+                    control: producer_control,
                 })
             }));
         }
@@ -727,7 +847,7 @@ async fn continue_job(mut job: UploadJob, store: Arc<Store>, control: &Control) 
     }
     if job.state != "finalizing" {
         job.state = "finalizing".into();
-        job.exact_manifest = Some(encrypted_manifest(&job)?);
+        job.exact_manifest = Some(encrypted_manifest(&job, control)?);
         store.save(&job)?; // Exact envelope is persisted before its idempotent request.
     }
     control.phase(Phase::Finalizing)?;
@@ -739,6 +859,9 @@ async fn continue_job(mut job: UploadJob, store: Arc<Store>, control: &Control) 
         job.exact_manifest
             .as_deref()
             .context("final upload manifest is unavailable")?,
+        job.recipient
+            .as_ref()
+            .and_then(|recipient| recipient.encrypted_key.as_deref()),
         control,
     )
     .await?;
@@ -754,6 +877,87 @@ async fn continue_job(mut job: UploadJob, store: Arc<Store>, control: &Control) 
         fs::remove_file(archive).context("remove completed upload archive")?;
     }
     Ok(url)
+}
+
+pub(super) fn revoke(store: Store, control: &Control) -> Result<()> {
+    crate::runtime::shared_tokio_runtime().block_on(async move {
+        let job = store
+            .load::<UploadJob>()?
+            .context("saved upload checkpoint is empty")?;
+        validate_job(&job)?;
+        let transfer = job.transfer_id.context("upload was not reserved yet")?;
+        let token = job.delete_token.context("delete token is unavailable")?;
+        let response = request(
+            control,
+            client(control, &super::UploadAuthentication::Anonymous)?
+                .delete(format!("{}/api/v1/transfers/{transfer}", job.instance))
+                .header("X-Filebeam-Delete-Token", token),
+        )
+        .await?;
+        if response.status() != StatusCode::ACCEPTED {
+            bail!("could not revoke transfer: {}", response.status());
+        }
+        let path = store.path().to_path_buf();
+        let discarded =
+            control
+                .transfer_home()
+                .join(format!(".{}.revoked-{}", job.id, Uuid::new_v4()));
+        fs::rename(&path, &discarded).with_context(|| format!("discard {}", path.display()))?;
+        drop(store);
+        fs::remove_dir_all(&discarded).with_context(|| format!("discard {}", discarded.display()))
+    })
+}
+
+pub(super) fn end_live(store: Store, control: &Control) -> Result<()> {
+    crate::runtime::shared_tokio_runtime().block_on(async move {
+        let mut job = store
+            .load::<UploadJob>()?
+            .context("saved upload checkpoint is empty")?;
+        validate_job(&job)?;
+        if job.driver != "webrtc" {
+            bail!("saved transfer is not a live share");
+        }
+        let transfer = job
+            .transfer_id
+            .clone()
+            .context("upload was not reserved yet")?;
+        let token = job
+            .upload_token
+            .clone()
+            .context("upload token is unavailable")?;
+        Signaling::new(
+            client(control, &super::UploadAuthentication::Anonymous)?,
+            &job.instance,
+            &transfer,
+        )?
+        .end(&token)
+        .await?;
+        job.state = "ended".into();
+        store.save(&job)
+    })
+}
+
+fn unlock_job(job: &mut UploadJob, control: &Control) -> Result<()> {
+    if job.master_key.len() == 32 {
+        return Ok(());
+    }
+    if job.share_key.len() != 32 {
+        bail!("saved upload has an invalid share key");
+    }
+    if let Some(salt) = &job.password_salt {
+        let password = control.secret(crate::control::SecretKind::Password)?;
+        if password.chars().count() < 8 {
+            bail!("passwords must contain at least 8 characters");
+        }
+        let _kdf_memory = control.reserve_memory(super::PASSWORD_KDF_BYTES)?;
+        let mut password_key =
+            derive_password_key(password.as_bytes(), &decode(salt)?, 65_536, 3, 1)?;
+        job.master_key = derive_password_protected_key(&job.share_key, &password_key)?;
+        password_key.zeroize();
+    } else {
+        job.master_key = job.share_key.clone();
+    }
+    Ok(())
 }
 
 async fn prepare_live_ciphertext(
@@ -777,6 +981,7 @@ async fn prepare_live_ciphertext(
             prefix: decode(&job.items[item].nonce_prefix)?,
             key: derive_item_key(&job.master_key, transfer, &job.items[item].id)?,
             transfer: transfer.into(),
+            control: Control::clone(control),
         };
         let prepared = tokio::task::spawn_blocking(move || prepare_one(input))
             .await
@@ -988,14 +1193,20 @@ fn prepare_one(input: PreparedInput) -> Result<PreparedCiphertext> {
         .position
         .checked_mul(input.chunk_bytes)
         .context("chunk offset overflow")?;
-    let mut file = File::open(&input.source.path)?;
+    let mut file = source::open(&input.source.spec, input.control.source_resolver())?;
     let chunk_bytes = ((input.source.bytes.saturating_sub(offset)).min(input.chunk_bytes)) as usize;
-    file.seek(SeekFrom::Start(offset))?;
+    let (base, length) = input.source.spec.bounds();
+    if offset > length {
+        bail!("source chunk starts beyond its declared length");
+    }
+    file.seek(SeekFrom::Start(
+        base.checked_add(offset).context("source offset overflow")?,
+    ))?;
     let mut plain = vec![0; chunk_bytes];
     file.read_exact(&mut plain).with_context(|| {
         format!(
             "{} changed while it was being prepared",
-            input.source.path.display()
+            source_label(&input.source.spec)
         )
     })?;
     let expected = input
@@ -1004,11 +1215,12 @@ fn prepare_one(input: PreparedInput) -> Result<PreparedCiphertext> {
         .get(input.position as usize)
         .context("saved upload lacks per-chunk source fingerprints; start a new upload")?;
     if hex::encode(Sha256::digest(&plain)) != *expected
-        || source_metadata(&input.source.path)?.modified_ns != input.source.modified_ns
+        || source_metadata(&input.source.spec, &input.control)?.modified_ns
+            != input.source.modified_ns
     {
         bail!(
             "{} changed after source preflight; start a new upload to avoid nonce reuse",
-            input.source.path.display()
+            source_label(&input.source.spec)
         );
     }
     let ciphertext = encrypt_chunk(
@@ -1559,6 +1771,7 @@ async fn complete_transfer(
     transfer: &str,
     token: &str,
     manifest: &str,
+    encrypted_key: Option<&str>,
     control: &Control,
 ) -> Result<()> {
     for attempt in 0..5 {
@@ -1567,7 +1780,7 @@ async fn complete_transfer(
             client
                 .post(format!("{instance}/api/v1/transfers/{transfer}/complete"))
                 .header("X-Filebeam-Upload-Token", token)
-                .json(&serde_json::json!({"encrypted_manifest": manifest})),
+                .json(&serde_json::json!({"encrypted_manifest": manifest, "encrypted_key": encrypted_key})),
         )
         .await;
         match response {
@@ -1637,21 +1850,56 @@ async fn json<T: for<'de> Deserialize<'de>>(
     let bytes = read_control_body(control, response).await?;
     Ok(serde_json::from_slice::<Api<T>>(&bytes)?.data)
 }
-fn client(control: &Control) -> Result<Client> {
+fn client(control: &Control, authentication: &super::UploadAuthentication) -> Result<Client> {
+    let mut headers = reqwest::header::HeaderMap::new();
+    match authentication {
+        super::UploadAuthentication::Anonymous => {}
+        super::UploadAuthentication::Bearer(token) => {
+            let mut value = HeaderValue::from_str(&format!("Bearer {token}"))
+                .context("invalid bearer authentication")?;
+            value.set_sensitive(true);
+            headers.insert(AUTHORIZATION, value);
+        }
+        super::UploadAuthentication::SessionCookie(cookie) => {
+            let mut value = HeaderValue::from_str(cookie).context("invalid session cookie")?;
+            value.set_sensitive(true);
+            headers.insert(COOKIE, value);
+        }
+    }
     Client::builder()
         .connect_timeout(Duration::from_secs(10))
         .user_agent(control.client_user_agent())
+        .default_headers(headers)
         .build()
         .context("create HTTP client")
 }
-fn source_metadata(path: &Path) -> Result<Source> {
-    let metadata = fs::metadata(path).with_context(|| format!("read {}", path.display()))?;
-    if !metadata.is_file() {
-        bail!("{} is not a regular file", path.display());
-    }
+fn source_metadata(spec: &SourceSpec, control: &Control) -> Result<Source> {
+    spec.checked_end()?;
+    let metadata = match spec {
+        SourceSpec::Path {
+            path,
+            offset,
+            length,
+        } => {
+            let metadata =
+                fs::metadata(path).with_context(|| format!("read {}", path.display()))?;
+            if !metadata.is_file()
+                || metadata.len()
+                    < offset
+                        .checked_add(*length)
+                        .context("source offset overflow")?
+            {
+                bail!("{} is not a bounded regular file", path.display());
+            }
+            metadata
+        }
+        SourceSpec::Provider { .. } => source::open(spec, control.source_resolver())?
+            .metadata()
+            .context("read provider descriptor metadata")?,
+    };
     Ok(Source {
-        path: path.to_owned(),
-        bytes: metadata.len(),
+        spec: spec.clone(),
+        bytes: spec.bounds().1,
         modified_ns: metadata
             .modified()?
             .duration_since(UNIX_EPOCH)
@@ -1661,22 +1909,34 @@ fn source_metadata(path: &Path) -> Result<Source> {
         chunk_digests: Vec::new(),
     })
 }
-fn fingerprint(path: &Path, chunk_bytes: u64, cancelled: &AtomicBool) -> Result<Source> {
-    let mut source = source_metadata(path)?;
-    let mut file = File::open(path)?;
+fn fingerprint(
+    spec: &SourceSpec,
+    chunk_bytes: u64,
+    cancelled: &AtomicBool,
+    control: &Control,
+) -> Result<Source> {
+    let mut source = source_metadata(spec, control)?;
+    let mut file = source::open(spec, control.source_resolver())?;
+    file.seek(SeekFrom::Start(spec.bounds().0))?;
     let mut hash = Sha256::new();
     let mut chunk_hash = Sha256::new();
     let mut remaining = chunk_bytes;
     let mut chunks = Vec::with_capacity(usize::try_from(chunk_count(source.bytes, chunk_bytes)?)?);
     let mut buffer = [0; 64 * 1024];
-    loop {
+    let mut source_remaining = source.bytes;
+    while source_remaining > 0 {
         if cancelled.load(Ordering::Relaxed) {
             bail!("Transfer cancelled");
         }
-        let n = file.read(&mut buffer)?;
+        let buffer_length = buffer.len() as u64;
+        let n = file.read(&mut buffer[..usize::try_from(source_remaining.min(buffer_length))?])?;
         if n == 0 {
-            break;
+            bail!(
+                "{} was truncated while it was fingerprinted",
+                source_label(spec)
+            );
         }
+        source_remaining -= n as u64;
         hash.update(&buffer[..n]);
         let mut offset = 0;
         while offset < n {
@@ -1694,18 +1954,29 @@ fn fingerprint(path: &Path, chunk_bytes: u64, cancelled: &AtomicBool) -> Result<
         chunks.push(hex::encode(chunk_hash.finalize()));
     }
     if chunks.len() as u64 != chunk_count(source.bytes, chunk_bytes)? {
-        bail!("{} changed while it was fingerprinted", path.display());
+        bail!("{} changed while it was fingerprinted", source_label(spec));
     }
     source.digest = hex::encode(hash.finalize());
     source.chunk_digests = chunks;
     Ok(source)
+}
+fn source_label(spec: &SourceSpec) -> String {
+    match spec {
+        SourceSpec::Path { path, .. } => path.display().to_string(),
+        SourceSpec::Provider { identity, .. } => identity.clone(),
+    }
 }
 fn validate_sources(job: &UploadJob, control: &Control) -> Result<()> {
     for (item_index, item) in job.items.iter().enumerate() {
         if item.source.chunk_digests.is_empty() {
             bail!("saved partial upload lacks per-chunk source fingerprints; start a new upload");
         }
-        let actual = match fingerprint(&item.source.path, job.chunk_bytes, &control.cancelled) {
+        let actual = match fingerprint(
+            &item.source.spec,
+            job.chunk_bytes,
+            &control.cancelled,
+            control,
+        ) {
             // `uploads::prepare` owns ZIP archives in a temporary directory.
             // Once every authenticated ciphertext record is durable, that
             // archive may disappear between a crash and resume.
@@ -1726,7 +1997,7 @@ fn validate_sources(job: &UploadJob, control: &Control) -> Result<()> {
         {
             bail!(
                 "{} changed after ciphertext preparation; start a new upload to avoid nonce reuse",
-                item.source.path.display()
+                source_label(&item.source.spec)
             );
         }
     }
@@ -1798,7 +2069,7 @@ fn validate_job(job: &UploadJob) -> Result<()> {
         || job.direction != "upload"
         || !matches!(
             job.state.as_str(),
-            "preparing" | "sending" | "finalizing" | "serving" | "complete"
+            "preparing" | "sending" | "finalizing" | "serving" | "ended" | "complete"
         )
         || job.chunk_bytes == 0
         || job.chunk_bytes > 24_999_984
@@ -1811,10 +2082,14 @@ fn validate_job(job: &UploadJob) -> Result<()> {
     {
         bail!("invalid saved upload checkpoint");
     }
-    if job.state != "complete"
-        && (job.transfer_id.as_deref().unwrap_or_default().is_empty()
-            || job.upload_token.as_deref().unwrap_or_default().is_empty()
-            || job.master_key.len() != 32)
+    if job.share_key.len() != 32
+        || job
+            .password_salt
+            .as_ref()
+            .is_some_and(|salt| decode(salt).map_or(true, |value| value.len() != 16))
+        || job.state != "complete"
+            && (job.transfer_id.as_deref().unwrap_or_default().is_empty()
+                || job.upload_token.as_deref().unwrap_or_default().is_empty())
     {
         bail!("saved upload checkpoint is missing credentials or encryption material");
     }
@@ -1878,17 +2153,27 @@ fn receipt(job: &UploadJob) -> Result<String> {
         .split('#')
         .next()
         .unwrap_or_default();
-    if !share.starts_with('/') || share.starts_with("//") || job.master_key.len() != 32 {
+    if !share.starts_with('/') || share.starts_with("//") || job.share_key.len() != 32 {
         bail!("server returned an invalid transfer share URL");
     }
     Ok(format!(
         "{}{}#k=v1.{}",
         job.instance.trim_end_matches('/'),
         share,
-        encode(&job.master_key)
+        encode(&job.share_key)
     ))
 }
-fn encrypted_manifest(job: &UploadJob) -> Result<String> {
+fn select_retention(default: u64, options: &[u64], requested: Option<u64>) -> Result<u64> {
+    let retention = requested.unwrap_or(default);
+    if retention == 0
+        || (!options.is_empty() && !options.contains(&retention))
+        || (options.is_empty() && retention != default)
+    {
+        bail!("the selected retention is not available on this instance");
+    }
+    Ok(retention)
+}
+fn encrypted_manifest(job: &UploadJob, control: &Control) -> Result<String> {
     let transfer = job
         .transfer_id
         .as_deref()
@@ -1902,6 +2187,7 @@ fn encrypted_manifest(job: &UploadJob) -> Result<String> {
         );
     }
     let plain = serde_json::to_vec(&manifest)?;
+    let _crypto_memory = control.reserve_memory(super::manifest_crypto_bytes(plain.len())?)?;
     let prefix = generate_nonce_prefix()?;
     let ciphertext = encrypt_manifest(
         &job.master_key,
@@ -1909,9 +2195,13 @@ fn encrypted_manifest(job: &UploadJob) -> Result<String> {
         &plain,
         format!("filebeam:v1:{transfer}:manifest:manifest").as_bytes(),
     )?;
-    Ok(serde_json::to_string(
-        &serde_json::json!({"v":1,"nonce_prefix":encode(&prefix),"ciphertext":encode(&ciphertext)}),
-    )?)
+    Ok(serde_json::to_string(&serde_json::json!({
+        "v": 1,
+        "nonce_prefix": encode(&prefix),
+        "salt": job.password_salt,
+        "kdf": job.password_salt.as_ref().map(|_| serde_json::json!({"name":"argon2id","memory_kib":65536,"iterations":3,"parallelism":1})),
+        "ciphertext": encode(&ciphertext),
+    }))?)
 }
 fn aad(transfer: &str, item: &str, position: u64) -> String {
     format!("filebeam:v1:{transfer}:{item}:{position}")
@@ -1991,9 +2281,15 @@ mod tests {
         let path = directory.path().join("source");
         fs::write(&path, b"first").unwrap();
         let cancelled = AtomicBool::new(false);
-        let original = fingerprint(&path, 10, &cancelled).unwrap();
+        let control = Control::test_factory();
+        let spec = SourceSpec::Path {
+            path: path.clone(),
+            offset: 0,
+            length: 5,
+        };
+        let original = fingerprint(&spec, 10, &cancelled, &control).unwrap();
         fs::write(&path, b"other").unwrap();
-        let changed = fingerprint(&path, 10, &cancelled).unwrap();
+        let changed = fingerprint(&spec, 10, &cancelled, &control).unwrap();
         assert_eq!(original.bytes, changed.bytes);
         assert_ne!(original.digest, changed.digest);
     }
@@ -2005,7 +2301,13 @@ mod tests {
         let original = vec![9; 25 * 1024 * 1024 + 3];
         fs::write(&path, &original).unwrap();
         let cancelled = AtomicBool::new(false);
-        let source = fingerprint(&path, 24_999_984, &cancelled).unwrap();
+        let control = Control::test_factory();
+        let spec = SourceSpec::Path {
+            path: path.clone(),
+            offset: 0,
+            length: original.len() as u64,
+        };
+        let source = fingerprint(&spec, 24_999_984, &cancelled, &control).unwrap();
         assert_eq!(source.chunk_digests.len(), 2);
         fs::write(&path, vec![7; original.len()]).unwrap();
         fs::write(&path, &original).unwrap();
@@ -2019,6 +2321,7 @@ mod tests {
                 prefix: vec![0; 16],
                 key: vec![0; 32],
                 transfer: "transfer".into(),
+                control,
             })
             .is_err()
         );
@@ -2037,6 +2340,9 @@ mod tests {
             transfer_id: None,
             upload_token: None,
             share_url: None,
+            delete_token: None,
+            share_key: vec![0; 32],
+            password_salt: None,
             master_key: vec![0; 32],
             chunk_bytes: 10,
             server_concurrency: 1,
@@ -2046,6 +2352,7 @@ mod tests {
             join_token: None,
             exact_manifest: None,
             receipt: None,
+            recipient: None,
             items: Vec::new(),
             chunks: Vec::new(),
         };
@@ -2075,6 +2382,9 @@ mod tests {
             transfer_id: Some("01ARZ3NDEKTSV4RRFFQ69G5FAV".into()),
             upload_token: Some("token".into()),
             share_url: Some("/transfers/01ARZ3NDEKTSV4RRFFQ69G5FAV".into()),
+            delete_token: Some("delete".into()),
+            share_key: vec![7; 32],
+            password_salt: None,
             master_key: vec![7; 32],
             chunk_bytes: 10,
             server_concurrency: 1,
@@ -2084,6 +2394,7 @@ mod tests {
             join_token: None,
             exact_manifest: None,
             receipt: None,
+            recipient: None,
             items: Vec::new(),
             chunks: Vec::new(),
         }
@@ -2116,7 +2427,11 @@ mod tests {
             position: 0,
             name: "archive.zip".into(),
             source: Source {
-                path: directory.path().join("removed-archive.zip"),
+                spec: SourceSpec::Path {
+                    path: directory.path().join("removed-archive.zip"),
+                    offset: 0,
+                    length: 0,
+                },
                 bytes: 0,
                 modified_ns: 0,
                 digest: "source".into(),
@@ -2146,6 +2461,70 @@ mod tests {
         assert_eq!(
             peer_failure_message(),
             "A live receiver disconnected or failed."
+        );
+    }
+
+    #[test]
+    fn retention_requires_a_discovered_choice() {
+        assert_eq!(select_retention(24, &[6, 24], None).unwrap(), 24);
+        assert_eq!(select_retention(24, &[6, 24], Some(6)).unwrap(), 6);
+        assert!(select_retention(24, &[6, 24], Some(72)).is_err());
+    }
+
+    #[test]
+    fn password_manifest_carries_browser_compatible_salt_without_password() {
+        let mut saved = job("sending");
+        saved.password_salt = Some(encode(&[3; 16]));
+        let password_key = derive_password_key(b"eight-char", &[3; 16], 65_536, 3, 1).unwrap();
+        saved.master_key = derive_password_protected_key(&saved.share_key, &password_key).unwrap();
+        let envelope: serde_json::Value =
+            serde_json::from_str(&encrypted_manifest(&saved, &Control::test_factory()).unwrap())
+                .unwrap();
+        assert_eq!(envelope["salt"], encode(&[3; 16]));
+        assert_eq!(envelope["kdf"]["name"], "argon2id");
+        assert_eq!(envelope["kdf"]["memory_kib"], 65_536);
+        assert!(!envelope.to_string().contains("eight-char"));
+    }
+
+    #[test]
+    fn password_restart_keeps_delete_capability_but_not_working_key() {
+        let mut saved = job("sending");
+        saved.password_salt = Some(encode(&[3; 16]));
+        saved.delete_token = Some("durable-delete-token".into());
+        let password_key = derive_password_key(b"eight-char", &[3; 16], 65_536, 3, 1).unwrap();
+        saved.master_key = derive_password_protected_key(&saved.share_key, &password_key).unwrap();
+
+        let resumed: UploadJob =
+            serde_json::from_value(serde_json::to_value(saved).unwrap()).unwrap();
+        assert!(resumed.master_key.is_empty());
+        assert_eq!(
+            resumed.delete_token.as_deref(),
+            Some("durable-delete-token")
+        );
+        assert_eq!(resumed.password_salt, Some(encode(&[3; 16])));
+    }
+
+    #[test]
+    fn ended_live_checkpoint_preserves_recovery_and_is_not_a_pause() {
+        let mut saved = job("ended");
+        saved.driver = "webrtc".into();
+        saved.join_token = Some("join".into());
+        saved.exact_manifest = Some("published-manifest".into());
+        validate_job(&saved).unwrap();
+        assert_eq!(receipt(&saved).unwrap(), receipt(&job("sending")).unwrap());
+    }
+
+    #[test]
+    fn recipient_envelope_uses_browser_account_aad() {
+        let pair = filebeam_encryption::generate_account_keypair().unwrap();
+        let transfer_key = [9; 32];
+        let aad = b"filebeam:recipient:v1:01ARZ3NDEKTSV4RRFFQ69G5FAV:12:34";
+        let envelope =
+            filebeam_encryption::seal_key_for_recipient(&pair[32..], &transfer_key, aad).unwrap();
+        assert_eq!(envelope.len(), 80);
+        assert_eq!(
+            filebeam_encryption::open_recipient_envelope(&pair[..32], &envelope, aad).unwrap(),
+            transfer_key
         );
     }
 }

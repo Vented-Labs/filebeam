@@ -4,6 +4,13 @@ transfer/target/
 transfer-native/target/
 transfer-wasm/target/
 cli/target/
+client-core/target/
+client-ffi/target/
+mobile/android/.gradle/
+mobile/android/.kotlin/
+mobile/android/**/build/
+mobile/android/local.properties
+.android-cache/
 encryption/pkg/
 transfer-wasm/pkg/
 .filebeam/

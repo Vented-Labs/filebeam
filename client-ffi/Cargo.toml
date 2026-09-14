@@ -1,0 +1,33 @@
+[package]
+name = "filebeam-client-ffi"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Kotlin and Swift bindings for the Filebeam native client"
+
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+required-features = ["bindgen"]
+
+[features]
+bindgen = ["uniffi/cli"]
+
+[dependencies]
+anyhow = "1.0.98"
+base64 = "0.22.1"
+filebeam-client-core = { path = "../client-core" }
+filebeam-encryption = { path = "../encryption" }
+filebeam-transfer-native = { path = "../transfer-native" }
+thiserror = "2.0.12"
+uniffi = "=0.32.1"
+url = "2.5.4"
+zeroize = "1.8.1"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = "debuginfo"

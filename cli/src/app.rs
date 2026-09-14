@@ -1,15 +1,8 @@
 use std::{
     collections::VecDeque,
     path::PathBuf,
-    sync::{
-        atomic::Ordering,
-        mpsc::{self, Receiver, TryRecvError},
-    },
-    thread,
     time::{Duration, Instant},
 };
-
-use anyhow::Result;
 
 use crate::{config::Config, protocol, update, uploads::DirectoryMode};
 #[allow(unused_imports)]
@@ -54,38 +47,34 @@ impl Request {
     }
 }
 
-pub struct Job {
-    pub control: Control,
-    pub prompts: Receiver<Prompt>,
-    pub events: Receiver<TransferEvent>,
-    result: Receiver<Result<Vec<String>>>,
+pub struct Job(filebeam_client_core::Job);
+
+impl std::ops::Deref for Job {
+    type Target = filebeam_client_core::Job;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 impl Job {
     pub fn start(instance: String, config: Config, request: Request) -> Self {
-        let (prompts, receiver) = mpsc::channel();
-        let (event_sender, events) = mpsc::channel();
-        let (sender, result) = mpsc::channel();
-        let control = Control::with_events(
+        Self(filebeam_client_core::Job::spawn(
             TransferSettings {
                 state_home: config.home.join("transfers"),
                 max_concurrency: config.max_concurrency,
                 memory_budget: config.memory_limit_mib * 1024 * 1024,
                 client_user_agent: Some(format!("beam/{}", env!("BEAM_VERSION"))),
                 webrtc_relay_only: config.webrtc_relay_only,
+                checkpoint_secret_store: None,
+                source_resolver: None,
             },
-            prompts,
-            event_sender,
-        );
-        let worker = control.clone();
-        thread::spawn(move || {
-            let outcome = match request {
+            move |worker| match request {
                 Request::Upload(paths, mode, options) => {
-                    protocol::upload(&instance, &paths, mode, options, &worker)
+                    protocol::upload(&instance, &paths, mode, options, worker)
                         .map(|link| vec![link])
                 }
                 Request::Download { link, output } => {
-                    protocol::download(&instance, &link, &output, &worker).map(|paths| {
+                    protocol::download(&instance, &link, &output, worker).map(|paths| {
                         paths
                             .into_iter()
                             .map(|path| path.display().to_string())
@@ -96,37 +85,9 @@ impl Job {
                     .phase(Phase::Updating)
                     .and_then(|_| update::check(&config))
                     .map(|value| vec![value]),
-                Request::Resume { id, .. } => protocol::resume(&id, &worker),
-            };
-            let outcome = if worker.cancelled.load(Ordering::Relaxed) && outcome.is_err() {
-                Err(Cancelled.into())
-            } else {
-                outcome
-            };
-            let _ = sender.send(outcome);
-        });
-        Self {
-            control,
-            prompts: receiver,
-            events,
-            result,
-        }
-    }
-
-    pub fn poll(&self) -> Option<Result<Vec<String>>> {
-        match self.result.try_recv() {
-            Ok(value) => Some(value),
-            Err(TryRecvError::Empty) => None,
-            Err(TryRecvError::Disconnected) => {
-                Some(Err(anyhow::anyhow!("Transfer worker stopped unexpectedly")))
-            }
-        }
-    }
-}
-
-impl Drop for Job {
-    fn drop(&mut self) {
-        self.control.cancel();
+                Request::Resume { id, .. } => protocol::resume(&id, worker),
+            },
+        ))
     }
 }
 

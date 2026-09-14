@@ -109,6 +109,52 @@ jobs:
           cargo test --manifest-path transfer-native/Cargo.toml --locked
           cargo test --manifest-path transfer-wasm/Cargo.toml --locked
 
+  android:
+    name: Android
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 45
+    env:
+      FILEBEAM_ANDROID_BUILD_IMAGE: 'false'
+      FILEBEAM_ANDROID_CACHE: ${{ github.workspace }}/.android-cache
+    steps:
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: useblacksmith/setup-docker-builder@19215110ab936351210feebdfa5b440b4493e184 # v2
+        with:
+          cache-key: docker/android/Dockerfile
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            .android-cache/cargo
+            .android-cache/gradle/caches
+            .android-cache/gradle/wrapper
+            client-ffi/target
+            client-core/target
+          key: android-${{ runner.os }}-rust1.98.0-${{ hashFiles('docker/android/Dockerfile', 'client-ffi/Cargo.lock', 'client-core/Cargo.lock', 'mobile/android/gradle/libs.versions.toml') }}-${{ github.sha }}
+          restore-keys: android-${{ runner.os }}-rust1.98.0-${{ hashFiles('docker/android/Dockerfile', 'client-ffi/Cargo.lock', 'client-core/Cargo.lock', 'mobile/android/gradle/libs.versions.toml') }}-
+      - name: Build Android tooling
+        run: docker buildx build --load --tag filebeam-android-tooling:rust-1.98.0-sdk37 docker/android
+      - name: Check native Android build
+        run: bash scripts/android/check.sh
+      - name: Build 16 KiB emulator
+        run: docker buildx build --load --file docker/android/Emulator.Dockerfile --tag filebeam-android-emulator:api35-16k docker/android
+      - name: Exercise native bindings on Android
+        run: bash scripts/android/device-test.sh
+      - name: Upload development APK and test reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: android-development
+          path: |
+            mobile/android/app/build/outputs/apk/debug/*.apk
+            mobile/android/app/build/outputs/apk/androidTest/debug/*.apk
+            mobile/android/app/build/reports/
+            test-results/android/
+          if-no-files-found: ignore
+          retention-days: 7
+
   php-static:
     name: PHP static checks
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -412,7 +458,7 @@ jobs:
     # Keep this name in sync with the required GitHub Actions check on master.
     name: Test
     if: always()
-    needs: [frontend, rust, php-static, php, sail, small-chunks, distribution]
+    needs: [frontend, rust, android, php-static, php, sail, small-chunks, distribution]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 5
     steps:

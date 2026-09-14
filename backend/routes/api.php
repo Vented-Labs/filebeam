@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\AccountKeyController;
 use App\Http\Controllers\Api\V1\DownloadSessionController;
 use App\Http\Controllers\Api\V1\InfoController;
 use App\Http\Controllers\Api\V1\TransferChunkController;
@@ -9,6 +10,9 @@ use App\Http\Controllers\Api\V1\TransferChunkStageController;
 use App\Http\Controllers\Api\V1\TransferController;
 use App\Http\Controllers\Api\V1\TurboTransferController;
 use App\Http\Controllers\Api\V1\WebRtcTransferController;
+use App\Http\Controllers\Auth\AuthenticatedSessionController;
+use App\Http\Controllers\InboxController;
+use App\Http\Controllers\NativeAccountController;
 use App\Http\Middleware\EnsureAnonymousTransferUploadsAreEnabled;
 use App\Http\Middleware\ProtectAuthenticatedTransferCreation;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
@@ -90,4 +94,20 @@ Route::prefix('v1')->group(function (): void {
         ->middleware('throttle:transfer-reading')
         ->scopeBindings()
         ->name('api.transfer-chunks.show');
+});
+
+// Native clients retain Laravel's cookie session and login throttles. These are
+// JSON representations of existing account capabilities, not bearer-token auth.
+Route::prefix('native/v1')->middleware([EncryptCookies::class, AddQueuedCookiesToResponse::class, StartSession::class])->group(function (): void {
+    Route::get('/recipients/{username}', [NativeAccountController::class, 'recipient'])->where('username', '[a-z0-9_]{3,24}')->middleware('throttle:transfer-reading');
+    Route::post('/session', [AuthenticatedSessionController::class, 'store'])->middleware('guest');
+    Route::delete('/session', [AuthenticatedSessionController::class, 'destroy'])->middleware('auth');
+    Route::middleware('auth')->group(function (): void {
+        Route::get('/session', [NativeAccountController::class, 'session']);
+        Route::get('/inbox', [NativeAccountController::class, 'inbox']);
+        Route::patch('/inbox', [InboxController::class, 'update']);
+        Route::get('/inbox/{transfer}/metadata', [InboxController::class, 'metadata'])->middleware('throttle:transfer-reading');
+        Route::get('/account/keys', [NativeAccountController::class, 'keys']);
+        Route::post('/account/keys', [AccountKeyController::class, 'store'])->middleware('throttle:account-key-writing');
+    });
 });

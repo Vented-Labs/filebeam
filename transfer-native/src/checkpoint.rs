@@ -2,12 +2,17 @@ use std::{
     fs::{self, File},
     io::{Read, Write},
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 #[cfg(not(windows))]
 use std::fs::OpenOptions;
 
 use anyhow::{Context, Result, bail};
+use chacha20poly1305::{
+    XChaCha20Poly1305, XNonce,
+    aead::{Aead, KeyInit, Payload},
+};
 use fs2::FileExt;
 use serde::{Serialize, de::DeserializeOwned};
 
@@ -20,11 +25,72 @@ const MAX_IMMUTABLE_BYTES: u64 = 25_000_000;
 const LOCK_NAME: &str = "lock";
 const CHECKPOINT_NAME: &str = "checkpoint.json";
 const CHECKPOINT_TEMP_NAME: &str = "checkpoint.json.new";
+const CATALOG_KEY_NAME: &str = ".catalog-key-v1";
+const CATALOG_SCOPE: &str = "checkpoint-catalog-v1";
+const ENVELOPE_MAGIC: &[u8; 4] = b"FBCK";
+const ENVELOPE_VERSION: u8 = 1;
+
+/// Supplies a per-client catalog key. Implementations must fail rather than
+/// silently replacing a missing or invalidated platform key.
+pub trait SecretStore: Send + Sync {
+    fn load_or_create(&self, scope: &str) -> Result<[u8; 32]>;
+    fn remove(&self, scope: &str) -> Result<()>;
+}
+
+/// Owner-only filesystem custody for the CLI. Mobile hosts should supply a
+/// platform-backed store through `create_with_secret_store` instead.
+pub struct FilesystemSecretStore {
+    root: PathBuf,
+}
+
+impl FilesystemSecretStore {
+    pub fn for_state_root(root: impl Into<PathBuf>) -> Arc<dyn SecretStore> {
+        Arc::new(Self { root: root.into() })
+    }
+}
+
+impl SecretStore for FilesystemSecretStore {
+    fn load_or_create(&self, scope: &str) -> Result<[u8; 32]> {
+        if scope != CATALOG_SCOPE {
+            bail!("unknown checkpoint secret scope")
+        }
+        let path = self.root.join(CATALOG_KEY_NAME);
+        match fs::symlink_metadata(&path) {
+            Ok(metadata) => {
+                validate_private_regular_file(&path, &metadata)?;
+                let bytes = fs::read(&path)?;
+                return bytes
+                    .try_into()
+                    .map_err(|_| anyhow::anyhow!("invalid checkpoint catalog key"));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        let mut key = [0u8; 32];
+        getrandom::getrandom(&mut key).context("generate checkpoint catalog key")?;
+        write_new_private_file(&path, &key).context("create checkpoint catalog key")?;
+        Ok(key)
+    }
+
+    fn remove(&self, scope: &str) -> Result<()> {
+        if scope != CATALOG_SCOPE {
+            bail!("unknown checkpoint secret scope")
+        }
+        let path = self.root.join(CATALOG_KEY_NAME);
+        match fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error.into()),
+        }
+    }
+}
 
 /// A private job directory. The advisory lock is released by the OS after a
 /// crash, unlike a create-new sentinel, so a restarted command can resume.
 pub struct Store {
     directory: PathBuf,
+    id: String,
+    catalog_key: [u8; 32],
     _lock: File,
 }
 
@@ -32,6 +98,14 @@ impl Store {
     /// Create a new job only. Existing jobs, including incomplete ones, must be
     /// opened explicitly so callers cannot overwrite resumable state by mistake.
     pub fn create(root: &Path, id: &str) -> Result<Self> {
+        Self::create_with_secret_store(root, id, FilesystemSecretStore::for_state_root(root))
+    }
+
+    pub fn create_with_secret_store(
+        root: &Path,
+        id: &str,
+        secret_store: Arc<dyn SecretStore>,
+    ) -> Result<Self> {
         validate_name(id, "transfer job id")?;
         ensure_platform_supported()?;
         ensure_private_root(root, true)?;
@@ -39,11 +113,19 @@ impl Store {
         let directory = root.join(id);
         create_private_dir(&directory)
             .with_context(|| format!("create {}", directory.display()))?;
-        open_locked(directory, id)
+        open_locked(directory, id, secret_store)
     }
 
     /// Open an existing job only. This never creates a root or job directory.
     pub fn open(root: &Path, id: &str) -> Result<Self> {
+        Self::open_with_secret_store(root, id, FilesystemSecretStore::for_state_root(root))
+    }
+
+    pub fn open_with_secret_store(
+        root: &Path,
+        id: &str,
+        secret_store: Arc<dyn SecretStore>,
+    ) -> Result<Self> {
         validate_name(id, "transfer job id")?;
         ensure_platform_supported()?;
         ensure_private_root(root, false)?;
@@ -51,7 +133,23 @@ impl Store {
         let directory = root.join(id);
         ensure_private_dir(&directory)
             .with_context(|| format!("validate {}", directory.display()))?;
-        open_locked(directory, id)
+        open_locked(directory, id, secret_store)
+    }
+
+    /// Remove a job without reading its catalog, including jobs whose host key
+    /// was invalidated or whose records no longer authenticate.
+    pub fn discard(root: &Path, id: &str) -> Result<()> {
+        validate_name(id, "transfer job id")?;
+        ensure_platform_supported()?;
+        ensure_private_root(root, false)?;
+        let directory = root.join(id);
+        ensure_private_dir(&directory)?;
+        let lock = acquire_lock(&directory, id)?;
+        let discarded = root.join(format!(".{id}.discarding-{}", uuid::Uuid::new_v4()));
+        fs::rename(&directory, &discarded)
+            .with_context(|| format!("discard {}", directory.display()))?;
+        drop(lock);
+        fs::remove_dir_all(&discarded).with_context(|| format!("discard {}", discarded.display()))
     }
 
     pub fn path(&self) -> &Path {
@@ -80,6 +178,7 @@ impl Store {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(error).with_context(|| format!("inspect {}", path.display())),
         }
+        let encoded = self.seal(name, &encoded)?;
         write_new_private_file(&temporary, &encoded)?;
         replace_private_file(&temporary, &path, true)
             .context("atomically save transfer checkpoint")?;
@@ -112,8 +211,9 @@ impl Store {
         if bytes.len() as u64 > MAX_CHECKPOINT_BYTES {
             bail!("transfer checkpoint exceeds {MAX_CHECKPOINT_BYTES} byte limit");
         }
+        let plaintext = self.open_record(name, &bytes)?;
         Ok(Some(
-            serde_json::from_slice(&bytes).context("parse transfer checkpoint")?,
+            serde_json::from_slice(&plaintext).context("parse transfer checkpoint")?,
         ))
     }
 
@@ -156,6 +256,94 @@ impl Store {
         sync_directory(&self.directory)?;
         Ok(path)
     }
+
+    /// Save a small secret record encrypted under the catalog key. This is for
+    /// material that does not belong in a JSON checkpoint.
+    pub fn save_secret(&self, name: &str, value: &[u8]) -> Result<()> {
+        use base64::Engine;
+        self.save_named(
+            name,
+            &base64::engine::general_purpose::STANDARD.encode(value),
+        )
+    }
+
+    pub fn load_secret(&self, name: &str) -> Result<Option<Vec<u8>>> {
+        use base64::Engine;
+        validate_checkpoint_name(name)?;
+        let path = self.directory.join(name);
+        let bytes = match fs::symlink_metadata(&path) {
+            Ok(metadata) => {
+                validate_private_regular_file(&path, &metadata)?;
+                if metadata.len() > MAX_CHECKPOINT_BYTES {
+                    bail!("saved secret exceeds {MAX_CHECKPOINT_BYTES} byte limit");
+                }
+                fs::read(&path)?
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error).with_context(|| format!("inspect {}", path.display())),
+        };
+        // Legacy raw secrets are rewritten before a resumed transfer continues.
+        if !bytes.starts_with(ENVELOPE_MAGIC) {
+            return Ok(Some(bytes));
+        }
+        let plaintext = self.open_record(name, &bytes)?;
+        let encoded: String = serde_json::from_slice(&plaintext).context("parse saved secret")?;
+        Ok(Some(
+            base64::engine::general_purpose::STANDARD
+                .decode(encoded)
+                .context("parse saved secret")?,
+        ))
+    }
+
+    fn seal(&self, name: &str, plaintext: &[u8]) -> Result<Vec<u8>> {
+        let mut nonce = [0u8; 24];
+        getrandom::getrandom(&mut nonce).context("generate checkpoint nonce")?;
+        let nonce = XNonce::try_from(&nonce[..])
+            .map_err(|_| anyhow::anyhow!("invalid checkpoint nonce"))?;
+        let cipher = XChaCha20Poly1305::new((&self.catalog_key).into());
+        let ciphertext = cipher
+            .encrypt(
+                &nonce,
+                Payload {
+                    msg: plaintext,
+                    aad: &self.aad(name),
+                },
+            )
+            .map_err(|_| anyhow::anyhow!("encrypt checkpoint catalog"))?;
+        let mut record =
+            Vec::with_capacity(ENVELOPE_MAGIC.len() + 1 + nonce.len() + ciphertext.len());
+        record.extend_from_slice(ENVELOPE_MAGIC);
+        record.push(ENVELOPE_VERSION);
+        record.extend_from_slice(&nonce);
+        record.extend_from_slice(&ciphertext);
+        Ok(record)
+    }
+
+    fn open_record(&self, name: &str, bytes: &[u8]) -> Result<Vec<u8>> {
+        if !bytes.starts_with(ENVELOPE_MAGIC) {
+            // Legacy JSON is accepted only until the next atomic save migration.
+            return Ok(bytes.to_vec());
+        }
+        if bytes.len() < 4 + 1 + 24 + 16 || bytes[4] != ENVELOPE_VERSION {
+            bail!("invalid checkpoint catalog envelope")
+        }
+        let nonce = XNonce::try_from(&bytes[5..29])
+            .map_err(|_| anyhow::anyhow!("invalid checkpoint catalog nonce"))?;
+        let cipher = XChaCha20Poly1305::new((&self.catalog_key).into());
+        cipher
+            .decrypt(
+                &nonce,
+                Payload {
+                    msg: &bytes[29..],
+                    aad: &self.aad(name),
+                },
+            )
+            .map_err(|_| anyhow::anyhow!("checkpoint catalog authentication failed"))
+    }
+
+    fn aad(&self, name: &str) -> Vec<u8> {
+        format!("filebeam:checkpoint:v1:{}:{name}", self.id).into_bytes()
+    }
 }
 
 impl Drop for Store {
@@ -164,7 +352,19 @@ impl Drop for Store {
     }
 }
 
-fn open_locked(directory: PathBuf, id: &str) -> Result<Store> {
+fn open_locked(directory: PathBuf, id: &str, secret_store: Arc<dyn SecretStore>) -> Result<Store> {
+    let lock = acquire_lock(&directory, id)?;
+    Ok(Store {
+        directory,
+        id: id.into(),
+        catalog_key: secret_store
+            .load_or_create(CATALOG_SCOPE)
+            .context("open checkpoint catalog key")?,
+        _lock: lock,
+    })
+}
+
+fn acquire_lock(directory: &Path, id: &str) -> Result<File> {
     let lock_path = directory.join(LOCK_NAME);
     match fs::symlink_metadata(&lock_path) {
         Ok(metadata) => validate_private_regular_file(&lock_path, &metadata)?,
@@ -179,10 +379,7 @@ fn open_locked(directory: PathBuf, id: &str) -> Result<Store> {
     validate_private_regular_file(&lock_path, &metadata)?;
     lock.try_lock_exclusive()
         .with_context(|| format!("transfer {id} is already active"))?;
-    Ok(Store {
-        directory,
-        _lock: lock,
-    })
+    Ok(lock)
 }
 
 fn validate_name(name: &str, kind: &str) -> Result<()> {
@@ -458,11 +655,168 @@ fn sync_directory(_: &Path) -> Result<()> {
 mod tests {
     use super::*;
     use serde::{Deserialize, Serialize};
+    use std::sync::Mutex;
 
     #[derive(Debug, PartialEq, Serialize, Deserialize)]
     struct State {
         offset: u64,
         checksum: String,
+    }
+
+    struct TestSecrets(Mutex<Option<[u8; 32]>>);
+    impl TestSecrets {
+        fn with(key: [u8; 32]) -> Arc<dyn SecretStore> {
+            Arc::new(Self(Mutex::new(Some(key))))
+        }
+    }
+    impl SecretStore for TestSecrets {
+        fn load_or_create(&self, _: &str) -> Result<[u8; 32]> {
+            self.0
+                .lock()
+                .unwrap()
+                .ok_or_else(|| anyhow::anyhow!("key invalidated"))
+        }
+        fn remove(&self, _: &str) -> Result<()> {
+            *self.0.lock().unwrap() = None;
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn catalog_authentication_rejects_wrong_keys_and_tampering() {
+        let root = tempfile::tempdir().unwrap();
+        let key = TestSecrets::with([7; 32]);
+        let store = Store::create_with_secret_store(root.path(), "job", key).unwrap();
+        store
+            .save(&State {
+                offset: 9,
+                checksum: "secret".into(),
+            })
+            .unwrap();
+        let path = store.path().join(CHECKPOINT_NAME);
+        let bytes = fs::read(&path).unwrap();
+        assert!(bytes.starts_with(ENVELOPE_MAGIC));
+        drop(store);
+        assert!(
+            Store::open_with_secret_store(root.path(), "job", TestSecrets::with([8; 32]))
+                .unwrap()
+                .load::<State>()
+                .is_err()
+        );
+        let mut tampered = bytes;
+        *tampered.last_mut().unwrap() ^= 1;
+        fs::write(path, tampered).unwrap();
+        assert!(
+            Store::open_with_secret_store(root.path(), "job", TestSecrets::with([7; 32]))
+                .unwrap()
+                .load::<State>()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn legacy_checkpoint_migrates_atomically_and_interrupted_migration_keeps_legacy() {
+        let root = tempfile::tempdir().unwrap();
+        let key = TestSecrets::with([3; 32]);
+        let store = Store::create_with_secret_store(root.path(), "job", key.clone()).unwrap();
+        let legacy = serde_json::to_vec(&State {
+            offset: 1,
+            checksum: "legacy".into(),
+        })
+        .unwrap();
+        write_new_private_file(&store.path().join(CHECKPOINT_NAME), &legacy).unwrap();
+        write_new_private_file(&store.path().join(CHECKPOINT_TEMP_NAME), b"interrupted").unwrap();
+        assert_eq!(store.load::<State>().unwrap().unwrap().offset, 1);
+        store
+            .save(&State {
+                offset: 2,
+                checksum: "migrated".into(),
+            })
+            .unwrap();
+        assert!(
+            fs::read(store.path().join(CHECKPOINT_NAME))
+                .unwrap()
+                .starts_with(ENVELOPE_MAGIC)
+        );
+        assert!(!store.path().join(CHECKPOINT_TEMP_NAME).exists());
+        assert_eq!(store.load::<State>().unwrap().unwrap().offset, 2);
+    }
+
+    #[test]
+    fn filesystem_default_keeps_cli_legacy_jobs_resumable_then_authenticates_them() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::create(root.path(), "job").unwrap();
+        let legacy = serde_json::to_vec(&State {
+            offset: 1,
+            checksum: "cli-legacy".into(),
+        })
+        .unwrap();
+        write_new_private_file(&store.path().join(CHECKPOINT_NAME), &legacy).unwrap();
+        assert_eq!(
+            store.load::<State>().unwrap().unwrap().checksum,
+            "cli-legacy"
+        );
+        store
+            .save(&State {
+                offset: 2,
+                checksum: "authenticated".into(),
+            })
+            .unwrap();
+        drop(store);
+        assert_eq!(
+            Store::open(root.path(), "job")
+                .unwrap()
+                .load::<State>()
+                .unwrap()
+                .unwrap()
+                .checksum,
+            "authenticated"
+        );
+    }
+
+    #[test]
+    fn secret_records_migrate_without_exposing_the_legacy_value_after_resume() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::create_with_secret_store(root.path(), "job", TestSecrets::with([5; 32]))
+            .unwrap();
+        let path = store.path().join("share-key");
+        write_new_private_file(&path, &[1; 32]).unwrap();
+        assert_eq!(store.load_secret("share-key").unwrap(), Some(vec![1; 32]));
+        store.save_secret("share-key", &[1; 32]).unwrap();
+        assert!(fs::read(path).unwrap().starts_with(ENVELOPE_MAGIC));
+    }
+
+    #[test]
+    fn oversized_or_tampered_secret_record_fails_closed() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::create_with_secret_store(root.path(), "job", TestSecrets::with([5; 32]))
+            .unwrap();
+        store.save_secret("share-key", &[9; 32]).unwrap();
+        let path = store.path().join("share-key");
+        let mut record = fs::read(&path).unwrap();
+        *record.last_mut().unwrap() ^= 1;
+        fs::write(&path, record).unwrap();
+        assert!(store.load_secret("share-key").is_err());
+        fs::remove_file(&path).unwrap();
+        let file = open_private_file(&path, false, true).unwrap();
+        file.set_len(MAX_CHECKPOINT_BYTES + 1).unwrap();
+        assert!(store.load_secret("share-key").is_err());
+    }
+
+    #[test]
+    fn corrupt_catalog_can_be_discarded_without_a_working_secret_provider() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::create_with_secret_store(root.path(), "job", TestSecrets::with([4; 32]))
+            .unwrap();
+        store
+            .save(&State {
+                offset: 1,
+                checksum: "x".into(),
+            })
+            .unwrap();
+        drop(store);
+        Store::discard(root.path(), "job").unwrap();
+        assert!(!root.path().join("job").exists());
     }
 
     #[test]

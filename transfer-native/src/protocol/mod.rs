@@ -1,7 +1,8 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use anyhow::{Context, Result, bail};
@@ -18,13 +19,29 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-    checkpoint::Store,
     control::{Control, Phase, SecretKind},
+    source::UploadSource,
     uploads::DirectoryMode,
 };
 
 mod download;
+mod live;
+mod revocation;
 mod upload;
+
+pub(crate) const PASSWORD_KDF_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Covers plaintext, AEAD output, base64 output, and JSON serialization buffers
+/// held simultaneously while constructing or opening a manifest.
+pub(crate) fn manifest_crypto_bytes(plain_bytes: usize) -> Result<u64> {
+    u64::try_from(plain_bytes)
+        .context("manifest is too large for memory accounting")?
+        .checked_mul(4)
+        .context("manifest memory accounting overflow")
+}
+
+#[cfg(test)]
+use crate::checkpoint::Store;
 
 #[derive(Clone, Debug)]
 pub struct SavedTransfer {
@@ -72,6 +89,18 @@ impl SavedHeader {
 }
 
 pub fn saved_transfers(home: &Path) -> Result<Vec<SavedTransfer>> {
+    saved_transfers_with_secret_store(
+        home,
+        crate::checkpoint::FilesystemSecretStore::for_state_root(home),
+    )
+}
+
+/// Enumerate records using the same per-client custody provider used to create
+/// them. Unauthenticated records are deliberately omitted rather than exposed.
+pub fn saved_transfers_with_secret_store(
+    home: &Path,
+    secret_store: Arc<dyn crate::checkpoint::SecretStore>,
+) -> Result<Vec<SavedTransfer>> {
     if !home.exists() {
         return Ok(Vec::new());
     }
@@ -82,7 +111,9 @@ pub fn saved_transfers(home: &Path) -> Result<Vec<SavedTransfer>> {
             continue;
         }
         let id = entry.file_name().to_string_lossy().into_owned();
-        let Ok(store) = Store::open(home, &id) else {
+        let Ok(store) =
+            crate::checkpoint::Store::open_with_secret_store(home, &id, secret_store.clone())
+        else {
             continue;
         };
         // A corrupt or obsolete job must not hide valid saved transfers.
@@ -106,26 +137,19 @@ pub fn discard_transfer(home: &Path, id: &str) -> Result<()> {
     if !path.exists() {
         return Ok(());
     }
-    // Acquiring the Store lock rejects an active transfer and validates that the
-    // directory is private rather than a symlink. Rename before releasing the
-    // lock so a new opener cannot race deletion of this job.
-    let store = Store::open(home, &id)?;
-    let discarded = home.join(format!(".{id}.discarding-{}", Uuid::new_v4()));
-    fs::rename(&path, &discarded).with_context(|| format!("discard {}", path.display()))?;
-    drop(store);
-    fs::remove_dir_all(&discarded).with_context(|| format!("discard {}", discarded.display()))?;
-    Ok(())
+    crate::checkpoint::Store::discard(home, &id)
 }
 
 pub fn resume(id: &str, control: &Control) -> Result<Vec<String>> {
     let id = Uuid::parse_str(id)
         .context("invalid saved transfer id")?
         .to_string();
-    let store = Store::open(&control.transfer_home(), &id)?;
+    let store = control.open_checkpoint_store(&id)?;
     let header = store
         .load::<SavedHeader>()?
         .context("saved transfer checkpoint is empty")?;
     let header = header.summary(&id)?;
+    control.set_checkpoint_id(id);
     match header.direction.as_str() {
         "upload" => upload::resume(store, control),
         "download" => download::resume(store, control),
@@ -145,11 +169,43 @@ pub struct TransferCapabilities {
 pub struct Info {
     pub name: String,
     pub file_retention_hours: u64,
+    #[serde(default)]
+    pub file_retention_options: Vec<u64>,
     pub anonymous_uploads_enabled: bool,
     #[serde(default)]
     pub enabled_drivers: Vec<String>,
     pub maximum_transfer_bytes: Option<u64>,
     pub maximum_file_count: Option<usize>,
+    #[serde(default)]
+    pub transport_limits: HashMap<String, DriverLimits>,
+}
+
+#[derive(Clone, Default, Deserialize)]
+pub struct DriverLimits {
+    pub maximum_transfer_bytes: Option<u64>,
+    pub maximum_file_count: Option<usize>,
+}
+
+impl DriverLimits {
+    pub fn select(
+        driver: &str,
+        advertised: &HashMap<String, Self>,
+        legacy_bytes: Option<u64>,
+        legacy_count: Option<usize>,
+    ) -> Self {
+        advertised.get(driver).cloned().unwrap_or_else(|| {
+            if driver == "http" {
+                Self {
+                    maximum_transfer_bytes: legacy_bytes,
+                    maximum_file_count: legacy_count,
+                }
+            } else {
+                // Older info endpoints advertise only HTTP limits. Reservation
+                // remains authoritative for live transfers on those instances.
+                Self::default()
+            }
+        })
+    }
 }
 
 impl Info {
@@ -157,10 +213,12 @@ impl Info {
         Self {
             name: "Filebeam".into(),
             file_retention_hours: 24,
+            file_retention_options: vec![24],
             anonymous_uploads_enabled: true,
             enabled_drivers: vec!["http".into()],
             maximum_transfer_bytes: Some(2 * 1024 * 1024 * 1024),
             maximum_file_count: Some(20),
+            transport_limits: HashMap::new(),
         }
     }
 }
@@ -259,9 +317,31 @@ pub enum Transport {
     WebRtc,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Default)]
 pub struct UploadOptions {
     pub transport: Transport,
+    pub password: bool,
+    pub retention_hours: Option<u64>,
+    /// Authentication is request-scoped and is never checkpointed.
+    pub authentication: UploadAuthentication,
+    /// Inbox recipients require HTTP and cannot be password-protected.
+    pub recipient: Option<UploadRecipient>,
+}
+
+#[derive(Clone, Default)]
+pub enum UploadAuthentication {
+    #[default]
+    Anonymous,
+    Bearer(String),
+    SessionCookie(String),
+}
+
+#[derive(Clone)]
+pub struct UploadRecipient {
+    pub username: String,
+    pub user_id: u64,
+    pub account_key_bundle_id: u64,
+    pub public_key: String,
 }
 
 pub fn upload(
@@ -272,14 +352,40 @@ pub fn upload(
     control: &Control,
 ) -> Result<String> {
     match options.transport {
-        Transport::Http => upload::run(instance, paths, mode, control),
+        Transport::Http => upload::run(instance, paths, mode, options, control),
         Transport::WebRtc => {
             if !control.webrtc_relay_only() {
                 control.request_peer_consent(instance.to_owned())?;
             }
-            upload::run_webrtc(instance, paths, mode, control)
+            upload::run_webrtc(instance, paths, mode, options, control)
         }
     }
+}
+
+/// Upload provider-backed sources. Their opaque identities, bounds, and
+/// mutation tokens are checkpointed; descriptor handles are reopened by the
+/// host resolver for each read and are never serialized.
+pub fn upload_sources(
+    instance: &str,
+    sources: &[UploadSource],
+    mode: DirectoryMode,
+    options: UploadOptions,
+    control: &Control,
+) -> Result<String> {
+    if options.transport != Transport::Http {
+        bail!("provider-backed live uploads are not supported yet");
+    }
+    upload::run_sources(instance, sources, mode, options, control)
+}
+
+/// Permanently delete an uploaded transfer using its durable delete capability.
+pub fn revoke_upload(id: &str, control: &Control) -> Result<()> {
+    revocation::run(id, control)
+}
+
+/// End a live share while preserving its local recovery checkpoint.
+pub fn end_live(id: &str, control: &Control) -> Result<()> {
+    live::run(id, control)
 }
 
 pub fn download(
@@ -551,6 +657,31 @@ fn decode_share_key(value: &str) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn live_limits_are_independent_of_legacy_http_limits() {
+        let mut advertised = HashMap::new();
+        advertised.insert(
+            "webrtc".into(),
+            DriverLimits {
+                maximum_transfer_bytes: Some(8 * 1024 * 1024 * 1024),
+                maximum_file_count: None,
+            },
+        );
+        assert_eq!(
+            DriverLimits::select("webrtc", &advertised, Some(512), Some(2)).maximum_transfer_bytes,
+            Some(8 * 1024 * 1024 * 1024)
+        );
+        assert_eq!(
+            DriverLimits::select("http", &advertised, Some(512), Some(2)).maximum_transfer_bytes,
+            Some(512)
+        );
+        assert_eq!(
+            DriverLimits::select("webrtc", &HashMap::new(), Some(512), Some(2))
+                .maximum_transfer_bytes,
+            None
+        );
+    }
 
     fn key() -> String {
         encode(&[1; 32])

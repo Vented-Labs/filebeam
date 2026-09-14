@@ -32,6 +32,7 @@ class InfoController extends Controller
             'transfer_capabilities' => ['upload_status' => true, 'download_ranges' => true],
             'maximum_transfer_bytes' => $limits['maximum_transfer_bytes'],
             'maximum_file_count' => $limits['maximum_file_count'],
+            'transport_limits' => $policy['limits'],
             'file_retention_hours' => $fileRetentionHours,
             'file_retention_options' => $this->retentionOptions($fileRetentionHours, $maximumFileRetentionHours),
         ]);

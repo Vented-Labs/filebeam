@@ -10,10 +10,12 @@ anyhow = "1.0.98"
 async-trait = "0.1.89"
 base64 = "0.22.1"
 bytes = "1"
+chacha20poly1305 = "0.11.0"
 filebeam-encryption = { path = "../encryption" }
 filebeam-transfer = { path = "../transfer" }
 futures-util = "0.3"
 fs2 = "0.4.3"
+getrandom = "0.2.16"
 hex = "0.4.3"
 reqwest = { version = "0.12.20", default-features = false, features = ["blocking", "json", "rustls-tls", "stream"] }
 serde = { version = "1.0.219", features = ["derive"] }

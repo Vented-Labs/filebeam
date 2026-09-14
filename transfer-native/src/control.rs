@@ -1,7 +1,7 @@
 use std::{
     path::PathBuf,
     sync::{
-        Arc, Mutex,
+        Arc, Condvar, Mutex,
         atomic::{AtomicBool, Ordering},
         mpsc::{self, Sender},
     },
@@ -134,31 +134,96 @@ pub enum TransferEvent {
 #[error("Transfer cancelled")]
 pub struct Cancelled;
 
-#[derive(Clone, Debug)]
+#[derive(Debug, thiserror::Error)]
+#[error("transfer memory budget is exhausted")]
+pub struct MemoryExhausted;
+
+#[derive(Clone)]
+pub struct MemoryBudget {
+    state: Arc<(Mutex<MemoryState>, Condvar)>,
+}
+
+struct MemoryState {
+    limit: u64,
+    used: u64,
+}
+
+impl MemoryBudget {
+    pub fn new(limit: u64) -> Self {
+        Self {
+            state: Arc::new((Mutex::new(MemoryState { limit, used: 0 }), Condvar::new())),
+        }
+    }
+
+    pub fn reserve(&self, bytes: u64, cancelled: &AtomicBool) -> Result<MemoryPermit> {
+        let (lock, wake) = &*self.state;
+        let mut state = lock.lock().unwrap_or_else(|error| error.into_inner());
+        if bytes > state.limit {
+            return Err(MemoryExhausted.into());
+        }
+        while state.used > state.limit - bytes {
+            if cancelled.load(Ordering::Relaxed) {
+                return Err(Cancelled.into());
+            }
+            let (next, _) = wake
+                .wait_timeout(state, Duration::from_millis(20))
+                .unwrap_or_else(|error| error.into_inner());
+            state = next;
+        }
+        state.used += bytes;
+        Ok(MemoryPermit {
+            budget: self.clone(),
+            bytes,
+        })
+    }
+}
+
+pub struct MemoryPermit {
+    budget: MemoryBudget,
+    bytes: u64,
+}
+
+impl Drop for MemoryPermit {
+    fn drop(&mut self) {
+        let (lock, wake) = &*self.budget.state;
+        let mut state = lock.lock().unwrap_or_else(|error| error.into_inner());
+        state.used -= self.bytes;
+        wake.notify_all();
+    }
+}
+
+#[derive(Clone)]
 pub struct TransferSettings {
     pub state_home: PathBuf,
     pub max_concurrency: Option<u32>,
     pub memory_budget: u64,
     pub client_user_agent: Option<String>,
     pub webrtc_relay_only: bool,
+    pub checkpoint_secret_store: Option<Arc<dyn crate::checkpoint::SecretStore>>,
+    pub source_resolver: Option<Arc<dyn crate::source::SourceResolver>>,
 }
 
 #[derive(Clone)]
 pub struct Control {
     progress: Arc<Mutex<Progress>>,
+    checkpoint_id: Arc<Mutex<Option<String>>>,
     pub cancelled: Arc<AtomicBool>,
     prompts: Sender<Prompt>,
     events: Option<Sender<TransferEvent>>,
+    memory: Arc<Mutex<MemoryBudget>>,
     settings: TransferSettings,
 }
 
 impl Control {
     pub fn new(settings: TransferSettings, prompts: Sender<Prompt>) -> Self {
+        let memory = MemoryBudget::new(settings.memory_budget);
         Self {
             progress: Arc::new(Mutex::new(Progress::default())),
+            checkpoint_id: Arc::new(Mutex::new(None)),
             cancelled: Arc::new(AtomicBool::new(false)),
             prompts,
             events: None,
+            memory: Arc::new(Mutex::new(memory)),
             settings,
         }
     }
@@ -181,6 +246,8 @@ impl Control {
                 memory_budget: 512 * 1024 * 1024,
                 client_user_agent: None,
                 webrtc_relay_only: false,
+                checkpoint_secret_store: None,
+                source_resolver: None,
             },
             mpsc::channel().0,
         )
@@ -194,11 +261,53 @@ impl Control {
     pub fn transfer_home(&self) -> PathBuf {
         self.settings.state_home.clone()
     }
+    pub fn create_checkpoint_store(&self, id: &str) -> Result<crate::checkpoint::Store> {
+        let root = self.transfer_home();
+        let secrets = self
+            .settings
+            .checkpoint_secret_store
+            .clone()
+            .unwrap_or_else(|| crate::checkpoint::FilesystemSecretStore::for_state_root(&root));
+        crate::checkpoint::Store::create_with_secret_store(&root, id, secrets)
+    }
+    pub fn open_checkpoint_store(&self, id: &str) -> Result<crate::checkpoint::Store> {
+        let root = self.transfer_home();
+        let secrets = self
+            .settings
+            .checkpoint_secret_store
+            .clone()
+            .unwrap_or_else(|| crate::checkpoint::FilesystemSecretStore::for_state_root(&root));
+        crate::checkpoint::Store::open_with_secret_store(&root, id, secrets)
+    }
+    /// Advertise only a durable checkpoint that the host can actually resume.
+    pub fn set_checkpoint_id(&self, id: String) {
+        *self.checkpoint_id.lock().unwrap_or_else(|e| e.into_inner()) = Some(id);
+    }
+    pub fn checkpoint_id(&self) -> Option<String> {
+        self.checkpoint_id
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
     pub fn max_concurrency(&self) -> Option<u32> {
         self.settings.max_concurrency
     }
     pub fn memory_budget(&self) -> u64 {
         self.settings.memory_budget
+    }
+    /// Replaces the local test/default pool with the application-owned scheduler pool.
+    pub fn set_memory_budget(&self, memory: MemoryBudget) {
+        *self
+            .memory
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = memory;
+    }
+    pub fn reserve_memory(&self, bytes: u64) -> Result<MemoryPermit> {
+        self.memory
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+            .reserve(bytes, &self.cancelled)
     }
     pub fn client_user_agent(&self) -> &str {
         self.settings
@@ -211,6 +320,9 @@ impl Control {
     }
     pub fn webrtc_relay_only(&self) -> bool {
         self.settings.webrtc_relay_only
+    }
+    pub fn source_resolver(&self) -> Option<&dyn crate::source::SourceResolver> {
+        self.settings.source_resolver.as_deref()
     }
     pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::Relaxed);
@@ -299,6 +411,26 @@ mod tests {
     }
 
     #[test]
+    fn memory_permits_are_bounded_and_cancellation_aware() {
+        let budget = MemoryBudget::new(10);
+        let cancelled = AtomicBool::new(false);
+        let held = budget.reserve(10, &cancelled).unwrap();
+        let waiting = {
+            let budget = budget.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(25));
+                budget
+            })
+        };
+        let waiting = waiting.join().unwrap();
+        cancelled.store(true, Ordering::Relaxed);
+        assert!(waiting.reserve(1, &cancelled).is_err());
+        drop(held);
+        let active = AtomicBool::new(false);
+        assert!(budget.reserve(10, &active).is_ok());
+    }
+
+    #[test]
     fn events_are_advisory() {
         let (prompts, _) = mpsc::channel();
         let (events, receiver) = mpsc::channel();
@@ -309,6 +441,8 @@ mod tests {
                 memory_budget: 512 * 1024 * 1024,
                 client_user_agent: None,
                 webrtc_relay_only: false,
+                checkpoint_secret_store: None,
+                source_resolver: None,
             },
             prompts,
             events,
@@ -333,6 +467,8 @@ mod tests {
                 memory_budget: 512 * 1024 * 1024,
                 client_user_agent: None,
                 webrtc_relay_only: false,
+                checkpoint_secret_store: None,
+                source_resolver: None,
             },
             prompts,
             events,

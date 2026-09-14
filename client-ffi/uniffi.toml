@@ -1,0 +1,7 @@
+[bindings.kotlin]
+package_name = "io.filebeam.rust"
+cdylib_name = "filebeam_client_ffi"
+
+[bindings.swift]
+module_name = "FilebeamCore"
+ffi_module_name = "FilebeamCoreFFI"

@@ -60,6 +60,25 @@ Run `actionlint` from the repository root when editing workflows. `.github/actio
 
 ## Contribution Rules
 
+### Native Android
+
+Open `mobile/android/` in Android Studio or build with the pinned Linux Docker
+toolchain from the repository root:
+
+```sh
+bash scripts/android/check.sh
+```
+
+The Android check builds real Rust libraries for ARM64, ARMv7, and x86_64,
+generates UniFFI bindings, runs Rust/Kotlin checks, builds debug and R8 release
+APKs, and verifies native-library 16 KiB alignment. See
+[`mobile/android/README.md`](mobile/android/README.md) for device instrumentation
+and the IDE setup. Changes to `client-core/` also require the CLI checks because
+the CLI shares its worker lifecycle. Keep generated bindings and build artifacts
+out of version control.
+
+### General
+
 - Preserve browser encryption: plaintext files, notes, titles, filenames, and manifest metadata must not become API metadata or server logs.
 - Keep storage private and keep changes compatible with SQLite, MySQL/MariaDB, and PostgreSQL unless a change explicitly documents otherwise.
 - We need to support traditional shared hosting as well as more modern (FrankenPHP/Docker) installations 100% on every feature.

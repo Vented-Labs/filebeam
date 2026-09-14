@@ -9,6 +9,7 @@ use App\Http\Requests\Auth\LoginRequest;
 use App\Support\AuthIdentifier;
 use App\Support\Branding;
 use App\Support\InstanceSettings;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -31,7 +32,7 @@ class AuthenticatedSessionController extends Controller
         ]);
     }
 
-    public function store(LoginRequest $request): RedirectResponse
+    public function store(LoginRequest $request): RedirectResponse|JsonResponse
     {
         $credentials = $request->validated();
         $key = 'login:'.sha1($credentials['email'].'|'.$request->ip());
@@ -58,15 +59,39 @@ class AuthenticatedSessionController extends Controller
         RateLimiter::clear($ipKey);
         $request->session()->regenerate();
 
+        if ($request->expectsJson()) {
+            return response()->json(['data' => $this->session($request)]);
+        }
+
         return to_route('account');
     }
 
-    public function destroy(Request $request): RedirectResponse
+    public function destroy(Request $request): RedirectResponse|JsonResponse
     {
         Auth::logout();
         $request->session()->invalidate();
         $request->session()->regenerateToken();
 
+        if ($request->expectsJson()) {
+            return response()->json(status: 204);
+        }
+
         return to_route('home');
+    }
+
+    /** @return array<string, bool|int|string|null> */
+    private function session(Request $request): array
+    {
+        $user = $request->user();
+        assert($user !== null);
+
+        return [
+            'id' => $user->id,
+            'name' => $user->name,
+            'username' => $user->username,
+            'email' => $user->email,
+            'inboxEnabled' => $user->inbox_enabled,
+            'usernameRoutingEnabled' => app(InstanceSettings::class)->boolean('username_routing'),
+        ];
     }
 }

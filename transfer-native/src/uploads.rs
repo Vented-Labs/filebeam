@@ -12,6 +12,7 @@ use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
 use crate::{
     control::{Control, Phase, PromptKind},
     protocol::safe_filename,
+    source::{SourceSpec, UploadSource},
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -25,6 +26,7 @@ pub enum DirectoryMode {
 pub struct UploadFile {
     pub path: PathBuf,
     pub name: String,
+    pub spec: SourceSpec,
 }
 
 pub struct Prepared {
@@ -34,6 +36,29 @@ pub struct Prepared {
 }
 
 impl Prepared {
+    pub fn from_sources(sources: &[UploadSource], maximum_files: Option<usize>) -> Result<Self> {
+        if let Some(maximum) = maximum_files
+            && sources.len() > maximum
+        {
+            bail!(
+                "{} individual files exceed this instance's {maximum}-file limit",
+                sources.len()
+            );
+        }
+        let mut names = HashSet::new();
+        let files = sources
+            .iter()
+            .map(|source| UploadFile {
+                path: PathBuf::new(),
+                name: unique_name(&safe_filename(&source.name), &mut names),
+                spec: source.spec.clone(),
+            })
+            .collect();
+        Ok(Self {
+            files,
+            _archive: None,
+        })
+    }
     /// Keep a generated archive in the private job directory so a partial
     /// upload can resume after temporary-directory cleanup or a reboot.
     pub fn retain_archive(&mut self, directory: &Path) -> Result<()> {
@@ -60,6 +85,11 @@ impl Prepared {
         #[cfg(unix)]
         File::open(directory)?.sync_all()?;
         source.path = destination;
+        source.spec = SourceSpec::Path {
+            path: source.path.clone(),
+            offset: 0,
+            length: source.path.metadata()?.len(),
+        };
         self._archive.take();
         Ok(())
     }
@@ -172,7 +202,15 @@ pub fn prepare(
         archive.finish()?.sync_all()?;
         control.phase(Phase::Preparing)?;
         return Ok(Prepared {
-            files: vec![UploadFile { path, name }],
+            files: vec![UploadFile {
+                spec: SourceSpec::Path {
+                    path: path.clone(),
+                    offset: 0,
+                    length: fs::metadata(&path)?.len(),
+                },
+                path,
+                name,
+            }],
             _archive: Some(directory),
         });
     }
@@ -200,6 +238,11 @@ pub fn prepare(
                     .to_string_lossy(),
             );
             UploadFile {
+                spec: SourceSpec::Path {
+                    path: source.path.clone(),
+                    offset: 0,
+                    length: source.size,
+                },
                 path: source.path,
                 name: unique_name(&name, &mut names),
             }

@@ -74,6 +74,12 @@ enum Command {
         /// Transfer over the HTTP relay or directly over WebRTC.
         #[arg(long, value_enum, default_value_t = Transport::Http)]
         transport: Transport,
+        /// Require a transfer password in addition to the link key.
+        #[arg(long)]
+        password: bool,
+        /// Retain the transfer for this many hours when offered by the instance.
+        #[arg(long)]
+        retention_hours: Option<u64>,
         /// Combine the selection into one ZIP archive before encrypting.
         #[arg(long, conflicts_with = "individual")]
         zip: bool,
@@ -104,12 +110,19 @@ enum Transport {
 }
 
 impl Transport {
-    fn upload_options(self) -> protocol::UploadOptions {
+    fn upload_options(
+        self,
+        password: bool,
+        retention_hours: Option<u64>,
+    ) -> protocol::UploadOptions {
         protocol::UploadOptions {
             transport: match self {
                 Self::Http => protocol::Transport::Http,
                 Self::Webrtc => protocol::Transport::WebRtc,
             },
+            password,
+            retention_hours,
+            ..Default::default()
         }
     }
 }
@@ -142,6 +155,8 @@ fn main() -> Result<()> {
         Some(Command::Up {
             files,
             transport,
+            password,
+            retention_hours,
             zip,
             individual,
         }) => {
@@ -160,7 +175,11 @@ fn main() -> Result<()> {
             for link in inline::run(
                 &config,
                 &instance,
-                app::Request::Upload(files, mode, transport.upload_options()),
+                app::Request::Upload(
+                    files,
+                    mode,
+                    transport.upload_options(password, retention_hours),
+                ),
                 cli.plain,
                 cli.accept_peer_address_exposure,
             )? {

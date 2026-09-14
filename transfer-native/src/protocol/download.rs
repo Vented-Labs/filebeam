@@ -116,6 +116,7 @@ struct AuthenticateAndWriteRequest<'a> {
     item: &'a SavedItem,
     master: &'a [u8],
     ciphertext: Vec<u8>,
+    retain_ciphertext: bool,
 }
 
 struct LiveConnection {
@@ -358,15 +359,9 @@ pub(super) fn run(
     control: &Control,
 ) -> Result<Vec<PathBuf>> {
     let parsed = parse_link_for_instance(raw, instance)?;
-    let root = control.transfer_home();
     let id = uuid::Uuid::new_v4().to_string();
-    let store = Store::create(&root, &id)?;
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
-        .max_blocking_threads(4)
-        .enable_all()
-        .build()?;
-    runtime.block_on(async_run(
+    let store = control.create_checkpoint_store(&id)?;
+    crate::runtime::shared_tokio_runtime().block_on(async_run(
         parsed,
         output.to_path_buf(),
         store,
@@ -379,12 +374,7 @@ pub(super) fn resume(store: Store, control: &Control) -> Result<Vec<String>> {
         .load::<DownloadJob>()?
         .context("saved download checkpoint is empty")?;
     job.checked()?;
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
-        .max_blocking_threads(4)
-        .enable_all()
-        .build()?;
-    runtime.block_on(async_resume(store, job, control.clone()))
+    crate::runtime::shared_tokio_runtime().block_on(async_resume(store, job, control.clone()))
 }
 
 async fn async_run(
@@ -413,10 +403,10 @@ async fn async_run(
         unlock_async(unlock_link, envelope.clone(), control.clone()).await?;
     // The share key is secret state, but the checkpoint Store guarantees a
     // private, owner-only file. Passwords and password-derived keys are never stored.
-    store.persist_immutable("share-key", &share_key)?;
+    store.save_secret("share-key", &share_key)?;
     fs::create_dir_all(&output)?;
     let output = fs::canonicalize(&output).context("canonicalize download output directory")?;
-    let manifest = manifest_for(&master, &link.id, &envelope, &transfer)?;
+    let manifest = manifest_for(&master, &link.id, &envelope, &transfer, &control)?;
     let live_join_token = live_join_token(&transfer, &manifest)?;
     let total = manifest
         .items
@@ -468,6 +458,7 @@ async fn async_run(
     };
     // The checkpoint is durable before network data can arrive.
     store.save(&job)?;
+    control.set_checkpoint_id(job.id.clone());
     Ok(
         download(store, job, master, client, cancel, control, live_join_token)
             .await?
@@ -484,17 +475,14 @@ async fn async_resume(store: Store, mut job: DownloadJob, control: Control) -> R
     let cancel = cancellation_bridge(control.clone());
     let client = async_client(&control)?;
     let capabilities = capabilities(&client, &job.instance, &cancel).await?;
-    let key_path = store.path().join("share-key");
-    let share_key = tokio::task::spawn_blocking(move || {
-        fs::read(key_path)
-            .context("saved download key is unavailable; restart with the original link")
-    })
-    .await
-    .context("download key worker stopped")??;
+    let share_key = store.load_secret("share-key").and_then(|key| {
+        key.context("saved download key is unavailable; restart with the original link")
+    })?;
     let share_key = Zeroizing::new(share_key);
     if share_key.len() != 32 {
         bail!("saved download key is invalid");
     }
+    store.save_secret("share-key", &share_key)?;
     // Re-authenticate the original manifest before trusting any retained data.
     let transfer = metadata(&client, &job.instance, &job.transfer_id, &cancel, &control).await?;
     validate_transfer(&transfer, &job.transfer_id)?;
@@ -510,7 +498,13 @@ async fn async_resume(store: Store, mut job: DownloadJob, control: Control) -> R
     let master = unlock_saved_async(share_key, job.envelope.clone(), control.clone()).await?;
     job.server_concurrency = server_download_limit(&capabilities, &transfer);
     job.ranges = server_ranges(&capabilities, &transfer);
-    let manifest = manifest_for(&master, &job.transfer_id, &job.envelope, &transfer)?;
+    let manifest = manifest_for(
+        &master,
+        &job.transfer_id,
+        &job.envelope,
+        &transfer,
+        &control,
+    )?;
     let live_join_token = live_join_token(&transfer, &manifest)?;
     if manifest.items.len() != job.items.len() {
         bail!("saved download layout changed");
@@ -777,6 +771,7 @@ async fn download(
                 item: &saved,
                 master: &master_copy,
                 ciphertext,
+                retain_ciphertext: live,
             })
         })
         .await
@@ -859,6 +854,7 @@ async fn download(
                         item: &item,
                         master: &master,
                         ciphertext,
+                        retain_ciphertext: live,
                     })
                 })
                 .await
@@ -1327,6 +1323,7 @@ fn unlock(link: &Link, envelope: &str, control: &Control) -> Result<UnlockedKeys
     }
     if let Some(salt) = envelope.salt {
         let password = control.secret(SecretKind::Password)?;
+        let _kdf_memory = control.reserve_memory(PASSWORD_KDF_BYTES)?;
         let p = derive_password_key(password.as_bytes(), &decode(&salt)?, 65_536, 3, 1)?;
         key = Zeroizing::new(derive_password_protected_key(&key, &p)?);
     }
@@ -1346,6 +1343,7 @@ fn unlock_saved(share_key: &[u8], envelope: &str, control: &Control) -> Result<Z
     let mut key = Zeroizing::new(share_key.to_vec());
     if let Some(salt) = envelope.salt {
         let password = control.secret(SecretKind::Password)?;
+        let _kdf_memory = control.reserve_memory(PASSWORD_KDF_BYTES)?;
         let p = derive_password_key(password.as_bytes(), &decode(&salt)?, 65_536, 3, 1)?;
         key = Zeroizing::new(derive_password_protected_key(&key, &p)?);
     }
@@ -1360,8 +1358,16 @@ async fn unlock_saved_async(
         .await
         .context("download unlock worker stopped")?
 }
-fn manifest_for(key: &[u8], id: &str, envelope: &str, transfer: &Transfer) -> Result<Manifest> {
+fn manifest_for(
+    key: &[u8],
+    id: &str,
+    envelope: &str,
+    transfer: &Transfer,
+    control: &Control,
+) -> Result<Manifest> {
     let envelope: Envelope = serde_json::from_str(envelope)?;
+    let _crypto_memory =
+        control.reserve_memory(manifest_crypto_bytes(envelope.ciphertext.len())?)?;
     let bytes = decrypt_manifest(
         key,
         &decode(&envelope.nonce_prefix)?,
@@ -1568,6 +1574,7 @@ fn authenticate_and_write(request: AuthenticateAndWriteRequest<'_>) -> Result<u6
         item,
         master,
         ciphertext,
+        retain_ciphertext,
     } = request;
     let key = derive_item_key(master, transfer_id, &item.id)?;
     let plain = decrypt_chunk(
@@ -1581,6 +1588,17 @@ fn authenticate_and_write(request: AuthenticateAndWriteRequest<'_>) -> Result<u6
     let expected = plaintext_len(item.size, chunk_bytes, index);
     if plain.len() as u64 != expected {
         bail!("authenticated chunk has an invalid plaintext length");
+    }
+    if retain_ciphertext {
+        // Live transport has no HTTP prefix file. Retain the authenticated record
+        // before the verified bit can be checkpointed, so restart can rebuild
+        // plaintext instead of silently restarting the entire incomplete item.
+        let target = cipher_path(base, item_index, index);
+        let mut temporary = tempfile::NamedTempFile::new_in(base)?;
+        temporary.write_all(&ciphertext)?;
+        temporary.as_file().sync_all()?;
+        temporary.persist(&target)?;
+        sync_parent(&target)?;
     }
     write_plain(base, item_index, index * chunk_bytes, &plain)?;
     Ok(expected)
@@ -1679,6 +1697,102 @@ fn restrict(path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn discovery_failure_does_not_advertise_an_empty_checkpoint_for_resume() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let instance = format!("http://{}", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0; 2048];
+            assert!(stream.read(&mut request).unwrap() > 0);
+            stream
+                .write_all(
+                    b"HTTP/1.1 503 Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                )
+                .unwrap();
+        });
+        let home = tempfile::tempdir().unwrap();
+        let control = Control::new(
+            crate::control::TransferSettings {
+                state_home: home.path().join("jobs"),
+                max_concurrency: Some(1),
+                memory_budget: 128 * 1024 * 1024,
+                client_user_agent: None,
+                webrtc_relay_only: false,
+                checkpoint_secret_store: None,
+                source_resolver: None,
+            },
+            std::sync::mpsc::channel().0,
+        );
+        assert!(
+            run(
+                &instance,
+                "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+                &home.path().join("output"),
+                &control
+            )
+            .is_err()
+        );
+        control.cancel();
+        server.join().unwrap();
+        assert!(control.checkpoint_id().is_none());
+        assert!(
+            saved_transfers(&control.transfer_home())
+                .unwrap()
+                .is_empty()
+        );
+    }
+    #[test]
+    fn live_records_recover_plaintext_after_process_death() {
+        let transfer = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+        let home = tempfile::tempdir().unwrap();
+        let store = Store::create(home.path(), &uuid::Uuid::new_v4().to_string()).unwrap();
+        let master = [7; 32];
+        let prefix = filebeam_encryption::generate_nonce_prefix().unwrap();
+        let plain = b"verified live payload";
+        let item = SavedItem {
+            id: "01ARZ3NDEKTSV4RRFFQ69G5FAW".into(),
+            name: "file".into(),
+            size: plain.len() as u64,
+            nonce_prefix: encode(&prefix),
+            chunk_count: 1,
+            digest: String::new(),
+            target: home.path().join("output"),
+            verified: vec![true],
+            published: false,
+        };
+        let key = derive_item_key(&master, transfer, &item.id).unwrap();
+        let cipher = filebeam_encryption::encrypt_chunk(
+            &key,
+            &prefix,
+            0,
+            plain,
+            aad(transfer, &item.id, "0").as_bytes(),
+        )
+        .unwrap();
+        authenticate_and_write(AuthenticateAndWriteRequest {
+            base: store.path(),
+            item_index: 0,
+            index: 0,
+            chunk_bytes: plain.len() as u64,
+            transfer_id: transfer,
+            item: &item,
+            master: &master,
+            ciphertext: cipher,
+            retain_ciphertext: true,
+        })
+        .unwrap();
+        fs::remove_file(plain_path(store.path(), 0)).unwrap();
+        assert!(
+            restore_retained(&store, 0, transfer, plain.len() as u64, &item, 0, &master).unwrap()
+        );
+        assert_eq!(fs::read(plain_path(store.path(), 0)).unwrap(), plain);
+        fs::write(cipher_path(store.path(), 0, 0), b"corrupted").unwrap();
+        assert!(
+            !restore_retained(&store, 0, transfer, plain.len() as u64, &item, 0, &master).unwrap()
+        );
+    }
     #[test]
     fn continuation_range_is_exact() {
         assert!(validate_range(Some(&"bytes 5-19/20".parse().unwrap()), 5, 19, 20).is_ok());
