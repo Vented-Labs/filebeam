@@ -126,7 +126,7 @@ class API(http.server.BaseHTTPRequestHandler):
         STATE.event("POST", self.path); body = self.read_body()
         if self.path == "/api/v1/transfers":
             transfer = STATE.new_transfer(json.loads(body)); result = {"id":transfer["id"],
-                "share_url":"/" + transfer["id"], "chunk_bytes":CHUNK,
+                "share_url":"/" + transfer["id"], "driver":"http", "chunk_bytes":CHUNK,
                 "items":transfer["items"], "upload_token":"fixture-token"}
             if transfer["mode"] == "stage": result["upload_transport"] = {"version":1,
                 "part_min_bytes":16384,"part_max_bytes":65536,"request_target_ms":100,

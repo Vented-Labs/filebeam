@@ -417,6 +417,7 @@ impl NativePeer {
         Self::with_udp_addrs_and_policy(servers, vec!["0.0.0.0:0".to_owned()], relay_only).await
     }
 
+    #[cfg(test)]
     async fn with_udp_addrs(servers: &[IceServer], udp_addrs: Vec<String>) -> Result<Self> {
         Self::with_udp_addrs_and_policy(servers, udp_addrs, false).await
     }
@@ -815,7 +816,7 @@ mod tests {
         fn drop(&mut self) {
             let _ = Command::new("docker")
                 .args(["rm", "-f", &self.name])
-                .status();
+                .output();
         }
     }
 
@@ -971,7 +972,7 @@ mod tests {
             ciphertext
         );
         receiver_channel.close().await?;
-        timeout(CONNECT_TIMEOUT, serving)
+        let _closed = timeout(CONNECT_TIMEOUT, serving)
             .await
             .context("timed out stopping relay-only WebRTC sender")??;
         receiver.close().await;

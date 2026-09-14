@@ -249,9 +249,17 @@ mod tests {
 
     #[test]
     fn transfer_commands_and_bounds_are_parsed() {
-        let cli =
-            Cli::try_parse_from(["beam", "--max-concurrency", "4", "resume", "job-1"]).unwrap();
+        let cli = Cli::try_parse_from([
+            "beam",
+            "--webrtc-relay-only",
+            "--max-concurrency",
+            "4",
+            "resume",
+            "job-1",
+        ])
+        .unwrap();
         assert_eq!(cli.max_concurrency, Some(4));
+        assert!(cli.webrtc_relay_only);
         assert!(matches!(cli.command, Some(Command::Resume { id }) if id == "job-1"));
         assert!(Cli::try_parse_from(["beam", "--memory-limit-mib", "32", "transfers"]).is_err());
     }
