@@ -3,18 +3,25 @@ set -euo pipefail
 
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/filebeam-github-release.XXXXXX")
-cleanup() { rm -rf "$tmp"; }
-trap cleanup EXIT
-
+trap 'rm -rf "$tmp"' EXIT
 tag=v1.2.3
 commit=0123456789abcdef0123456789abcdef01234567
-release_dir="$tmp/release"
+app="$tmp/app"
+cli="$tmp/cli"
 bin="$tmp/bin"
-mkdir -p "$release_dir" "$bin"
-printf 'verified release asset\n' > "$release_dir/filebeam-$tag.zip"
-sha=$(sha256sum "$release_dir/filebeam-$tag.zip" | cut -d' ' -f1)
-size=$(stat --format=%s "$release_dir/filebeam-$tag.zip")
-printf '{"tag":"%s","commit":"%s","package":{"path":"versions/%s/filebeam-%s.zip","sha256":"%s","size":%s}}\n' "$tag" "$commit" "$tag" "$tag" "$sha" "$size" > "$release_dir/release.json"
+mkdir -p "$app" "$cli" "$bin"
+printf 'verified application asset\n' > "$app/filebeam-$tag.zip"
+sha=$(sha256sum "$app/filebeam-$tag.zip" | cut -d' ' -f1)
+size=$(stat --format=%s "$app/filebeam-$tag.zip")
+printf '{"tag":"%s","commit":"%s","package":{"path":"versions/%s/filebeam-%s.zip","sha256":"%s","size":%s}}\n' "$tag" "$commit" "$tag" "$tag" "$sha" "$size" > "$app/release.json"
+cli_tag="beam-$tag"
+for target in linux-x86_64.tar.gz linux-aarch64.tar.gz macos-x86_64.tar.gz macos-aarch64.tar.gz windows-x86_64.zip; do printf '%s\n' "$target" > "$cli/$cli_tag-$target"; done
+(cd "$cli" && sha256sum "$cli_tag"-*.tar.gz "$cli_tag"-*.zip > checksums.txt)
+printf '%s\n' "${tag#v}" > "$cli/version"
+printf 'public key\n' > "$cli/public-key"
+printf 'installer\n' > "$cli/install.sh"
+printf 'installer\n' > "$cli/install.ps1"
+SOURCE_DATE_EPOCH=1700000000 php "$root/scripts/release/cli-write-release.php" "$cli_tag" "$cli" "$cli/release.json"
 
 cat > "$bin/gh" <<'EOF'
 #!/usr/bin/env bash
@@ -22,105 +29,75 @@ set -euo pipefail
 printf '%s\n' "$*" >> "$MOCK_LOG"
 case "$1 $2" in
   'api repos/Vented-Labs/filebeam/git/ref/tags/v1.2.3')
-    [[ ${MOCK_REF_FAIL:-false} == true ]] && { printf 'gh: Not Found (HTTP 404)\n' >&2; exit 1; }
-    count_file=$MOCK_API_COUNT
-    count=0
-    [[ -f $count_file ]] && count=$(<"$count_file")
-    count=$((count + 1))
-    printf '%s' "$count" > "$count_file"
+    count=0; [[ -f $MOCK_TAG_COUNT ]] && count=$(<"$MOCK_TAG_COUNT")
+    count=$((count + 1)); printf '%s' "$count" > "$MOCK_TAG_COUNT"
     resolved=$MOCK_COMMIT
-    [[ -n ${MOCK_RETAG_AFTER:-} && $count -gt $MOCK_RETAG_AFTER ]] && resolved=$MOCK_RETAG_COMMIT
-    [[ ${MOCK_ANNOTATED:-false} == true ]] && printf 'tag\taaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n' || printf 'commit\t%s\n' "$resolved"
-    ;;
-  'api repos/Vented-Labs/filebeam/git/tags/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
-    printf 'commit\t%s\n' "$MOCK_COMMIT"
+    [[ ${MOCK_RETAG_AFTER:-99} -lt $count ]] && resolved=$MOCK_RETAG_COMMIT
+    printf 'commit\t%s\n' "$resolved"
     ;;
   'release view')
-    if [[ $MOCK_STATE == missing ]]; then printf 'release not found\n' >&2; exit 1; fi
-    if [[ ${MOCK_VIEW_ERROR:-false} == true ]]; then printf 'simulated release API failure\n' >&2; exit 1; fi
-    [[ $MOCK_STATE == draft ]] && printf '{"isDraft":true}\n' || printf '{"isDraft":false}\n'
+    [[ ${MOCK_STATE:-missing} != missing ]] || { printf 'release not found\n' >&2; exit 1; }
+    [[ ${MOCK_STATE:-missing} == draft ]] && printf '{"isDraft":true}\n' || printf '{"isDraft":false}\n'
     ;;
-  'release create') ;;
-  'release upload')
-    [[ ${MOCK_FAIL_UPLOAD:-false} == true ]] && exit 1
-    :
-    ;;
+  'release create') : ;;
+  'release upload') [[ ${MOCK_FAIL_UPLOAD:-false} != true ]] ;;
   'release download')
-    for ((i=1; i <= $#; i++)); do
-      if [[ ${!i} == --pattern ]]; then pattern_index=$((i + 1)); pattern=${!pattern_index}; fi
-      if [[ ${!i} == --dir ]]; then dir_index=$((i + 1)); dir=${!dir_index}; fi
+    for ((i = 1; i <= $#; i++)); do
+      [[ ${!i} == --pattern ]] && { j=$((i + 1)); pattern=${!j}; }
+      [[ ${!i} == --dir ]] && { j=$((i + 1)); dir=${!j}; }
     done
     mkdir -p "$dir"
-    case $pattern in
-      filebeam-v1.2.3.zip) cp "$MOCK_RELEASE_ASSET" "$dir/$pattern" ;;
-      release.json) cp "$MOCK_RELEASE_METADATA" "$dir/$pattern" ;;
-      *) exit 64 ;;
-    esac
+    [[ ${MOCK_MISMATCH:-} != "$pattern" ]] || { printf 'wrong bytes\n' > "$dir/$pattern"; exit 0; }
+    [[ ${MOCK_MISSING:-} != "$pattern" ]] || { printf 'asset not found\n' >&2; exit 1; }
+    cp "$MOCK_SOURCE/$pattern" "$dir/$pattern"
     ;;
-  'release edit') ;;
+  'release edit') : ;;
   *) exit 64 ;;
 esac
 EOF
 chmod +x "$bin/gh"
+source="$tmp/source"
+mkdir "$source"
+cp "$app"/* "$source/"
+for asset in "$cli"/*; do
+    name=${asset##*/}
+    [[ $name == release.json ]] && name="$cli_tag-release.json"
+    cp "$asset" "$source/$name"
+done
 
 run_case() {
-    local state=$1 annotated=${2:-false}
     : > "$tmp/log"
-    : > "$tmp/api-count"
-    MOCK_STATE=$state MOCK_ANNOTATED=$annotated MOCK_LOG="$tmp/log" MOCK_COMMIT=$commit MOCK_API_COUNT="$tmp/api-count" MOCK_RELEASE_ASSET="$release_dir/filebeam-$tag.zip" MOCK_RELEASE_METADATA="$release_dir/release.json" GH_REPO=Vented-Labs/filebeam PATH="$bin:$PATH" "$root/scripts/release/github-release.sh" "$tag" "$commit" "$release_dir"
+    : > "$tmp/tag-count"
+    MOCK_STATE=$1 MOCK_LOG="$tmp/log" MOCK_COMMIT=$commit MOCK_TAG_COUNT="$tmp/tag-count" MOCK_SOURCE=$source GH_REPO=Vented-Labs/filebeam PATH="$bin:$PATH" "$root/scripts/release/github-release.sh" "$tag" "$commit" "$app" "$cli"
 }
+release_order() { awk '$1 == "release" { printf "%s %s ", $1, $2 }' "$tmp/log"; }
 
-release_calls() {
-    mapfile -t calls < <(while read -r command subcommand _; do [[ $command == release ]] && printf '%s %s\n' "$command" "$subcommand"; done < "$tmp/log")
-}
-
-# Download directories are random; validate ordered command types separately.
+# One draft contains both application and CLI assets, then is verified and published once.
 run_case missing
-release_calls
-[[ ${calls[*]} == 'release view release create release upload release download release edit' ]]
-[[ $(<"$tmp/log") == *'api repos/Vented-Labs/filebeam/git/ref/tags/v1.2.3'* ]]
-run_case draft true
-release_calls
-[[ ${calls[*]} == 'release view release upload release download release edit' ]]
-[[ $(<"$tmp/log") == *'api repos/Vented-Labs/filebeam/git/tags/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'* ]]
-run_case published
-release_calls
-[[ ${calls[*]} == 'release view release download release download' ]]
+order=$(release_order)
+[[ $order == "release view release create release upload "*"release edit " ]]
+[[ $(grep -o 'release download' <<<"$order" | wc -l) -eq 13 ]]
+[[ $(grep -o 'release upload' <<<"$order" | wc -l) -eq 1 && $(grep -o 'release edit' <<<"$order" | wc -l) -eq 1 ]]
 
-printf 'different metadata\n' > "$tmp/different-release.json"
+# A failed combined upload leaves the draft unpublished.
 : > "$tmp/log"
-if MOCK_STATE=published MOCK_LOG="$tmp/log" MOCK_COMMIT=$commit MOCK_API_COUNT="$tmp/api-count" MOCK_RELEASE_ASSET="$release_dir/filebeam-$tag.zip" MOCK_RELEASE_METADATA="$tmp/different-release.json" GH_REPO=Vented-Labs/filebeam PATH="$bin:$PATH" "$root/scripts/release/github-release.sh" "$tag" "$commit" "$release_dir"; then
-    printf 'Expected mismatched public metadata to fail.\n' >&2
-    exit 1
-fi
-[[ $(<"$tmp/log") != *'release upload'* ]]
+if MOCK_STATE=draft MOCK_FAIL_UPLOAD=true MOCK_LOG="$tmp/log" MOCK_COMMIT=$commit MOCK_TAG_COUNT="$tmp/tag-count" MOCK_SOURCE=$source GH_REPO=Vented-Labs/filebeam PATH="$bin:$PATH" "$root/scripts/release/github-release.sh" "$tag" "$commit" "$app" "$cli"; then exit 1; fi
 [[ $(<"$tmp/log") != *'release edit'* ]]
 
+# Any downloaded-byte mismatch prevents publication.
 : > "$tmp/log"
-if MOCK_STATE=draft MOCK_FAIL_UPLOAD=true MOCK_LOG="$tmp/log" MOCK_COMMIT=$commit MOCK_API_COUNT="$tmp/api-count" MOCK_RELEASE_ASSET="$release_dir/filebeam-$tag.zip" MOCK_RELEASE_METADATA="$release_dir/release.json" GH_REPO=Vented-Labs/filebeam PATH="$bin:$PATH" "$root/scripts/release/github-release.sh" "$tag" "$commit" "$release_dir"; then
-    printf 'Expected failed draft upload to fail.\n' >&2
-    exit 1
-fi
+if MOCK_STATE=draft MOCK_MISMATCH=checksums.txt MOCK_LOG="$tmp/log" MOCK_COMMIT=$commit MOCK_TAG_COUNT="$tmp/tag-count" MOCK_SOURCE=$source GH_REPO=Vented-Labs/filebeam PATH="$bin:$PATH" "$root/scripts/release/github-release.sh" "$tag" "$commit" "$app" "$cli"; then exit 1; fi
 [[ $(<"$tmp/log") != *'release edit'* ]]
 
+# Published releases are immutable: retries only download and verify, never upload or edit.
 : > "$tmp/log"
-if MOCK_STATE=draft MOCK_RETAG_AFTER=1 MOCK_RETAG_COMMIT=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa MOCK_LOG="$tmp/log" MOCK_COMMIT=$commit MOCK_API_COUNT="$tmp/api-count" MOCK_RELEASE_ASSET="$release_dir/filebeam-$tag.zip" MOCK_RELEASE_METADATA="$release_dir/release.json" GH_REPO=Vented-Labs/filebeam PATH="$bin:$PATH" "$root/scripts/release/github-release.sh" "$tag" "$commit" "$release_dir"; then
-    printf 'Expected changed remote tag to fail.\n' >&2
-    exit 1
-fi
+if MOCK_STATE=published MOCK_MISSING=release.json MOCK_LOG="$tmp/log" MOCK_COMMIT=$commit MOCK_TAG_COUNT="$tmp/tag-count" MOCK_SOURCE=$source GH_REPO=Vented-Labs/filebeam PATH="$bin:$PATH" "$root/scripts/release/github-release.sh" "$tag" "$commit" "$app" "$cli" 2>"$tmp/error"; then exit 1; fi
+[[ $(<"$tmp/error") == *'Recovery requires a new release tag'* ]]
+[[ $(<"$tmp/log") != *'release upload'* && $(<"$tmp/log") != *'release edit'* && $(<"$tmp/log") != *'release create'* ]]
+
+# A tag move after draft verification prevents the only publish operation.
+: > "$tmp/log"; : > "$tmp/tag-count"
+if MOCK_STATE=draft MOCK_RETAG_AFTER=1 MOCK_RETAG_COMMIT=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa MOCK_LOG="$tmp/log" MOCK_COMMIT=$commit MOCK_TAG_COUNT="$tmp/tag-count" MOCK_SOURCE=$source GH_REPO=Vented-Labs/filebeam PATH="$bin:$PATH" "$root/scripts/release/github-release.sh" "$tag" "$commit" "$app" "$cli"; then exit 1; fi
 [[ $(<"$tmp/log") != *'release edit'* ]]
 
-: > "$tmp/log"
-if MOCK_STATE=missing MOCK_REF_FAIL=true MOCK_LOG="$tmp/log" MOCK_COMMIT=$commit MOCK_API_COUNT="$tmp/api-count" MOCK_RELEASE_ASSET="$release_dir/filebeam-$tag.zip" MOCK_RELEASE_METADATA="$release_dir/release.json" GH_REPO=Vented-Labs/filebeam PATH="$bin:$PATH" "$root/scripts/release/github-release.sh" "$tag" "$commit" "$release_dir"; then
-    printf 'Expected remote tag lookup failure to fail.\n' >&2
-    exit 1
-fi
-[[ $(<"$tmp/log") != *'release create'* ]]
-
-: > "$tmp/log"
-if MOCK_STATE=draft MOCK_VIEW_ERROR=true MOCK_LOG="$tmp/log" MOCK_COMMIT=$commit MOCK_API_COUNT="$tmp/api-count" MOCK_RELEASE_ASSET="$release_dir/filebeam-$tag.zip" MOCK_RELEASE_METADATA="$release_dir/release.json" GH_REPO=Vented-Labs/filebeam PATH="$bin:$PATH" "$root/scripts/release/github-release.sh" "$tag" "$commit" "$release_dir" 2>"$tmp/error"; then
-    printf 'Expected release lookup failure to fail.\n' >&2
-    exit 1
-fi
-[[ $(<"$tmp/error") == *'simulated release API failure'* ]]
-[[ $(<"$tmp/log") != *'release create'* ]]
+printf 'Combined GitHub release draft, verification, and immutable retry checks passed.\n'

@@ -10,6 +10,7 @@
         "paths": {
             "@/*": ["./resources/js/*"],
             "@filebeam/encryption": ["../encryption/pkg/filebeam_encryption.js"],
+            "@filebeam/transfer": ["../transfer-wasm/pkg/filebeam_transfer_wasm.js"],
             "@filebeam/ui": ["../ui/src/index.ts"]
         },
         "types": ["vite/client"],

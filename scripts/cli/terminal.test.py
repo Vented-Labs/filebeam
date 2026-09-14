@@ -2,6 +2,7 @@
 """Exercise the real binary in a PTY, including slow, single-chunk encrypted transfers."""
 import fcntl
 import base64
+import hashlib
 import http.server
 import json
 import os
@@ -22,7 +23,7 @@ import zipfile
 BINARY = str(Path(sys.argv[1]).resolve())
 ID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 CHUNK = 24_999_984
-STATE = {}
+STATE = {"upload_started": threading.Event()}
 ANSI = re.compile(rb"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
 
 
@@ -63,8 +64,36 @@ class API(http.server.BaseHTTPRequestHandler):
                                    encrypted_manifest=STATE["manifest"], items=STATE["items"]))
         elif "/chunks/" in self.path:
             body = STATE["chunks"][self.path]
-            self.send_response(200)
+            etag = f'"{hashlib.sha256(body).hexdigest()}"'
+            start, end, status = 0, len(body) - 1, 200
+            range_header = self.headers.get("Range")
+            if range_header and self.headers.get("If-Range") == etag:
+                match = re.fullmatch(r"bytes=(\d*)-(\d*)", range_header)
+                if not match:
+                    self.send_response(416)
+                    self.send_header("Content-Range", f"bytes */{len(body)}")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                start = int(match.group(1) or 0)
+                end = min(int(match.group(2) or len(body) - 1), len(body) - 1)
+                if start > end or start >= len(body):
+                    self.send_response(416)
+                    self.send_header("Content-Range", f"bytes */{len(body)}")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                status = 206
+            body = body[start:end + 1]
+            self.send_response(status)
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Cache-Control", "private, no-store")
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("ETag", etag)
+            self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Content-Length", str(len(body)))
+            if status == 206:
+                self.send_header("Content-Range", f"bytes {start}-{end}/{len(STATE['chunks'][self.path])}")
             self.end_headers()
             try:
                 for offset in range(0, len(body), 65536):
@@ -83,7 +112,7 @@ class API(http.server.BaseHTTPRequestHandler):
                           chunk_count=item["chunk_count"]) for i, item in enumerate(data["items"])]
             STATE.update(items=items, chunks={})
             STATE.pop("manifest", None)
-            self.respond(201, dict(id=ID, share_url=f"/{ID}", chunk_bytes=CHUNK,
+            self.respond(201, dict(id=ID, share_url=f"/{ID}", driver="http", chunk_bytes=CHUNK,
                                    items=items, upload_token="test-upload-token"))
         elif self.path.endswith("/complete"):
             STATE["manifest"] = data["encrypted_manifest"]
@@ -92,6 +121,7 @@ class API(http.server.BaseHTTPRequestHandler):
             self.respond(404, {})
 
     def do_PUT(self):
+        STATE["upload_started"].set()
         STATE["chunks"][self.path] = self.body(slow=True)
         try:
             self.respond(201, {})
@@ -160,7 +190,7 @@ def main():
         env = {**os.environ, "TERM": "xterm-256color", "COLORTERM": "truecolor", "LANG": "C.UTF-8",
                "FILEBEAM_INSTANCE": f"http://127.0.0.1:{server.server_port}", "FILEBEAM_HOME": str(root / "home")}
         upload = Terminal(["up", str(source)], env, root, stdout_pipe=True)
-        upload.until(b"Uploading")
+        upload.until(b"Encrypting")
         code, output = upload.finish()
         assert code == 0, output
         link = upload.process.stdout.read().decode().strip()
@@ -218,8 +248,9 @@ def main():
         screen.until(b"Choose what to share")
         screen.send(b"/QA\r ")
         screen.pump(0.3)
+        STATE["upload_started"].clear()
         screen.send(b"u")
-        screen.until(b"Uploading")
+        assert STATE["upload_started"].wait(10), "TUI upload did not reach the chunk endpoint"
         screen.until(b"Your encrypted link is ready")
         screen.send(b"c")
         screen.until(b"Copy requested")

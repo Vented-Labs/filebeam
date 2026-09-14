@@ -22,7 +22,19 @@ Run `php artisan schedule:run` every minute as documented in [Deployment](deploy
 
 Client byte progress means ciphertext has been sent; durable/downloadable progress begins only after the entire chunk is staged, verified, and synchronously published to final storage. A receiver cannot decrypt or download a partial chunk, so the first full chunk still determines first-download latency.
 
+Progress has three distinct meanings. **Sent** is ciphertext accepted by the local transport for transmission. A part or chunk **acknowledgement** is the server's validated durable offset or completed-chunk response. **Authenticated** is receiver-side AEAD verification after the full ciphertext chunk has been assembled. UI and telemetry must not present sent bytes as server acknowledgement or authenticated/downloadable content.
+
 Clients start with one active chunk and probe additional concurrency within server and memory limits. Fast connections retain whole-chunk PUTs. Slow connections switch to staged parts, uploaded sequentially within each active chunk. Part size adapts within server-advertised bounds, targeting roughly 20 seconds per request by default. Completion is synchronous; clients query stage status when retrying an uncertain request. They must not assume a stage exists after a `410`, expiry, or storage-loss response; retransmit the pending ciphertext while the sending browser page remains alive. There is no resume across a browser restart or another browser.
+
+The one-hour stage TTL is independent from a pending transfer's lifetime. New pending transfers default to two hours. Each accepted pending Turbo chunk extends that expiry by two hours, capped at 24 hours from creation (`FILEBEAM_INCOMPLETE_EXPIRY_HOURS` and `FILEBEAM_PENDING_MAX_LIFETIME_HOURS`). These are server defaults, not promises that a client checkpoint can outlive the transfer.
+
+Download continuation may use byte ranges only to recover ciphertext for a known whole encrypted chunk. The response range, total ciphertext length, entity identity, and byte count are validated before use; the reassembled whole chunk must still authenticate before plaintext is released. A valid byte-range response is not an independently decryptable or authenticated fragment.
+
+## Memory And Measurement
+
+Transfer memory budgets bound managed transfer buffers and the number of in-flight chunk representations. They do not cap process RSS, which also includes runtime, allocator, operating-system cache, and unrelated application memory. Operators should set a buffer budget that leaves headroom for those costs rather than treating it as a container memory limit.
+
+No production speed claim is published yet; mainline measurements are pending the post-pipeline run. A reproducible benchmark should record the workload shape (file count, plaintext sizes, chunk size, directory mode), transport and server policy, configured concurrency and buffer budget, host CPU/memory/storage/network characteristics, build revision, and warm-up policy. Report separate wall-clock completion time, sent ciphertext throughput, acknowledged throughput, authenticated/downloadable throughput, retry count, request/part latency percentiles, peak managed-buffer reservation, and CPU/IO observations. Run a baseline and the adaptive configuration under the same conditions, repeat enough times to show variation, and retain only the methodology and summarized results in permanent documentation. Do not publish disposable experiment files, temporary paths, raw logs, secrets, API identifiers, or unreviewed benchmark code as production documentation.
 
 ## Restart And Multi-Instance Deployment
 

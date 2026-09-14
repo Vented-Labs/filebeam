@@ -37,10 +37,15 @@ RUN rustup target add wasm32-unknown-unknown \
     && cargo install wasm-pack --version 0.15.0 --locked
 WORKDIR /src
 COPY encryption encryption
+COPY transfer transfer
+COPY transfer-wasm transfer-wasm
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/src/encryption/target \
-    wasm-pack build encryption --target web --release --no-opt
+    --mount=type=cache,target=/src/transfer/target \
+    --mount=type=cache,target=/src/transfer-wasm/target \
+    wasm-pack build encryption --target web --release --no-opt \
+    && wasm-pack build transfer-wasm --target web --release --no-opt
 
 FROM node:24-trixie@sha256:f7d34e58713740f9eef9092c0bd6ff10369d132f7238399a4b270f16d47fa608 AS node
 
@@ -66,6 +71,7 @@ COPY scripts/og scripts/og
 COPY scripts/prism-gallery scripts/prism-gallery
 COPY vite.config.ts ./
 COPY --from=wasm /src/encryption/pkg /opt/filebeam/encryption/pkg
+COPY --from=wasm /src/transfer-wasm/pkg /opt/filebeam/transfer-wasm/pkg
 RUN npm run check:icons \
     && npm run build --workspace=backend
 

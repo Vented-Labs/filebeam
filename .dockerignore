@@ -8,6 +8,8 @@
 !docker/production/**
 !docker/cli/
 !docker/cli/**
+!docker/wasm/
+!docker/wasm/**
 
 !package.json
 !package-lock.json
@@ -76,6 +78,17 @@
 !encryption/Cargo.lock
 !encryption/src/
 !encryption/src/**
+
+!transfer/
+!transfer/Cargo.toml
+!transfer/Cargo.lock
+!transfer/src/
+!transfer/src/**
+!transfer-wasm/
+!transfer-wasm/Cargo.toml
+!transfer-wasm/Cargo.lock
+!transfer-wasm/src/
+!transfer-wasm/src/**
 
 !update.php
 !updater/

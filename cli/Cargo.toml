@@ -17,9 +17,13 @@ ctrlc = { version = "3.5.2", features = ["termination"] }
 dirs = "6.0.0"
 ed25519-dalek = "2.1.1"
 filebeam-encryption = { path = "../encryption" }
+filebeam-transfer = { path = "../transfer" }
+filebeam-transfer-native = { path = "../transfer-native" }
+bytes = "1"
+futures-util = "0.3"
 hex = "0.4.3"
 ratatui = "0.29.0"
-reqwest = { version = "0.12.20", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+reqwest = { version = "0.12.20", default-features = false, features = ["blocking", "json", "rustls-tls", "stream"] }
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
 semver = "1.0.26"
@@ -35,6 +39,9 @@ zeroize = "1.8.1"
 unicode-segmentation = "1.13.3"
 unicode-width = "=0.2.0"
 zip = { version = "4.6.1", default-features = false, features = ["deflate"] }
+uuid = { version = "1.18.1", features = ["v4"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "fs", "io-util"] }
+tokio-util = { version = "0.7", features = ["rt", "io"] }
 
 [dev-dependencies]
 assert_matches = "1.5.0"

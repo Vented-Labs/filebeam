@@ -29,6 +29,7 @@ class InfoController extends Controller
             'chunk_bytes' => config('filebeam.transfers.chunk_bytes'),
             'upload_concurrency' => config('filebeam.transfers.upload_concurrency'),
             'download_concurrency' => config('filebeam.transfers.download_concurrency'),
+            'transfer_capabilities' => ['upload_status' => true, 'download_ranges' => true],
             'maximum_transfer_bytes' => $limits['maximum_transfer_bytes'],
             'maximum_file_count' => $limits['maximum_file_count'],
             'file_retention_hours' => $fileRetentionHours,

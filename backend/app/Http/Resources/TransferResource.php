@@ -30,6 +30,7 @@ class TransferResource extends JsonResource
             'chunk_bytes' => $this->resource->chunk_bytes,
             'upload_transport' => $this->resource->driver->value === 'http' ? app(ChunkStaging::class)->transport($this->resource->chunk_bytes) : null,
             'download_concurrency' => config('filebeam.transfers.download_concurrency'),
+            'transfer_capabilities' => ['upload_status' => true, 'download_ranges' => true],
             'retention_hours' => $this->resource->retention_hours,
             'burn_on_read' => $this->resource->burn_on_read,
             'encrypted_manifest' => $this->resource->encrypted_manifest,

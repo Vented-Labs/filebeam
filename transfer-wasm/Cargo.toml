@@ -1,0 +1,25 @@
+[package]
+name = "filebeam-transfer-wasm"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+description = "WASM bindings for Filebeam transfer scheduling policy"
+repository = "https://github.com/Vented-Labs/filebeam"
+
+[package.metadata.wasm-pack.profile.release]
+# wasm-pack's bundled optimizer cannot validate Rust 1.98's enabled WASM features.
+wasm-opt = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+filebeam-transfer = { path = "../transfer" }
+serde-wasm-bindgen = "0.6.5"
+wasm-bindgen = "0.2.100"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

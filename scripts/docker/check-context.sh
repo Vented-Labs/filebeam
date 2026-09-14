@@ -70,6 +70,8 @@ COPY backend/public/fonts /context/backend/public/fonts
 COPY ui/package.json /context/ui/package.json
 COPY ui/src /context/ui/src
 COPY encryption /context/encryption
+COPY transfer /context/transfer
+COPY transfer-wasm /context/transfer-wasm
 COPY update.php /context/update.php
 COPY updater /context/updater
 RUN cd /context && find . -mindepth 1 -print | cut -c3- | LC_ALL=C sort > /manifest
@@ -96,6 +98,7 @@ mkdir -p "$sentinel_context/backend/app" "$sentinel_context/backend/database" \
     "$sentinel_context/backend/resources/js/actions" "$sentinel_context/backend/resources/js/routes" \
     "$sentinel_context/backend/resources/js/wayfinder" "$sentinel_context/backend/storage/logs" \
     "$sentinel_context/encryption/pkg" "$sentinel_context/encryption/target" \
+    "$sentinel_context/transfer/target" "$sentinel_context/transfer-wasm/pkg" "$sentinel_context/transfer-wasm/target" \
     "$sentinel_context/node_modules" "$sentinel_context/.ai" "$sentinel_context/dist" \
     "$sentinel_context/tests" "$sentinel_context/mobile"
 touch "$sentinel_context/backend/app/.context-allowed.php" \
@@ -109,6 +112,9 @@ touch "$sentinel_context/backend/app/.context-allowed.php" \
     "$sentinel_context/backend/storage/logs/context-sentinel.log" \
     "$sentinel_context/encryption/pkg/context-sentinel.wasm" \
     "$sentinel_context/encryption/target/context-sentinel" \
+    "$sentinel_context/transfer/target/context-sentinel" \
+    "$sentinel_context/transfer-wasm/pkg/context-sentinel.wasm" \
+    "$sentinel_context/transfer-wasm/target/context-sentinel" \
     "$sentinel_context/node_modules/context-sentinel.js" \
     "$sentinel_context/.ai/context-sentinel" "$sentinel_context/dist/context-sentinel" \
     "$sentinel_context/tests/context-sentinel" "$sentinel_context/mobile/context-sentinel"
@@ -197,6 +203,14 @@ require_present 'backend/public/frankenphp-worker.php'
 if [[ -f "$root/encryption/Cargo.lock" ]]; then
     require_present 'encryption/Cargo.lock'
 fi
+require_present 'transfer/Cargo.toml'
+require_present 'transfer-wasm/Cargo.toml'
+if [[ -f "$root/transfer/Cargo.lock" ]]; then
+    require_present 'transfer/Cargo.lock'
+fi
+if [[ -f "$root/transfer-wasm/Cargo.lock" ]]; then
+    require_present 'transfer-wasm/Cargo.lock'
+fi
 require_prefix 'backend/app'
 require_prefix 'backend/bootstrap'
 require_prefix 'backend/config'
@@ -208,6 +222,8 @@ require_prefix 'backend/public/brand'
 require_prefix 'backend/public/fonts'
 require_prefix 'ui/src'
 require_prefix 'encryption/src'
+require_prefix 'transfer/src'
+require_prefix 'transfer-wasm/src'
 require_prefix 'updater'
 require_sentinel_present 'backend/app/.context-allowed.php'
 
@@ -229,6 +245,9 @@ for excluded in \
     'backend/storage/logs/context-sentinel.log' \
     'encryption/pkg/context-sentinel.wasm' \
     'encryption/target/context-sentinel' \
+    'transfer/target/context-sentinel' \
+    'transfer-wasm/pkg/context-sentinel.wasm' \
+    'transfer-wasm/target/context-sentinel' \
     'node_modules/context-sentinel.js' \
     '.ai/context-sentinel' \
     'dist/context-sentinel' \

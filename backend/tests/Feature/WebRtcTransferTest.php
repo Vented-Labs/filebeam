@@ -144,6 +144,26 @@ test('sender expiry and end revoke admitted sessions', function (): void {
     $this->getJson("/api/v1/transfers/{$transfer['id']}/webrtc/sessions/{$session['id']}", ['X-Filebeam-Session-Token' => $session['token']])->assertNotFound();
 });
 
+test('sender liveness accepts Redis integer strings but rejects malformed, absent, and stale heartbeats', function (): void {
+    $transfer = reserveWebRtc();
+    publishWebRtc($transfer);
+    $senderKey = "filebeam:webrtc:{$transfer['id']}:sender";
+    $endpoint = "/api/v1/transfers/{$transfer['id']}/webrtc/sessions";
+    $headers = ['X-Filebeam-Join-Token' => $transfer['join_token']];
+
+    Cache::put($senderKey, (string) now()->getTimestamp(), now()->addMinute());
+    $this->postJson($endpoint, [], $headers)->assertCreated();
+
+    Cache::put($senderKey, 'not-a-timestamp', now()->addMinute());
+    $this->postJson($endpoint, [], $headers)->assertNotFound();
+
+    Cache::forget($senderKey);
+    $this->postJson($endpoint, [], $headers)->assertNotFound();
+
+    Cache::put($senderKey, now()->subSeconds((int) config('filebeam.webrtc.session_idle_seconds', 120) + 1)->getTimestamp(), now()->addMinute());
+    $this->postJson($endpoint, [], $headers)->assertNotFound();
+});
+
 test('session capacity is bounded and expired entries cannot be revived', function (): void {
     config()->set('filebeam.webrtc.session_limit', 1);
     $transfer = reserveWebRtc();

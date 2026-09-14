@@ -12,8 +12,12 @@ on:
   pull_request:
     paths:
       - 'cli/**'
+      - 'transfer/**'
+      - 'transfer-native/**'
+      - 'transfer-wasm/**'
       - 'docker/cli/**'
       - 'scripts/cli/**'
+      - 'package.json'
       - 'scripts/release/cli-*'
       - '.github/workflows/beam.yml'
   push:
@@ -89,8 +93,8 @@ jobs:
           path: |
             ${{ env.BEAM_CARGO_CACHE_DIR }}
             cli/target
-          key: beam-cargo-${{ runner.os }}-${{ runner.arch }}-rust1.98.0-${{ hashFiles('docker/cli/Dockerfile', 'cli/Cargo.lock') }}-${{ hashFiles('cli/src/**', 'cli/tests/**', 'cli/build.rs', 'cli/Cargo.toml') }}
-          restore-keys: beam-cargo-${{ runner.os }}-${{ runner.arch }}-rust1.98.0-${{ hashFiles('docker/cli/Dockerfile', 'cli/Cargo.lock') }}-
+          key: beam-cargo-${{ runner.os }}-${{ runner.arch }}-rust1.98.0-${{ hashFiles('docker/cli/Dockerfile', 'cli/Cargo.lock', 'transfer/Cargo.lock', 'transfer-native/Cargo.lock') }}-${{ hashFiles('cli/src/**', 'cli/tests/**', 'cli/build.rs', 'cli/Cargo.toml', 'transfer/src/**', 'transfer/Cargo.toml', 'transfer-native/src/**', 'transfer-native/Cargo.toml') }}
+          restore-keys: beam-cargo-${{ runner.os }}-${{ runner.arch }}-rust1.98.0-${{ hashFiles('docker/cli/Dockerfile', 'cli/Cargo.lock', 'transfer/Cargo.lock', 'transfer-native/Cargo.lock') }}-
       - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240
         with:
           php-version: '8.5'
@@ -102,6 +106,7 @@ jobs:
           scripts/cli/check.sh
           scripts/cli/test.sh
           scripts/cli/build.sh
+          scripts/cli/transfer.test.sh
           scripts/cli/terminal.test.sh
           scripts/cli/catalog.test.sh
           scripts/cli/install.test.sh
@@ -142,8 +147,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             cli/target
-          key: beam-check-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.98.0-${{ hashFiles('cli/Cargo.lock') }}-${{ hashFiles('cli/src/**', 'cli/build.rs', 'cli/Cargo.toml') }}
-          restore-keys: beam-check-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.98.0-${{ hashFiles('cli/Cargo.lock') }}-
+          key: beam-check-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.98.0-${{ hashFiles('cli/Cargo.lock', 'transfer/Cargo.lock', 'transfer-native/Cargo.lock') }}-${{ hashFiles('cli/src/**', 'cli/build.rs', 'cli/Cargo.toml', 'transfer/src/**', 'transfer/Cargo.toml', 'transfer-native/src/**', 'transfer-native/Cargo.toml') }}
+          restore-keys: beam-check-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.98.0-${{ hashFiles('cli/Cargo.lock', 'transfer/Cargo.lock', 'transfer-native/Cargo.lock') }}-
       - name: Test native CLI
         if: matrix.test
         shell: bash
@@ -258,8 +263,8 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             cli/target
-          key: beam-package-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.98.0-${{ hashFiles('cli/Cargo.lock') }}-${{ hashFiles('cli/src/**', 'cli/build.rs', 'cli/Cargo.toml') }}
-          restore-keys: beam-package-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.98.0-${{ hashFiles('cli/Cargo.lock') }}-
+          key: beam-package-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.98.0-${{ hashFiles('cli/Cargo.lock', 'transfer/Cargo.lock', 'transfer-native/Cargo.lock') }}-${{ hashFiles('cli/src/**', 'cli/build.rs', 'cli/Cargo.toml', 'transfer/src/**', 'transfer/Cargo.toml', 'transfer-native/src/**', 'transfer-native/Cargo.toml') }}
+          restore-keys: beam-package-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.98.0-${{ hashFiles('cli/Cargo.lock', 'transfer/Cargo.lock', 'transfer-native/Cargo.lock') }}-
       - name: Derive canonical CLI public key
         shell: bash
         env:
