@@ -773,7 +773,7 @@ mod tests {
         );
 
         receiver_channel.close().await?;
-        timeout(CONNECT_TIMEOUT, serving)
+        let _closed = timeout(CONNECT_TIMEOUT, serving)
             .await
             .context("timed out stopping loopback WebRTC sender")??;
         receiver.close().await;
