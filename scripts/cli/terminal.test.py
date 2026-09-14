@@ -83,7 +83,7 @@ class API(http.server.BaseHTTPRequestHandler):
                           chunk_count=item["chunk_count"]) for i, item in enumerate(data["items"])]
             STATE.update(items=items, chunks={})
             STATE.pop("manifest", None)
-            self.respond(201, dict(id=ID, share_url=f"/{ID}", chunk_bytes=CHUNK,
+            self.respond(201, dict(id=ID, share_url=f"/{ID}", driver="http", chunk_bytes=CHUNK,
                                    items=items, upload_token="test-upload-token"))
         elif self.path.endswith("/complete"):
             STATE["manifest"] = data["encrypted_manifest"]
