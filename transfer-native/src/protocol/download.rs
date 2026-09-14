@@ -149,8 +149,9 @@ impl LiveDownload {
 
     async fn reconnect(&mut self, control: &Control, progress: u8) -> Result<()> {
         if let Some(connection) = self.connection.take() {
-            let _ = self.signaling.report(&connection.session, "failed", progress).await;
+            let reported = self.signaling.report(&connection.session, "failed", progress).await;
             connection.peer.close().await;
+            reported.context("report failed live receiver session")?;
         }
         control.phase(Phase::Connecting)?;
         let (peer, session, channel) = connect_receiver(&self.signaling, &self.join_token).await?;
@@ -203,7 +204,9 @@ impl LiveDownload {
             let received = loop {
                 tokio::select! {
                     _ = cancel.cancelled() => {
-                        self.finish("cancelled", progress).await;
+                        self.finish("cancelled", progress)
+                            .await
+                            .context("report cancelled live receiver session")?;
                         bail!("transfer cancelled");
                     }
                     _ = heartbeat.tick() => {
@@ -222,8 +225,9 @@ impl LiveDownload {
                 }
                 Err(error) => {
                     if let Some(connection) = self.connection.take() {
-                        let _ = self.signaling.report(&connection.session, "failed", progress).await;
+                        let reported = self.signaling.report(&connection.session, "failed", progress).await;
                         connection.peer.close().await;
+                        reported.context("report failed live receiver session")?;
                     }
                     control.phase(Phase::Retrying)?;
                     retry_wait(None, attempt, cancel).await?;
@@ -236,11 +240,13 @@ impl LiveDownload {
         bail!("live chunk retry window exhausted")
     }
 
-    async fn finish(&mut self, status: &str, progress: u8) {
+    async fn finish(&mut self, status: &str, progress: u8) -> Result<()> {
         if let Some(connection) = self.connection.take() {
-            let _ = self.signaling.report(&connection.session, status, progress).await;
+            let reported = self.signaling.report(&connection.session, status, progress).await;
             connection.peer.close().await;
+            reported.with_context(|| format!("report {status} live receiver session"))?;
         }
+        Ok(())
     }
 }
 
@@ -377,6 +383,7 @@ async fn async_run(
     let capabilities = capabilities(&client, &link.instance, &cancel).await?;
     let transfer = metadata(&client, &link.instance, &link.id, &cancel, &control).await?;
     validate_transfer(&transfer, &link.id)?;
+    reject_live_note(&transfer)?;
     let envelope = transfer
         .encrypted_manifest
         .clone()
@@ -473,6 +480,7 @@ async fn async_resume(store: Store, mut job: DownloadJob, control: Control) -> R
     // Re-authenticate the original manifest before trusting any retained data.
     let transfer = metadata(&client, &job.instance, &job.transfer_id, &cancel, &control).await?;
     validate_transfer(&transfer, &job.transfer_id)?;
+    reject_live_note(&transfer)?;
     if transfer.chunk_bytes != job.chunk_bytes
         || transfer.encrypted_manifest.as_deref() != Some(&job.envelope)
         || transfer.driver != job.driver
@@ -700,7 +708,7 @@ async fn download(
             job.state = "paused".into();
             let _ = store.save(&job);
             if let Some(live) = &rtc {
-                live.lock().await.finish("cancelled", live_progress(job.done, job.total)).await;
+                live.lock().await.finish("cancelled", live_progress(job.done, job.total)).await?;
             }
             return Err(error);
         }
@@ -711,7 +719,7 @@ async fn download(
                 let _ = store.save(&job);
                 if let Some(live) = &rtc {
                     let status = if cancel.is_cancelled() { "cancelled" } else { "failed" };
-                    live.lock().await.finish(status, live_progress(job.done, job.total)).await;
+                    live.lock().await.finish(status, live_progress(job.done, job.total)).await?;
                 }
                 return Err(error);
             }
@@ -849,7 +857,7 @@ async fn download(
     job.state = "complete".into();
     store.save(&job)?;
     if let Some(live) = &rtc {
-        live.lock().await.finish("completed", 100).await;
+        live.lock().await.finish("completed", 100).await?;
     }
     let share_key = store.path().join("share-key");
     let _ = fs_blocking(move || {
@@ -1348,6 +1356,15 @@ fn validate_transfer(transfer: &Transfer, id: &str) -> Result<()> {
     }
     Ok(())
 }
+fn reject_live_note(transfer: &Transfer) -> Result<()> {
+    // File manifests always contain declared item records. Notes do not, and a
+    // WebRTC registration would permanently claim a burn-on-read note before
+    // this native file receiver can render or consume it.
+    if transfer.driver == "webrtc" && transfer.items.is_empty() {
+        bail!("native WebRTC note reads are unsupported; use the browser before claiming the note");
+    }
+    Ok(())
+}
 fn server_download_limit(capabilities: &DownloadCapabilities, transfer: &Transfer) -> u32 {
     capabilities
         .download_concurrency
@@ -1375,6 +1392,9 @@ async fn metadata(
             control.phase(Phase::Waiting)?;
             retry_wait(response.headers().get(RETRY_AFTER), attempt, cancel).await?;
             continue;
+        }
+        if matches!(response.status(), StatusCode::NOT_FOUND | StatusCode::GONE) {
+            bail!("transfer is unavailable, expired, or has been revoked");
         }
         if !response.status().is_success() {
             bail!("metadata request failed: {}", response.status());
@@ -1649,6 +1669,21 @@ mod tests {
             }],
         };
         assert!(job.checked().is_err());
+    }
+
+    #[test]
+    fn live_note_is_rejected_before_receiver_registration() {
+        let transfer = Transfer {
+            driver: "webrtc".into(),
+            id: "X".into(),
+            protocol_version: 1,
+            chunk_bytes: 1,
+            encrypted_manifest: Some("envelope".into()),
+            items: Vec::new(),
+            download_concurrency: None,
+            transfer_capabilities: TransferCapabilities::default(),
+        };
+        assert!(reject_live_note(&transfer).is_err());
     }
 
     #[test]

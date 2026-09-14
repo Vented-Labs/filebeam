@@ -758,8 +758,9 @@ async fn serve_live(job: &UploadJob, client: Client, control: &Control) -> Resul
             }))
         })
         .collect::<Result<HashMap<_, _>>>()?;
-    let mut peers = JoinSet::new();
+    let mut peers: JoinSet<(String, Result<()>)> = JoinSet::new();
     let mut serving = HashSet::new();
+    let mut answered = HashSet::new();
     loop {
         control.phase(Phase::Waiting)?;
         let sessions = tokio::select! {
@@ -767,7 +768,8 @@ async fn serve_live(job: &UploadJob, client: Client, control: &Control) -> Resul
                 result.context("timed out polling live receiver sessions")?
             },
             _ = cancelled(control) => {
-                let _ = signaling.end(token).await;
+                // Keep the published transfer live: its checkpointed artifacts
+                // and credentials let the sender resume after an interrupt.
                 bail!("Transfer cancelled");
             }
         }?;
@@ -775,13 +777,18 @@ async fn serve_live(job: &UploadJob, client: Client, control: &Control) -> Resul
         serving.retain(|id| sessions.iter().any(|session| {
             session.id == *id && !matches!(session.status.as_str(), "completed" | "cancelled" | "failed")
         }));
+        answered.retain(|id| sessions.iter().any(|session| {
+            session.id == *id && !matches!(session.status.as_str(), "completed" | "cancelled" | "failed")
+        }));
         while let Some(result) = peers.try_join_next() {
-            let (id, _) = result.context("live peer task ended unexpectedly")?;
+            let (id, served) = result.context("live peer task ended unexpectedly")?;
             serving.remove(&id);
+            served.context("live peer transfer failed")?;
         }
         for session in sessions {
             if serving.len() >= WEBRTC_MAX_PEERS
                 || serving.contains(&session.id)
+                || answered.contains(&session.id)
                 || session.offer.is_none()
                 || matches!(session.status.as_str(), "completed" | "cancelled" | "failed")
             {
@@ -793,6 +800,10 @@ async fn serve_live(job: &UploadJob, client: Client, control: &Control) -> Resul
             let chunks = chunks.clone();
             let ice_servers = ice_servers.clone();
             serving.insert(id.clone());
+            // An SDP answer is immutable at the signaling endpoint. A failed
+            // connection must be retried by a fresh receiver session, not by
+            // publishing another answer for this offer.
+            answered.insert(id.clone());
             peers.spawn(async move {
                 let outcome = async {
                     let (peer, channel) = webrtc::connect_sender(&signaling, &token, &session, &ice_servers).await?;
@@ -807,7 +818,6 @@ async fn serve_live(job: &UploadJob, client: Client, control: &Control) -> Resul
         tokio::select! {
             _ = tokio::time::sleep(WEBRTC_POLL) => {},
             _ = cancelled(control) => {
-                let _ = signaling.end(token).await;
                 bail!("Transfer cancelled");
             }
         }
@@ -1650,6 +1660,25 @@ fn validate_job(job: &UploadJob) -> Result<()> {
         bail!("saved upload checkpoint is missing credentials or encryption material");
     }
     let mut positions = HashSet::new();
+    let mut item_ids = HashSet::new();
+    for (position, item) in job.items.iter().enumerate() {
+        if item.id.is_empty()
+            || item.position != position as u64
+            || !item_ids.insert(&item.id)
+            || decode(&item.nonce_prefix).map_or(true, |prefix| prefix.len() != 16)
+            || item.digest.len() != 64
+            || !item.digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+            || item.source.digest.len() != 64
+            || !item.source.digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+            || item.source.chunk_digests.len() as u64
+                != chunk_count(item.source.bytes, job.chunk_bytes)?
+            || item.source.chunk_digests.iter().any(|digest| {
+                digest.len() != 64 || !digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+            })
+        {
+            bail!("invalid saved upload item checkpoint");
+        }
+    }
     for chunk in &job.chunks {
         let expected_plaintext = job
             .items

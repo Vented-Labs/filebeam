@@ -665,7 +665,7 @@ pub async fn request_chunk(
                     }
                     let frame = parse_webrtc_frame(&message.data).map_err(anyhow::Error::msg)?;
                     frame
-                        .validate_for_chunk(seq, expected, bytes.len() as u64)
+                        .validate_for_chunk(seq, bytes.len() as u64, expected)
                         .map_err(anyhow::Error::msg)?;
                     bytes.extend_from_slice(&frame.payload);
                     if bytes.len() as u64 == expected {
@@ -727,7 +727,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn loopback_offer_answer_carries_a_full_browser_sized_frame() -> Result<()> {
+    async fn loopback_pair_requests_frames_and_acknowledges_each_chunk() -> Result<()> {
         let receiver = NativePeer::with_udp_addrs(&[], vec!["127.0.0.1:0".to_owned()]).await?;
         let sender = NativePeer::with_udp_addrs(&[], vec!["127.0.0.1:0".to_owned()]).await?;
 
@@ -738,26 +738,44 @@ mod tests {
 
         wait_for_open(&receiver_channel).await?;
         wait_for_open(&sender_channel).await?;
-        let frame = vec![0x5a; FRAME_PAYLOAD_BYTES + 16];
-        receiver_channel
-            .send(BytesMut::from(frame.as_slice()))
-            .await?;
 
-        let received = timeout(CONNECT_TIMEOUT, async {
-            loop {
-                match sender_channel.poll().await {
-                    Some(DataChannelEvent::OnMessage(message)) => break Ok(message),
-                    Some(DataChannelEvent::OnClose) | None => bail!("loopback data channel closed"),
-                    _ => {}
-                }
-            }
-        })
-        .await
-        .context("timed out receiving full WebRTC frame")??;
-        assert!(!received.is_string);
-        assert_eq!(received.data.len(), frame.len());
-        assert_eq!(received.data.as_ref(), frame.as_slice());
+        let tag_only = vec![0xa5; 16];
+        let tail_16_401 = (0..16_401).map(|value| (value % 251) as u8).collect::<Vec<_>>();
+        let multiple_frames = (0..(FRAME_PAYLOAD_BYTES * 2 + 16))
+            .map(|value| (value % 239) as u8)
+            .collect::<Vec<_>>();
+        let chunks = HashMap::from([
+            (("item".to_owned(), 0), tag_only.clone()),
+            (("item".to_owned(), 1), tail_16_401.clone()),
+            (("item".to_owned(), 2), multiple_frames.clone()),
+        ]);
+        let serving = tokio::spawn(serve_channel(sender_channel, chunks));
 
+        assert_eq!(
+            request_chunk(receiver_channel.clone(), 7, "item".into(), 0, 16).await?,
+            tag_only
+        );
+        // This request is accepted only after the first request's ACK clears the sender's slot.
+        assert_eq!(
+            request_chunk(receiver_channel.clone(), 8, "item".into(), 1, 16_401).await?,
+            tail_16_401
+        );
+        assert_eq!(
+            request_chunk(
+                receiver_channel.clone(),
+                9,
+                "item".into(),
+                2,
+                multiple_frames.len() as u64,
+            )
+            .await?,
+            multiple_frames
+        );
+
+        receiver_channel.close().await?;
+        timeout(CONNECT_TIMEOUT, serving)
+            .await
+            .context("timed out stopping loopback WebRTC sender")??;
         receiver.close().await;
         sender.close().await;
         Ok(())
