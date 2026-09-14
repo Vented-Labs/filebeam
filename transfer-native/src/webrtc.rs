@@ -301,26 +301,33 @@ pub async fn connect_receiver(
 ) -> Result<(NativePeer, ReceiverSession, Arc<dyn DataChannel>)> {
     let session = signaling.register(join_token).await?;
     let peer = NativePeer::new(&session.ice_servers, relay_only).await?;
-    let (offer, channel) = peer.offer_channel().await?;
-    signaling.offer(&session, &offer).await?;
-    let started = tokio::time::Instant::now();
-    loop {
-        let (answer, status) = signaling.receiver_status(&session).await?;
-        if let Some(answer) = answer {
-            peer.accept_answer(&answer).await?;
-            if let Err(error) = wait_for_open(&channel).await {
-                peer.close().await;
-                return Err(error);
+    let result = async {
+        let (offer, channel) = peer.offer_channel().await?;
+        signaling.offer(&session, &offer).await?;
+        let started = tokio::time::Instant::now();
+        loop {
+            let (answer, status) = signaling.receiver_status(&session).await?;
+            if let Some(answer) = answer {
+                peer.accept_answer(&answer).await?;
+                wait_for_open(&channel).await?;
+                return Ok(channel);
             }
-            return Ok((peer, session, channel));
+            if matches!(status.as_str(), "cancelled" | "completed" | "failed") {
+                bail!("live sender ended the WebRTC session ({status})");
+            }
+            if started.elapsed() >= CONNECT_TIMEOUT {
+                bail!("timed out waiting for WebRTC sender");
+            }
+            tokio::time::sleep(Duration::from_millis(1800)).await;
         }
-        if matches!(status.as_str(), "cancelled" | "completed" | "failed") {
-            bail!("live sender ended the WebRTC session ({status})");
+    }
+    .await;
+    match result {
+        Ok(channel) => Ok((peer, session, channel)),
+        Err(error) => {
+            peer.close().await;
+            Err(error)
         }
-        if started.elapsed() >= CONNECT_TIMEOUT {
-            bail!("timed out waiting for WebRTC sender");
-        }
-        tokio::time::sleep(Duration::from_millis(1800)).await;
     }
 }
 
@@ -332,16 +339,41 @@ pub async fn connect_sender(
     session: &SenderSession,
     servers: &[IceServer],
     relay_only: bool,
+    cancellation: Arc<AtomicBool>,
 ) -> Result<(NativePeer, Arc<dyn DataChannel>)> {
     let offer = session
         .offer
         .as_ref()
         .context("receiver has not published an offer")?;
     let peer = NativePeer::new(servers, relay_only).await?;
-    let answer = peer.answer(offer).await?;
-    signaling.answer(upload_token, &session.id, &answer).await?;
-    let channel = peer.receiver_channel().await?;
-    Ok((peer, channel))
+    let result = async {
+        let answer = tokio::select! {
+            answer = peer.answer(offer) => answer?,
+            _ = wait_for_cancellation(&cancellation) => bail!("Transfer cancelled"),
+        };
+        tokio::select! {
+            result = signaling.answer(upload_token, &session.id, &answer) => result?,
+            _ = wait_for_cancellation(&cancellation) => bail!("Transfer cancelled"),
+        }
+        tokio::select! {
+            channel = peer.receiver_channel() => channel,
+            _ = wait_for_cancellation(&cancellation) => bail!("Transfer cancelled"),
+        }
+    }
+    .await;
+    match result {
+        Ok(channel) => Ok((peer, channel)),
+        Err(error) => {
+            peer.close().await;
+            Err(error)
+        }
+    }
+}
+
+async fn wait_for_cancellation(cancellation: &AtomicBool) {
+    while !cancellation.load(Ordering::Relaxed) {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
@@ -918,6 +950,51 @@ mod tests {
         let _closed = timeout(CONNECT_TIMEOUT, serving)
             .await
             .context("timed out stopping loopback WebRTC sender")??;
+        receiver.close().await;
+        sender.close().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn loopback_receiver_close_does_not_affect_another_peer() -> Result<()> {
+        let closed_receiver =
+            NativePeer::with_udp_addrs(&[], vec!["127.0.0.1:0".to_owned()]).await?;
+        let closed_sender = NativePeer::with_udp_addrs(&[], vec!["127.0.0.1:0".to_owned()]).await?;
+        let (offer, receiver_channel) = closed_receiver.offer_channel().await?;
+        let answer = closed_sender.answer(&offer).await?;
+        closed_receiver.accept_answer(&answer).await?;
+        let sender_channel = closed_sender.receiver_channel().await?;
+        wait_for_open(&receiver_channel).await?;
+        wait_for_open(&sender_channel).await?;
+        let closed_serving = tokio::spawn(serve_channel(sender_channel, HashMap::new()));
+        receiver_channel.close().await?;
+        timeout(CONNECT_TIMEOUT, closed_serving)
+            .await
+            .context("timed out stopping closed loopback receiver")???;
+        closed_receiver.close().await;
+        closed_sender.close().await;
+
+        let receiver = NativePeer::with_udp_addrs(&[], vec!["127.0.0.1:0".to_owned()]).await?;
+        let sender = NativePeer::with_udp_addrs(&[], vec!["127.0.0.1:0".to_owned()]).await?;
+        let (offer, receiver_channel) = receiver.offer_channel().await?;
+        let answer = sender.answer(&offer).await?;
+        receiver.accept_answer(&answer).await?;
+        let sender_channel = sender.receiver_channel().await?;
+        wait_for_open(&receiver_channel).await?;
+        wait_for_open(&sender_channel).await?;
+        let ciphertext = vec![7; 16];
+        let serving = tokio::spawn(serve_channel(
+            sender_channel,
+            HashMap::from([(("item".to_owned(), 0), ciphertext.clone())]),
+        ));
+        assert_eq!(
+            request_chunk(receiver_channel.clone(), 1, "item".into(), 0, 16).await?,
+            ciphertext
+        );
+        receiver_channel.close().await?;
+        timeout(CONNECT_TIMEOUT, serving)
+            .await
+            .context("timed out stopping independent loopback receiver")???;
         receiver.close().await;
         sender.close().await;
         Ok(())

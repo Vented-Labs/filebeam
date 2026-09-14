@@ -2,7 +2,9 @@ import { expect, test } from '@playwright/test';
 import {
     AdaptiveConcurrency,
     initialiseTransferPolicy,
+    maximumCiphertextRecordBytes,
     retryDelayMilliseconds,
+    transferConcurrency,
     transferPolicy,
 } from '../../ui/src/lib/transfer';
 import { StageSession } from '../../ui/src/lib/transfer-wasm-policy';
@@ -30,6 +32,13 @@ test('WASM policy matches the native transfer trace for scheduling, retry, and s
         small.observe(1_040, 0.05);
         expect(small.limit).toBe(2);
         expect(transferPolicy().concurrencyLimit(8, 25_000_000 - 16, 128 * 1024 * 1024, 8)).toBe(2);
+        expect(transferConcurrency(8, 25_000_000)).toBe(2);
+        const maximumRecord = maximumCiphertextRecordBytes(
+            [{ size: 1_048_576 }, { size: 524_288 }, { size: 0 }],
+            25_000_000 - 16,
+        );
+        expect(maximumRecord).toBe(1_048_592);
+        expect(transferConcurrency(8, maximumRecord)).toBe(8);
         expect(retryDelayMilliseconds(2, undefined, 1)).toBe(1_000);
 
         const session = new StageSession('stage', 8, 'checksum');

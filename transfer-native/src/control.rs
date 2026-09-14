@@ -119,9 +119,15 @@ pub struct PeerConsent {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PeerFailed {
+    pub message: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TransferEvent {
     ShareReady(ShareReady),
     PeerConsent(PeerConsent),
+    PeerFailed(PeerFailed),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -313,6 +319,30 @@ mod tests {
         assert!(matches!(
             receiver.recv().unwrap(),
             TransferEvent::ShareReady(_)
+        ));
+    }
+
+    #[test]
+    fn peer_failure_is_an_advisory_event() {
+        let (prompts, _) = mpsc::channel();
+        let (events, receiver) = mpsc::channel();
+        let control = Control::with_events(
+            TransferSettings {
+                state_home: PathBuf::from("transfers"),
+                max_concurrency: None,
+                memory_budget: 512 * 1024 * 1024,
+                client_user_agent: None,
+                webrtc_relay_only: false,
+            },
+            prompts,
+            events,
+        );
+        control.emit(TransferEvent::PeerFailed(PeerFailed {
+            message: "A live receiver disconnected or failed.".into(),
+        }));
+        assert!(matches!(
+            receiver.recv().unwrap(),
+            TransferEvent::PeerFailed(PeerFailed { message }) if message == "A live receiver disconnected or failed."
         ));
     }
 }

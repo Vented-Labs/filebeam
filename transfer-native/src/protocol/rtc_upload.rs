@@ -24,6 +24,17 @@ pub(super) async fn serve_artifacts(
     channel: Arc<dyn DataChannel>,
     chunks: HashMap<(String, u64), CiphertextArtifact>,
 ) -> Result<()> {
+    let result = serve_artifacts_inner(channel.clone(), chunks).await;
+    if result.is_err() {
+        let _ = channel.close().await;
+    }
+    result
+}
+
+async fn serve_artifacts_inner(
+    channel: Arc<dyn DataChannel>,
+    chunks: HashMap<(String, u64), CiphertextArtifact>,
+) -> Result<()> {
     let mut pending: Option<u32> = None;
     loop {
         let event = if pending.is_some() {

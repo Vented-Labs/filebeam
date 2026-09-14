@@ -14,8 +14,8 @@ use anyhow::Result;
 use crate::{config::Config, protocol, update, uploads::DirectoryMode};
 #[allow(unused_imports)]
 pub use filebeam_transfer_native::control::{
-    Cancelled, Control, PeerConsent, Phase, Progress, Prompt, PromptKind, SecretKind, ShareReady,
-    TransferEvent, TransferSettings,
+    Cancelled, Control, PeerConsent, PeerFailed, Phase, Progress, Prompt, PromptKind, SecretKind,
+    ShareReady, TransferEvent, TransferSettings,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

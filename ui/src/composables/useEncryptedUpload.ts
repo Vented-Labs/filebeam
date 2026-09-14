@@ -12,6 +12,7 @@ import {
     AdaptiveConcurrency,
     fetchChunkWithRetry,
     initialiseTransferPolicy,
+    maximumCiphertextRecordBytes,
     transferConcurrency,
 } from '../lib/transfer';
 import { uploadCiphertext, type UploadPhase, type UploadTransport } from '../lib/adaptive-upload';
@@ -670,6 +671,10 @@ export function useEncryptedUpload(
             let uploaded = 0;
             await initialiseTransferPolicy();
             ensureActive(jobId);
+            const maximumCiphertextBytes = maximumCiphertextRecordBytes(
+                uploadEntries.map((entry) => entry.file),
+                created.data.chunk_bytes,
+            );
             const sourceBytes = uploadEntries.reduce((total, entry) => total + entry.file.size, 0);
             const uploadedByItem = new Map<string, number>();
             const inFlightByChunk = new Map<string, { itemId: string; bytes: number }>();
@@ -689,7 +694,7 @@ export function useEncryptedUpload(
             let progressHighwater = 0;
             let lastProgressUpdate = 0;
             const adaptive = new AdaptiveConcurrency(
-                transferConcurrency(config.upload_concurrency, created.data.chunk_bytes),
+                transferConcurrency(config.upload_concurrency, maximumCiphertextBytes),
                 (limit) => {
                     if (activeJob === jobId && !uploadController.signal.aborted)
                         activeWorker?.postMessage({ type: 'window', jobId, limit });

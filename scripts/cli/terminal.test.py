@@ -2,6 +2,7 @@
 """Exercise the real binary in a PTY, including slow, single-chunk encrypted transfers."""
 import fcntl
 import base64
+import hashlib
 import http.server
 import json
 import os
@@ -63,8 +64,36 @@ class API(http.server.BaseHTTPRequestHandler):
                                    encrypted_manifest=STATE["manifest"], items=STATE["items"]))
         elif "/chunks/" in self.path:
             body = STATE["chunks"][self.path]
-            self.send_response(200)
+            etag = f'"{hashlib.sha256(body).hexdigest()}"'
+            start, end, status = 0, len(body) - 1, 200
+            range_header = self.headers.get("Range")
+            if range_header and self.headers.get("If-Range") == etag:
+                match = re.fullmatch(r"bytes=(\d*)-(\d*)", range_header)
+                if not match:
+                    self.send_response(416)
+                    self.send_header("Content-Range", f"bytes */{len(body)}")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                start = int(match.group(1) or 0)
+                end = min(int(match.group(2) or len(body) - 1), len(body) - 1)
+                if start > end or start >= len(body):
+                    self.send_response(416)
+                    self.send_header("Content-Range", f"bytes */{len(body)}")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                status = 206
+            body = body[start:end + 1]
+            self.send_response(status)
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Cache-Control", "private, no-store")
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("ETag", etag)
+            self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Content-Length", str(len(body)))
+            if status == 206:
+                self.send_header("Content-Range", f"bytes {start}-{end}/{len(STATE['chunks'][self.path])}")
             self.end_headers()
             try:
                 for offset in range(0, len(body), 65536):

@@ -117,7 +117,7 @@ pub fn run(
                     crate::output::result(&share.share_url, plain)?;
                     announced_links.push(share.share_url);
                 }
-                TransferEvent::PeerConsent(_) => {}
+                TransferEvent::PeerConsent(_) | TransferEvent::PeerFailed(_) => {}
             }
         }
         if let Ok(prompt) = job.prompts.try_recv() {

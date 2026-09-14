@@ -1,6 +1,8 @@
 const ATTEMPTS = 4;
 const IDLE_TIMEOUT_MS = 120_000;
 const MAX_RETRY_AFTER_MS = 60_000;
+const AEAD_TAG_BYTES = 16;
+const MAX_CIPHERTEXT_CHUNK_BYTES = 25_000_000;
 
 class NonRetryableChunkError extends Error {}
 
@@ -60,13 +62,34 @@ export function transferPolicy(): TransferWasm {
     return wasm;
 }
 
-export function transferConcurrency(configured: number | undefined, chunkBytes: number): number {
+/** Largest encrypted chunk that this selection can emit, including its AEAD tag. */
+export function maximumCiphertextRecordBytes(
+    files: Iterable<{ size: number }>,
+    chunkBytes: number,
+): number {
+    let maximum = AEAD_TAG_BYTES;
+    for (const { size } of files)
+        maximum = Math.max(maximum, Math.min(size, chunkBytes) + AEAD_TAG_BYTES);
+    return maximum;
+}
+
+export function transferConcurrency(
+    configured: number | undefined,
+    maximumCiphertextBytes: number,
+): number {
     const memory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
     const constrained = memory !== undefined && memory <= 4;
     const byteBudget = (constrained ? 64 : 128) * 1024 * 1024;
+    // The policy reserves one plaintext and one ciphertext copy for each active record.
+    const plaintextBytes =
+        Number.isSafeInteger(maximumCiphertextBytes) &&
+        maximumCiphertextBytes >= AEAD_TAG_BYTES &&
+        maximumCiphertextBytes <= MAX_CIPHERTEXT_CHUNK_BYTES
+            ? maximumCiphertextBytes - AEAD_TAG_BYTES
+            : MAX_CIPHERTEXT_CHUNK_BYTES - AEAD_TAG_BYTES;
     return transferPolicy().concurrencyLimit(
         Number.isFinite(configured) ? Math.floor(configured!) : 4,
-        chunkBytes,
+        plaintextBytes,
         byteBudget,
         constrained ? 2 : 8,
     );

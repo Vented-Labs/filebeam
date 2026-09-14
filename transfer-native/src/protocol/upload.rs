@@ -41,7 +41,7 @@ use uuid::Uuid;
 use zeroize::Zeroize;
 
 use crate::{
-    control::{Control, Phase},
+    control::{Control, PeerFailed, Phase, TransferEvent},
     uploads::{self, DirectoryMode},
     webrtc::{self, Signaling},
 };
@@ -840,6 +840,7 @@ async fn serve_live(job: &UploadJob, client: Client, control: &Control) -> Resul
         .collect::<Result<HashMap<_, _>>>()?;
     let mut peers: JoinSet<(String, Result<()>)> = JoinSet::new();
     let mut serving = HashSet::new();
+    let mut stopping = HashMap::new();
     let mut answered = HashSet::new();
     loop {
         control.phase(Phase::Waiting)?;
@@ -850,19 +851,11 @@ async fn serve_live(job: &UploadJob, client: Client, control: &Control) -> Resul
             _ = cancelled(control) => {
                 // Keep the published transfer live: its checkpointed artifacts
                 // and credentials let the sender resume after an interrupt.
+                stop_live_peers(&mut peers, &mut stopping).await;
                 bail!("Transfer cancelled");
             }
         }?;
         let (sessions, ice_servers) = sessions;
-        serving.retain(|id| {
-            sessions.iter().any(|session| {
-                session.id == *id
-                    && !matches!(
-                        session.status.as_str(),
-                        "completed" | "cancelled" | "failed"
-                    )
-            })
-        });
         answered.retain(|id| {
             sessions.iter().any(|session| {
                 session.id == *id
@@ -872,13 +865,35 @@ async fn serve_live(job: &UploadJob, client: Client, control: &Control) -> Resul
                     )
             })
         });
+        for session in &sessions {
+            if matches!(
+                session.status.as_str(),
+                "completed" | "cancelled" | "failed"
+            ) && let Some(stop) = stopping.get(&session.id)
+            {
+                stop.send_replace(());
+            }
+        }
         while let Some(result) = peers.try_join_next() {
-            let (id, served) = result.context("live peer task ended unexpectedly")?;
+            let (id, served) = match result {
+                Ok(result) => result,
+                Err(_) => {
+                    control.emit(TransferEvent::PeerFailed(PeerFailed {
+                        message: peer_failure_message(),
+                    }));
+                    continue;
+                }
+            };
             serving.remove(&id);
-            served.context("live peer transfer failed")?;
+            stopping.remove(&id);
+            if served.is_err() {
+                control.emit(TransferEvent::PeerFailed(PeerFailed {
+                    message: peer_failure_message(),
+                }));
+            }
         }
         for session in sessions {
-            if serving.len() >= WEBRTC_MAX_PEERS
+            if peers.len() >= WEBRTC_MAX_PEERS
                 || serving.contains(&session.id)
                 || answered.contains(&session.id)
                 || session.offer.is_none()
@@ -895,7 +910,10 @@ async fn serve_live(job: &UploadJob, client: Client, control: &Control) -> Resul
             let chunks = chunks.clone();
             let ice_servers = ice_servers.clone();
             let relay_only = control.webrtc_relay_only();
+            let task_control = control.clone();
+            let (stop, mut stopped) = watch::channel(());
             serving.insert(id.clone());
+            stopping.insert(id.clone(), stop);
             // An SDP answer is immutable at the signaling endpoint. A failed
             // connection must be retried by a fresh receiver session, not by
             // publishing another answer for this offer.
@@ -908,9 +926,14 @@ async fn serve_live(job: &UploadJob, client: Client, control: &Control) -> Resul
                         &session,
                         &ice_servers,
                         relay_only,
+                        task_control.cancelled.clone(),
                     )
                     .await?;
-                    let served = serve_artifacts(channel, chunks).await;
+                    let served = tokio::select! {
+                        served = serve_artifacts(channel, chunks) => served,
+                        _ = cancelled(&task_control) => bail!("Transfer cancelled"),
+                        _ = stopped.changed() => Ok(()),
+                    };
                     peer.close().await;
                     served
                 }
@@ -921,10 +944,28 @@ async fn serve_live(job: &UploadJob, client: Client, control: &Control) -> Resul
         tokio::select! {
             _ = tokio::time::sleep(WEBRTC_POLL) => {},
             _ = cancelled(control) => {
+                stop_live_peers(&mut peers, &mut stopping).await;
                 bail!("Transfer cancelled");
             }
         }
     }
+}
+
+async fn stop_live_peers(
+    peers: &mut JoinSet<(String, Result<()>)>,
+    stopping: &mut HashMap<String, watch::Sender<()>>,
+) {
+    for stop in stopping.values() {
+        stop.send_replace(());
+    }
+    while peers.join_next().await.is_some() {}
+    stopping.clear();
+}
+
+fn peer_failure_message() -> String {
+    // Peer protocol errors can contain receiver-controlled frames and must not
+    // be surfaced through the advisory event stream.
+    "A live receiver disconnected or failed.".into()
 }
 
 fn next_missing_chunk(job: &UploadJob) -> Result<Option<(usize, u64)>> {
@@ -2098,5 +2139,13 @@ mod tests {
             stage: None,
         });
         assert!(preparation_complete(&saved).unwrap());
+    }
+
+    #[test]
+    fn peer_failure_event_message_is_sanitized() {
+        assert_eq!(
+            peer_failure_message(),
+            "A live receiver disconnected or failed."
+        );
     }
 }
