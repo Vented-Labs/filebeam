@@ -307,6 +307,10 @@ pub async fn connect_receiver(
         let (answer, status) = signaling.receiver_status(&session).await?;
         if let Some(answer) = answer {
             peer.accept_answer(&answer).await?;
+            if let Err(error) = wait_for_open(&channel).await {
+                peer.close().await;
+                return Err(error);
+            }
             return Ok((peer, session, channel));
         }
         if matches!(status.as_str(), "cancelled" | "completed" | "failed") {
@@ -684,6 +688,20 @@ pub async fn request_chunk(
     result
 }
 
+async fn wait_for_open(channel: &Arc<dyn DataChannel>) -> Result<()> {
+    timeout(CONNECT_TIMEOUT, async {
+        loop {
+            match channel.poll().await {
+                Some(DataChannelEvent::OnOpen) => return Ok(()),
+                Some(DataChannelEvent::OnClose) | None => bail!("WebRTC data channel closed before opening"),
+                _ => {}
+            }
+        }
+    })
+    .await
+    .context("timed out opening WebRTC data channel")?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -745,17 +763,4 @@ mod tests {
         Ok(())
     }
 
-    async fn wait_for_open(channel: &Arc<dyn DataChannel>) -> Result<()> {
-        timeout(CONNECT_TIMEOUT, async {
-            loop {
-                match channel.poll().await {
-                    Some(DataChannelEvent::OnOpen) => return Ok(()),
-                    Some(DataChannelEvent::OnClose) | None => bail!("loopback data channel closed"),
-                    _ => {}
-                }
-            }
-        })
-        .await
-        .context("timed out opening loopback WebRTC data channel")?
-    }
 }
