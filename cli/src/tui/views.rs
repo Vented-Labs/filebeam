@@ -8,7 +8,7 @@ use ratatui::{
 
 use super::state::{Entry, Focus, Mode, State};
 use crate::{
-    app::{Direction, Phase},
+    app::{Direction, Phase, PromptKind},
     input::Input,
     presentation::{self as paint, Theme, at, bytes, clean, clip, duration},
 };
@@ -1089,6 +1089,25 @@ fn help(area: Rect, buffer: &mut Buffer, theme: Theme) {
 
 fn secret(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) -> Option<(u16, u16)> {
     let prompt = state.prompt.as_ref()?;
+    if matches!(prompt.kind, PromptKind::PeerConsent { .. }) {
+        let inner = paint::card(centered(area, 72, 13), buffer, theme, true);
+        paint::line(
+            at(inner, 0, 1),
+            buffer,
+            Line::styled("Peer connection", theme.strong().fg(theme.accent())),
+        );
+        paint::line(
+            at(inner, 2, 1),
+            buffer,
+            Line::styled("This shares your network address with the sender.", theme.dim()),
+        );
+        paint::line(
+            at(inner, 4, 1),
+            buffer,
+            Line::styled("Press Y to continue, or Enter/Esc to cancel.", theme.dim()),
+        );
+        return None;
+    }
     let inner = paint::card(centered(area, 72, 13), buffer, theme, true);
     paint::line(
         at(inner, 0, 1),

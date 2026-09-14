@@ -37,7 +37,7 @@ impl Direction {
 }
 
 pub enum Request {
-    Upload(Vec<PathBuf>, DirectoryMode),
+    Upload(Vec<PathBuf>, DirectoryMode, protocol::UploadOptions),
     Download { link: String, output: PathBuf },
     Update,
     Resume { id: String, direction: Direction },
@@ -57,14 +57,16 @@ impl Request {
 pub struct Job {
     pub control: Control,
     pub prompts: Receiver<Prompt>,
+    pub events: Receiver<TransferEvent>,
     result: Receiver<Result<Vec<String>>>,
 }
 
 impl Job {
     pub fn start(instance: String, config: Config, request: Request) -> Self {
         let (prompts, receiver) = mpsc::channel();
+        let (event_sender, events) = mpsc::channel();
         let (sender, result) = mpsc::channel();
-        let control = Control::new(
+        let control = Control::with_events(
             TransferSettings {
                 state_home: config.home.join("transfers"),
                 max_concurrency: config.max_concurrency,
@@ -72,12 +74,13 @@ impl Job {
                 client_user_agent: Some(format!("beam/{}", env!("BEAM_VERSION"))),
             },
             prompts,
+            event_sender,
         );
         let worker = control.clone();
         thread::spawn(move || {
             let outcome = match request {
-                Request::Upload(paths, mode) => {
-                    protocol::upload(&instance, &paths, mode, &worker).map(|link| vec![link])
+                Request::Upload(paths, mode, options) => {
+                    protocol::upload(&instance, &paths, mode, options, &worker).map(|link| vec![link])
                 }
                 Request::Download { link, output } => {
                     protocol::download(&instance, &link, &output, &worker).map(|paths| {
@@ -103,6 +106,7 @@ impl Job {
         Self {
             control,
             prompts: receiver,
+            events,
             result,
         }
     }

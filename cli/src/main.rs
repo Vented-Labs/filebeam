@@ -13,7 +13,7 @@ mod uploads;
 use std::{env, io::IsTerminal, path::PathBuf};
 
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::config::{MAX_CONCURRENCY, MAX_MEMORY_LIMIT_MIB, MIN_MEMORY_LIMIT_MIB};
 
@@ -50,6 +50,9 @@ struct Cli {
     /// Disable decorative animation and progress interpolation.
     #[arg(long, global = true)]
     reduced_motion: bool,
+    /// Allow WebRTC downloads to expose your network address to the sender.
+    #[arg(long, global = true)]
+    accept_peer_address_exposure: bool,
     /// Limit simultaneous transfer requests (1-64).
     #[arg(long, global = true, value_parser = clap::value_parser!(u32).range(1..=MAX_CONCURRENCY as i64))]
     max_concurrency: Option<u32>,
@@ -65,6 +68,9 @@ enum Command {
     /// Encrypt and upload files or directories.
     Up {
         files: Vec<PathBuf>,
+        /// Transfer over the HTTP relay or directly over WebRTC.
+        #[arg(long, value_enum, default_value_t = Transport::Http)]
+        transport: Transport,
         /// Combine the selection into one ZIP archive before encrypting.
         #[arg(long, conflicts_with = "individual")]
         zip: bool,
@@ -86,6 +92,23 @@ enum Command {
     Resume { id: String },
     /// Discard a saved transfer and its local resume state.
     Cancel { id: String },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum Transport {
+    Http,
+    Webrtc,
+}
+
+impl Transport {
+    fn upload_options(self) -> protocol::UploadOptions {
+        protocol::UploadOptions {
+            transport: match self {
+                Self::Http => protocol::Transport::Http,
+                Self::Webrtc => protocol::Transport::WebRtc,
+            },
+        }
+    }
 }
 
 fn main() -> Result<()> {
@@ -114,6 +137,7 @@ fn main() -> Result<()> {
     match cli.command {
         Some(Command::Up {
             files,
+            transport,
             zip,
             individual,
         }) => {
@@ -132,8 +156,9 @@ fn main() -> Result<()> {
             for link in inline::run(
                 &config,
                 &instance,
-                app::Request::Upload(files, mode),
+                app::Request::Upload(files, mode, transport.upload_options()),
                 cli.plain,
+                cli.accept_peer_address_exposure,
             )? {
                 output::result(&link, cli.plain)?;
             }
@@ -144,6 +169,7 @@ fn main() -> Result<()> {
                 &instance,
                 app::Request::Download { link, output },
                 cli.plain,
+                cli.accept_peer_address_exposure,
             )?;
             for path in paths {
                 output::result(&path, cli.plain)?;
@@ -176,6 +202,7 @@ fn main() -> Result<()> {
                     direction,
                 },
                 cli.plain,
+                cli.accept_peer_address_exposure,
             )? {
                 output::result(&value, cli.plain)?;
             }

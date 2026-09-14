@@ -1,11 +1,20 @@
 //! Deterministic, transport-agnostic transfer coordination.
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::fmt;
 
 pub const AEAD_TAG_BYTES: u64 = 16;
 pub const MAX_CIPHERTEXT_BYTES: u64 = 25_000_000;
 pub const MAX_CHUNKS: u64 = 65_535;
+pub const WEBRTC_CONTROL_LIMIT: usize = 1_024;
+pub const WEBRTC_MAX_ITEM_ID_UNITS: usize = 256;
+pub const WEBRTC_FRAME_HEADER_BYTES: usize = 16;
+pub const WEBRTC_FRAME_PAYLOAD_BYTES: usize = 16 * 1024;
+pub const WEBRTC_FRAME_MAGIC: u32 = 0x4642_4348;
+
+const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
 const MAX_CONCURRENCY: u32 = 8;
 const SAMPLE_WINDOW_MS: u64 = 2_000;
@@ -390,6 +399,270 @@ pub fn ciphertext_bytes(plaintext_bytes: u64, chunk_bytes: u64) -> Result<u64, S
                 .ok_or("ciphertext size overflow")?,
         )
         .ok_or_else(|| "ciphertext size overflow".into())
+}
+
+/// A validated JSON control message exchanged on the ordered WebRTC channel.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "type")]
+pub enum WebRtcControl {
+    #[serde(rename = "request")]
+    Request {
+        seq: u32,
+        #[serde(rename = "itemId")]
+        item_id: String,
+        index: u64,
+    },
+    #[serde(rename = "chunk")]
+    Chunk {
+        seq: u32,
+        #[serde(rename = "itemId")]
+        item_id: String,
+        index: u64,
+        length: u64,
+    },
+    #[serde(rename = "ack")]
+    Ack { seq: u32 },
+}
+
+impl WebRtcControl {
+    pub fn request(seq: u32, item_id: String, index: u64) -> Result<Self, WebRtcProtocolError> {
+        let message = Self::Request {
+            seq,
+            item_id,
+            index,
+        };
+        message.validate()?;
+        Ok(message)
+    }
+
+    pub fn chunk(
+        seq: u32,
+        item_id: String,
+        index: u64,
+        length: u64,
+    ) -> Result<Self, WebRtcProtocolError> {
+        let message = Self::Chunk {
+            seq,
+            item_id,
+            index,
+            length,
+        };
+        message.validate()?;
+        Ok(message)
+    }
+
+    pub const fn ack(seq: u32) -> Self {
+        Self::Ack { seq }
+    }
+
+    pub fn validate(&self) -> Result<(), WebRtcProtocolError> {
+        match self {
+            Self::Request { item_id, index, .. } => {
+                validate_item_id(item_id)?;
+                validate_safe_integer(*index)
+            }
+            Self::Chunk {
+                item_id,
+                index,
+                length,
+                ..
+            } => {
+                validate_item_id(item_id)?;
+                validate_safe_integer(*index)?;
+                if !(AEAD_TAG_BYTES..=MAX_CIPHERTEXT_BYTES).contains(length) {
+                    return Err(WebRtcProtocolError("invalid WebRTC chunk length"));
+                }
+                Ok(())
+            }
+            Self::Ack { .. } => Ok(()),
+        }
+    }
+}
+
+/// Parses a browser WebRTC text message, including its UTF-16 length limit.
+/// Unknown object properties are deliberately ignored, matching the browser transport.
+pub fn parse_webrtc_control(text: &str) -> Result<WebRtcControl, WebRtcProtocolError> {
+    if text.encode_utf16().count() > WEBRTC_CONTROL_LIMIT {
+        return Err(WebRtcProtocolError("WebRTC control frame is too large"));
+    }
+    let value: Value = serde_json::from_str(text)
+        .map_err(|_| WebRtcProtocolError("invalid WebRTC control frame"))?;
+    let object = value
+        .as_object()
+        .ok_or(WebRtcProtocolError("invalid WebRTC control frame"))?;
+    let kind = object
+        .get("type")
+        .and_then(Value::as_str)
+        .ok_or(WebRtcProtocolError("invalid WebRTC control frame"))?;
+    let seq = control_u32(object.get("seq"))?;
+    let message = match kind {
+        "request" => WebRtcControl::request(
+            seq,
+            control_item_id(object.get("itemId"))?,
+            control_integer(object.get("index"))?,
+        )?,
+        "chunk" => WebRtcControl::chunk(
+            seq,
+            control_item_id(object.get("itemId"))?,
+            control_integer(object.get("index"))?,
+            control_integer(object.get("length"))?,
+        )?,
+        "ack" => WebRtcControl::ack(seq),
+        _ => return Err(WebRtcProtocolError("unknown WebRTC control frame type")),
+    };
+    Ok(message)
+}
+
+/// Encodes a validated control message as compact JSON accepted by the browser transport.
+pub fn encode_webrtc_control(message: &WebRtcControl) -> Result<String, WebRtcProtocolError> {
+    message.validate()?;
+    let text = serde_json::to_string(message)
+        .map_err(|_| WebRtcProtocolError("unable to encode WebRTC control frame"))?;
+    if text.encode_utf16().count() > WEBRTC_CONTROL_LIMIT {
+        return Err(WebRtcProtocolError("WebRTC control frame is too large"));
+    }
+    Ok(text)
+}
+
+/// A decoded `FBCH` binary frame. Payloads are always non-empty and at most 16 KiB.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WebRtcFrame {
+    pub seq: u32,
+    pub offset: u32,
+    pub payload: Vec<u8>,
+}
+
+impl WebRtcFrame {
+    pub fn new(seq: u32, offset: u32, payload: Vec<u8>) -> Result<Self, WebRtcProtocolError> {
+        validate_frame_payload(&payload)?;
+        Ok(Self {
+            seq,
+            offset,
+            payload,
+        })
+    }
+
+    /// Checks the receiver-side sequencing and chunk bounds after generic frame decoding.
+    pub fn validate_for_chunk(
+        &self,
+        expected_seq: u32,
+        received: u64,
+        expected_bytes: u64,
+    ) -> Result<(), WebRtcProtocolError> {
+        if expected_bytes < AEAD_TAG_BYTES || expected_bytes > MAX_CIPHERTEXT_BYTES {
+            return Err(WebRtcProtocolError("invalid expected WebRTC chunk length"));
+        }
+        if self.seq != expected_seq || u64::from(self.offset) != received {
+            return Err(WebRtcProtocolError(
+                "unexpected WebRTC frame sequence or offset",
+            ));
+        }
+        if received
+            .checked_add(self.payload.len() as u64)
+            .ok_or(WebRtcProtocolError("WebRTC frame offset overflow"))?
+            > expected_bytes
+        {
+            return Err(WebRtcProtocolError("WebRTC frame exceeds chunk bounds"));
+        }
+        Ok(())
+    }
+}
+
+pub fn encode_webrtc_frame(frame: &WebRtcFrame) -> Result<Vec<u8>, WebRtcProtocolError> {
+    validate_frame_payload(&frame.payload)?;
+    let length = u32::try_from(frame.payload.len())
+        .map_err(|_| WebRtcProtocolError("WebRTC frame payload is too large"))?;
+    let mut bytes = Vec::with_capacity(WEBRTC_FRAME_HEADER_BYTES + frame.payload.len());
+    bytes.extend_from_slice(&WEBRTC_FRAME_MAGIC.to_be_bytes());
+    bytes.extend_from_slice(&frame.seq.to_be_bytes());
+    bytes.extend_from_slice(&frame.offset.to_be_bytes());
+    bytes.extend_from_slice(&length.to_be_bytes());
+    bytes.extend_from_slice(&frame.payload);
+    Ok(bytes)
+}
+
+pub fn parse_webrtc_frame(bytes: &[u8]) -> Result<WebRtcFrame, WebRtcProtocolError> {
+    if bytes.len() <= WEBRTC_FRAME_HEADER_BYTES
+        || bytes.len() > WEBRTC_FRAME_HEADER_BYTES + WEBRTC_FRAME_PAYLOAD_BYTES
+    {
+        return Err(WebRtcProtocolError("invalid WebRTC binary frame length"));
+    }
+    let magic = u32::from_be_bytes(bytes[0..4].try_into().expect("fixed frame header"));
+    if magic != WEBRTC_FRAME_MAGIC {
+        return Err(WebRtcProtocolError("invalid WebRTC binary frame magic"));
+    }
+    let seq = u32::from_be_bytes(bytes[4..8].try_into().expect("fixed frame header"));
+    let offset = u32::from_be_bytes(bytes[8..12].try_into().expect("fixed frame header"));
+    let length = u32::from_be_bytes(bytes[12..16].try_into().expect("fixed frame header"));
+    let payload = &bytes[WEBRTC_FRAME_HEADER_BYTES..];
+    if usize::try_from(length).ok() != Some(payload.len()) {
+        return Err(WebRtcProtocolError(
+            "WebRTC frame length does not match payload",
+        ));
+    }
+    WebRtcFrame::new(seq, offset, payload.to_vec())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WebRtcProtocolError(&'static str);
+
+impl fmt::Display for WebRtcProtocolError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.0)
+    }
+}
+
+impl std::error::Error for WebRtcProtocolError {}
+
+fn validate_item_id(item_id: &str) -> Result<(), WebRtcProtocolError> {
+    if item_id.is_empty() || item_id.encode_utf16().count() > WEBRTC_MAX_ITEM_ID_UNITS {
+        return Err(WebRtcProtocolError("invalid WebRTC item ID"));
+    }
+    Ok(())
+}
+
+fn validate_safe_integer(value: u64) -> Result<(), WebRtcProtocolError> {
+    if value > MAX_SAFE_INTEGER {
+        return Err(WebRtcProtocolError("invalid WebRTC integer"));
+    }
+    Ok(())
+}
+
+fn control_item_id(value: Option<&Value>) -> Result<String, WebRtcProtocolError> {
+    value
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .ok_or(WebRtcProtocolError("invalid WebRTC item ID"))
+}
+
+fn control_u32(value: Option<&Value>) -> Result<u32, WebRtcProtocolError> {
+    u32::try_from(control_integer(value)?)
+        .map_err(|_| WebRtcProtocolError("invalid WebRTC sequence"))
+}
+
+fn control_integer(value: Option<&Value>) -> Result<u64, WebRtcProtocolError> {
+    let value = value.ok_or(WebRtcProtocolError("invalid WebRTC integer"))?;
+    let integer = value
+        .as_u64()
+        .or_else(|| {
+            value.as_f64().and_then(|number| {
+                (number.is_finite()
+                    && number >= 0.0
+                    && number <= MAX_SAFE_INTEGER as f64
+                    && number.fract() == 0.0)
+                    .then_some(number as u64)
+            })
+        })
+        .ok_or(WebRtcProtocolError("invalid WebRTC integer"))?;
+    validate_safe_integer(integer)?;
+    Ok(integer)
+}
+
+fn validate_frame_payload(payload: &[u8]) -> Result<(), WebRtcProtocolError> {
+    if payload.is_empty() || payload.len() > WEBRTC_FRAME_PAYLOAD_BYTES {
+        return Err(WebRtcProtocolError("invalid WebRTC frame payload length"));
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

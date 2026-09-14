@@ -12,6 +12,9 @@ use std::{
 };
 
 use crate::checkpoint::Store;
+use crate::{
+    webrtc::{NativePeer, ReceiverSession, Signaling, connect_receiver, request_chunk},
+};
 use anyhow::{Context, Result, bail};
 use filebeam_transfer::{AdaptiveConcurrency, concurrency_limit, retry_delay_ms, retryable_status};
 use futures_util::{StreamExt, stream::FuturesUnordered};
@@ -29,6 +32,7 @@ use super::*;
 const VERSION: u8 = 1;
 const MAX_ATTEMPTS: u32 = 6;
 const BODY_IDLE: Duration = Duration::from_secs(20);
+const LIVE_HEARTBEAT: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Serialize, Deserialize)]
 struct DownloadJob {
@@ -45,9 +49,15 @@ struct DownloadJob {
     chunk_bytes: u64,
     server_concurrency: u32,
     ranges: bool,
+    #[serde(default = "http_driver")]
+    driver: String,
     envelope: String,
     output: PathBuf,
     items: Vec<SavedItem>,
+}
+
+fn http_driver() -> String {
+    "http".into()
 }
 
 #[derive(Deserialize)]
@@ -110,6 +120,138 @@ struct AuthenticateAndWriteRequest<'a> {
     ciphertext: Vec<u8>,
 }
 
+struct LiveConnection {
+    peer: NativePeer,
+    session: ReceiverSession,
+    channel: Arc<dyn webrtc::data_channel::DataChannel>,
+}
+
+/// WebRTC's request/response/ACK contract permits exactly one outstanding
+/// chunk per channel. A failed request is never resumed on that channel: a new
+/// receiver session is registered, which also makes resume independent of an
+/// expired signaling session.
+struct LiveDownload {
+    signaling: Signaling,
+    join_token: String,
+    connection: Option<LiveConnection>,
+    sequence: u32,
+}
+
+impl LiveDownload {
+    fn new(client: Client, instance: &str, transfer_id: &str, join_token: String) -> Result<Self> {
+        Ok(Self {
+            signaling: Signaling::new(client, instance, transfer_id)?,
+            join_token,
+            connection: None,
+            sequence: 0,
+        })
+    }
+
+    async fn reconnect(&mut self, control: &Control, progress: u8) -> Result<()> {
+        if let Some(connection) = self.connection.take() {
+            let _ = self.signaling.report(&connection.session, "failed", progress).await;
+            connection.peer.close().await;
+        }
+        control.phase(Phase::Connecting)?;
+        let (peer, session, channel) = connect_receiver(&self.signaling, &self.join_token).await?;
+        self.signaling.report(&session, "active", progress).await?;
+        self.connection = Some(LiveConnection {
+            peer,
+            session,
+            channel,
+        });
+        Ok(())
+    }
+
+    async fn fetch(
+        &mut self,
+        item_id: String,
+        index: u64,
+        expected: u64,
+        completed: u64,
+        total: u64,
+        cancel: &CancellationToken,
+        control: &Control,
+    ) -> Result<Vec<u8>> {
+        let progress = live_progress(completed, total);
+        for attempt in 0..MAX_ATTEMPTS {
+            if self.connection.is_none() {
+                if attempt > 0 {
+                    control.phase(Phase::Reconnecting)?;
+                }
+                if let Err(error) = self.reconnect(control, progress).await {
+                    retry_wait(None, attempt, cancel).await?;
+                    if attempt + 1 == MAX_ATTEMPTS {
+                        return Err(error);
+                    }
+                    continue;
+                }
+            }
+            let connection = self.connection.as_ref().context("live receiver is unavailable")?;
+            let sequence = self.sequence;
+            self.sequence = self.sequence.wrapping_add(1);
+            let request = request_chunk(
+                connection.channel.clone(),
+                sequence,
+                item_id.clone(),
+                index,
+                expected,
+            );
+            tokio::pin!(request);
+            let mut heartbeat = tokio::time::interval(LIVE_HEARTBEAT);
+            heartbeat.tick().await;
+            let received = loop {
+                tokio::select! {
+                    _ = cancel.cancelled() => {
+                        self.finish("cancelled", progress).await;
+                        bail!("transfer cancelled");
+                    }
+                    _ = heartbeat.tick() => {
+                        let Some(connection) = self.connection.as_ref() else { break Err(anyhow::anyhow!("live receiver disconnected")); };
+                        if let Err(error) = self.signaling.report(&connection.session, "active", progress).await {
+                            break Err(error);
+                        }
+                    }
+                    result = &mut request => break result,
+                }
+            };
+            match received {
+                Ok(ciphertext) => {
+                    control.phase(Phase::Receiving)?;
+                    return Ok(ciphertext);
+                }
+                Err(error) => {
+                    if let Some(connection) = self.connection.take() {
+                        let _ = self.signaling.report(&connection.session, "failed", progress).await;
+                        connection.peer.close().await;
+                    }
+                    control.phase(Phase::Retrying)?;
+                    retry_wait(None, attempt, cancel).await?;
+                    if attempt + 1 == MAX_ATTEMPTS {
+                        return Err(error);
+                    }
+                }
+            }
+        }
+        bail!("live chunk retry window exhausted")
+    }
+
+    async fn finish(&mut self, status: &str, progress: u8) {
+        if let Some(connection) = self.connection.take() {
+            let _ = self.signaling.report(&connection.session, status, progress).await;
+            connection.peer.close().await;
+        }
+    }
+}
+
+fn live_progress(done: u64, total: u64) -> u8 {
+    if total == 0 {
+        0
+    } else {
+        ((done.saturating_mul(100) / total).min(99)) as u8
+    }
+}
+
 /// Tracks uncommitted body bytes across concurrent requests. UI `done` may
 /// include these bytes, while `committed` is advanced only after AEAD and disk
 /// persistence have completed.
@@ -170,6 +312,7 @@ impl DownloadJob {
             || self.direction != "download"
             || self.id.is_empty()
             || self.chunk_bytes == 0
+            || !matches!(self.driver.as_str(), "http" | "webrtc")
             || !self.output.is_absolute()
             || self.items.iter().any(|i| {
                 i.verified.len() != i.chunk_count as usize
@@ -251,6 +394,7 @@ async fn async_run(
     fs::create_dir_all(&output)?;
     let output = fs::canonicalize(&output).context("canonicalize download output directory")?;
     let manifest = manifest_for(&master, &link.id, &envelope, &transfer)?;
+    let live_join_token = live_join_token(&transfer, &manifest)?;
     let total = manifest
         .items
         .iter()
@@ -294,13 +438,14 @@ async fn async_run(
         chunk_bytes: transfer.chunk_bytes,
         server_concurrency: server_download_limit(&capabilities, &transfer),
         ranges: server_ranges(&capabilities, &transfer),
+        driver: transfer.driver.clone(),
         envelope,
         output,
         items,
     };
     // The checkpoint is durable before network data can arrive.
     store.save(&job)?;
-    Ok(download(store, job, master, client, cancel, control)
+    Ok(download(store, job, master, client, cancel, control, live_join_token)
         .await?
         .into_iter()
         .map(PathBuf::from)
@@ -330,6 +475,7 @@ async fn async_resume(store: Store, mut job: DownloadJob, control: Control) -> R
     validate_transfer(&transfer, &job.transfer_id)?;
     if transfer.chunk_bytes != job.chunk_bytes
         || transfer.encrypted_manifest.as_deref() != Some(&job.envelope)
+        || transfer.driver != job.driver
     {
         bail!("transfer identity changed; refusing saved ciphertext");
     }
@@ -339,6 +485,7 @@ async fn async_resume(store: Store, mut job: DownloadJob, control: Control) -> R
     job.server_concurrency = server_download_limit(&capabilities, &transfer);
     job.ranges = server_ranges(&capabilities, &transfer);
     let manifest = manifest_for(&master, &job.transfer_id, &job.envelope, &transfer)?;
+    let live_join_token = live_join_token(&transfer, &manifest)?;
     if manifest.items.len() != job.items.len() {
         bail!("saved download layout changed");
     }
@@ -391,7 +538,7 @@ async fn async_resume(store: Store, mut job: DownloadJob, control: Control) -> R
         })
         .sum();
     store.save(&job)?;
-    download(store, job, master, client, cancel, control).await
+    download(store, job, master, client, cancel, control, live_join_token).await
 }
 
 async fn download(
@@ -401,6 +548,7 @@ async fn download(
     client: Client,
     cancel: CancellationToken,
     control: Control,
+    live_join_token: Option<String>,
 ) -> Result<Vec<String>> {
     control.totals(job.total, job.items.len());
     let configured = control.max_concurrency().unwrap_or(4);
@@ -411,6 +559,26 @@ async fn download(
         job.server_concurrency,
     )
     .min(job.server_concurrency) as usize;
+    let live = job.driver == "webrtc";
+    if !matches!(job.driver.as_str(), "http" | "webrtc") {
+        bail!("unsupported download driver");
+    }
+    // Peer transport exposes the receiver's IP address to the sender. The
+    // caller's shared consent flow must approve that before registration.
+    if live {
+        control.request_peer_consent(job.transfer_id.clone())?;
+    }
+    let slots = if live { 1 } else { slots };
+    let rtc = if live {
+        Some(Arc::new(tokio::sync::Mutex::new(LiveDownload::new(
+            client.clone(),
+            &job.instance,
+            &job.transfer_id,
+            live_join_token.context("live transfer has no join capability")?,
+        )?)))
+    } else {
+        None
+    };
     let adaptive = Arc::new(std::sync::Mutex::new(AdaptiveConcurrency::new(
         slots as u32,
     )));
@@ -488,24 +656,40 @@ async fn download(
             let control = control.clone();
             let ranges = job.ranges;
             let chunk_bytes = job.chunk_bytes;
+            let live = rtc.clone();
+            let done = job.done;
+            let total = job.total;
             fetched.push(async move {
-                let data = fetch_chunk(FetchChunkRequest {
-                    client: &client,
-                    url: &url,
-                    directory: &store_path,
-                    item: item_index,
-                    chunk: index,
-                    plain: plaintext_len(item.size, chunk_bytes, index),
-                    ranges,
-                    cancel: &cancel,
-                    adaptive: &adaptive,
-                    receiving: &receiving,
-                    control: &control,
-                    item_name: &item.name,
-                    item_size: item.size,
-                    fresh: false,
-                })
-                .await?;
+                let plain = plaintext_len(item.size, chunk_bytes, index);
+                let data = if let Some(live) = live {
+                    let data = live
+                        .lock()
+                        .await
+                        .fetch(item.id.clone(), index, plain + TAG_BYTES, done, total, &cancel, &control)
+                        .await?;
+                    let (display_done, item_done) = receiving.lock().unwrap().report(item_index, index, plain);
+                    control.item(item.name.clone(), item_index + 1, item.size);
+                    control.advance(display_done, item_done, data.len() as u64);
+                    data
+                } else {
+                    fetch_chunk(FetchChunkRequest {
+                        client: &client,
+                        url: &url,
+                        directory: &store_path,
+                        item: item_index,
+                        chunk: index,
+                        plain,
+                        ranges,
+                        cancel: &cancel,
+                        adaptive: &adaptive,
+                        receiving: &receiving,
+                        control: &control,
+                        item_name: &item.name,
+                        item_size: item.size,
+                        fresh: false,
+                    })
+                    .await?
+                };
                 Ok::<_, anyhow::Error>((item_index, index, data))
             });
         }
@@ -515,6 +699,9 @@ async fn download(
         if let Err(error) = control.check() {
             job.state = "paused".into();
             let _ = store.save(&job);
+            if let Some(live) = &rtc {
+                live.lock().await.finish("cancelled", live_progress(job.done, job.total)).await;
+            }
             return Err(error);
         }
         let (item_index, index, ciphertext) = match result {
@@ -522,6 +709,10 @@ async fn download(
             Err(error) => {
                 job.state = "paused".into();
                 let _ = store.save(&job);
+                if let Some(live) = &rtc {
+                    let status = if cancel.is_cancelled() { "cancelled" } else { "failed" };
+                    live.lock().await.finish(status, live_progress(job.done, job.total)).await;
+                }
                 return Err(error);
             }
         };
@@ -567,27 +758,40 @@ async fn download(
                 );
                 control.advance(done, item_done, 0);
                 let item = job.items[item_index].clone();
-                let url = format!(
-                    "{}/api/v1/transfers/{}/items/{}/chunks/{index}",
-                    job.instance, job.transfer_id, item.id
-                );
-                let ciphertext = fetch_chunk(FetchChunkRequest {
-                    client: &client,
-                    url: &url,
-                    directory: store.path(),
-                    item: item_index,
-                    chunk: index,
-                    plain: plaintext_len(item.size, job.chunk_bytes, index),
-                    ranges: job.ranges,
-                    cancel: &cancel,
-                    adaptive: &adaptive,
-                    receiving: &receiving,
-                    control: &control,
-                    item_name: &item.name,
-                    item_size: item.size,
-                    fresh: true,
-                })
-                .await?;
+                let plain = plaintext_len(item.size, job.chunk_bytes, index);
+                let ciphertext = if let Some(live) = &rtc {
+                    let data = live
+                        .lock()
+                        .await
+                        .fetch(item.id.clone(), index, plain + TAG_BYTES, job.done, job.total, &cancel, &control)
+                        .await?;
+                    let (display_done, item_done) = receiving.lock().unwrap().report(item_index, index, plain);
+                    control.item(item.name.clone(), item_index + 1, item.size);
+                    control.advance(display_done, item_done, data.len() as u64);
+                    data
+                } else {
+                    let url = format!(
+                        "{}/api/v1/transfers/{}/items/{}/chunks/{index}",
+                        job.instance, job.transfer_id, item.id
+                    );
+                    fetch_chunk(FetchChunkRequest {
+                        client: &client,
+                        url: &url,
+                        directory: store.path(),
+                        item: item_index,
+                        chunk: index,
+                        plain,
+                        ranges: job.ranges,
+                        cancel: &cancel,
+                        adaptive: &adaptive,
+                        receiving: &receiving,
+                        control: &control,
+                        item_name: &item.name,
+                        item_size: item.size,
+                        fresh: true,
+                    })
+                    .await?
+                };
                 let store_path = store.path().to_path_buf();
                 let transfer_id = job.transfer_id.clone();
                 let master = Zeroizing::new(master.to_vec());
@@ -644,6 +848,9 @@ async fn download(
     }
     job.state = "complete".into();
     store.save(&job)?;
+    if let Some(live) = &rtc {
+        live.lock().await.finish("completed", 100).await;
+    }
     let share_key = store.path().join("share-key");
     let _ = fs_blocking(move || {
         let _ = fs::remove_file(share_key);
@@ -1114,11 +1321,28 @@ fn manifest_for(key: &[u8], id: &str, envelope: &str, transfer: &Transfer) -> Re
     validate_manifest(&manifest, transfer)?;
     Ok(manifest)
 }
+fn live_join_token(transfer: &Transfer, manifest: &Manifest) -> Result<Option<String>> {
+    match transfer.driver.as_str() {
+        "http" => Ok(None),
+        "webrtc" => {
+            let token = manifest
+                .join_token
+                .clone()
+                .context("live transfer manifest has no join capability")?;
+            if token.len() != 64 || !token.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
+                bail!("live transfer manifest has an invalid join capability");
+            }
+            Ok(Some(token))
+        }
+        _ => bail!("unsupported download driver"),
+    }
+}
 fn validate_transfer(transfer: &Transfer, id: &str) -> Result<()> {
     if transfer.protocol_version != 1
         || transfer.id != id
         || transfer.chunk_bytes == 0
         || transfer.chunk_bytes > 24_999_984
+        || !matches!(transfer.driver.as_str(), "http" | "webrtc")
     {
         bail!("unsupported or invalid transfer metadata");
     }
@@ -1409,6 +1633,7 @@ mod tests {
             chunk_bytes: 1,
             server_concurrency: 1,
             ranges: false,
+            driver: "http".into(),
             envelope: "x".into(),
             output: PathBuf::new(),
             items: vec![SavedItem {

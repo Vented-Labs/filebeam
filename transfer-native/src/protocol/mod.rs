@@ -199,6 +199,8 @@ struct MetadataItem {
 
 #[derive(Deserialize)]
 struct Transfer {
+    #[serde(default = "http_driver")]
+    driver: String,
     id: String,
     protocol_version: u8,
     chunk_bytes: u64,
@@ -213,6 +215,8 @@ struct Transfer {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct Manifest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    join_token: Option<String>,
     version: u8,
     items: Vec<ManifestItem>,
 }
@@ -244,13 +248,36 @@ struct Envelope {
     ciphertext: String,
 }
 
+fn http_driver() -> String {
+    "http".into()
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Transport {
+    #[default]
+    Http,
+    WebRtc,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct UploadOptions {
+    pub transport: Transport,
+}
+
 pub fn upload(
     instance: &str,
     paths: &[PathBuf],
     mode: DirectoryMode,
+    options: UploadOptions,
     control: &Control,
 ) -> Result<String> {
-    upload::run(instance, paths, mode, control)
+    match options.transport {
+        Transport::Http => upload::run(instance, paths, mode, control),
+        Transport::WebRtc => {
+            control.request_peer_consent(instance.to_owned())?;
+            upload::run_webrtc(instance, paths, mode, control)
+        }
+    }
 }
 
 pub fn download(
@@ -436,6 +463,13 @@ fn valid_digest(value: &str) -> bool {
 }
 
 fn validate_manifest(manifest: &Manifest, transfer: &Transfer) -> Result<()> {
+    if transfer.driver == "webrtc"
+        && !manifest.join_token.as_ref().is_some_and(|token| {
+            token.len() == 64 && token.bytes().all(|byte| byte.is_ascii_alphanumeric())
+        })
+    {
+        bail!("live manifest has an invalid join token");
+    }
     if manifest.version != 1
         || manifest.items.is_empty()
         || manifest.items.len() != transfer.items.len()
@@ -591,6 +625,7 @@ mod tests {
     #[test]
     fn manifest_rejects_noncanonical_server_items_and_chunk_overflow() {
         let transfer = Transfer {
+            driver: "http".into(),
             id: "01ARZ3NDEKTSV4RRFFQ69G5FAV".into(),
             protocol_version: 1,
             chunk_bytes: 10,
@@ -604,6 +639,7 @@ mod tests {
             transfer_capabilities: TransferCapabilities::default(),
         };
         let manifest = Manifest {
+            join_token: None,
             version: 1,
             items: vec![ManifestItem {
                 id: "item".into(),

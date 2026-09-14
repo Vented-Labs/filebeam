@@ -43,7 +43,12 @@ use zeroize::Zeroize;
 use crate::{
     control::{Control, Phase},
     uploads::{self, DirectoryMode},
+    webrtc::{self, Signaling},
 };
+
+#[path = "rtc_upload.rs"]
+mod rtc_upload;
+use rtc_upload::{CiphertextArtifact, serve_artifacts};
 
 const TAG_BYTES: u64 = 16;
 const JSON_LIMIT: usize = 2 * 1024 * 1024;
@@ -53,6 +58,8 @@ const UPLOAD_BODY_IDLE: Duration = Duration::from_secs(120);
 const UPLOAD_ACK_HEADERS: Duration = Duration::from_secs(120);
 const MEMORY_OVERHEAD_BYTES: u64 = 8 * 1024 * 1024;
 const BODY_BUFFER_BYTES: usize = 64 * 1024;
+const WEBRTC_POLL: Duration = Duration::from_secs(2);
+const WEBRTC_MAX_PEERS: usize = 8;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) struct UploadJob {
@@ -71,6 +78,10 @@ pub(super) struct UploadJob {
     server_concurrency: u32,
     upload_status: bool,
     transport: Option<UploadTransport>,
+    #[serde(default = "http_driver")]
+    driver: String,
+    #[serde(default)]
+    join_token: Option<String>,
     exact_manifest: Option<String>,
     receipt: Option<String>,
     items: Vec<Item>,
@@ -199,6 +210,10 @@ struct Created {
     upload_transport: Option<UploadTransport>,
     items: Vec<CreatedItem>,
     upload_token: String,
+    #[serde(default)]
+    driver: String,
+    #[serde(default)]
+    join_token: Option<String>,
 }
 #[derive(Deserialize)]
 struct CreatedItem {
@@ -232,7 +247,22 @@ pub(super) fn run(
     let root = control.transfer_home();
     let id = Uuid::new_v4().to_string();
     let store = Store::create(&root, &id)?;
-    runtime()?.block_on(run_new(instance, paths, mode, control, Arc::new(store)))
+    runtime()?.block_on(run_new(instance, paths, mode, control, Arc::new(store), "http"))
+}
+
+/// Creates a live, peer-served transfer. The caller owns transport selection;
+/// this entry point intentionally shares the HTTP checkpoint format so an
+/// interrupted sender can resume from its authenticated ciphertext artifacts.
+pub(super) fn run_webrtc(
+    instance: &str,
+    paths: &[PathBuf],
+    mode: DirectoryMode,
+    control: &Control,
+) -> Result<String> {
+    let root = control.transfer_home();
+    let id = Uuid::new_v4().to_string();
+    let store = Store::create(&root, &id)?;
+    runtime()?.block_on(run_new(instance, paths, mode, control, Arc::new(store), "webrtc"))
 }
 
 pub(super) fn resume(store: Store, control: &Control) -> Result<Vec<String>> {
@@ -260,6 +290,7 @@ async fn run_new(
     mode: DirectoryMode,
     control: &Control,
     store: Arc<Store>,
+    driver: &str,
 ) -> Result<String> {
     control.phase(Phase::Connecting)?;
     let client = client(control)?;
@@ -269,9 +300,9 @@ async fn run_new(
     )
     .await?;
     if !info.anonymous_uploads_enabled
-        || !info.enabled_drivers.iter().any(|driver| driver == "http")
+        || !info.enabled_drivers.iter().any(|enabled| enabled == driver)
     {
-        bail!("this instance does not allow anonymous HTTP uploads");
+        bail!("this instance does not allow anonymous {driver} uploads");
     }
     if info.chunk_bytes == 0 || info.chunk_bytes > 24_999_984 {
         bail!("server supplied an invalid chunk size");
@@ -328,6 +359,8 @@ async fn run_new(
         server_concurrency: info.upload_concurrency.unwrap_or(8).clamp(1, 8),
         upload_status: info.transfer_capabilities.upload_status,
         transport: None,
+        driver: driver.into(),
+        join_token: None,
         exact_manifest: None,
         receipt: None,
         items: Vec::new(),
@@ -336,7 +369,7 @@ async fn run_new(
     store.save(&job)?; // The job exists before the non-idempotent reservation request.
     let create = Create {
         kind: "files",
-        driver: "http",
+        driver,
         protocol_version: 1,
         chunk_bytes: info.chunk_bytes,
         retention_hours: info.file_retention_hours,
@@ -361,7 +394,8 @@ async fn run_new(
         .await?,
     )
     .await?;
-    if created.chunk_bytes != job.chunk_bytes
+    if created.driver != driver
+        || created.chunk_bytes != job.chunk_bytes
         || created.items.len() != sources.len()
         || created
             .items
@@ -378,6 +412,10 @@ async fn run_new(
     job.upload_token = Some(created.upload_token);
     job.share_url = Some(created.share_url);
     job.transport = created.upload_transport;
+    job.join_token = created.join_token;
+    if job.driver == "webrtc" && job.join_token.as_deref().unwrap_or_default().is_empty() {
+        bail!("server did not provide a live transfer join token");
+    }
     for ((name, source), server) in sources.into_iter().zip(created.items) {
         let bytes = source.bytes;
         let digest = source.digest.clone();
@@ -425,7 +463,7 @@ async fn continue_job(mut job: UploadJob, store: Arc<Store>, control: &Control) 
         .clone()
         .context("upload token is unavailable")?;
     let client = client(control)?;
-    if job.upload_status {
+    if job.driver == "http" && job.upload_status {
         reconcile(&mut job, &client, &transfer, &token, control).await?;
         store.save(&job)?;
         for chunk in job.chunks.iter().filter(|chunk| chunk.complete) {
@@ -434,6 +472,39 @@ async fn continue_job(mut job: UploadJob, store: Arc<Store>, control: &Control) 
     }
     control.totals(job.total, job.items.len());
     control.phase(Phase::Sending)?;
+    if job.driver == "webrtc" {
+        prepare_live_ciphertext(&mut job, &store, control).await?;
+        if job.state == "preparing" {
+            validate_sources(&job, control)?;
+            for item in &mut job.items {
+                item.digest = item.source.digest.clone();
+                item.bytes = item.source.bytes;
+                item.chunk_count = chunk_count(item.source.bytes, job.chunk_bytes)?;
+            }
+            job.state = "sending".into();
+            store.save(&job)?;
+        }
+        if job.state == "sending" {
+            if job.exact_manifest.is_none() {
+                job.exact_manifest = Some(encrypted_manifest(&job)?);
+                store.save(&job)?;
+            }
+            let manifest = job
+                .exact_manifest
+                .as_deref()
+                .context("live upload manifest is unavailable")?;
+            Signaling::new(client.clone(), &job.instance, &transfer)?
+                .publish(&token, manifest)
+                .await?;
+            job.state = "serving".into();
+            store.save(&job)?;
+        }
+        control.request_peer_consent(job.instance.clone())?;
+        control.emit(crate::control::TransferEvent::ShareReady(crate::control::ShareReady {
+            share_url: receipt(&job)?,
+        }));
+        return serve_live(&job, client, control).await;
+    }
     let configured = control
         .max_concurrency()
         .unwrap_or(4)
@@ -606,6 +677,141 @@ async fn continue_job(mut job: UploadJob, store: Arc<Store>, control: &Control) 
         fs::remove_file(archive).context("remove completed upload archive")?;
     }
     Ok(url)
+}
+
+async fn prepare_live_ciphertext(
+    job: &mut UploadJob,
+    store: &Store,
+    control: &Control,
+) -> Result<()> {
+    while let Some((item, position)) = next_missing_chunk(job)? {
+        control.check()?;
+        control.phase(Phase::Encrypting)?;
+        let transfer = job
+            .transfer_id
+            .as_deref()
+            .context("upload was not reserved")?;
+        let input = PreparedInput {
+            source: job.items[item].source.clone(),
+            item,
+            item_id: job.items[item].id.clone(),
+            position,
+            chunk_bytes: job.chunk_bytes,
+            prefix: decode(&job.items[item].nonce_prefix)?,
+            key: derive_item_key(&job.master_key, transfer, &job.items[item].id)?,
+            transfer: transfer.into(),
+        };
+        let prepared = tokio::task::spawn_blocking(move || prepare_one(input))
+            .await
+            .context("ciphertext producer ended unexpectedly")??;
+        let name = format!("chunk-{}-{}", prepared.item, prepared.position);
+        let artifact = store.path().join(&name);
+        let checksum = hex::encode(Sha256::digest(&prepared.ciphertext));
+        if artifact.exists() {
+            let existing = fs::read(&artifact)?;
+            if existing != prepared.ciphertext {
+                bail!("orphaned ciphertext conflicts with the verified source");
+            }
+        } else {
+            store.persist_immutable(&name, &prepared.ciphertext)?;
+        }
+        job.chunks.push(Chunk {
+            item: prepared.item,
+            item_id: job.items[prepared.item].id.clone(),
+            position: prepared.position,
+            plaintext_bytes: prepared.plaintext_bytes,
+            ciphertext_bytes: prepared.ciphertext.len() as u64,
+            checksum,
+            artifact,
+            complete: false,
+            stage: None,
+        });
+        // The immutable file is durable before its parent record, so a restart
+        // can safely re-verify and adopt an interrupted preparation step.
+        store.save(job)?;
+        control.advance(job.done, 0, 0);
+    }
+    if !preparation_complete(job)? {
+        bail!("live ciphertext preparation stopped before all chunks were durable");
+    }
+    Ok(())
+}
+
+async fn serve_live(job: &UploadJob, client: Client, control: &Control) -> Result<String> {
+    let transfer = job
+        .transfer_id
+        .as_deref()
+        .context("upload was not reserved")?;
+    let token = job
+        .upload_token
+        .as_deref()
+        .context("upload token is unavailable")?;
+    let signaling = Signaling::new(client, &job.instance, transfer)?;
+    let chunks = job
+        .chunks
+        .iter()
+        .map(|chunk| {
+            Ok(((chunk.item_id.clone(), chunk.position), CiphertextArtifact {
+                path: chunk.artifact.clone(),
+                bytes: chunk.ciphertext_bytes,
+                checksum: chunk.checksum.clone(),
+            }))
+        })
+        .collect::<Result<HashMap<_, _>>>()?;
+    let mut peers = JoinSet::new();
+    let mut serving = HashSet::new();
+    loop {
+        control.phase(Phase::Waiting)?;
+        let sessions = tokio::select! {
+            result = tokio::time::timeout(webrtc::REQUEST_TIMEOUT, signaling.sender_sessions(token)) => {
+                result.context("timed out polling live receiver sessions")?
+            },
+            _ = cancelled(control) => {
+                let _ = signaling.end(token).await;
+                bail!("Transfer cancelled");
+            }
+        }?;
+        let (sessions, ice_servers) = sessions;
+        serving.retain(|id| sessions.iter().any(|session| {
+            session.id == *id && !matches!(session.status.as_str(), "completed" | "cancelled" | "failed")
+        }));
+        while let Some(result) = peers.try_join_next() {
+            let (id, _) = result.context("live peer task ended unexpectedly")?;
+            serving.remove(&id);
+        }
+        for session in sessions {
+            if serving.len() >= WEBRTC_MAX_PEERS
+                || serving.contains(&session.id)
+                || session.offer.is_none()
+                || matches!(session.status.as_str(), "completed" | "cancelled" | "failed")
+            {
+                continue;
+            }
+            let id = session.id.clone();
+            let signaling = signaling.clone();
+            let token = token.to_owned();
+            let chunks = chunks.clone();
+            let ice_servers = ice_servers.clone();
+            serving.insert(id.clone());
+            peers.spawn(async move {
+                let outcome = async {
+                    let (peer, channel) = webrtc::connect_sender(&signaling, &token, &session, &ice_servers).await?;
+                    let served = serve_artifacts(channel, chunks).await;
+                    peer.close().await;
+                    served
+                }
+                .await;
+                (id, outcome)
+            });
+        }
+        tokio::select! {
+            _ = tokio::time::sleep(WEBRTC_POLL) => {},
+            _ = cancelled(control) => {
+                let _ = signaling.end(token).await;
+                bail!("Transfer cancelled");
+            }
+        }
+    }
 }
 
 fn next_missing_chunk(job: &UploadJob) -> Result<Option<(usize, u64)>> {
@@ -1423,14 +1629,16 @@ fn validate_job(job: &UploadJob) -> Result<()> {
         || job.direction != "upload"
         || !matches!(
             job.state.as_str(),
-            "preparing" | "sending" | "finalizing" | "complete"
+            "preparing" | "sending" | "finalizing" | "serving" | "complete"
         )
         || job.chunk_bytes == 0
         || job.chunk_bytes > 24_999_984
         || job.total != job.items.iter().map(|item| item.source.bytes).sum::<u64>()
         || (job.state == "complete" && job.receipt.is_none())
-        || (job.state == "finalizing" && job.exact_manifest.is_none())
+        || (matches!(job.state.as_str(), "finalizing" | "serving") && job.exact_manifest.is_none())
         || (job.state == "finalizing" && job.chunks.iter().any(|chunk| !chunk.complete))
+        || (!matches!(job.driver.as_str(), "http" | "webrtc"))
+        || (job.driver == "webrtc" && job.join_token.as_deref().unwrap_or_default().is_empty())
     {
         bail!("invalid saved upload checkpoint");
     }
@@ -1493,7 +1701,12 @@ fn encrypted_manifest(job: &UploadJob) -> Result<String> {
         .transfer_id
         .as_deref()
         .context("upload was not reserved")?;
-    let manifest = serde_json::json!({"version":1,"items":job.items.iter().map(|i| serde_json::json!({"id":i.id,"name":i.name,"type":"application/octet-stream","size":i.bytes,"nonce_prefix":i.nonce_prefix,"chunk_count":i.chunk_count,"digest":{"algorithm":"sha256","value":i.digest}})).collect::<Vec<_>>()});
+    let mut manifest = serde_json::json!({"version":1,"items":job.items.iter().map(|i| serde_json::json!({"id":i.id,"name":i.name,"type":"application/octet-stream","size":i.bytes,"nonce_prefix":i.nonce_prefix,"chunk_count":i.chunk_count,"digest":{"algorithm":"sha256","value":i.digest}})).collect::<Vec<_>>()});
+    if job.driver == "webrtc" {
+        manifest["join_token"] = serde_json::Value::String(
+            job.join_token.clone().context("live transfer join token is unavailable")?,
+        );
+    }
     let plain = serde_json::to_vec(&manifest)?;
     let prefix = generate_nonce_prefix()?;
     let ciphertext = encrypt_manifest(
@@ -1508,6 +1721,9 @@ fn encrypted_manifest(job: &UploadJob) -> Result<String> {
 }
 fn aad(transfer: &str, item: &str, position: u64) -> String {
     format!("filebeam:v1:{transfer}:{item}:{position}")
+}
+fn http_driver() -> String {
+    "http".into()
 }
 fn encode(value: &[u8]) -> String {
     URL_SAFE_NO_PAD.encode(value)
@@ -1606,6 +1822,8 @@ mod tests {
             server_concurrency: 1,
             upload_status: false,
             transport: None,
+            driver: "http".into(),
+            join_token: None,
             exact_manifest: None,
             receipt: None,
             items: Vec::new(),
@@ -1642,6 +1860,8 @@ mod tests {
             server_concurrency: 1,
             upload_status: false,
             transport: None,
+            driver: "http".into(),
+            join_token: None,
             exact_manifest: None,
             receipt: None,
             items: Vec::new(),

@@ -1,6 +1,7 @@
 use filebeam_transfer::{
-    AdaptiveConcurrency, StageSession, StageStatus, UploadTransport, chunk_count, ciphertext_bytes,
-    concurrency_limit, retry_delay_ms, retryable_status,
+    AdaptiveConcurrency, StageSession, StageStatus, UploadTransport, WebRtcControl, WebRtcFrame,
+    chunk_count, ciphertext_bytes, concurrency_limit, encode_webrtc_control, encode_webrtc_frame,
+    parse_webrtc_control, parse_webrtc_frame, retry_delay_ms, retryable_status,
 };
 use wasm_bindgen::prelude::*;
 
@@ -19,6 +20,106 @@ fn integer(value: f64) -> Result<u64, JsError> {
         return Err(JsError::new("expected a non-negative integer"));
     }
     Ok(value as u64)
+}
+
+fn u32_integer(value: f64) -> Result<u32, JsError> {
+    u32::try_from(integer(value)?).map_err(|_| JsError::new("expected a u32 integer"))
+}
+
+#[wasm_bindgen]
+pub struct DecodedWebRtcFrame {
+    inner: WebRtcFrame,
+}
+
+#[wasm_bindgen]
+impl DecodedWebRtcFrame {
+    #[wasm_bindgen(getter)]
+    pub fn seq(&self) -> u32 {
+        self.inner.seq
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn offset(&self) -> u32 {
+        self.inner.offset
+    }
+
+    pub fn payload(&self) -> Vec<u8> {
+        self.inner.payload.clone()
+    }
+
+    #[wasm_bindgen(js_name = validateForChunk)]
+    pub fn validate_for_chunk(
+        &self,
+        expected_seq: f64,
+        received: f64,
+        expected_bytes: f64,
+    ) -> Result<(), JsError> {
+        self.inner
+            .validate_for_chunk(
+                u32_integer(expected_seq)?,
+                integer(received)?,
+                integer(expected_bytes)?,
+            )
+            .map_err(|error| JsError::new(&error.to_string()))
+    }
+}
+
+#[wasm_bindgen(js_name = parseWebRtcControl)]
+pub fn wasm_parse_webrtc_control(text: String) -> Result<JsValue, JsError> {
+    let control = parse_webrtc_control(&text).map_err(|error| JsError::new(&error.to_string()))?;
+    serde_wasm_bindgen::to_value(&control).map_err(|error| JsError::new(&error.to_string()))
+}
+
+#[wasm_bindgen(js_name = encodeWebRtcRequest)]
+pub fn wasm_encode_webrtc_request(
+    seq: f64,
+    item_id: String,
+    index: f64,
+) -> Result<String, JsError> {
+    let control = WebRtcControl::request(u32_integer(seq)?, item_id, integer(index)?)
+        .map_err(|error| JsError::new(&error.to_string()))?;
+    encode_webrtc_control(&control).map_err(|error| JsError::new(&error.to_string()))
+}
+
+#[wasm_bindgen(js_name = encodeWebRtcChunk)]
+pub fn wasm_encode_webrtc_chunk(
+    seq: f64,
+    item_id: String,
+    index: f64,
+    length: f64,
+) -> Result<String, JsError> {
+    let control = WebRtcControl::chunk(
+        u32_integer(seq)?,
+        item_id,
+        integer(index)?,
+        integer(length)?,
+    )
+    .map_err(|error| JsError::new(&error.to_string()))?;
+    encode_webrtc_control(&control).map_err(|error| JsError::new(&error.to_string()))
+}
+
+#[wasm_bindgen(js_name = encodeWebRtcAck)]
+pub fn wasm_encode_webrtc_ack(seq: f64) -> Result<String, JsError> {
+    encode_webrtc_control(&WebRtcControl::ack(u32_integer(seq)?))
+        .map_err(|error| JsError::new(&error.to_string()))
+}
+
+#[wasm_bindgen(js_name = encodeWebRtcFrame)]
+pub fn wasm_encode_webrtc_frame(
+    seq: f64,
+    offset: f64,
+    payload: Vec<u8>,
+) -> Result<Vec<u8>, JsError> {
+    let frame = WebRtcFrame::new(u32_integer(seq)?, u32_integer(offset)?, payload)
+        .map_err(|error| JsError::new(&error.to_string()))?;
+    encode_webrtc_frame(&frame).map_err(|error| JsError::new(&error.to_string()))
+}
+
+#[wasm_bindgen(js_name = parseWebRtcFrame)]
+pub fn wasm_parse_webrtc_frame(bytes: Vec<u8>) -> Result<DecodedWebRtcFrame, JsError> {
+    Ok(DecodedWebRtcFrame {
+        inner: parse_webrtc_frame(&bytes).map_err(|error| JsError::new(&error.to_string()))?,
+    })
 }
 
 #[wasm_bindgen]

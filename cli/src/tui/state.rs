@@ -13,7 +13,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use zeroize::Zeroizing;
 
 use crate::{
-    app::{Cancelled, Job, Prompt, Request, TransferView, subsequence},
+    app::{Cancelled, Job, Prompt, PromptKind, Request, TransferView, subsequence},
     config::Config,
     input::Input,
     presentation::{Theme, clean},
@@ -254,6 +254,7 @@ impl State {
                 Request::Upload(
                     self.selected.keys().cloned().collect(),
                     crate::uploads::DirectoryMode::Individual,
+                    protocol::UploadOptions::default(),
                 )
             }
             Mode::Receive => {
@@ -400,6 +401,18 @@ impl State {
             return Ok(false);
         }
         if self.prompt.is_some() {
+            if matches!(self.prompt.as_ref().map(|prompt| &prompt.kind), Some(PromptKind::PeerConsent { .. })) {
+                match key.code {
+                    KeyCode::Char('y') | KeyCode::Char('Y') => {
+                        if let Some(prompt) = self.prompt.take() {
+                            let _ = prompt.reply.send(Zeroizing::new("yes".into()));
+                        }
+                    }
+                    KeyCode::Esc | KeyCode::Enter => self.cancel(),
+                    _ => {}
+                }
+                return Ok(false);
+            }
             match key.code {
                 KeyCode::Esc => self.cancel(),
                 KeyCode::Enter => {

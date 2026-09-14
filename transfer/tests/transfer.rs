@@ -324,3 +324,54 @@ fn progress_tracks_ciphertext_without_double_counting_active_work() {
     assert!(p.set_active(101).is_err());
     assert!(p.complete(101).is_err());
 }
+
+#[test]
+fn webrtc_controls_match_browser_json_and_enforce_utf16_limits() {
+    let request = WebRtcControl::request(7, "item-1".into(), 3).unwrap();
+    assert_eq!(
+        encode_webrtc_control(&request),
+        Ok(r#"{"type":"request","seq":7,"itemId":"item-1","index":3}"#.into())
+    );
+    assert_eq!(
+        parse_webrtc_control(
+            r#"{"extra":true,"type":"chunk","seq":7,"itemId":"item-1","index":3,"length":16}"#
+        ),
+        Ok(WebRtcControl::chunk(7, "item-1".into(), 3, 16).unwrap())
+    );
+    assert_eq!(
+        parse_webrtc_control(r#"{"type":"ack","seq":4294967295}"#),
+        Ok(WebRtcControl::ack(u32::MAX))
+    );
+    assert!(
+        parse_webrtc_control(r#"{"type":"request","seq":1,"itemId":"x","index":9007199254740992}"#)
+            .is_err()
+    );
+    assert!(WebRtcControl::request(1, "😀".repeat(129), 0).is_err());
+    let oversized = format!(
+        r#"{{"type":"ack","seq":1,"ignored":"{}"}}"#,
+        "a".repeat(1_000)
+    );
+    assert!(parse_webrtc_control(&oversized).is_err());
+}
+
+#[test]
+fn webrtc_frames_are_big_endian_and_validate_chunk_progress() {
+    let frame = WebRtcFrame::new(0x0102_0304, 5, vec![9, 8, 7]).unwrap();
+    let encoded = encode_webrtc_frame(&frame).unwrap();
+    assert_eq!(
+        encoded,
+        vec![
+            b'F', b'B', b'C', b'H', 1, 2, 3, 4, 0, 0, 0, 5, 0, 0, 0, 3, 9, 8, 7
+        ]
+    );
+    let decoded = parse_webrtc_frame(&encoded).unwrap();
+    assert_eq!(decoded, frame);
+    assert!(decoded.validate_for_chunk(0x0102_0304, 5, 16).is_ok());
+    assert!(decoded.validate_for_chunk(0x0102_0304, 4, 16).is_err());
+    assert!(decoded.validate_for_chunk(0x0102_0305, 5, 16).is_err());
+    assert!(parse_webrtc_frame(&encoded[..18]).is_err());
+    let mut wrong_magic = encoded;
+    wrong_magic[0] = 0;
+    assert!(parse_webrtc_frame(&wrong_magic).is_err());
+    assert!(WebRtcFrame::new(1, 0, vec![0; WEBRTC_FRAME_PAYLOAD_BYTES + 1]).is_err());
+}

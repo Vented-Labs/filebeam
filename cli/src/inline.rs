@@ -23,14 +23,20 @@ use unicode_width::UnicodeWidthStr;
 use zeroize::Zeroizing;
 
 use crate::{
-    app::{Cancelled, Direction, Job, Phase, Prompt, PromptKind, Request, TransferView},
+    app::{Cancelled, Direction, Job, Phase, Prompt, PromptKind, Request, TransferEvent, TransferView},
     config::Config,
     input::Input,
     presentation::{self as paint, Theme, bytes, clean, clip, duration},
     terminal::Session,
 };
 
-pub fn run(config: &Config, instance: &str, request: Request, plain: bool) -> Result<Vec<String>> {
+pub fn run(
+    config: &Config,
+    instance: &str,
+    request: Request,
+    plain: bool,
+    accept_peer_address_exposure: bool,
+) -> Result<Vec<String>> {
     let theme = Theme::new(config);
     let resuming = matches!(request, Request::Resume { .. });
     let resumable = matches!(
@@ -38,12 +44,12 @@ pub fn run(config: &Config, instance: &str, request: Request, plain: bool) -> Re
         Request::Upload(..) | Request::Download { .. } | Request::Resume { .. }
     );
     let label = match &request {
-        Request::Upload(files, _) if files.len() == 1 => files[0]
+        Request::Upload(files, _, _) if files.len() == 1 => files[0]
             .file_name()
             .unwrap_or_default()
             .to_string_lossy()
             .into_owned(),
-        Request::Upload(files, _) => format!("{} files", files.len()),
+        Request::Upload(files, _, _) => format!("{} files", files.len()),
         Request::Download { .. } => "Encrypted transfer".into(),
         Request::Update => "beam".into(),
         Request::Resume { id, .. } => format!("Saved transfer {}", clean(id)),
@@ -55,6 +61,7 @@ pub fn run(config: &Config, instance: &str, request: Request, plain: bool) -> Re
         !plain && io::stderr().is_terminal() && std::env::var("TERM").unwrap_or_default() != "dumb";
     let mut surface = InlineSurface::default();
     let mut seen = Vec::new();
+    let mut announced_links = Vec::new();
     loop {
         view.tick(job.control.snapshot(), !theme.motion, Instant::now());
         view.cancelling = job.control.cancelled.load(Ordering::Relaxed);
@@ -96,10 +103,29 @@ pub fn run(config: &Config, instance: &str, request: Request, plain: bool) -> Re
             } else {
                 eprintln!("{summary}");
             }
-            return Ok(values);
+            return Ok(
+                values
+                    .into_iter()
+                    .filter(|value| !announced_links.contains(value))
+                    .collect(),
+            );
+        }
+        while let Ok(event) = job.events.try_recv() {
+            match event {
+                TransferEvent::ShareReady(share) => {
+                    surface.clear()?;
+                    crate::output::result(&share.share_url, plain)?;
+                    announced_links.push(share.share_url);
+                }
+                TransferEvent::PeerConsent(_) => {}
+            }
         }
         if let Ok(prompt) = job.prompts.try_recv() {
             surface.clear()?;
+            if matches!(prompt.kind, PromptKind::PeerConsent { .. }) {
+                prompt_peer_consent(&prompt, &job, plain, accept_peer_address_exposure)?;
+                continue;
+            }
             if !io::stdin().is_terminal() {
                 job.control.cancel();
                 bail!(
@@ -353,6 +379,70 @@ fn prompt_secret(prompt: &Prompt, job: &Job, plain: bool) -> Result<()> {
                     _ => input.handle(key),
                 },
                 Event::Paste(value) => input.insert(value.trim()),
+                _ => {}
+            }
+        }
+    }
+}
+
+fn prompt_peer_consent(
+    prompt: &Prompt,
+    job: &Job,
+    plain: bool,
+    accepted: bool,
+) -> Result<()> {
+    if accepted {
+        let _ = prompt.reply.send(Zeroizing::new("yes".into()));
+        return Ok(());
+    }
+    if !io::stdin().is_terminal() {
+        job.control.cancel();
+        bail!(
+            "peer transfer requires consent because your network address will be exposed to the sender; rerun with --accept-peer-address-exposure"
+        );
+    }
+    let _session = if plain {
+        Session::plain_input()?
+    } else {
+        Session::enter(false)?
+    };
+    let mut output = io::stderr();
+    if plain {
+        eprint!(
+            "Peer transfer exposes your network address to the sender. Continue? [y/N] "
+        );
+        output.flush()?;
+    } else {
+        queue!(
+            output,
+            Print("  Peer transfer exposes your network address to the sender.\r\n"),
+            Print("  Continue? [y/N] ")
+        )?;
+        output.flush()?;
+    }
+    loop {
+        if job.control.cancelled.load(Ordering::Relaxed) {
+            return Err(Cancelled.into());
+        }
+        if event::poll(Duration::from_millis(100))? {
+            match event::read()? {
+                Event::Key(key) if key.kind != KeyEventKind::Release => match key.code {
+                    KeyCode::Char('y') | KeyCode::Char('Y') => {
+                        let _ = prompt.reply.send(Zeroizing::new("yes".into()));
+                        queue!(output, Print("\r\n"))?;
+                        output.flush()?;
+                        return Ok(());
+                    }
+                    KeyCode::Enter | KeyCode::Esc => {
+                        job.control.cancel();
+                        return Err(Cancelled.into());
+                    }
+                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        job.control.cancel();
+                        return Err(Cancelled.into());
+                    }
+                    _ => {}
+                },
                 _ => {}
             }
         }

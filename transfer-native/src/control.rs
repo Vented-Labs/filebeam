@@ -31,7 +31,7 @@ pub enum Phase {
 }
 
 impl Phase {
-    pub fn label(self) -> &'static str {
+    pub fn label(&self) -> &'static str {
         match self {
             Self::Connecting => "Connecting",
             Self::Preparing => "Preparing",
@@ -79,7 +79,7 @@ impl SecretKind {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub enum PromptKind {
     Secret(SecretKind),
     Directory {
@@ -88,15 +88,15 @@ pub enum PromptKind {
         maximum_files: Option<usize>,
     },
     ShareReady,
-    PeerConsent,
+    PeerConsent { peer_id: String },
 }
 impl PromptKind {
-    pub fn label(self) -> &'static str {
+    pub fn label(&self) -> &'static str {
         match self {
             Self::Secret(kind) => kind.label(),
             Self::Directory { .. } => "Directory upload",
             Self::ShareReady => "Share ready",
-            Self::PeerConsent => "Peer consent",
+            Self::PeerConsent { .. } => "Peer consent",
         }
     }
 }
@@ -139,6 +139,7 @@ pub struct Control {
     progress: Arc<Mutex<Progress>>,
     pub cancelled: Arc<AtomicBool>,
     prompts: Sender<Prompt>,
+    events: Option<Sender<TransferEvent>>,
     settings: TransferSettings,
 }
 
@@ -148,8 +149,20 @@ impl Control {
             progress: Arc::new(Mutex::new(Progress::default())),
             cancelled: Arc::new(AtomicBool::new(false)),
             prompts,
+            events: None,
             settings,
         }
+    }
+    /// Attaches an advisory event stream. A disconnected consumer must never
+    /// affect a running transfer.
+    pub fn with_events(
+        settings: TransferSettings,
+        prompts: Sender<Prompt>,
+        events: Sender<TransferEvent>,
+    ) -> Self {
+        let mut control = Self::new(settings, prompts);
+        control.events = Some(events);
+        control
     }
     pub fn test_factory() -> Self {
         Self::new(
@@ -188,6 +201,22 @@ impl Control {
     }
     pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::Relaxed);
+    }
+    pub fn emit(&self, event: TransferEvent) {
+        if let Some(events) = &self.events {
+            let _ = events.send(event);
+        }
+    }
+    pub fn request_peer_consent(&self, peer_id: String) -> Result<()> {
+        self.emit(TransferEvent::PeerConsent(PeerConsent {
+            peer_id: peer_id.clone(),
+        }));
+        let consent = self.ask(PromptKind::PeerConsent { peer_id })?;
+        if consent.trim().eq_ignore_ascii_case("yes") {
+            Ok(())
+        } else {
+            bail!("peer address exposure was not accepted")
+        }
     }
     pub fn snapshot(&self) -> Progress {
         self.progress
@@ -254,5 +283,25 @@ mod tests {
         let control = Control::test_factory();
         assert_eq!(control.transfer_home(), PathBuf::from("transfers"));
         assert_eq!(control.memory_budget(), 512 * 1024 * 1024);
+    }
+
+    #[test]
+    fn events_are_advisory() {
+        let (prompts, _) = mpsc::channel();
+        let (events, receiver) = mpsc::channel();
+        let control = Control::with_events(
+            TransferSettings {
+                state_home: PathBuf::from("transfers"),
+                max_concurrency: None,
+                memory_budget: 512 * 1024 * 1024,
+                client_user_agent: None,
+            },
+            prompts,
+            events,
+        );
+        control.emit(TransferEvent::ShareReady(ShareReady {
+            share_url: "https://example.test/share".into(),
+        }));
+        assert!(matches!(receiver.recv().unwrap(), TransferEvent::ShareReady(_)));
     }
 }
