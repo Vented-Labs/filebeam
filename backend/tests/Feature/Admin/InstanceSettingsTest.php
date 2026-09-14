@@ -192,8 +192,8 @@ test('the admin transport form audits persisted changes', function (): void {
         ->call('save')
         ->assertHasNoFormErrors();
 
-    expect(AdminAudit::query()->where('action', 'instance_setting.updated')->where('target_id', 'enabled_drivers')->value('changes'))->toBe(['value' => ['from' => null, 'to' => ['http', 'webrtc']]])
-        ->and(AdminAudit::query()->where('action', 'instance_setting.updated')->where('target_id', 'default_driver')->value('changes'))->toBe(['value' => ['from' => null, 'to' => 'webrtc']]);
+    expect(AdminAudit::query()->where('action', 'instance_setting.updated')->where('target_id', 'enabled_drivers')->value('changes'))->toEqual(['value' => ['from' => null, 'to' => ['http', 'webrtc']]])
+        ->and(AdminAudit::query()->where('action', 'instance_setting.updated')->where('target_id', 'default_driver')->value('changes'))->toEqual(['value' => ['from' => null, 'to' => 'webrtc']]);
 });
 
 test('environment locked transport form fields cannot change the persisted policy', function (): void {
