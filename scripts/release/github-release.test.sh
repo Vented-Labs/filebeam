@@ -70,6 +70,7 @@ run_case missing
 order=$(release_order)
 [[ $order == "release view release create release upload "*"release edit " ]]
 [[ $(grep -o 'release download' <<<"$order" | wc -l) -eq 13 ]]
+[[ $(grep -o 'release upload' <<<"$order" | wc -l) -eq 1 && $(grep -o 'release edit' <<<"$order" | wc -l) -eq 1 ]]
 
 # A failed combined upload leaves the draft unpublished.
 : > "$tmp/log"

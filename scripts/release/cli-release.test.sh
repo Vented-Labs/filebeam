@@ -48,5 +48,6 @@ chmod +x "$temporary/bin/gh"
 order=$(awk '$1 == "release" { printf "%s %s ", $1, $2 }' "$temporary/gh.log")
 [[ $order == "release view release create release upload "*"release edit " ]]
 [[ $(grep -o 'release download' <<<"$order" | wc -l) -eq 11 ]]
+[[ $(grep -o 'release upload' <<<"$order" | wc -l) -eq 1 && $(grep -o 'release edit' <<<"$order" | wc -l) -eq 1 ]]
 printf 'Standalone CLI draft creation, complete upload, verification, and single publish passed.\n'
 bash "$root/scripts/release/cli-key.test.sh"
