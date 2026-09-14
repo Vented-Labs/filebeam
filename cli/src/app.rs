@@ -80,7 +80,8 @@ impl Job {
         thread::spawn(move || {
             let outcome = match request {
                 Request::Upload(paths, mode, options) => {
-                    protocol::upload(&instance, &paths, mode, options, &worker).map(|link| vec![link])
+                    protocol::upload(&instance, &paths, mode, options, &worker)
+                        .map(|link| vec![link])
                 }
                 Request::Download { link, output } => {
                     protocol::download(&instance, &link, &output, &worker).map(|paths| {

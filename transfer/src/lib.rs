@@ -549,7 +549,7 @@ impl WebRtcFrame {
         received: u64,
         expected_bytes: u64,
     ) -> Result<(), WebRtcProtocolError> {
-        if expected_bytes < AEAD_TAG_BYTES || expected_bytes > MAX_CIPHERTEXT_BYTES {
+        if !(AEAD_TAG_BYTES..=MAX_CIPHERTEXT_BYTES).contains(&expected_bytes) {
             return Err(WebRtcProtocolError("invalid expected WebRTC chunk length"));
         }
         if self.seq != expected_seq || u64::from(self.offset) != received {

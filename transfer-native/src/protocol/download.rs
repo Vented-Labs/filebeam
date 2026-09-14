@@ -12,9 +12,7 @@ use std::{
 };
 
 use crate::checkpoint::Store;
-use crate::{
-    webrtc::{NativePeer, ReceiverSession, Signaling, connect_receiver, request_chunk},
-};
+use crate::webrtc::{NativePeer, ReceiverSession, Signaling, connect_receiver, request_chunk};
 use anyhow::{Context, Result, bail};
 use filebeam_transfer::{AdaptiveConcurrency, concurrency_limit, retry_delay_ms, retryable_status};
 use futures_util::{StreamExt, stream::FuturesUnordered};
@@ -149,7 +147,10 @@ impl LiveDownload {
 
     async fn reconnect(&mut self, control: &Control, progress: u8) -> Result<()> {
         if let Some(connection) = self.connection.take() {
-            let reported = self.signaling.report(&connection.session, "failed", progress).await;
+            let reported = self
+                .signaling
+                .report(&connection.session, "failed", progress)
+                .await;
             connection.peer.close().await;
             reported.context("report failed live receiver session")?;
         }
@@ -169,12 +170,10 @@ impl LiveDownload {
         item_id: String,
         index: u64,
         expected: u64,
-        completed: u64,
-        total: u64,
+        progress: u8,
         cancel: &CancellationToken,
         control: &Control,
     ) -> Result<Vec<u8>> {
-        let progress = live_progress(completed, total);
         for attempt in 0..MAX_ATTEMPTS {
             if self.connection.is_none() {
                 if attempt > 0 {
@@ -188,7 +187,10 @@ impl LiveDownload {
                     continue;
                 }
             }
-            let connection = self.connection.as_ref().context("live receiver is unavailable")?;
+            let connection = self
+                .connection
+                .as_ref()
+                .context("live receiver is unavailable")?;
             let sequence = self.sequence;
             self.sequence = self.sequence.wrapping_add(1);
             let request = request_chunk(
@@ -225,7 +227,10 @@ impl LiveDownload {
                 }
                 Err(error) => {
                     if let Some(connection) = self.connection.take() {
-                        let reported = self.signaling.report(&connection.session, "failed", progress).await;
+                        let reported = self
+                            .signaling
+                            .report(&connection.session, "failed", progress)
+                            .await;
                         connection.peer.close().await;
                         reported.context("report failed live receiver session")?;
                     }
@@ -242,7 +247,10 @@ impl LiveDownload {
 
     async fn finish(&mut self, status: &str, progress: u8) -> Result<()> {
         if let Some(connection) = self.connection.take() {
-            let reported = self.signaling.report(&connection.session, status, progress).await;
+            let reported = self
+                .signaling
+                .report(&connection.session, status, progress)
+                .await;
             connection.peer.close().await;
             reported.with_context(|| format!("report {status} live receiver session"))?;
         }
@@ -251,11 +259,10 @@ impl LiveDownload {
 }
 
 fn live_progress(done: u64, total: u64) -> u8 {
-    if total == 0 {
-        0
-    } else {
-        ((done.saturating_mul(100) / total).min(99)) as u8
-    }
+    done.saturating_mul(100)
+        .checked_div(total)
+        .unwrap_or(0)
+        .min(99) as u8
 }
 
 /// Tracks uncommitted body bytes across concurrent requests. UI `done` may
@@ -452,11 +459,13 @@ async fn async_run(
     };
     // The checkpoint is durable before network data can arrive.
     store.save(&job)?;
-    Ok(download(store, job, master, client, cancel, control, live_join_token)
-        .await?
-        .into_iter()
-        .map(PathBuf::from)
-        .collect())
+    Ok(
+        download(store, job, master, client, cancel, control, live_join_token)
+            .await?
+            .into_iter()
+            .map(PathBuf::from)
+            .collect(),
+    )
 }
 
 async fn async_resume(store: Store, mut job: DownloadJob, control: Control) -> Result<Vec<String>> {
@@ -673,9 +682,17 @@ async fn download(
                     let data = live
                         .lock()
                         .await
-                        .fetch(item.id.clone(), index, plain + TAG_BYTES, done, total, &cancel, &control)
+                        .fetch(
+                            item.id.clone(),
+                            index,
+                            plain + TAG_BYTES,
+                            live_progress(done, total),
+                            &cancel,
+                            &control,
+                        )
                         .await?;
-                    let (display_done, item_done) = receiving.lock().unwrap().report(item_index, index, plain);
+                    let (display_done, item_done) =
+                        receiving.lock().unwrap().report(item_index, index, plain);
                     control.item(item.name.clone(), item_index + 1, item.size);
                     control.advance(display_done, item_done, data.len() as u64);
                     data
@@ -708,7 +725,10 @@ async fn download(
             job.state = "paused".into();
             let _ = store.save(&job);
             if let Some(live) = &rtc {
-                live.lock().await.finish("cancelled", live_progress(job.done, job.total)).await?;
+                live.lock()
+                    .await
+                    .finish("cancelled", live_progress(job.done, job.total))
+                    .await?;
             }
             return Err(error);
         }
@@ -718,8 +738,15 @@ async fn download(
                 job.state = "paused".into();
                 let _ = store.save(&job);
                 if let Some(live) = &rtc {
-                    let status = if cancel.is_cancelled() { "cancelled" } else { "failed" };
-                    live.lock().await.finish(status, live_progress(job.done, job.total)).await?;
+                    let status = if cancel.is_cancelled() {
+                        "cancelled"
+                    } else {
+                        "failed"
+                    };
+                    live.lock()
+                        .await
+                        .finish(status, live_progress(job.done, job.total))
+                        .await?;
                 }
                 return Err(error);
             }
@@ -771,9 +798,17 @@ async fn download(
                     let data = live
                         .lock()
                         .await
-                        .fetch(item.id.clone(), index, plain + TAG_BYTES, job.done, job.total, &cancel, &control)
+                        .fetch(
+                            item.id.clone(),
+                            index,
+                            plain + TAG_BYTES,
+                            live_progress(job.done, job.total),
+                            &cancel,
+                            &control,
+                        )
                         .await?;
-                    let (display_done, item_done) = receiving.lock().unwrap().report(item_index, index, plain);
+                    let (display_done, item_done) =
+                        receiving.lock().unwrap().report(item_index, index, plain);
                     control.item(item.name.clone(), item_index + 1, item.size);
                     control.advance(display_done, item_done, data.len() as u64);
                     data

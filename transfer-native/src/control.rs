@@ -88,7 +88,9 @@ pub enum PromptKind {
         maximum_files: Option<usize>,
     },
     ShareReady,
-    PeerConsent { peer_id: String },
+    PeerConsent {
+        peer_id: String,
+    },
 }
 impl PromptKind {
     pub fn label(&self) -> &'static str {
@@ -302,6 +304,9 @@ mod tests {
         control.emit(TransferEvent::ShareReady(ShareReady {
             share_url: "https://example.test/share".into(),
         }));
-        assert!(matches!(receiver.recv().unwrap(), TransferEvent::ShareReady(_)));
+        assert!(matches!(
+            receiver.recv().unwrap(),
+            TransferEvent::ShareReady(_)
+        ));
     }
 }

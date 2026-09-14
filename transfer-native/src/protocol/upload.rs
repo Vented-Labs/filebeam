@@ -247,7 +247,14 @@ pub(super) fn run(
     let root = control.transfer_home();
     let id = Uuid::new_v4().to_string();
     let store = Store::create(&root, &id)?;
-    runtime()?.block_on(run_new(instance, paths, mode, control, Arc::new(store), "http"))
+    runtime()?.block_on(run_new(
+        instance,
+        paths,
+        mode,
+        control,
+        Arc::new(store),
+        "http",
+    ))
 }
 
 /// Creates a live, peer-served transfer. The caller owns transport selection;
@@ -262,7 +269,14 @@ pub(super) fn run_webrtc(
     let root = control.transfer_home();
     let id = Uuid::new_v4().to_string();
     let store = Store::create(&root, &id)?;
-    runtime()?.block_on(run_new(instance, paths, mode, control, Arc::new(store), "webrtc"))
+    runtime()?.block_on(run_new(
+        instance,
+        paths,
+        mode,
+        control,
+        Arc::new(store),
+        "webrtc",
+    ))
 }
 
 pub(super) fn resume(store: Store, control: &Control) -> Result<Vec<String>> {
@@ -500,9 +514,11 @@ async fn continue_job(mut job: UploadJob, store: Arc<Store>, control: &Control) 
             store.save(&job)?;
         }
         control.request_peer_consent(job.instance.clone())?;
-        control.emit(crate::control::TransferEvent::ShareReady(crate::control::ShareReady {
-            share_url: receipt(&job)?,
-        }));
+        control.emit(crate::control::TransferEvent::ShareReady(
+            crate::control::ShareReady {
+                share_url: receipt(&job)?,
+            },
+        ));
         return serve_live(&job, client, control).await;
     }
     let configured = control
@@ -751,11 +767,14 @@ async fn serve_live(job: &UploadJob, client: Client, control: &Control) -> Resul
         .chunks
         .iter()
         .map(|chunk| {
-            Ok(((chunk.item_id.clone(), chunk.position), CiphertextArtifact {
-                path: chunk.artifact.clone(),
-                bytes: chunk.ciphertext_bytes,
-                checksum: chunk.checksum.clone(),
-            }))
+            Ok((
+                (chunk.item_id.clone(), chunk.position),
+                CiphertextArtifact {
+                    path: chunk.artifact.clone(),
+                    bytes: chunk.ciphertext_bytes,
+                    checksum: chunk.checksum.clone(),
+                },
+            ))
         })
         .collect::<Result<HashMap<_, _>>>()?;
     let mut peers: JoinSet<(String, Result<()>)> = JoinSet::new();
@@ -774,12 +793,24 @@ async fn serve_live(job: &UploadJob, client: Client, control: &Control) -> Resul
             }
         }?;
         let (sessions, ice_servers) = sessions;
-        serving.retain(|id| sessions.iter().any(|session| {
-            session.id == *id && !matches!(session.status.as_str(), "completed" | "cancelled" | "failed")
-        }));
-        answered.retain(|id| sessions.iter().any(|session| {
-            session.id == *id && !matches!(session.status.as_str(), "completed" | "cancelled" | "failed")
-        }));
+        serving.retain(|id| {
+            sessions.iter().any(|session| {
+                session.id == *id
+                    && !matches!(
+                        session.status.as_str(),
+                        "completed" | "cancelled" | "failed"
+                    )
+            })
+        });
+        answered.retain(|id| {
+            sessions.iter().any(|session| {
+                session.id == *id
+                    && !matches!(
+                        session.status.as_str(),
+                        "completed" | "cancelled" | "failed"
+                    )
+            })
+        });
         while let Some(result) = peers.try_join_next() {
             let (id, served) = result.context("live peer task ended unexpectedly")?;
             serving.remove(&id);
@@ -790,7 +821,10 @@ async fn serve_live(job: &UploadJob, client: Client, control: &Control) -> Resul
                 || serving.contains(&session.id)
                 || answered.contains(&session.id)
                 || session.offer.is_none()
-                || matches!(session.status.as_str(), "completed" | "cancelled" | "failed")
+                || matches!(
+                    session.status.as_str(),
+                    "completed" | "cancelled" | "failed"
+                )
             {
                 continue;
             }
@@ -806,7 +840,8 @@ async fn serve_live(job: &UploadJob, client: Client, control: &Control) -> Resul
             answered.insert(id.clone());
             peers.spawn(async move {
                 let outcome = async {
-                    let (peer, channel) = webrtc::connect_sender(&signaling, &token, &session, &ice_servers).await?;
+                    let (peer, channel) =
+                        webrtc::connect_sender(&signaling, &token, &session, &ice_servers).await?;
                     let served = serve_artifacts(channel, chunks).await;
                     peer.close().await;
                     served
@@ -1669,7 +1704,11 @@ fn validate_job(job: &UploadJob) -> Result<()> {
             || item.digest.len() != 64
             || !item.digest.bytes().all(|byte| byte.is_ascii_hexdigit())
             || item.source.digest.len() != 64
-            || !item.source.digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+            || !item
+                .source
+                .digest
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
             || item.source.chunk_digests.len() as u64
                 != chunk_count(item.source.bytes, job.chunk_bytes)?
             || item.source.chunk_digests.iter().any(|digest| {
@@ -1733,7 +1772,9 @@ fn encrypted_manifest(job: &UploadJob) -> Result<String> {
     let mut manifest = serde_json::json!({"version":1,"items":job.items.iter().map(|i| serde_json::json!({"id":i.id,"name":i.name,"type":"application/octet-stream","size":i.bytes,"nonce_prefix":i.nonce_prefix,"chunk_count":i.chunk_count,"digest":{"algorithm":"sha256","value":i.digest}})).collect::<Vec<_>>()});
     if job.driver == "webrtc" {
         manifest["join_token"] = serde_json::Value::String(
-            job.join_token.clone().context("live transfer join token is unavailable")?,
+            job.join_token
+                .clone()
+                .context("live transfer join token is unavailable")?,
         );
     }
     let plain = serde_json::to_vec(&manifest)?;

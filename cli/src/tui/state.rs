@@ -401,7 +401,10 @@ impl State {
             return Ok(false);
         }
         if self.prompt.is_some() {
-            if matches!(self.prompt.as_ref().map(|prompt| &prompt.kind), Some(PromptKind::PeerConsent { .. })) {
+            if matches!(
+                self.prompt.as_ref().map(|prompt| &prompt.kind),
+                Some(PromptKind::PeerConsent { .. })
+            ) {
                 match key.code {
                     KeyCode::Char('y') | KeyCode::Char('Y') => {
                         if let Some(prompt) = self.prompt.take() {

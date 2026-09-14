@@ -1099,7 +1099,10 @@ fn secret(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) -> Optio
         paint::line(
             at(inner, 2, 1),
             buffer,
-            Line::styled("This shares your network address with the sender.", theme.dim()),
+            Line::styled(
+                "This shares your network address with the sender.",
+                theme.dim(),
+            ),
         );
         paint::line(
             at(inner, 4, 1),

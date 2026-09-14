@@ -427,7 +427,6 @@ impl NativePeer {
                         urls: server.urls.clone(),
                         username: server.username.clone().unwrap_or_default(),
                         credential: server.credential.clone().unwrap_or_default(),
-                        ..Default::default()
                     })
                     .collect(),
             )
@@ -693,7 +692,9 @@ async fn wait_for_open(channel: &Arc<dyn DataChannel>) -> Result<()> {
         loop {
             match channel.poll().await {
                 Some(DataChannelEvent::OnOpen) => return Ok(()),
-                Some(DataChannelEvent::OnClose) | None => bail!("WebRTC data channel closed before opening"),
+                Some(DataChannelEvent::OnClose) | None => {
+                    bail!("WebRTC data channel closed before opening")
+                }
                 _ => {}
             }
         }
@@ -740,7 +741,9 @@ mod tests {
         wait_for_open(&sender_channel).await?;
 
         let tag_only = vec![0xa5; 16];
-        let tail_16_401 = (0..16_401).map(|value| (value % 251) as u8).collect::<Vec<_>>();
+        let tail_16_401 = (0..16_401)
+            .map(|value| (value % 251) as u8)
+            .collect::<Vec<_>>();
         let multiple_frames = (0..(FRAME_PAYLOAD_BYTES * 2 + 16))
             .map(|value| (value % 239) as u8)
             .collect::<Vec<_>>();
@@ -780,5 +783,4 @@ mod tests {
         sender.close().await;
         Ok(())
     }
-
 }

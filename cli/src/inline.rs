@@ -23,7 +23,9 @@ use unicode_width::UnicodeWidthStr;
 use zeroize::Zeroizing;
 
 use crate::{
-    app::{Cancelled, Direction, Job, Phase, Prompt, PromptKind, Request, TransferEvent, TransferView},
+    app::{
+        Cancelled, Direction, Job, Phase, Prompt, PromptKind, Request, TransferEvent, TransferView,
+    },
     config::Config,
     input::Input,
     presentation::{self as paint, Theme, bytes, clean, clip, duration},
@@ -103,12 +105,10 @@ pub fn run(
             } else {
                 eprintln!("{summary}");
             }
-            return Ok(
-                values
-                    .into_iter()
-                    .filter(|value| !announced_links.contains(value))
-                    .collect(),
-            );
+            return Ok(values
+                .into_iter()
+                .filter(|value| !announced_links.contains(value))
+                .collect());
         }
         while let Ok(event) = job.events.try_recv() {
             match event {
@@ -385,12 +385,7 @@ fn prompt_secret(prompt: &Prompt, job: &Job, plain: bool) -> Result<()> {
     }
 }
 
-fn prompt_peer_consent(
-    prompt: &Prompt,
-    job: &Job,
-    plain: bool,
-    accepted: bool,
-) -> Result<()> {
+fn prompt_peer_consent(prompt: &Prompt, job: &Job, plain: bool, accepted: bool) -> Result<()> {
     if accepted {
         let _ = prompt.reply.send(Zeroizing::new("yes".into()));
         return Ok(());
@@ -408,9 +403,7 @@ fn prompt_peer_consent(
     };
     let mut output = io::stderr();
     if plain {
-        eprint!(
-            "Peer transfer exposes your network address to the sender. Continue? [y/N] "
-        );
+        eprint!("Peer transfer exposes your network address to the sender. Continue? [y/N] ");
         output.flush()?;
     } else {
         queue!(

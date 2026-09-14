@@ -36,13 +36,17 @@ pub(super) async fn serve_artifacts(
         let Some(event) = event else { return Ok(()) };
         match event {
             DataChannelEvent::OnMessage(message) if message.is_string => {
-                let text = std::str::from_utf8(&message.data)
-                    .context("invalid WebRTC control UTF-8")?;
+                let text =
+                    std::str::from_utf8(&message.data).context("invalid WebRTC control UTF-8")?;
                 if text.len() > CONTROL_LIMIT {
                     bail!("WebRTC control frame is too large");
                 }
                 match parse_webrtc_control(text).map_err(anyhow::Error::msg)? {
-                    WebRtcControl::Request { seq, item_id, index } if pending.is_none() => {
+                    WebRtcControl::Request {
+                        seq,
+                        item_id,
+                        index,
+                    } if pending.is_none() => {
                         let artifact = chunks
                             .get(&(item_id.clone(), index))
                             .context("unknown WebRTC chunk request")?;
@@ -50,15 +54,22 @@ pub(super) async fn serve_artifacts(
                         let response = WebRtcControl::chunk(seq, item_id, index, artifact.bytes)
                             .map_err(anyhow::Error::msg)?;
                         channel
-                            .send_text(&encode_webrtc_control(&response).map_err(anyhow::Error::msg)?)
+                            .send_text(
+                                &encode_webrtc_control(&response).map_err(anyhow::Error::msg)?,
+                            )
                             .await?;
                         let mut offset = 0u64;
                         let mut payload = vec![0; FRAME_PAYLOAD_BYTES];
                         while offset < artifact.bytes {
-                            let length = usize::try_from((artifact.bytes - offset).min(FRAME_PAYLOAD_BYTES as u64))?;
-                            tokio::io::AsyncReadExt::read_exact(&mut ciphertext, &mut payload[..length])
-                                .await
-                                .context("immutable ciphertext was truncated")?;
+                            let length = usize::try_from(
+                                (artifact.bytes - offset).min(FRAME_PAYLOAD_BYTES as u64),
+                            )?;
+                            tokio::io::AsyncReadExt::read_exact(
+                                &mut ciphertext,
+                                &mut payload[..length],
+                            )
+                            .await
+                            .context("immutable ciphertext was truncated")?;
                             let frame = WebRtcFrame::new(
                                 seq,
                                 u32::try_from(offset)?,
@@ -67,10 +78,14 @@ pub(super) async fn serve_artifacts(
                             .map_err(anyhow::Error::msg)?;
                             channel
                                 .send(BytesMut::from(
-                                    encode_webrtc_frame(&frame).map_err(anyhow::Error::msg)?.as_slice(),
+                                    encode_webrtc_frame(&frame)
+                                        .map_err(anyhow::Error::msg)?
+                                        .as_slice(),
                                 ))
                                 .await?;
-                            offset = offset.checked_add(length as u64).context("WebRTC frame offset overflow")?;
+                            offset = offset
+                                .checked_add(length as u64)
+                                .context("WebRTC frame offset overflow")?;
                         }
                         pending = Some(seq);
                     }
