@@ -444,5 +444,4 @@ jobs:
           coverage: none
       - name: Publish verified GitHub release
         run: |
-          scripts/release/github-release.sh "$RELEASE_TAG" "$RELEASE_COMMIT" dist/release
-          scripts/release/cli-github-release.sh "beam-$RELEASE_TAG" "$RELEASE_COMMIT" dist/beam "$RELEASE_TAG"
+          scripts/release/github-release.sh "$RELEASE_TAG" "$RELEASE_COMMIT" dist/release dist/beam
