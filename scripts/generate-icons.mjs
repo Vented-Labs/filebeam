@@ -48,9 +48,11 @@ function innerSvg(svg) {
         .trim();
 }
 
-const entries = Object.entries(manifest.icons).map(([name, source]) => {
-    const svg = catalog[source]?.[manifest.source.style];
-    if (typeof svg !== 'string') throw new Error(`Missing ${manifest.source.style} source for ${source}.`);
+const entries = Object.entries(manifest.icons).map(([name, entry]) => {
+    // An object entry pins a reviewed variant key for artwork the package mis-keys (it must still be Twotone).
+    const source = typeof entry === 'string' ? entry : entry.source;
+    const svg = catalog[source]?.[typeof entry === 'string' ? manifest.source.style : entry.variant];
+    if (typeof svg !== 'string' || (typeof entry !== 'string' && !svg.includes('opacity="0.4"'))) throw new Error(`Missing ${manifest.source.style} source for ${source}.`);
     return [name, innerSvg(svg)];
 });
 for (const [name, brand] of Object.entries(manifest.brandIcons ?? {})) {

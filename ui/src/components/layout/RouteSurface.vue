@@ -61,8 +61,10 @@ export default defineComponent({
                         {
                             githubUrl: page.props.filebeam.github_url,
                             copyrightHolder: page.props.filebeam.copyright_holder,
+                            copyrightUrl: page.props.filebeam.copyright_url,
                             user: page.props.auth.user,
                             registrationEnabled: page.props.filebeam.registration_enabled,
+                            communityLinks: page.props.filebeam.community_links,
                             homeAction: goHome,
                         },
                         () => [

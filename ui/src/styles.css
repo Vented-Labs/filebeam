@@ -619,6 +619,46 @@ textarea.fb-input {
 .fb-footer__version {
     min-width: 0;
     overflow-wrap: anywhere;
+    padding: 0.125rem 0.5rem;
+    border: 1px solid var(--fb-border);
+    border-radius: 999px;
+    background: var(--fb-surface);
+    line-height: 1.25rem;
+}
+.fb-footer__copyright-link {
+    color: inherit;
+    text-decoration: underline;
+    text-decoration-color: transparent;
+    text-underline-offset: 0.2em;
+    transition:
+        color 120ms ease,
+        text-decoration-color 120ms ease;
+}
+.fb-footer__copyright-link:hover {
+    color: var(--fb-text);
+    text-decoration-color: currentColor;
+}
+.fb-footer__community {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+}
+.fb-footer__community-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 999px;
+    color: var(--fb-text-muted);
+    transition:
+        color 120ms ease,
+        background-color 120ms ease;
+}
+.fb-footer__community-link:hover {
+    color: var(--fb-text);
+    background: var(--fb-surface);
 }
 :where(.fb-shell, .auth-drawer, .fb-report-dialog)
     :focus-visible:not([contenteditable]):not([role='dialog']),

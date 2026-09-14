@@ -15,6 +15,8 @@ const rendererFiles = new Set(['ui/src/components/primitives/Icon.vue', 'ui/src/
 const rawSvgFiles = new Set(['ui/src/components/primitives/Icon.vue', 'ui/src/components/primitives/icons.generated.ts', 'backend/app/Support/Icons/Iconsax.php']);
 const filamentHeroiconMigration = 'backend/app/Support/Icons/FilamentIcons.php';
 const identitySvgAssets = new Set(['/brand/filebeam-logo-header.svg', '/brand/filebeam-mark.svg']);
+// Reviewed brand identity marks that may live in icons/approved.json alongside the Iconsax subset.
+const brandIdentityNames = new Set(['os-linux', ...['discord', 'x', 'bluesky', 'mastodon', 'threads', 'github', 'youtube', 'instagram', 'facebook', 'linkedin', 'reddit', 'telegram', 'tiktok', 'twitch'].map((platform) => `social-${platform}`)]);
 const approvedSource = {
     package: 'iconsax',
     version: '0.1.1',
@@ -167,13 +169,18 @@ async function checkApprovedSource() {
     const packageDirectory = dirname(dirname(require.resolve('iconsax')));
     const groups = ['ai', 'archive', 'arrow', 'astrology', 'building', 'business', 'call', 'car', 'christmas', 'computers-devices-electronics', 'content-edit', 'crypto', 'cryptocurrency', 'delivery', 'design-tools', 'emails-messages', 'essential', 'files', 'grid', 'location', 'money', 'notifications', 'programming', 'school-learning', 'search', 'security', 'settings', 'shop', 'support-like-question', 'time', 'type-paragraph-character', 'users', 'video-audio-image', 'weather'];
     const catalog = Object.assign({}, ...(await Promise.all(groups.map(async (group) => JSON.parse(await readFile(join(packageDirectory, 'dist/data', `${group}.json`), 'utf8'))))));
-    const entries = Object.entries(manifest.icons).map(([name, source]) => [
-        name,
-        catalog[source]?.[approvedSource.style]?.replace(/^<svg\b[^>]*>/, '').replace(/<\/svg>$/, '').replaceAll('white', 'currentColor').replace(/\s+/g, ' ').trim(),
-    ]);
+    const entries = Object.entries(manifest.icons).map(([name, entry]) => {
+        // An object entry pins a reviewed variant key for artwork the package mis-keys; it must still carry the Twotone opacity group.
+        const source = typeof entry === 'string' ? entry : entry?.source;
+        const svg = catalog[source]?.[typeof entry === 'string' ? approvedSource.style : entry?.variant];
+        return [
+            name,
+            typeof svg === 'string' && (typeof entry === 'string' || svg.includes('opacity="0.4"')) ? svg.replace(/^<svg\b[^>]*>/, '').replace(/<\/svg>$/, '').replaceAll('white', 'currentColor').replace(/\s+/g, ' ').trim() : undefined,
+        ];
+    });
     if (entries.some(([, markup]) => typeof markup !== 'string')) add(errors, 'icons/approved.json', 'contains an icon missing from the immutable Twotone source');
     for (const [name, brand] of Object.entries(manifest.brandIcons ?? {})) {
-        if (name !== 'os-linux' || !brand.description || typeof brand.markup !== 'string') {
+        if (!brandIdentityNames.has(name) || !brand.description || typeof brand.markup !== 'string') {
             add(errors, 'icons/approved.json', 'unapproved brand identity entry');
             continue;
         }

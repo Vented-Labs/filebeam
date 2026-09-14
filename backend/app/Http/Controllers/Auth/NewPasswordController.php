@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\ResetPasswordRequest;
 use App\Models\User;
 use App\Support\AuthIdentifier;
+use App\Support\Branding;
 use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Hash;
@@ -21,12 +22,14 @@ class NewPasswordController extends Controller
 {
     public function create(string $token): Response
     {
+        $branding = app(Branding::class)->resolve();
+
         return Inertia::render('auth/AuthScreen', [
             'mode' => 'reset',
             'token' => $token,
             'email' => request('email'),
-            'githubUrl' => config('filebeam.github_url'),
-            'copyrightHolder' => config('filebeam.copyright_holder'),
+            'githubUrl' => $branding['github_url'],
+            'copyrightHolder' => $branding['copyright_holder'],
         ]);
     }
 

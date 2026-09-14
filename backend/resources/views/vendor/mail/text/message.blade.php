@@ -17,7 +17,7 @@
 
     <x-slot:footer>
         <x-mail::footer>
-            © {{ config('filebeam.branding.copyright_year') }} {{ config('filebeam.branding.copyright_holder') }}. @lang('All rights reserved.')
+            © {{ app(App\Support\Branding::class)->resolve()['copyright_year'] }} {{ app(App\Support\Branding::class)->resolve()['copyright_holder'] }}. @lang('All rights reserved.')
         </x-mail::footer>
     </x-slot:footer>
 </x-mail::layout>

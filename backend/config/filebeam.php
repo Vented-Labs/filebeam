@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+use App\Support\InstanceSettingValue;
+
 $version = require __DIR__.'/version.php';
 
 $branding = [
@@ -9,9 +11,12 @@ $branding = [
     'logo_url' => env('FILEBEAM_LOGO_URL') ?: null,
     'favicon_url' => env('FILEBEAM_FAVICON_URL') ?: (env('FILEBEAM_LOGO_URL') ?: null),
     'version' => $version['version'],
-    'copyright_holder' => env('FILEBEAM_COPYRIGHT_HOLDER', 'Vented'),
-    'copyright_year' => (int) env('FILEBEAM_COPYRIGHT_YEAR', 2026),
-    'github_url' => env('FILEBEAM_GITHUB_URL', 'https://github.com/Vented-Labs/filebeam'),
+    // PHP fallbacks for the admin-editable branding resolved by App\Support\Branding.
+    'copyright_holder' => 'Vented',
+    'copyright_year' => 2026,
+    'copyright_url' => null,
+    'github_url' => 'https://github.com/Vented-Labs/filebeam',
+    'community_links' => [],
 ];
 $chunkMaxSizeValue = env('CHUNK_MAX_SIZE', '25000000');
 
@@ -108,6 +113,36 @@ if ($webrtcSessionLimit < 1 || $webrtcSessionLimit > 128 || $webrtcMaxSdpBytes <
     throw new InvalidArgumentException('WebRTC session and SDP limits are outside supported bounds.');
 }
 
+$settingEnvironmentNames = [
+    'registration' => ['FILEBEAM_REGISTRATION_ENABLED', 'boolean'],
+    'anonymous_uploads' => ['FILEBEAM_ANONYMOUS_UPLOADS_ENABLED', 'boolean'],
+    'username_routing' => ['FILEBEAM_USERNAME_ROUTING_ENABLED', 'boolean'],
+    'copyright_holder' => ['FILEBEAM_COPYRIGHT_HOLDER', 'text'],
+    'copyright_year' => ['FILEBEAM_COPYRIGHT_YEAR', 'year'],
+    'copyright_url' => ['FILEBEAM_COPYRIGHT_URL', 'url'],
+    'github_url' => ['FILEBEAM_GITHUB_URL', 'url'],
+    'community_links' => ['FILEBEAM_COMMUNITY_LINKS', 'community_links'],
+];
+$settingEnvironment = ['enabled_drivers' => $transportDrivers, 'default_driver' => $transportDefaultDriver];
+
+foreach ($settingEnvironmentNames as $key => [$name, $type]) {
+    $value = env($name);
+    $value = $value === '' ? null : $value;
+
+    if ($value !== null && $type === 'community_links') {
+        if (! is_string($value)) {
+            throw new InvalidArgumentException("{$name} must be a JSON array.");
+        }
+        $value = json_decode($value, true, 512, JSON_THROW_ON_ERROR);
+    }
+
+    try {
+        $settingEnvironment[$key] = $value === null ? null : InstanceSettingValue::normalize($type, $value);
+    } catch (InvalidArgumentException $exception) {
+        throw new InvalidArgumentException("{$name}: ".$exception->getMessage());
+    }
+}
+
 $cliInstallerUrl = env('FILEBEAM_CLI_INSTALLER_URL') ?: 'https://releases.filebeam.io/cli/install.sh';
 $cliWindowsInstallerUrl = env('FILEBEAM_CLI_WINDOWS_INSTALLER_URL') ?: 'https://releases.filebeam.io/cli/install.ps1';
 foreach (['FILEBEAM_CLI_INSTALLER_URL' => $cliInstallerUrl, 'FILEBEAM_CLI_WINDOWS_INSTALLER_URL' => $cliWindowsInstallerUrl] as $name => $installerUrl) {
@@ -126,8 +161,6 @@ foreach (['FILEBEAM_CLI_INSTALLER_URL' => $cliInstallerUrl, 'FILEBEAM_CLI_WINDOW
 return [
     'username_domain' => $usernameDomain,
     'branding' => $branding,
-    'github_url' => $branding['github_url'],
-    'copyright_holder' => $branding['copyright_holder'],
 
     'cli' => [
         // Configure only after the signed CLI release and installer are published.
@@ -152,39 +185,75 @@ return [
     ],
 
     'instance_settings' => [
-        'environment' => [
-            'registration' => env('FILEBEAM_REGISTRATION_ENABLED'),
-            'anonymous_uploads' => env('FILEBEAM_ANONYMOUS_UPLOADS_ENABLED'),
-            'username_routing' => env('FILEBEAM_USERNAME_ROUTING_ENABLED'),
-        ],
+        // Normalized environment values; a non-null key locks its Admin field and wins over the database row.
+        'environment' => $settingEnvironment,
+        // Every admin-editable setting: its type drives validation, the fallback is a config path.
         'definitions' => [
             'registration' => [
                 'label' => 'Registration',
                 'description' => 'Allow new accounts to be registered.',
+                'type' => 'boolean',
                 'fallback' => 'filebeam.features.registration',
-                'environment' => 'registration',
             ],
             'anonymous_uploads' => [
                 'label' => 'Anonymous uploads',
                 'description' => 'Allow visitors without an account to create uploads.',
+                'type' => 'boolean',
                 'fallback' => 'filebeam.features.anonymous_uploads',
-                'environment' => 'anonymous_uploads',
             ],
             'username_routing' => [
                 'label' => 'Username Routing',
                 'description' => 'Allow public username receiving pages and inbox activation.',
+                'type' => 'boolean',
                 'fallback' => 'filebeam.features.username_routing',
-                'environment' => 'username_routing',
+            ],
+            'enabled_drivers' => [
+                'label' => 'Enabled drivers',
+                'description' => 'Transfer drivers offered on public pages.',
+                'type' => 'drivers',
+                'fallback' => 'filebeam.transport_policy.defaults.enabled_drivers',
+            ],
+            'default_driver' => [
+                'label' => 'Default driver',
+                'description' => 'Transfer driver selected by default.',
+                'type' => 'driver',
+                'fallback' => 'filebeam.transport_policy.defaults.default_driver',
+            ],
+            'copyright_holder' => [
+                'label' => 'Copyright holder',
+                'description' => 'Name shown in the copyright line.',
+                'type' => 'text',
+                'fallback' => 'filebeam.branding.copyright_holder',
+            ],
+            'copyright_year' => [
+                'label' => 'Copyright year',
+                'description' => 'Year shown in the copyright line.',
+                'type' => 'year',
+                'fallback' => 'filebeam.branding.copyright_year',
+            ],
+            'copyright_url' => [
+                'label' => 'Copyright link',
+                'description' => 'Optional link on the copyright holder.',
+                'type' => 'url',
+                'fallback' => 'filebeam.branding.copyright_url',
+            ],
+            'github_url' => [
+                'label' => 'GitHub link',
+                'description' => 'Project link shown in the header navigation.',
+                'type' => 'url',
+                'fallback' => 'filebeam.branding.github_url',
+            ],
+            'community_links' => [
+                'label' => 'Community links',
+                'description' => 'Platform links rendered as icons in the footer.',
+                'type' => 'community_links',
+                'fallback' => 'filebeam.branding.community_links',
             ],
         ],
     ],
 
     'transport_policy' => [
         'defaults' => ['enabled_drivers' => ['http'], 'default_driver' => 'http'],
-        'environment' => [
-            'enabled_drivers' => $transportDrivers,
-            'default_driver' => $transportDefaultDriver,
-        ],
     ],
 
     'webrtc' => [

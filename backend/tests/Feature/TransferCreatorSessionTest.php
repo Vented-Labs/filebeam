@@ -18,8 +18,8 @@ beforeEach(function (): void {
     config()->set('app.key', 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=');
     config()->set('session.driver', 'cookie');
     config()->set('session.cookie', 'transfer-creator-session');
-    config()->set('filebeam.transport_policy.environment.enabled_drivers', ['http', 'webrtc']);
-    config()->set('filebeam.transport_policy.environment.default_driver', 'http');
+    config()->set('filebeam.instance_settings.environment.enabled_drivers', ['http', 'webrtc']);
+    config()->set('filebeam.instance_settings.environment.default_driver', 'http');
     app('session')->forgetDrivers();
     app()->forgetInstance('session.store');
 
