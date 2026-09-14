@@ -131,15 +131,23 @@ struct LiveConnection {
 struct LiveDownload {
     signaling: Signaling,
     join_token: String,
+    relay_only: bool,
     connection: Option<LiveConnection>,
     sequence: u32,
 }
 
 impl LiveDownload {
-    fn new(client: Client, instance: &str, transfer_id: &str, join_token: String) -> Result<Self> {
+    fn new(
+        client: Client,
+        instance: &str,
+        transfer_id: &str,
+        join_token: String,
+        relay_only: bool,
+    ) -> Result<Self> {
         Ok(Self {
             signaling: Signaling::new(client, instance, transfer_id)?,
             join_token,
+            relay_only,
             connection: None,
             sequence: 0,
         })
@@ -155,7 +163,8 @@ impl LiveDownload {
             reported.context("report failed live receiver session")?;
         }
         control.phase(Phase::Connecting)?;
-        let (peer, session, channel) = connect_receiver(&self.signaling, &self.join_token).await?;
+        let (peer, session, channel) =
+            connect_receiver(&self.signaling, &self.join_token, self.relay_only).await?;
         self.signaling.report(&session, "active", progress).await?;
         self.connection = Some(LiveConnection {
             peer,
@@ -582,7 +591,7 @@ async fn download(
     }
     // Peer transport exposes the receiver's IP address to the sender. The
     // caller's shared consent flow must approve that before registration.
-    if live {
+    if live && !control.webrtc_relay_only() {
         control.request_peer_consent(job.transfer_id.clone())?;
     }
     let slots = if live { 1 } else { slots };
@@ -592,6 +601,7 @@ async fn download(
             &job.instance,
             &job.transfer_id,
             live_join_token.context("live transfer has no join capability")?,
+            control.webrtc_relay_only(),
         )?)))
     } else {
         None

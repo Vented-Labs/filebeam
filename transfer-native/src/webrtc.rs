@@ -31,7 +31,7 @@ use webrtc::{
     data_channel::{DataChannel, DataChannelEvent, RTCDataChannelInit},
     peer_connection::{
         PeerConnection, PeerConnectionBuilder, PeerConnectionEventHandler, RTCConfigurationBuilder,
-        RTCIceGatheringState, RTCIceServer, RTCSessionDescription,
+        RTCIceGatheringState, RTCIceServer, RTCIceTransportPolicy, RTCSessionDescription,
     },
 };
 
@@ -297,9 +297,10 @@ impl Signaling {
 pub async fn connect_receiver(
     signaling: &Signaling,
     join_token: &str,
+    relay_only: bool,
 ) -> Result<(NativePeer, ReceiverSession, Arc<dyn DataChannel>)> {
     let session = signaling.register(join_token).await?;
-    let peer = NativePeer::new(&session.ice_servers).await?;
+    let peer = NativePeer::new(&session.ice_servers, relay_only).await?;
     let (offer, channel) = peer.offer_channel().await?;
     signaling.offer(&session, &offer).await?;
     let started = tokio::time::Instant::now();
@@ -330,12 +331,13 @@ pub async fn connect_sender(
     upload_token: &str,
     session: &SenderSession,
     servers: &[IceServer],
+    relay_only: bool,
 ) -> Result<(NativePeer, Arc<dyn DataChannel>)> {
     let offer = session
         .offer
         .as_ref()
         .context("receiver has not published an offer")?;
-    let peer = NativePeer::new(servers).await?;
+    let peer = NativePeer::new(servers, relay_only).await?;
     let answer = peer.answer(offer).await?;
     signaling.answer(upload_token, &session.id, &answer).await?;
     let channel = peer.receiver_channel().await?;
@@ -411,26 +413,28 @@ pub struct NativePeer {
 }
 
 impl NativePeer {
-    pub async fn new(servers: &[IceServer]) -> Result<Self> {
-        Self::with_udp_addrs(servers, vec!["0.0.0.0:0".to_owned()]).await
+    pub async fn new(servers: &[IceServer], relay_only: bool) -> Result<Self> {
+        Self::with_udp_addrs_and_policy(servers, vec!["0.0.0.0:0".to_owned()], relay_only).await
     }
 
     async fn with_udp_addrs(servers: &[IceServer], udp_addrs: Vec<String>) -> Result<Self> {
+        Self::with_udp_addrs_and_policy(servers, udp_addrs, false).await
+    }
+
+    async fn with_udp_addrs_and_policy(
+        servers: &[IceServer],
+        udp_addrs: Vec<String>,
+        relay_only: bool,
+    ) -> Result<Self> {
         let (sender, receiver) = mpsc::channel(1);
         let gathered = Arc::new(Notify::new());
         let gathering_complete = Arc::new(AtomicBool::new(false));
-        let configuration = RTCConfigurationBuilder::new()
-            .with_ice_servers(
-                servers
-                    .iter()
-                    .map(|server| RTCIceServer {
-                        urls: server.urls.clone(),
-                        username: server.username.clone().unwrap_or_default(),
-                        credential: server.credential.clone().unwrap_or_default(),
-                    })
-                    .collect(),
-            )
-            .build();
+        let ice_servers = rtc_ice_servers(servers, relay_only)?;
+        let mut configuration = RTCConfigurationBuilder::new().with_ice_servers(ice_servers);
+        if relay_only {
+            configuration = configuration.with_ice_transport_policy(RTCIceTransportPolicy::Relay);
+        }
+        let configuration = configuration.build();
         let connection: Arc<dyn PeerConnection> = Arc::new(
             PeerConnectionBuilder::new()
                 .with_configuration(configuration)
@@ -519,6 +523,60 @@ impl NativePeer {
     pub async fn close(&self) {
         let _ = self.connection.close().await;
     }
+}
+
+/// webrtc 0.20.5 allocates TURN relays only over UDP. Filter the backend's
+/// short-lived ICE response so relay-only mode cannot silently select an
+/// unsupported TCP or TLS URL.
+fn rtc_ice_servers(servers: &[IceServer], relay_only: bool) -> Result<Vec<RTCIceServer>> {
+    let mut usable_turn_urls = 0;
+    let servers = servers
+        .iter()
+        .filter_map(|server| {
+            let urls = if relay_only {
+                server
+                    .urls
+                    .iter()
+                    .filter(|url| is_turn_udp_url(url))
+                    .cloned()
+                    .collect::<Vec<_>>()
+            } else {
+                server.urls.clone()
+            };
+            usable_turn_urls += urls.len();
+            (!urls.is_empty()).then(|| RTCIceServer {
+                urls,
+                username: server.username.clone().unwrap_or_default(),
+                credential: server.credential.clone().unwrap_or_default(),
+            })
+        })
+        .collect::<Vec<_>>();
+    if relay_only && usable_turn_urls == 0 {
+        bail!(
+            "WebRTC relay-only requires a turn: UDP ICE URL; webrtc 0.20.5 does not support TURN over TCP or TLS"
+        );
+    }
+    Ok(servers)
+}
+
+fn is_turn_udp_url(url: &str) -> bool {
+    let Some((scheme, remainder)) = url.split_once(':') else {
+        return false;
+    };
+    if !scheme.eq_ignore_ascii_case("turn") {
+        return false;
+    }
+    remainder
+        .split_once('?')
+        .map(|(_, query)| {
+            query.split('&').all(|parameter| {
+                let Some((name, value)) = parameter.split_once('=') else {
+                    return true;
+                };
+                !name.eq_ignore_ascii_case("transport") || value.eq_ignore_ascii_case("udp")
+            })
+        })
+        .unwrap_or(true)
 }
 
 async fn validate_channel(channel: &Arc<dyn DataChannel>) -> Result<()> {
@@ -706,6 +764,60 @@ async fn wait_for_open(channel: &Arc<dyn DataChannel>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
+
+    struct Coturn {
+        name: String,
+    }
+
+    impl Coturn {
+        fn start() -> Result<Self> {
+            let name = format!("filebeam-coturn-{}", std::process::id());
+            let output = Command::new("docker")
+                .args([
+                    "run",
+                    "--rm",
+                    "-d",
+                    "--name",
+                    &name,
+                    "--cpus=2",
+                    "--memory=2g",
+                    "-p",
+                    "127.0.0.1:34780:3478/udp",
+                    "-p",
+                    "127.0.0.1:49160-49170:49160-49170/udp",
+                    "coturn/coturn:4.6.2",
+                    "-n",
+                    "--log-file=stdout",
+                    "--no-cli",
+                    "--no-tls",
+                    "--no-dtls",
+                    "--realm=filebeam.test",
+                    "--lt-cred-mech",
+                    "--user=filebeam:local-only",
+                    "--external-ip=127.0.0.1",
+                    "--min-port=49160",
+                    "--max-port=49170",
+                ])
+                .output()
+                .context("start local coturn Docker fixture")?;
+            if !output.status.success() {
+                bail!(
+                    "start local coturn Docker fixture: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                );
+            }
+            Ok(Self { name })
+        }
+    }
+
+    impl Drop for Coturn {
+        fn drop(&mut self) {
+            let _ = Command::new("docker")
+                .args(["rm", "-f", &self.name])
+                .status();
+        }
+    }
 
     #[test]
     fn descriptions_require_complete_nontrickle_sdp() {
@@ -723,6 +835,32 @@ mod tests {
                 sdp: "v=0\r\n".into()
             }
             .validate("offer")
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn relay_only_accepts_only_turn_udp_urls() {
+        assert!(is_turn_udp_url("turn:relay.example.test:3478"));
+        assert!(is_turn_udp_url(
+            "turn:relay.example.test:3478?transport=udp"
+        ));
+        assert!(!is_turn_udp_url(
+            "turn:relay.example.test:3478?transport=tcp"
+        ));
+        assert!(!is_turn_udp_url(
+            "turns:relay.example.test:5349?transport=tcp"
+        ));
+        assert!(!is_turn_udp_url("stun:relay.example.test:3478"));
+        assert!(
+            rtc_ice_servers(
+                &[IceServer {
+                    urls: vec!["turns:relay.example.test:5349".into()],
+                    username: None,
+                    credential: None,
+                }],
+                true,
+            )
             .is_err()
         );
     }
@@ -779,6 +917,63 @@ mod tests {
         let _closed = timeout(CONNECT_TIMEOUT, serving)
             .await
             .context("timed out stopping loopback WebRTC sender")??;
+        receiver.close().await;
+        sender.close().await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "requires Docker and downloads the coturn fixture image"]
+    async fn relay_only_coturn_transfers_a_framed_chunk() -> Result<()> {
+        let _coturn = Coturn::start()?;
+        tokio::time::sleep(Duration::from_millis(750)).await;
+        let servers = [IceServer {
+            urls: vec!["turn:127.0.0.1:34780?transport=udp".into()],
+            username: Some("filebeam".into()),
+            credential: Some("local-only".into()),
+        }];
+        let receiver =
+            NativePeer::with_udp_addrs_and_policy(&servers, vec!["127.0.0.1:0".to_owned()], true)
+                .await?;
+        let sender =
+            NativePeer::with_udp_addrs_and_policy(&servers, vec!["127.0.0.1:0".to_owned()], true)
+                .await?;
+
+        let (offer, receiver_channel) = receiver.offer_channel().await?;
+        assert!(offer.sdp.contains(" typ relay"));
+        assert!(!offer.sdp.contains(" typ host"));
+        assert!(!offer.sdp.contains(" typ srflx"));
+        let answer = sender.answer(&offer).await?;
+        assert!(answer.sdp.contains(" typ relay"));
+        assert!(!answer.sdp.contains(" typ host"));
+        assert!(!answer.sdp.contains(" typ srflx"));
+        receiver.accept_answer(&answer).await?;
+        let sender_channel = sender.receiver_channel().await?;
+        wait_for_open(&receiver_channel).await?;
+        wait_for_open(&sender_channel).await?;
+
+        let ciphertext = (0..(FRAME_PAYLOAD_BYTES + 37))
+            .map(|value| (value % 251) as u8)
+            .collect::<Vec<_>>();
+        let serving = tokio::spawn(serve_channel(
+            sender_channel,
+            HashMap::from([(("item".to_owned(), 0), ciphertext.clone())]),
+        ));
+        assert_eq!(
+            request_chunk(
+                receiver_channel.clone(),
+                1,
+                "item".into(),
+                0,
+                ciphertext.len() as u64,
+            )
+            .await?,
+            ciphertext
+        );
+        receiver_channel.close().await?;
+        timeout(CONNECT_TIMEOUT, serving)
+            .await
+            .context("timed out stopping relay-only WebRTC sender")??;
         receiver.close().await;
         sender.close().await;
         Ok(())

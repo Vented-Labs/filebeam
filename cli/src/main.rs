@@ -53,6 +53,9 @@ struct Cli {
     /// Allow WebRTC downloads to expose your network address to the sender.
     #[arg(long, global = true)]
     accept_peer_address_exposure: bool,
+    /// Require WebRTC transfers to use a TURN UDP relay and not expose peer addresses.
+    #[arg(long, global = true)]
+    webrtc_relay_only: bool,
     /// Limit simultaneous transfer requests (1-64).
     #[arg(long, global = true, value_parser = clap::value_parser!(u32).range(1..=MAX_CONCURRENCY as i64))]
     max_concurrency: Option<u32>,
@@ -120,6 +123,7 @@ fn main() -> Result<()> {
     let mut config = config::Config::load(cli.home)?;
     config.no_color |= cli.no_color;
     config.reduced_motion |= cli.reduced_motion;
+    config.webrtc_relay_only |= cli.webrtc_relay_only;
     if let Some(value) = cli.max_concurrency {
         config.max_concurrency = Some(value);
     }

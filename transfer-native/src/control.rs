@@ -134,6 +134,7 @@ pub struct TransferSettings {
     pub max_concurrency: Option<u32>,
     pub memory_budget: u64,
     pub client_user_agent: Option<String>,
+    pub webrtc_relay_only: bool,
 }
 
 #[derive(Clone)]
@@ -173,6 +174,7 @@ impl Control {
                 max_concurrency: None,
                 memory_budget: 512 * 1024 * 1024,
                 client_user_agent: None,
+                webrtc_relay_only: false,
             },
             mpsc::channel().0,
         )
@@ -200,6 +202,9 @@ impl Control {
                 "filebeam-transfer-native/",
                 env!("CARGO_PKG_VERSION")
             ))
+    }
+    pub fn webrtc_relay_only(&self) -> bool {
+        self.settings.webrtc_relay_only
     }
     pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::Relaxed);
@@ -297,6 +302,7 @@ mod tests {
                 max_concurrency: None,
                 memory_budget: 512 * 1024 * 1024,
                 client_user_agent: None,
+                webrtc_relay_only: false,
             },
             prompts,
             events,

@@ -23,6 +23,8 @@ pub struct Config {
     pub max_concurrency: Option<u32>,
     #[serde(default = "default_memory_limit_mib")]
     pub memory_limit_mib: u64,
+    #[serde(default)]
+    pub webrtc_relay_only: bool,
     #[serde(skip)]
     pub home: PathBuf,
 }
@@ -35,6 +37,7 @@ impl Default for Config {
             check_updates: true,
             max_concurrency: None,
             memory_limit_mib: DEFAULT_MEMORY_LIMIT_MIB,
+            webrtc_relay_only: false,
             home: PathBuf::new(),
         }
     }

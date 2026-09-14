@@ -274,7 +274,9 @@ pub fn upload(
     match options.transport {
         Transport::Http => upload::run(instance, paths, mode, control),
         Transport::WebRtc => {
-            control.request_peer_consent(instance.to_owned())?;
+            if !control.webrtc_relay_only() {
+                control.request_peer_consent(instance.to_owned())?;
+            }
             upload::run_webrtc(instance, paths, mode, control)
         }
     }

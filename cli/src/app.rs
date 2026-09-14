@@ -72,6 +72,7 @@ impl Job {
                 max_concurrency: config.max_concurrency,
                 memory_budget: config.memory_limit_mib * 1024 * 1024,
                 client_user_agent: Some(format!("beam/{}", env!("BEAM_VERSION"))),
+                webrtc_relay_only: config.webrtc_relay_only,
             },
             prompts,
             event_sender,

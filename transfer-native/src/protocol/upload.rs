@@ -513,7 +513,9 @@ async fn continue_job(mut job: UploadJob, store: Arc<Store>, control: &Control) 
             job.state = "serving".into();
             store.save(&job)?;
         }
-        control.request_peer_consent(job.instance.clone())?;
+        if !control.webrtc_relay_only() {
+            control.request_peer_consent(job.instance.clone())?;
+        }
         control.emit(crate::control::TransferEvent::ShareReady(
             crate::control::ShareReady {
                 share_url: receipt(&job)?,
@@ -833,6 +835,7 @@ async fn serve_live(job: &UploadJob, client: Client, control: &Control) -> Resul
             let token = token.to_owned();
             let chunks = chunks.clone();
             let ice_servers = ice_servers.clone();
+            let relay_only = control.webrtc_relay_only();
             serving.insert(id.clone());
             // An SDP answer is immutable at the signaling endpoint. A failed
             // connection must be retried by a fresh receiver session, not by
@@ -840,8 +843,14 @@ async fn serve_live(job: &UploadJob, client: Client, control: &Control) -> Resul
             answered.insert(id.clone());
             peers.spawn(async move {
                 let outcome = async {
-                    let (peer, channel) =
-                        webrtc::connect_sender(&signaling, &token, &session, &ice_servers).await?;
+                    let (peer, channel) = webrtc::connect_sender(
+                        &signaling,
+                        &token,
+                        &session,
+                        &ice_servers,
+                        relay_only,
+                    )
+                    .await?;
                     let served = serve_artifacts(channel, chunks).await;
                     peer.close().await;
                     served
