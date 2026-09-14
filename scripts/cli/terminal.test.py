@@ -23,7 +23,7 @@ import zipfile
 BINARY = str(Path(sys.argv[1]).resolve())
 ID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 CHUNK = 24_999_984
-STATE = {}
+STATE = {"upload_started": threading.Event()}
 ANSI = re.compile(rb"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
 
 
@@ -121,6 +121,7 @@ class API(http.server.BaseHTTPRequestHandler):
             self.respond(404, {})
 
     def do_PUT(self):
+        STATE["upload_started"].set()
         STATE["chunks"][self.path] = self.body(slow=True)
         try:
             self.respond(201, {})
@@ -247,8 +248,9 @@ def main():
         screen.until(b"Choose what to share")
         screen.send(b"/QA\r ")
         screen.pump(0.3)
+        STATE["upload_started"].clear()
         screen.send(b"u")
-        screen.until(b"Encrypting")
+        assert STATE["upload_started"].wait(10), "TUI upload did not reach the chunk endpoint"
         screen.until(b"Your encrypted link is ready")
         screen.send(b"c")
         screen.until(b"Copy requested")

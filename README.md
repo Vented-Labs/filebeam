@@ -37,7 +37,7 @@ docker compose -f backend/compose.yaml run --rm --no-deps laravel.test bash -c '
 - [Encryption protocol](encryption/README.md)
 - [Contributing](CONTRIBUTING.md)
 - [UI workspace](ui/README.md)
-- [Beam CLI](docs/beam-cli.md)
+- [Beam CLI](cli/README.md)
 - [Adaptive transfers and production operation](docs/adaptive-transfers.md)
 - [Shared transfer policy](transfer/README.md)
 - [Native transfer runtime](transfer-native/README.md)
