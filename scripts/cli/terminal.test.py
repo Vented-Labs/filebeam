@@ -160,7 +160,7 @@ def main():
         env = {**os.environ, "TERM": "xterm-256color", "COLORTERM": "truecolor", "LANG": "C.UTF-8",
                "FILEBEAM_INSTANCE": f"http://127.0.0.1:{server.server_port}", "FILEBEAM_HOME": str(root / "home")}
         upload = Terminal(["up", str(source)], env, root, stdout_pipe=True)
-        upload.until(b"Uploading")
+        upload.until(b"Encrypting")
         code, output = upload.finish()
         assert code == 0, output
         link = upload.process.stdout.read().decode().strip()
@@ -219,7 +219,7 @@ def main():
         screen.send(b"/QA\r ")
         screen.pump(0.3)
         screen.send(b"u")
-        screen.until(b"Uploading")
+        screen.until(b"Encrypting")
         screen.until(b"Your encrypted link is ready")
         screen.send(b"c")
         screen.until(b"Copy requested")

@@ -148,8 +148,61 @@ struct UploadContext {
     token: String,
     policy: Option<UploadTransport>,
     adaptive: Arc<Mutex<AdaptiveConcurrency>>,
+    sending: Arc<Mutex<SendProgress>>,
     control: Control,
     store: Arc<Store>,
+}
+
+/// Tracks bytes handed to active HTTP request bodies. `done` can include this
+/// observed progress, while the base moves only after the parent checkpoint is
+/// durable. Entries are removed on acknowledgement, bounding this map by the
+/// upload scheduler's active window.
+struct SendProgress {
+    base_done: u64,
+    active: HashMap<(usize, u64), u64>,
+}
+
+impl SendProgress {
+    fn new(base_done: u64) -> Self {
+        Self {
+            base_done,
+            active: HashMap::new(),
+        }
+    }
+
+    fn restart(&mut self, chunk: &Chunk) -> u64 {
+        self.active.insert(chunk_key(chunk), 0);
+        self.snapshot()
+    }
+
+    fn report(
+        &mut self,
+        key: (usize, u64),
+        plaintext_bytes: u64,
+        ciphertext_bytes: u64,
+        sent: u64,
+    ) -> u64 {
+        // AEAD appends its tag, so only the ciphertext prefix before it maps to
+        // user-visible plaintext progress.
+        self.active
+            .insert(key, sent.min(ciphertext_bytes).min(plaintext_bytes));
+        self.snapshot()
+    }
+
+    fn acknowledged(&mut self, chunk: &Chunk) -> u64 {
+        self.active.remove(&chunk_key(chunk));
+        self.base_done = self.base_done.saturating_add(chunk.plaintext_bytes);
+        self.snapshot()
+    }
+
+    fn snapshot(&self) -> u64 {
+        self.base_done
+            .saturating_add(self.active.values().copied().sum::<u64>())
+    }
+}
+
+fn chunk_key(chunk: &Chunk) -> (usize, u64) {
+    (chunk.item, chunk.position)
 }
 
 struct DirectRequest<'a> {
@@ -485,6 +538,8 @@ async fn continue_job(mut job: UploadJob, store: Arc<Store>, control: &Control) 
         }
     }
     control.totals(job.total, job.items.len());
+    control.advance(job.done, 0, 0);
+    control.commit(job.done);
     control.phase(Phase::Sending)?;
     if job.driver == "webrtc" {
         prepare_live_ciphertext(&mut job, &store, control).await?;
@@ -542,6 +597,7 @@ async fn continue_job(mut job: UploadJob, store: Arc<Store>, control: &Control) 
         .slot_bytes(job.chunk_bytes)
         .is_some_and(|slot| memory.fixed_overhead_bytes.saturating_add(slot) <= memory.total_bytes);
     let adaptive = Arc::new(Mutex::new(AdaptiveConcurrency::new(maximum)));
+    let sending = Arc::new(Mutex::new(SendProgress::new(job.done)));
     let mut active = JoinSet::new();
     let mut active_indices = HashSet::new();
     let mut producer = None;
@@ -562,6 +618,7 @@ async fn continue_job(mut job: UploadJob, store: Arc<Store>, control: &Control) 
                 token: token.clone(),
                 policy: job.transport.clone(),
                 adaptive: adaptive.clone(),
+                sending: sending.clone(),
                 control: (*control).clone(),
                 store: store.clone(),
             };
@@ -619,8 +676,10 @@ async fn continue_job(mut job: UploadJob, store: Arc<Store>, control: &Control) 
                         .filter(|c| c.complete)
                         .map(|c| c.plaintext_bytes)
                         .sum();
-                    control.commit(job.done);
                     store.save(&job)?;
+                    let display_done = sending.lock().unwrap().acknowledged(&job.chunks[index]);
+                    control.advance(display_done, 0, 0);
+                    control.commit(job.done);
                     // The parent completion checkpoint is durable before the
                     // sidecar is removed, so SIGKILL cannot lose a stage ID.
                     store.remove_named(&stage_name(&job.chunks[index]))?;
@@ -1037,6 +1096,8 @@ async fn upload_chunk(context: UploadContext, chunk: Chunk) -> Result<Chunk> {
     }
     if let Some(policy) = &context.policy {
         context.control.phase(Phase::Reconnecting)?;
+        let display_done = context.sending.lock().unwrap().restart(&chunk);
+        context.control.advance(display_done, 0, 0);
         let body = read_artifact(&chunk)?;
         return stage(StageRequest {
             context: &context,
@@ -1088,6 +1149,8 @@ async fn direct_request(
     let chunk = request.chunk;
     let policy = request.policy;
     let abandoned = Arc::new(AtomicBool::new(false));
+    let display_done = context.sending.lock().unwrap().restart(chunk);
+    context.control.advance(display_done, 0, 0);
     let key = Uuid::new_v4().to_string();
     let file = match tokio::fs::File::open(&chunk.artifact).await {
         Ok(file) => file,
@@ -1100,6 +1163,10 @@ async fn direct_request(
     let stream_control = context.control.clone();
     let stream_policy = policy.cloned();
     let stream_adaptive = context.adaptive.clone();
+    let stream_sending = context.sending.clone();
+    let stream_chunk_key = chunk_key(chunk);
+    let stream_plaintext_bytes = chunk.plaintext_bytes;
+    let stream_ciphertext_bytes = chunk.ciphertext_bytes;
     let (_body_state, mut body_updates) = watch::channel((false, Instant::now()));
     // Keep one sender outside the stream so a completed stream does not turn
     // the completion notification into a permanently-ready closed channel.
@@ -1111,6 +1178,7 @@ async fn direct_request(
         let control = stream_control.clone();
         let policy = stream_policy.clone();
         let body_state = stream_body_state.clone();
+        let sending = stream_sending.clone();
         async move {
             if control.cancelled.load(Ordering::Relaxed) {
                 return Some((
@@ -1148,7 +1216,13 @@ async fn direct_request(
                     let loaded = loaded + read as u64;
                     body_state.send_replace((loaded == total, Instant::now()));
                     adaptive.lock().unwrap().sample(&key, loaded, now());
-                    control.advance(control.snapshot().done, 0, read as u64);
+                    let display_done = sending.lock().unwrap().report(
+                        stream_chunk_key,
+                        stream_plaintext_bytes,
+                        stream_ciphertext_bytes,
+                        loaded,
+                    );
+                    control.advance(display_done, 0, read as u64);
                     Some((
                         Ok::<Bytes, std::io::Error>(Bytes::from(buffer)),
                         (file, loaded),
@@ -1835,6 +1909,32 @@ fn now() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn send_progress_does_not_count_a_tail_tag_or_retry_twice() {
+        let chunk = Chunk {
+            item: 0,
+            item_id: "item".into(),
+            position: 3,
+            plaintext_bytes: 10,
+            ciphertext_bytes: 26,
+            checksum: String::new(),
+            artifact: PathBuf::new(),
+            complete: false,
+            stage: None,
+        };
+        let mut progress = SendProgress::new(11);
+
+        assert_eq!(progress.restart(&chunk), 11);
+        assert_eq!(progress.report(chunk_key(&chunk), 10, 26, 9), 20);
+        assert_eq!(progress.report(chunk_key(&chunk), 10, 26, 26), 21);
+
+        assert_eq!(progress.restart(&chunk), 11);
+        assert_eq!(progress.report(chunk_key(&chunk), 10, 26, 10), 21);
+        assert_eq!(progress.report(chunk_key(&chunk), 10, 26, 26), 21);
+        assert_eq!(progress.acknowledged(&chunk), 21);
+        assert!(progress.active.is_empty());
+    }
 
     #[test]
     fn ciphertext_accounting_handles_empty_and_full_chunks() {
