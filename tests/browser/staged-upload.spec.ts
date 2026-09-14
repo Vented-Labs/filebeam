@@ -152,9 +152,9 @@ test('recovers a persisted staged part, reports progress before final storage, a
     expect(lostTransferComplete).toBe(true);
     expect(completions).toHaveLength(1);
     expect(completions[0].data.id).toBe(transfers[0].id);
-    expect(partRequests.size).toBe(3);
-    expect([...partRequests.values()]).toEqual([1, 1, 1]);
-    expect(partSizes.get(0)).toBe(1024 * 1024);
+    // Rust owns initial sizing; verify the advertised transport bounds and no duplicate ranges.
+    expect(partRequests.size).toBeGreaterThan(1);
+    expect([...partRequests.values()].every((requests) => requests === 1)).toBe(true);
     expect(
         [...partSizes.values()].every((size) => size >= 64 * 1024 && size <= 4 * 1024 * 1024),
     ).toBe(true);

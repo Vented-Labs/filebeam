@@ -12,13 +12,14 @@ use RuntimeException;
 
 class ChunkStaging
 {
-    /** @return array{version: int, part_min_bytes: int, part_max_bytes: int, request_target_ms: int, request_budget_ms: int} */
+    /** @return array{version: int, part_min_bytes: int, part_max_bytes: int, part_max_count: int, request_target_ms: int, request_budget_ms: int} */
     public function transport(int $chunkBytes): array
     {
         return [
             'version' => 1,
             'part_min_bytes' => min((int) config('filebeam.staging.part_min_bytes'), $chunkBytes + 16),
             'part_max_bytes' => min((int) config('filebeam.staging.part_max_bytes'), $chunkBytes + 16),
+            'part_max_count' => (int) config('filebeam.staging.part_max_count'),
             'request_target_ms' => (int) config('filebeam.staging.request_target_ms'),
             'request_budget_ms' => (int) config('filebeam.staging.request_budget_ms'),
         ];

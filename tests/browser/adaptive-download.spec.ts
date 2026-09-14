@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
-import { AdaptiveConcurrency } from '../../ui/src/lib/transfer';
+import { AdaptiveConcurrency, initialiseTransferPolicy } from '../../ui/src/lib/transfer';
+
+test.beforeEach(async () => initialiseTransferPolicy());
 
 function withClock(run: (set: (milliseconds: number) => void) => void): void {
     const original = Date.now;
@@ -14,7 +16,7 @@ function withClock(run: (set: (milliseconds: number) => void) => void): void {
     }
 }
 
-test('policy starts at one and grows after three fast samples over two seconds', () => {
+test('policy learns sampled throughput without speculative growth, then grows after completed requests', () => {
     withClock((set) => {
         const adaptive = new AdaptiveConcurrency(3);
         adaptive.sample('a', 0);
@@ -24,6 +26,9 @@ test('policy starts at one and grows after three fast samples over two seconds',
         set(2_000);
         adaptive.sample('b', 600_000);
         adaptive.sample('c', 600_000);
+        expect(adaptive.limit).toBe(1);
+        adaptive.observe(1_000_000, 10);
+        adaptive.observe(1_000_000, 10);
         expect(adaptive.limit).toBe(2);
     });
 });
@@ -40,9 +45,12 @@ test('policy keeps one slot at 100 KiB/s', () => {
     });
 });
 
-test('a probe without aggregate gain rolls back and enters cooldown', () => {
+test('an aggregate sample without gain rolls back a completed-request probe', () => {
     withClock((set) => {
         const adaptive = new AdaptiveConcurrency(3);
+        adaptive.observe(1_000_000, 10);
+        adaptive.observe(1_000_000, 10);
+        expect(adaptive.limit).toBe(2);
         adaptive.sample('a', 0);
         adaptive.sample('a', 600_000);
         adaptive.sample('b', 0);
@@ -50,15 +58,10 @@ test('a probe without aggregate gain rolls back and enters cooldown', () => {
         set(2_000);
         adaptive.sample('b', 600_000);
         adaptive.sample('c', 600_000);
-        expect(adaptive.limit).toBe(2);
-        adaptive.sample('a', 1_200_000);
-        adaptive.sample('b', 1_200_000);
-        adaptive.sample('c', 1_200_000);
-        set(4_100);
-        adaptive.sample('d', 1);
         expect(adaptive.limit).toBe(1);
-        set(10_000);
-        adaptive.sample('d', 700_000);
+        set(9_999);
+        adaptive.observe(1_000_000, 10);
+        adaptive.observe(1_000_000, 10);
         expect(adaptive.limit).toBe(1);
     });
 });
@@ -69,6 +72,16 @@ test('two completed fast requests grow to two without old slow-request assumptio
         adaptive.observe(1_000_000, 10);
         set(10);
         adaptive.observe(1_000_000, 10);
+        expect(adaptive.limit).toBe(2);
+    });
+});
+
+test('small sub-ms completion samples retain a nonzero scheduler duration', () => {
+    withClock((set) => {
+        const adaptive = new AdaptiveConcurrency(3);
+        adaptive.observe(1_040, 0.05);
+        set(1);
+        adaptive.observe(1_040, 0.05);
         expect(adaptive.limit).toBe(2);
     });
 });

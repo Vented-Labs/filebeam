@@ -1,8 +1,9 @@
+import { initialiseTransferPolicy, transferPolicy } from './transfer';
+
 const MAX_CIPHERTEXT_BYTES = 25_000_000;
 const CHUNK_OVERHEAD_BYTES = 16;
 const FRAME_BYTES = 16;
 const FRAME_PAYLOAD_BYTES = 16 * 1024;
-const FRAME_MAGIC = 0x46424348;
 const POLL_MS = 1800;
 const SDP_TIMEOUT_MS = 10_000;
 const CONNECT_TIMEOUT_MS = 30_000;
@@ -18,6 +19,31 @@ type Session = {
 type ApiResponse<T> = { data: T };
 type Description = { type: 'offer' | 'answer'; sdp: string };
 type Item = { id: string; chunk_count: number; ciphertext_bytes: number };
+type WebRtcControl =
+    | { type: 'request'; seq: number; itemId: string; index: number }
+    | {
+          type: 'chunk';
+          seq: number;
+          itemId: string;
+          index: number;
+          length: number;
+      }
+    | { type: 'ack'; seq: number };
+type DecodedWebRtcFrame = {
+    readonly seq: number;
+    readonly offset: number;
+    payload(): Uint8Array<ArrayBuffer>;
+    validateForChunk(expectedSeq: number, received: number, expectedBytes: number): void;
+    free(): void;
+};
+type WebRtcWasm = {
+    parseWebRtcControl(text: string): WebRtcControl;
+    encodeWebRtcRequest(seq: number, itemId: string, index: number): string;
+    encodeWebRtcChunk(seq: number, itemId: string, index: number, length: number): string;
+    encodeWebRtcAck(seq: number): string;
+    encodeWebRtcFrame(seq: number, offset: number, payload: Uint8Array): Uint8Array<ArrayBuffer>;
+    parseWebRtcFrame(bytes: Uint8Array): DecodedWebRtcFrame;
+};
 
 export type WebRtcSender = { close(): void };
 export type WebRtcReceiver = {
@@ -131,9 +157,11 @@ async function gathered(pc: RTCPeerConnection, signal: AbortSignal): Promise<Des
     return { type: description.type as 'offer' | 'answer', sdp: description.sdp };
 }
 
-function control(channel: RTCDataChannel, value: Record<string, unknown>): void {
-    const text = JSON.stringify(value);
-    if (text.length > CONTROL_LIMIT) throw new Error('WebRTC control frame is too large.');
+function webRtcWasm(): WebRtcWasm {
+    return transferPolicy() as unknown as WebRtcWasm;
+}
+
+function control(channel: RTCDataChannel, text: string): void {
     channel.send(text);
 }
 
@@ -234,15 +262,13 @@ function configureSenderChannel(
         { once: true },
     );
     channel.addEventListener('message', (event) => {
-        if (typeof event.data !== 'string' || event.data.length > CONTROL_LIMIT) {
+        if (typeof event.data !== 'string') {
             channel.close();
             return;
         }
-        let value: Record<string, unknown>;
+        let value: WebRtcControl;
         try {
-            const parsed: unknown = JSON.parse(event.data);
-            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error();
-            value = parsed as Record<string, unknown>;
+            value = webRtcWasm().parseWebRtcControl(event.data);
         } catch {
             channel.close();
             return;
@@ -256,15 +282,7 @@ function configureSenderChannel(
             pendingAcknowledgement.finish();
             return;
         }
-        if (
-            busy ||
-            value.type !== 'request' ||
-            !Number.isSafeInteger(value.seq) ||
-            (value.seq as number) < 0 ||
-            (value.seq as number) > 0xffffffff ||
-            !validId(value.itemId) ||
-            !Number.isSafeInteger(value.index)
-        ) {
+        if (busy || value.type !== 'request') {
             channel.close();
             return;
         }
@@ -282,24 +300,19 @@ function configureSenderChannel(
                 if (!(ciphertext instanceof Uint8Array) || ciphertext.byteLength !== expected) {
                     throw new Error('Encrypted chunk length does not match its declaration.');
                 }
-                control(channel, {
-                    type: 'chunk',
-                    seq: value.seq,
-                    itemId: value.itemId,
-                    index,
-                    length: expected,
-                });
+                control(
+                    channel,
+                    webRtcWasm().encodeWebRtcChunk(value.seq, value.itemId, index, expected),
+                );
                 for (let offset = 0; offset < ciphertext.byteLength; offset += framePayloadBytes) {
                     while (channel.bufferedAmount > framePayloadBytes * 4) await waitBuffer();
                     if (signal.aborted || channel.readyState !== 'open') throw abortError();
                     const length = Math.min(framePayloadBytes, ciphertext.byteLength - offset);
-                    const frame = new Uint8Array(FRAME_BYTES + length);
-                    const header = new DataView(frame.buffer);
-                    header.setUint32(0, FRAME_MAGIC);
-                    header.setUint32(4, value.seq as number);
-                    header.setUint32(8, offset);
-                    header.setUint32(12, length);
-                    frame.set(ciphertext.subarray(offset, offset + length), FRAME_BYTES);
+                    const frame = webRtcWasm().encodeWebRtcFrame(
+                        value.seq,
+                        offset,
+                        ciphertext.subarray(offset, offset + length),
+                    );
                     channel.send(frame);
                 }
                 await abortable(signal, (finish) => {
@@ -345,6 +358,7 @@ export async function startWebRtcSender(options: {
     onError?: (error: Error) => void;
     onEnded?: (error: Error) => void;
 }): Promise<WebRtcSender> {
+    await initialiseTransferPolicy();
     if (
         !Number.isSafeInteger(options.chunkBytes) ||
         options.chunkBytes < 1 ||
@@ -493,7 +507,11 @@ export async function startWebRtcSender(options: {
                     }
                 }
                 options.onSessions?.(
-                    data.sessions.map(({ id, status, progress }) => ({ id, status, progress })),
+                    data.sessions.map(({ id, status, progress }) => ({
+                        id,
+                        status,
+                        progress,
+                    })),
                 );
                 for (const session of data.sessions) {
                     if (!validId(session.id)) continue;
@@ -535,6 +553,7 @@ export async function connectWebRtcReceiver(options: {
     joinToken: string;
     signal: AbortSignal;
 }): Promise<WebRtcReceiver> {
+    await initialiseTransferPolicy();
     if (options.signal.aborted) throw abortError();
     const controller = new AbortController();
     const signal = controller.signal;
@@ -701,16 +720,7 @@ export async function connectWebRtcReceiver(options: {
                         const message = (event: MessageEvent) => {
                             try {
                                 if (typeof event.data === 'string') {
-                                    if (event.data.length > CONTROL_LIMIT)
-                                        throw new Error('Invalid WebRTC control frame.');
-                                    const parsed: unknown = JSON.parse(event.data);
-                                    if (
-                                        !parsed ||
-                                        typeof parsed !== 'object' ||
-                                        Array.isArray(parsed)
-                                    )
-                                        throw new Error('Invalid WebRTC control frame.');
-                                    const value = parsed as Record<string, unknown>;
+                                    const value = webRtcWasm().parseWebRtcControl(event.data);
                                     if (
                                         bytes ||
                                         value.type !== 'chunk' ||
@@ -724,31 +734,23 @@ export async function connectWebRtcReceiver(options: {
                                     reset();
                                     return;
                                 }
-                                if (
-                                    !(event.data instanceof ArrayBuffer) ||
-                                    !bytes ||
-                                    event.data.byteLength <= FRAME_BYTES ||
-                                    event.data.byteLength > FRAME_BYTES + FRAME_PAYLOAD_BYTES
-                                )
+                                if (!(event.data instanceof ArrayBuffer) || !bytes)
                                     throw new Error('Invalid WebRTC binary frame.');
-                                const frame = new Uint8Array(event.data);
-                                const header = new DataView(event.data);
-                                const length = header.getUint32(12);
-                                const offset = header.getUint32(8);
-                                if (
-                                    header.getUint32(0) !== FRAME_MAGIC ||
-                                    header.getUint32(4) !== seq ||
-                                    length === 0 ||
-                                    length !== frame.byteLength - FRAME_BYTES ||
-                                    offset !== received ||
-                                    offset + length > bytes.byteLength
-                                )
-                                    throw new Error('Invalid WebRTC frame bounds.');
-                                bytes.set(frame.subarray(FRAME_BYTES), offset);
-                                received += length;
+                                const frame = webRtcWasm().parseWebRtcFrame(
+                                    new Uint8Array(event.data),
+                                );
+                                let payload: Uint8Array;
+                                try {
+                                    frame.validateForChunk(seq, received, bytes.byteLength);
+                                    payload = frame.payload();
+                                } finally {
+                                    frame.free();
+                                }
+                                bytes.set(payload, received);
+                                received += payload.byteLength;
                                 onProgress?.(received);
                                 if (received === bytes.byteLength) {
-                                    control(channel!, { type: 'ack', seq });
+                                    control(channel!, webRtcWasm().encodeWebRtcAck(seq));
                                     finish();
                                 } else reset();
                             } catch (error) {
@@ -772,8 +774,10 @@ export async function connectWebRtcReceiver(options: {
                             return;
                         }
                         dataChannel.addEventListener('message', message);
-                        dataChannel.addEventListener('close', channelClosed, { once: true });
-                        control(dataChannel, { type: 'request', seq, itemId, index });
+                        dataChannel.addEventListener('close', channelClosed, {
+                            once: true,
+                        });
+                        control(dataChannel, webRtcWasm().encodeWebRtcRequest(seq, itemId, index));
                     });
                 };
                 const result = readQueue.then(run, run);

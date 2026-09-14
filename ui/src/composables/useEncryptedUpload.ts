@@ -8,7 +8,13 @@ import {
     monitor,
 } from '../../../backend/resources/js/actions/App/Http/Controllers/Api/V1/TurboTransferController';
 import { ciphertextBytes } from '../lib/format';
-import { AdaptiveConcurrency, fetchChunkWithRetry, transferConcurrency } from '../lib/transfer';
+import {
+    AdaptiveConcurrency,
+    fetchChunkWithRetry,
+    initialiseTransferPolicy,
+    maximumCiphertextRecordBytes,
+    transferConcurrency,
+} from '../lib/transfer';
 import { uploadCiphertext, type UploadPhase, type UploadTransport } from '../lib/adaptive-upload';
 import { waitForWorkerMessage, type WorkerMessage } from '../lib/worker-request';
 import { enabledTransferDrivers, transferLimits } from '../lib/transfer-policy';
@@ -563,7 +569,11 @@ export function useEncryptedUpload(
                     requestId,
                     transferId: created.data.id,
                     serverItems: created.data.items,
-                    items: uploadEntries.map(({ file, name, type }) => ({ file, name, type })),
+                    items: uploadEntries.map(({ file, name, type }) => ({
+                        file,
+                        name,
+                        type,
+                    })),
                     chunkBytes: created.data.chunk_bytes,
                     masterKey,
                     protocolVersion: 1,
@@ -584,7 +594,9 @@ export function useEncryptedUpload(
                             'Content-Type': 'application/json',
                             'X-Filebeam-Upload-Token': created.data.upload_token,
                         },
-                        body: JSON.stringify({ encrypted_manifest: metadata.encryptedManifest }),
+                        body: JSON.stringify({
+                            encrypted_manifest: metadata.encryptedManifest,
+                        }),
                     },
                 );
                 ensureActive(jobId);
@@ -657,6 +669,12 @@ export function useEncryptedUpload(
                 return;
             }
             let uploaded = 0;
+            await initialiseTransferPolicy();
+            ensureActive(jobId);
+            const maximumCiphertextBytes = maximumCiphertextRecordBytes(
+                uploadEntries.map((entry) => entry.file),
+                created.data.chunk_bytes,
+            );
             const sourceBytes = uploadEntries.reduce((total, entry) => total + entry.file.size, 0);
             const uploadedByItem = new Map<string, number>();
             const inFlightByChunk = new Map<string, { itemId: string; bytes: number }>();
@@ -676,7 +694,7 @@ export function useEncryptedUpload(
             let progressHighwater = 0;
             let lastProgressUpdate = 0;
             const adaptive = new AdaptiveConcurrency(
-                transferConcurrency(config.upload_concurrency, created.data.chunk_bytes),
+                transferConcurrency(config.upload_concurrency, maximumCiphertextBytes),
                 (limit) => {
                     if (activeJob === jobId && !uploadController.signal.aborted)
                         activeWorker?.postMessage({ type: 'window', jobId, limit });
@@ -729,7 +747,10 @@ export function useEncryptedUpload(
                             ensureActive(jobId);
                             publishShare(created.data.expires_at);
                             startMonitoring(created.data);
-                            uploadWorker.postMessage({ type: 'uploaded', token: message.token });
+                            uploadWorker.postMessage({
+                                type: 'uploaded',
+                                token: message.token,
+                            });
                         } catch (reason) {
                             if (activeJob !== jobId || uploadController.signal.aborted) return;
                             for (const reject of waiters.get(jobId) ?? [])
@@ -798,8 +819,15 @@ export function useEncryptedUpload(
                             const nextEntry = uploadEntries[uploadEntries.indexOf(entry) + 1];
                             if (nextEntry?.state === 'queued') nextEntry.state = 'encrypting';
                         }
-                        uploadWorker.postMessage({ type: 'uploaded', token: message.token });
-                        uploadWorker.postMessage({ type: 'window', jobId, limit: adaptive.limit });
+                        uploadWorker.postMessage({
+                            type: 'uploaded',
+                            token: message.token,
+                        });
+                        uploadWorker.postMessage({
+                            type: 'window',
+                            jobId,
+                            limit: adaptive.limit,
+                        });
                     } catch (reason) {
                         if (activeJob !== jobId || uploadController.signal.aborted) return;
                         entry.state = 'error';
@@ -827,7 +855,11 @@ export function useEncryptedUpload(
                 requestId: encryptRequestId,
                 transferId: created.data.id,
                 serverItems: created.data.items,
-                items: uploadEntries.map(({ file, name, type }) => ({ file, name, type })),
+                items: uploadEntries.map(({ file, name, type }) => ({
+                    file,
+                    name,
+                    type,
+                })),
                 chunkBytes: created.data.chunk_bytes,
                 uploadConcurrency: 1,
                 masterKey,

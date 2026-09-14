@@ -47,3 +47,11 @@ Selecting a method updates its limits immediately without opening a connection o
 There is no automatic HTTP fallback. The sender may explicitly restart as a new stored HTTP transfer, with a new link and key, only when HTTP is enabled and the content fits its limits. The original live share is then revoked.
 
 Burn-on-read notes admit only one recipient session. Successful decryption revokes the share, but does not erase a recipient's copy. A failed or abandoned connection can require the sender to create a fresh note link: the server conservatively retains the claim because it cannot prove that a peer has not already received the content. Existing admitted sessions may finish when an administrator disables WebRTC, but new publications and joins are rejected. Explicit deletion or takedown revokes coordination for existing sessions as well.
+
+## Native CLI
+
+The native CLI can send files with `beam up --transport webrtc FILE...` and receive compatible live file links with `beam down LINK`. The sender encrypts all selected data into a private local ciphertext spool before publishing, then prints the share URL to stdout as soon as the live share is ready. The process remains the live sender until the share expires or is stopped. `Ctrl+C` stops the current sender but retains its private state; `beam resume JOB_ID` can start serving the same live share again while it remains unexpired.
+
+Direct native peer connections expose the receiver's network address to the sender. A receiver must confirm interactively or pass `--accept-peer-address-exposure`; this flag accepts that exposure, not the safety or identity of the peer. `--webrtc-relay-only` instead requires a relay and skips that direct-peer consent. It accepts only a `turn:` UDP ICE URL. Native relay-only has been exercised with TURN over UDP; the native `webrtc` crate 0.20.5 does not support TURN over TCP or TLS. Do not describe this as full TURN support, and do not treat relay-only as a general security guarantee or proof that all peer-address exposure has been eliminated.
+
+The native CLI does not support notes, including burn-on-read notes, or account-key inbox delivery. Its live download validation requires normal manifest items and does not synthesize an item for an itemless note payload.

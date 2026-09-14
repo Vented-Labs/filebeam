@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test';
 import { uploadCiphertext, xhrUpload } from '../../ui/src/lib/adaptive-upload';
-import { AdaptiveConcurrency } from '../../ui/src/lib/transfer';
+import { AdaptiveConcurrency, initialiseTransferPolicy } from '../../ui/src/lib/transfer';
+
+test.beforeEach(async () => initialiseTransferPolicy());
 
 type Plan = {
     status?: number;
@@ -150,6 +152,23 @@ test('a direct uncertain failure immediately falls back instead of four direct a
         expect(FakeXhr.instances.filter((xhr) => xhr.url === '/chunk')).toHaveLength(1);
     }));
 
+test('staging rejects an advertised part-count limit before opening a session', async () =>
+    mocked(async () => {
+        FakeXhr.plan = [{ error: true }];
+        await expect(
+            uploadCiphertext({
+                chunkUrl: '/chunk',
+                token: 't',
+                ciphertext: new Uint8Array([1, 2, 3]),
+                transport: { ...transport, part_max_count: 1 },
+                signal: new AbortController().signal,
+                controller: new AdaptiveConcurrency(1),
+                onProgress: () => undefined,
+            }),
+        ).rejects.toThrow('part count');
+        expect(FakeXhr.instances.filter((xhr) => xhr.url.includes('/uploads/'))).toHaveLength(0);
+    }));
+
 test('staged upload derives its URL from the returned generated id and sends incremental offsets', async () =>
     mocked(async () => {
         // The checksum is learned from the create body, independent of crypto implementation.
@@ -177,7 +196,7 @@ test('staged upload derives its URL from the returned generated id and sends inc
                 chunkUrl: '/chunk',
                 token: 't',
                 ciphertext: new Uint8Array([1, 2, 3]),
-                transport,
+                transport: { ...transport, part_min_bytes: 2 },
                 signal: new AbortController().signal,
                 controller: new AdaptiveConcurrency(1),
                 onProgress: () => undefined,
@@ -205,6 +224,8 @@ test('a saved part after response loss is discovered by status and is not resent
                 FakeXhr.plan.unshift({ data: stage(id, 0, 2, checksum) });
             } else if (this.url.endsWith('/parts/0')) FakeXhr.plan.unshift({ error: true });
             else if (this.method === 'GET')
+                FakeXhr.plan.unshift({ data: stage(id, 1, 2, checksum) });
+            else if (this.url.endsWith('/parts/1'))
                 FakeXhr.plan.unshift({ data: stage(id, 2, 2, checksum) });
             else FakeXhr.plan.unshift({ data: stage(id, 2, 2, checksum, 'complete') });
             originalSend.call(this, body);
@@ -225,7 +246,7 @@ test('a saved part after response loss is discovered by status and is not resent
         }
     }));
 
-test('an unsaved response loss retries a smaller part rather than throwing', async () =>
+test('an unsaved response loss reconciles before retrying the part', async () =>
     mocked(async () => {
         const originalSend = FakeXhr.prototype.send;
         let checksum = '';
@@ -298,7 +319,7 @@ test('a 410 reset is bounded and starts a fresh staging id', async () =>
                 chunkUrl: '/chunk',
                 token: 't',
                 ciphertext: new Uint8Array([1, 2]),
-                transport,
+                transport: { ...transport, part_min_bytes: 2 },
                 signal: new AbortController().signal,
                 controller: new AdaptiveConcurrency(1),
                 onProgress: () => undefined,
@@ -349,7 +370,7 @@ test('a finalizing completion retries after bounded status failures', async () =
                 chunkUrl: '/chunk',
                 token: 't',
                 ciphertext: new Uint8Array([1, 2]),
-                transport,
+                transport: { ...transport, part_min_bytes: 2 },
                 signal: new AbortController().signal,
                 controller: new AdaptiveConcurrency(1),
                 onProgress: () => undefined,

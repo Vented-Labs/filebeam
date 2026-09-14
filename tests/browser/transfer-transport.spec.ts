@@ -1,9 +1,12 @@
 import { expect, test } from '@playwright/test';
 import {
     fetchChunkWithRetry,
+    initialiseTransferPolicy,
     readChunkWithRetry,
     retryAfterMilliseconds,
 } from '../../ui/src/lib/transfer';
+
+test.beforeEach(async () => initialiseTransferPolicy());
 
 function response(
     status: number,
@@ -13,14 +16,19 @@ function response(
     return new Response(body, { status, headers });
 }
 
-async function withFetch(queue: Array<Response | Error>, run: () => Promise<void>): Promise<void> {
+async function withFetch(
+    queue: Array<Response | Error>,
+    run: (requests: RequestInit[]) => Promise<void>,
+): Promise<void> {
     const originalFetch = globalThis.fetch;
     const originalWindow = globalThis.window;
     const originalTimeout = globalThis.setTimeout;
+    const requests: RequestInit[] = [];
     let id = 0;
     Object.assign(globalThis, {
         window: globalThis,
-        fetch: async () => {
+        fetch: async (_url: string | URL | Request, init?: RequestInit) => {
+            requests.push(init ?? {});
             const next = queue.shift();
             if (!next) throw new Error('missing fetch');
             if (next instanceof Error) throw next;
@@ -32,7 +40,7 @@ async function withFetch(queue: Array<Response | Error>, run: () => Promise<void
         }) as typeof setTimeout,
     });
     try {
-        await run();
+        await run(requests);
     } finally {
         Object.assign(globalThis, {
             fetch: originalFetch,
@@ -47,6 +55,15 @@ const stream = (...chunks: number[][]) =>
         start(controller) {
             for (const chunk of chunks) controller.enqueue(new Uint8Array(chunk));
             controller.close();
+        },
+    });
+
+const interruptedStream = (...chunks: number[][]) =>
+    new ReadableStream<Uint8Array>({
+        pull(controller) {
+            const chunk = chunks.shift();
+            if (chunk) controller.enqueue(new Uint8Array(chunk));
+            else controller.error(new Error('lost connection'));
         },
     });
 
@@ -121,4 +138,131 @@ test('external cancellation remains cancellation rather than timeout', async () 
         await expect(
             fetchChunkWithRetry('/x', {}, controller.signal, async () => undefined),
         ).rejects.toThrow('stop');
+    }));
+test('range retry retains an interrupted prefix only when the ETag and range match', async () =>
+    withFetch(
+        [
+            response(200, interruptedStream(Array(8).fill(1)), {
+                'Content-Length': '16',
+                ETag: '"ciphertext"',
+            }),
+            response(206, stream(Array(8).fill(2)), {
+                'Content-Length': '8',
+                'Content-Range': 'bytes 8-15/16',
+                ETag: '"ciphertext"',
+            }),
+        ],
+        async (requests) => {
+            const progress: number[] = [];
+            expect([
+                ...new Uint8Array(
+                    (await readChunkWithRetry(
+                        '/x',
+                        {},
+                        new AbortController().signal,
+                        16,
+                        (loaded) => progress.push(loaded),
+                        undefined,
+                        true,
+                    ))!,
+                ),
+            ]).toEqual([...Array(8).fill(1), ...Array(8).fill(2)]);
+            expect(new Headers(requests[1].headers).get('Range')).toBe('bytes=8-');
+            expect(new Headers(requests[1].headers).get('If-Range')).toBe('"ciphertext"');
+            expect(progress).toEqual([0, 8, 16]);
+        },
+    ));
+test('a server that ignores Range restarts from a complete ciphertext response', async () =>
+    withFetch(
+        [
+            response(200, interruptedStream(Array(8).fill(1)), {
+                'Content-Length': '16',
+                ETag: '"ciphertext"',
+            }),
+            response(200, stream(Array(16).fill(3)), {
+                'Content-Length': '16',
+                ETag: '"ciphertext"',
+            }),
+        ],
+        async (requests) => {
+            const progress: number[] = [];
+            expect([
+                ...new Uint8Array(
+                    (await readChunkWithRetry(
+                        '/x',
+                        {},
+                        new AbortController().signal,
+                        16,
+                        (loaded) => progress.push(loaded),
+                        undefined,
+                        true,
+                    ))!,
+                ),
+            ]).toEqual(Array(16).fill(3));
+            expect(new Headers(requests[1].headers).get('Range')).toBe('bytes=8-');
+            expect(progress.filter((loaded) => loaded === 0)).toHaveLength(2);
+        },
+    ));
+test('a changed ETag cannot be appended to retained ciphertext', async () =>
+    withFetch(
+        [
+            response(200, interruptedStream(Array(8).fill(1)), {
+                'Content-Length': '16',
+                ETag: '"ciphertext"',
+            }),
+            response(206, stream(Array(8).fill(2)), {
+                'Content-Length': '8',
+                'Content-Range': 'bytes 8-15/16',
+                ETag: '"changed"',
+            }),
+        ],
+        async () => {
+            await expect(
+                readChunkWithRetry(
+                    '/x',
+                    {},
+                    new AbortController().signal,
+                    16,
+                    () => undefined,
+                    undefined,
+                    true,
+                ),
+            ).rejects.toThrow('prefix');
+        },
+    ));
+test('an invalid range cannot be appended to retained ciphertext', async () =>
+    withFetch(
+        [
+            response(200, interruptedStream(Array(8).fill(1)), {
+                'Content-Length': '16',
+                ETag: '"ciphertext"',
+            }),
+            response(206, stream(Array(8).fill(2)), {
+                'Content-Length': '8',
+                'Content-Range': 'bytes 7-15/16',
+                ETag: '"ciphertext"',
+            }),
+        ],
+        async () => {
+            await expect(
+                readChunkWithRetry(
+                    '/x',
+                    {},
+                    new AbortController().signal,
+                    16,
+                    () => undefined,
+                    undefined,
+                    true,
+                ),
+            ).rejects.toThrow('prefix');
+        },
+    ));
+test('download cancellation does not issue a range continuation', async () =>
+    withFetch([], async (requests) => {
+        const controller = new AbortController();
+        controller.abort(new DOMException('stop', 'AbortError'));
+        await expect(
+            readChunkWithRetry('/x', {}, controller.signal, 16, () => undefined, undefined, true),
+        ).rejects.toThrow('stop');
+        expect(requests).toHaveLength(0);
     }));

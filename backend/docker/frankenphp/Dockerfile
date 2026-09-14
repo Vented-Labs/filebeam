@@ -23,6 +23,7 @@ COPY --from=rust /usr/local/cargo /usr/local/cargo
 COPY --from=rust /usr/local/rustup /usr/local/rustup
 
 ENV CARGO_HOME=/home/sail/.cargo \
+    FILEBEAM_RUST_IN_CONTAINER=1 \
     RUSTUP_HOME=/usr/local/rustup \
     PATH=/usr/local/cargo/bin:$PATH
 

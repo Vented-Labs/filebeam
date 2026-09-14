@@ -1,5 +1,5 @@
 name: Prepare Rust
-description: Install the pinned encryption toolchain with cached Cargo dependencies and wasm-pack
+description: Install the pinned Rust toolchain, transfer crates, and wasm-pack
 inputs:
   wasm:
     description: Install the WASM target and wasm-pack
@@ -18,8 +18,11 @@ runs:
           ~/.cargo/registry
           ~/.cargo/git
           encryption/target
-        key: cargo-${{ runner.os }}-${{ runner.arch }}-1.98.0-wasm${{ inputs.wasm }}-${{ hashFiles('encryption/Cargo.lock') }}-${{ hashFiles('encryption/src/**', 'encryption/Cargo.toml') }}
-        restore-keys: cargo-${{ runner.os }}-${{ runner.arch }}-1.98.0-wasm${{ inputs.wasm }}-${{ hashFiles('encryption/Cargo.lock') }}-
+          transfer/target
+          transfer-native/target
+          transfer-wasm/target
+        key: cargo-${{ runner.os }}-${{ runner.arch }}-1.98.0-wasm${{ inputs.wasm }}-${{ hashFiles('encryption/Cargo.lock', 'transfer/Cargo.lock', 'transfer-native/Cargo.lock', 'transfer-wasm/Cargo.lock') }}-${{ hashFiles('encryption/src/**', 'encryption/Cargo.toml', 'transfer/src/**', 'transfer/Cargo.toml', 'transfer-native/src/**', 'transfer-native/Cargo.toml', 'transfer-wasm/src/**', 'transfer-wasm/Cargo.toml') }}
+        restore-keys: cargo-${{ runner.os }}-${{ runner.arch }}-1.98.0-wasm${{ inputs.wasm }}-${{ hashFiles('encryption/Cargo.lock', 'transfer/Cargo.lock', 'transfer-native/Cargo.lock', 'transfer-wasm/Cargo.lock') }}-
     - name: Cache wasm-pack
       if: inputs.wasm == 'true'
       id: wasm-pack
