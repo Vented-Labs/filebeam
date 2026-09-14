@@ -34,7 +34,9 @@ case "$1 $2" in
   'release create'|'release upload'|'release edit') : ;;
   'release download')
     for ((i = 1; i <= $#; i++)); do [[ ${!i} == --pattern ]] && { j=$((i + 1)); pattern=${!j}; }; [[ ${!i} == --dir ]] && { j=$((i + 1)); dir=${!j}; }; done
-    mkdir -p "$dir"; cp "$MOCK_SOURCE/$pattern" "$dir/$pattern"
+    mkdir -p "$dir"
+    [[ ${MOCK_MISSING:-} != "$pattern" ]] || { printf 'asset not found\n' >&2; exit 1; }
+    cp "$MOCK_SOURCE/$pattern" "$dir/$pattern"
     ;;
   *) exit 64 ;;
 esac
@@ -49,5 +51,13 @@ order=$(awk '$1 == "release" { printf "%s %s ", $1, $2 }' "$temporary/gh.log")
 [[ $order == "release view release create release upload "*"release edit " ]]
 [[ $(grep -o 'release download' <<<"$order" | wc -l) -eq 11 ]]
 [[ $(grep -o 'release upload' <<<"$order" | wc -l) -eq 1 && $(grep -o 'release edit' <<<"$order" | wc -l) -eq 1 ]]
+# A published CLI retry must report a nonzero missing-asset download as immutable recovery.
+: > "$temporary/gh.log"
+if (
+    cd "$temporary"
+    MOCK_STATE=published MOCK_MISSING=release.json MOCK_LOG="$temporary/gh.log" MOCK_COMMIT=$commit MOCK_SOURCE="$temporary/source-assets" PATH="$temporary/bin:$PATH" bash "$root/scripts/release/cli-github-release.sh" "$tag" "$commit" "$temporary"
+) 2>"$temporary/error"; then exit 1; fi
+[[ $(<"$temporary/error") == *'Recovery requires a new release tag'* ]]
+[[ $(<"$temporary/gh.log") != *'release upload'* && $(<"$temporary/gh.log") != *'release edit'* ]]
 printf 'Standalone CLI draft creation, complete upload, verification, and single publish passed.\n'
 bash "$root/scripts/release/cli-key.test.sh"

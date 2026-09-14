@@ -13,6 +13,10 @@ root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 [[ ${GH_REPO:-} =~ ^[^/[:space:]]+/[^/[:space:]]+$ ]] || { printf 'GH_REPO must be an OWNER/REPOSITORY value.\n' >&2; exit 1; }
 command -v gh >/dev/null
 command -v php >/dev/null
+temporary=$(mktemp -d "${TMPDIR:-/tmp}/filebeam-github-release.XXXXXX")
+error=''
+download_dir=''
+trap 'rm -rf "$temporary" "$download_dir"; rm -f "$error"' EXIT
 
 zip="$release_dir/filebeam-$tag.zip"
 metadata="$release_dir/release.json"
@@ -48,16 +52,14 @@ if [[ -n $cli_dir ]]; then
         if (count($seen) !== 5) exit(1);
     ' "$cli_dir/release.json" "$cli_tag" || { printf 'CLI release manifest does not verify every archive.\n' >&2; exit 1; }
     # GitHub release assets share one namespace; retain the catalog filename locally.
-    cli_manifest=$(mktemp "${TMPDIR:-/tmp}/filebeam-cli-release-manifest.XXXXXX")
+    cli_manifest="$temporary/$cli_tag-release.json"
     cp "$cli_dir/release.json" "$cli_manifest"
-    mv "$cli_manifest" "${cli_manifest%/*}/$cli_tag-release.json"
-    cli_manifest="${cli_manifest%/*}/$cli_tag-release.json"
     assets+=("${cli_assets[@]:0:10}" "$cli_manifest")
 fi
 
-error=$(mktemp "${TMPDIR:-/tmp}/filebeam-github-release.XXXXXX")
-download_dir=$(mktemp -d "${TMPDIR:-/tmp}/filebeam-github-release-asset.XXXXXX")
-trap 'rm -f "$error" "$cli_manifest"; rm -rf "$download_dir"' EXIT
+error="$temporary/error"
+download_dir="$temporary/download"
+mkdir "$download_dir"
 
 remote_tag_commit() {
     local object object_type object_sha depth
@@ -74,11 +76,18 @@ remote_tag_commit() {
 }
 assert_remote_tag() { [[ $(remote_tag_commit) == "$commit" ]] || { printf 'Remote tag %s no longer points at the verified commit.\n' "$tag" >&2; exit 1; }; }
 verify_remote_assets() {
-    local asset name
+    local published=${1:-false} asset name
     for asset in "${assets[@]}"; do
         name=${asset##*/}
         rm -f "$download_dir/$name"
-        gh release download "$tag" --pattern "$name" --dir "$download_dir" || { printf 'Release asset download failed: %s\n' "$name" >&2; return 1; }
+        gh release download "$tag" --pattern "$name" --dir "$download_dir" || {
+            if [[ $published == true ]]; then
+                printf 'Release is missing immutable asset %s. Recovery requires a new release tag; this script will not upload to, delete, or recreate a published release.\n' "$name" >&2
+            else
+                printf 'Release asset download failed: %s\n' "$name" >&2
+            fi
+            return 1
+        }
         [[ -f "$download_dir/$name" ]] || { printf 'Release is missing immutable asset %s. Recovery requires a new release tag; this script will not upload to, delete, or recreate a published release.\n' "$name" >&2; return 1; }
         cmp --silent "$asset" "$download_dir/$name" || { printf 'Release asset differs from verified bytes: %s\n' "$name" >&2; return 1; }
     done
@@ -87,7 +96,8 @@ verify_remote_assets() {
 assert_remote_tag
 if release=$(gh release view "$tag" --json isDraft 2>"$error"); then
     if [[ $release =~ \"isDraft\"[[:space:]]*:[[:space:]]*false ]]; then
-        verify_remote_assets
+        verify_remote_assets true
+        assert_remote_tag
         exit 0
     fi
     [[ $release =~ \"isDraft\"[[:space:]]*:[[:space:]]*true ]] || { printf 'Could not determine GitHub release draft state.\n' >&2; exit 1; }

@@ -41,10 +41,17 @@ assert_remote_tag() {
     [[ $actual == "$commit" ]] || { printf 'Release tag points to another commit.\n' >&2; exit 1; }
 }
 verify_remote_assets() {
-    local asset name
+    local published=${1:-false} asset name
     for asset in "${assets[@]}"; do
         name=${asset##*/}; rm -f "$temporary/$name"
-        gh release download "$tag" --pattern "$name" --dir "$temporary" || { printf 'CLI release asset download failed: %s\n' "$name" >&2; return 1; }
+        gh release download "$tag" --pattern "$name" --dir "$temporary" || {
+            if [[ $published == true ]]; then
+                printf 'CLI release is missing immutable asset %s. Recovery requires a new release tag; this script will not upload to, delete, or recreate a published release.\n' "$name" >&2
+            else
+                printf 'CLI release asset download failed: %s\n' "$name" >&2
+            fi
+            return 1
+        }
         [[ -f "$temporary/$name" ]] || { printf 'CLI release is missing immutable asset %s. Recovery requires a new release tag; this script will not upload to, delete, or recreate a published release.\n' "$name" >&2; return 1; }
         cmp --silent "$asset" "$temporary/$name" || { printf 'CLI release asset differs from verified bytes: %s\n' "$name" >&2; return 1; }
     done
@@ -52,7 +59,7 @@ verify_remote_assets() {
 
 assert_remote_tag
 if release=$(gh release view "$tag" --json isDraft 2>"$error"); then
-    if [[ $release =~ \"isDraft\"[[:space:]]*:[[:space:]]*false ]]; then verify_remote_assets; exit 0; fi
+    if [[ $release =~ \"isDraft\"[[:space:]]*:[[:space:]]*false ]]; then verify_remote_assets true; assert_remote_tag; exit 0; fi
     [[ $release =~ \"isDraft\"[[:space:]]*:[[:space:]]*true ]] || { printf 'Could not determine GitHub release draft state.\n' >&2; exit 1; }
 elif [[ $(<"$error") == *'release not found'* || $(<"$error") == *'HTTP 404'* ]]; then
     gh release create "$tag" --draft --verify-tag --target "$commit" --title "Beam CLI ${tag#beam-}" --latest=false --notes "Signed Linux, macOS, and Windows CLI release from Filebeam commit $commit."

@@ -28,7 +28,13 @@ cat > "$bin/gh" <<'EOF'
 set -euo pipefail
 printf '%s\n' "$*" >> "$MOCK_LOG"
 case "$1 $2" in
-  'api repos/Vented-Labs/filebeam/git/ref/tags/v1.2.3') printf 'commit\t%s\n' "$MOCK_COMMIT" ;;
+  'api repos/Vented-Labs/filebeam/git/ref/tags/v1.2.3')
+    count=0; [[ -f $MOCK_TAG_COUNT ]] && count=$(<"$MOCK_TAG_COUNT")
+    count=$((count + 1)); printf '%s' "$count" > "$MOCK_TAG_COUNT"
+    resolved=$MOCK_COMMIT
+    [[ ${MOCK_RETAG_AFTER:-99} -lt $count ]] && resolved=$MOCK_RETAG_COMMIT
+    printf 'commit\t%s\n' "$resolved"
+    ;;
   'release view')
     [[ ${MOCK_STATE:-missing} != missing ]] || { printf 'release not found\n' >&2; exit 1; }
     [[ ${MOCK_STATE:-missing} == draft ]] && printf '{"isDraft":true}\n' || printf '{"isDraft":false}\n'
@@ -42,7 +48,7 @@ case "$1 $2" in
     done
     mkdir -p "$dir"
     [[ ${MOCK_MISMATCH:-} != "$pattern" ]] || { printf 'wrong bytes\n' > "$dir/$pattern"; exit 0; }
-    [[ ${MOCK_MISSING:-} != "$pattern" ]] || exit 0
+    [[ ${MOCK_MISSING:-} != "$pattern" ]] || { printf 'asset not found\n' >&2; exit 1; }
     cp "$MOCK_SOURCE/$pattern" "$dir/$pattern"
     ;;
   'release edit') : ;;
@@ -61,7 +67,8 @@ done
 
 run_case() {
     : > "$tmp/log"
-    MOCK_STATE=$1 MOCK_LOG="$tmp/log" MOCK_COMMIT=$commit MOCK_SOURCE=$source GH_REPO=Vented-Labs/filebeam PATH="$bin:$PATH" "$root/scripts/release/github-release.sh" "$tag" "$commit" "$app" "$cli"
+    : > "$tmp/tag-count"
+    MOCK_STATE=$1 MOCK_LOG="$tmp/log" MOCK_COMMIT=$commit MOCK_TAG_COUNT="$tmp/tag-count" MOCK_SOURCE=$source GH_REPO=Vented-Labs/filebeam PATH="$bin:$PATH" "$root/scripts/release/github-release.sh" "$tag" "$commit" "$app" "$cli"
 }
 release_order() { awk '$1 == "release" { printf "%s %s ", $1, $2 }' "$tmp/log"; }
 
@@ -74,18 +81,23 @@ order=$(release_order)
 
 # A failed combined upload leaves the draft unpublished.
 : > "$tmp/log"
-if MOCK_STATE=draft MOCK_FAIL_UPLOAD=true MOCK_LOG="$tmp/log" MOCK_COMMIT=$commit MOCK_SOURCE=$source GH_REPO=Vented-Labs/filebeam PATH="$bin:$PATH" "$root/scripts/release/github-release.sh" "$tag" "$commit" "$app" "$cli"; then exit 1; fi
+if MOCK_STATE=draft MOCK_FAIL_UPLOAD=true MOCK_LOG="$tmp/log" MOCK_COMMIT=$commit MOCK_TAG_COUNT="$tmp/tag-count" MOCK_SOURCE=$source GH_REPO=Vented-Labs/filebeam PATH="$bin:$PATH" "$root/scripts/release/github-release.sh" "$tag" "$commit" "$app" "$cli"; then exit 1; fi
 [[ $(<"$tmp/log") != *'release edit'* ]]
 
 # Any downloaded-byte mismatch prevents publication.
 : > "$tmp/log"
-if MOCK_STATE=draft MOCK_MISMATCH=checksums.txt MOCK_LOG="$tmp/log" MOCK_COMMIT=$commit MOCK_SOURCE=$source GH_REPO=Vented-Labs/filebeam PATH="$bin:$PATH" "$root/scripts/release/github-release.sh" "$tag" "$commit" "$app" "$cli"; then exit 1; fi
+if MOCK_STATE=draft MOCK_MISMATCH=checksums.txt MOCK_LOG="$tmp/log" MOCK_COMMIT=$commit MOCK_TAG_COUNT="$tmp/tag-count" MOCK_SOURCE=$source GH_REPO=Vented-Labs/filebeam PATH="$bin:$PATH" "$root/scripts/release/github-release.sh" "$tag" "$commit" "$app" "$cli"; then exit 1; fi
 [[ $(<"$tmp/log") != *'release edit'* ]]
 
 # Published releases are immutable: retries only download and verify, never upload or edit.
 : > "$tmp/log"
-if MOCK_STATE=published MOCK_MISSING=release.json MOCK_LOG="$tmp/log" MOCK_COMMIT=$commit MOCK_SOURCE=$source GH_REPO=Vented-Labs/filebeam PATH="$bin:$PATH" "$root/scripts/release/github-release.sh" "$tag" "$commit" "$app" "$cli" 2>"$tmp/error"; then exit 1; fi
+if MOCK_STATE=published MOCK_MISSING=release.json MOCK_LOG="$tmp/log" MOCK_COMMIT=$commit MOCK_TAG_COUNT="$tmp/tag-count" MOCK_SOURCE=$source GH_REPO=Vented-Labs/filebeam PATH="$bin:$PATH" "$root/scripts/release/github-release.sh" "$tag" "$commit" "$app" "$cli" 2>"$tmp/error"; then exit 1; fi
 [[ $(<"$tmp/error") == *'Recovery requires a new release tag'* ]]
 [[ $(<"$tmp/log") != *'release upload'* && $(<"$tmp/log") != *'release edit'* && $(<"$tmp/log") != *'release create'* ]]
+
+# A tag move after draft verification prevents the only publish operation.
+: > "$tmp/log"; : > "$tmp/tag-count"
+if MOCK_STATE=draft MOCK_RETAG_AFTER=1 MOCK_RETAG_COMMIT=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa MOCK_LOG="$tmp/log" MOCK_COMMIT=$commit MOCK_TAG_COUNT="$tmp/tag-count" MOCK_SOURCE=$source GH_REPO=Vented-Labs/filebeam PATH="$bin:$PATH" "$root/scripts/release/github-release.sh" "$tag" "$commit" "$app" "$cli"; then exit 1; fi
+[[ $(<"$tmp/log") != *'release edit'* ]]
 
 printf 'Combined GitHub release draft, verification, and immutable retry checks passed.\n'
