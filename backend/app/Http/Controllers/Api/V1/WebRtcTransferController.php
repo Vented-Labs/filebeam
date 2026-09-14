@@ -281,7 +281,16 @@ class WebRtcTransferController extends Controller
 
     private function senderIsLive(Transfer $transfer): bool
     {
-        return is_int(Cache::get($this->senderKey($transfer)));
+        $heartbeat = Cache::get($this->senderKey($transfer));
+        if (is_int($heartbeat)) {
+            $timestamp = $heartbeat;
+        } elseif (is_string($heartbeat) && preg_match('/\A(?:0|[1-9][0-9]*)\z/D', $heartbeat) === 1 && (string) (int) $heartbeat === $heartbeat) {
+            $timestamp = (int) $heartbeat;
+        } else {
+            return false;
+        }
+
+        return $timestamp > now()->subSeconds($this->idle())->getTimestamp();
     }
 
     private function revoke(Transfer $transfer): void
