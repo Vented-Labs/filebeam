@@ -61,7 +61,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: test-frontend
-          path: backend/public/build/
+          path: |
+            backend/public/build/
+            transfer-wasm/pkg/
           if-no-files-found: error
           retention-days: 1
       - name: Upload browser failure artifacts
@@ -174,7 +176,7 @@ jobs:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: test-frontend
-          path: backend/public/build
+          path: .
       - uses: ./.ci-workflow/.github/actions/start-minio
       - name: Test PHP
         working-directory: backend
@@ -227,7 +229,7 @@ jobs:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: test-frontend
-          path: backend/public/build
+          path: .
       - uses: ./.ci-workflow/.github/actions/start-minio
         if: matrix.shard == ''
       - name: Validate Sail configuration
@@ -325,7 +327,7 @@ jobs:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: test-frontend
-          path: backend/public/build
+          path: .
       - name: Run small-chunk browser tests
         env:
           APP_ENV: testing
@@ -388,7 +390,7 @@ jobs:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: test-frontend
-          path: backend/public/build
+          path: .
       - name: Install archive tools
         run: sudo apt-get update && sudo apt-get install --yes zip unzip
       - name: Test updater harness
