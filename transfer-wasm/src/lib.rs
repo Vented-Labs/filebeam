@@ -3,6 +3,12 @@ use filebeam_transfer::{
     chunk_count, ciphertext_bytes, concurrency_limit, encode_webrtc_control, encode_webrtc_frame,
     parse_webrtc_control, parse_webrtc_frame, retry_delay_ms, retryable_status,
 };
+use filebeam_transfer::{
+    capabilities::{DriverLimits, select_driver_limits},
+    link::parse_share_link,
+    manifest::{Manifest, ManifestServerItem, validate_manifest},
+};
+use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 
 fn transport(value: JsValue) -> Result<UploadTransport, JsError> {
@@ -11,6 +17,19 @@ fn transport(value: JsValue) -> Result<UploadTransport, JsError> {
 
 fn result<T>(value: Result<T, String>) -> Result<T, JsError> {
     value.map_err(|error| JsError::new(&error))
+}
+
+#[derive(serde::Deserialize)]
+struct ManifestValidation {
+    driver: String,
+    chunk_bytes: u64,
+    items: Vec<ManifestServerItem>,
+}
+
+#[derive(serde::Serialize)]
+struct ParsedShareLink {
+    id: String,
+    key: Option<String>,
 }
 
 // wasm-bindgen exposes Rust u64 as BigInt. Browser byte counters and monotonic clocks are
@@ -331,4 +350,53 @@ pub fn validate_part_count(
     part_bytes: f64,
 ) -> Result<(), JsError> {
     result(transport(value)?.validate_part_count(integer(ciphertext_bytes)?, integer(part_bytes)?))
+}
+
+#[wasm_bindgen(js_name = parseShareLink)]
+pub fn wasm_parse_share_link(value: String) -> Result<JsValue, JsError> {
+    let link = result(parse_share_link(&value))?;
+    serde_wasm_bindgen::to_value(&ParsedShareLink {
+        id: link.id,
+        key: link.key,
+    })
+    .map_err(|error| JsError::new(&error.to_string()))
+}
+
+/// Validate final decrypted manifest metadata only; encryption stays in the crypto worker.
+#[wasm_bindgen(js_name = validateManifest)]
+pub fn wasm_validate_manifest(manifest: JsValue, transfer: JsValue) -> Result<(), JsError> {
+    let manifest: Manifest = serde_wasm_bindgen::from_value(manifest)
+        .map_err(|error| JsError::new(&error.to_string()))?;
+    let transfer: ManifestValidation = serde_wasm_bindgen::from_value(transfer)
+        .map_err(|error| JsError::new(&error.to_string()))?;
+    result(validate_manifest(
+        &manifest,
+        &transfer.driver,
+        transfer.chunk_bytes,
+        &transfer.items,
+    ))
+}
+
+#[wasm_bindgen(js_name = selectDriverLimits)]
+pub fn wasm_select_driver_limits(
+    driver: String,
+    advertised: JsValue,
+    legacy_http_bytes: Option<f64>,
+    legacy_http_count: Option<f64>,
+) -> Result<JsValue, JsError> {
+    let advertised: HashMap<String, DriverLimits> = serde_wasm_bindgen::from_value(advertised)
+        .map_err(|error| JsError::new(&error.to_string()))?;
+    let limits = select_driver_limits(
+        &driver,
+        &advertised,
+        legacy_http_bytes.map(integer).transpose()?,
+        legacy_http_count
+            .map(integer)
+            .transpose()?
+            .map(|count| {
+                usize::try_from(count).map_err(|_| JsError::new("maximum file count is too large"))
+            })
+            .transpose()?,
+    );
+    serde_wasm_bindgen::to_value(&limits).map_err(|error| JsError::new(&error.to_string()))
 }

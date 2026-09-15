@@ -1,5 +1,9 @@
 //! Deterministic, transport-agnostic transfer coordination.
 
+pub mod capabilities;
+pub mod link;
+pub mod manifest;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet, VecDeque};

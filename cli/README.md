@@ -1,7 +1,15 @@
 # Beam CLI
 
-`beam` sends and receives Filebeam files over stored HTTP by default. Use
-native live WebRTC for a file send with:
+`beam` sends and receives Filebeam files over stored HTTP by default. Start a
+Turbo HTTP transfer, which publishes the encrypted share so recipients can
+progressively receive verified chunks while the sender is still uploading, with:
+
+```sh
+beam up --turbo report.pdf
+```
+
+Turbo is HTTP-only and cannot be combined with `--transport webrtc`. Use native
+live WebRTC for a file send with:
 
 ```sh
 beam up --transport webrtc report.pdf

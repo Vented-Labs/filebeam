@@ -1,7 +1,7 @@
 use std::{
     collections::HashSet,
     fs::{self, File},
-    io::{Read, Write},
+    io::{Read, Seek, Write},
     path::{Path, PathBuf},
 };
 
@@ -12,7 +12,7 @@ use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
 use crate::{
     control::{Control, Phase, PromptKind},
     protocol::safe_filename,
-    source::{SourceSpec, UploadSource},
+    source::{self, SourceSpec, UploadSource},
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -36,7 +36,12 @@ pub struct Prepared {
 }
 
 impl Prepared {
-    pub fn from_sources(sources: &[UploadSource], maximum_files: Option<usize>) -> Result<Self> {
+    pub fn from_sources(
+        sources: &[UploadSource],
+        mode: DirectoryMode,
+        maximum_files: Option<usize>,
+        control: &Control,
+    ) -> Result<Self> {
         if let Some(maximum) = maximum_files
             && sources.len() > maximum
         {
@@ -45,12 +50,66 @@ impl Prepared {
                 sources.len()
             );
         }
+        if mode == DirectoryMode::Zip {
+            control.phase(Phase::Archiving)?;
+            let directory = tempfile::tempdir().context("create provider ZIP directory")?;
+            let path = directory.path().join("filebeam-transfer.zip");
+            let mut archive = ZipWriter::new(File::create(&path)?);
+            let options = SimpleFileOptions::default()
+                .compression_method(CompressionMethod::Deflated)
+                .compression_level(Some(1))
+                .unix_permissions(0o644);
+            let mut paths = HashSet::new();
+            let mut buffer = [0u8; 64 * 1024];
+            for source in sources {
+                control.check()?;
+                let name = safe_archive_path(&source.name)?;
+                if !paths.insert(name.clone()) {
+                    bail!("Two tree entries have the same portable ZIP path: {name}");
+                }
+                archive.start_file(
+                    &name,
+                    options.large_file(source.spec.bounds().1 >= u32::MAX as u64),
+                )?;
+                let (offset, mut remaining) = source.spec.bounds();
+                let mut input = source::open(&source.spec, control.source_resolver())?;
+                input.seek(std::io::SeekFrom::Start(offset))?;
+                while remaining > 0 {
+                    control.check()?;
+                    let capacity = buffer.len() as u64;
+                    let read = input.read(&mut buffer[..remaining.min(capacity) as usize])?;
+                    if read == 0 {
+                        bail!("{} was truncated while archiving", source.name);
+                    }
+                    archive.write_all(&buffer[..read])?;
+                    remaining -= read as u64;
+                }
+            }
+            archive.finish()?.sync_all()?;
+            control.phase(Phase::Preparing)?;
+            let length = fs::metadata(&path)?.len();
+            return Ok(Self {
+                files: vec![UploadFile {
+                    path: path.clone(),
+                    name: "filebeam-transfer.zip".into(),
+                    spec: SourceSpec::Path {
+                        path,
+                        offset: 0,
+                        length,
+                    },
+                }],
+                _archive: Some(directory),
+            });
+        }
         let mut names = HashSet::new();
         let files = sources
             .iter()
             .map(|source| UploadFile {
                 path: PathBuf::new(),
-                name: unique_name(&safe_filename(&source.name), &mut names),
+                // Individual transfers are flat at the protocol layer; retain
+                // the tree path in a portable escaped filename to avoid silent
+                // basename collisions.
+                name: unique_name(&safe_filename(&source.name.replace('/', "__")), &mut names),
                 spec: source.spec.clone(),
             })
             .collect();
@@ -93,6 +152,22 @@ impl Prepared {
         self._archive.take();
         Ok(())
     }
+}
+
+fn safe_archive_path(value: &str) -> Result<String> {
+    let parts = value.split('/').collect::<Vec<_>>();
+    if parts.is_empty()
+        || parts
+            .iter()
+            .any(|part| part.is_empty() || *part == "." || *part == ".." || part.contains('\\'))
+    {
+        bail!("tree entry has an unsafe relative path");
+    }
+    Ok(parts
+        .into_iter()
+        .map(safe_filename)
+        .collect::<Vec<_>>()
+        .join("/"))
 }
 
 struct Source {
@@ -318,4 +393,42 @@ fn unique_name(name: &str, used: &mut HashSet<String>) -> String {
         }
     }
     unreachable!()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn source_tree_zip_preserves_relative_paths_and_rejects_collisions() {
+        let directory = tempfile::tempdir().unwrap();
+        let first = directory.path().join("first");
+        let second = directory.path().join("second");
+        fs::write(&first, b"one").unwrap();
+        fs::write(&second, b"two").unwrap();
+        let sources = [
+            UploadSource {
+                name: "photos/one.jpg".into(),
+                spec: SourceSpec::Path {
+                    path: first,
+                    offset: 0,
+                    length: 3,
+                },
+            },
+            UploadSource {
+                name: "docs/two.txt".into(),
+                spec: SourceSpec::Path {
+                    path: second,
+                    offset: 0,
+                    length: 3,
+                },
+            },
+        ];
+        let prepared =
+            Prepared::from_sources(&sources, DirectoryMode::Zip, None, &Control::test_factory())
+                .unwrap();
+        let archive = zip::ZipArchive::new(File::open(&prepared.files[0].path).unwrap()).unwrap();
+        assert!(archive.file_names().any(|name| name == "photos/one.jpg"));
+        assert!(archive.file_names().any(|name| name == "docs/two.txt"));
+    }
 }

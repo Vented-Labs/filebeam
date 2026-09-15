@@ -93,6 +93,15 @@ pub struct InboxTransfer {
 }
 
 #[derive(Clone, uniffi::Record)]
+pub struct OpenedInbox {
+    pub transfer_id: String,
+    pub key_bundle_id: u64,
+    pub filenames: Vec<String>,
+    /// Secret-bearing v1 link. Store only in encrypted request state.
+    pub download_link: String,
+}
+
+#[derive(Clone, uniffi::Record)]
 pub struct AccountKeyUpload {
     pub public_key: String,
     pub fingerprint: String,
@@ -111,7 +120,7 @@ pub struct GeneratedAccountKey {
 
 #[derive(uniffi::Object)]
 pub struct NativeServices {
-    inner: core::ServiceClient,
+    pub(crate) inner: core::ServiceClient,
 }
 
 #[uniffi::export]
@@ -120,6 +129,19 @@ impl NativeServices {
     pub fn new(instance: String, allow_http: bool) -> Result<Self> {
         Ok(Self {
             inner: core::ServiceClient::new(&origin(&instance, allow_http)?).map_err(operation)?,
+        })
+    }
+
+    #[uniffi::constructor]
+    pub fn new_with_cookie_context(
+        instance: String,
+        allow_http: bool,
+        cookie_context: String,
+    ) -> Result<Self> {
+        let instance = origin(&instance, allow_http)?;
+        Ok(Self {
+            inner: core::ServiceClient::new_with_cookie_context(&instance, Some(&cookie_context))
+                .map_err(operation)?,
         })
     }
 
@@ -247,6 +269,26 @@ impl NativeServices {
             .login(&email, &password, remember)
             .map(account_session)
             .map_err(operation)
+    }
+
+    pub fn account_register(
+        &self,
+        username: String,
+        name: Option<String>,
+        email: String,
+        password: String,
+    ) -> Result<AccountSession> {
+        self.inner
+            .account()
+            .register(&username, name.as_deref(), &email, &password)
+            .map(account_session)
+            .map_err(operation)
+    }
+
+    /// Origin-scoped Cookie header for `UploadAuthentication.session_cookie`.
+    /// The platform must store it in Keystore-backed custody and never log it.
+    pub fn account_cookie_context(&self) -> Result<String> {
+        self.inner.cookie_context().map_err(operation)
     }
 
     pub fn account_logout(&self) -> Result<()> {
@@ -387,6 +429,16 @@ impl NativeServices {
         core::open_recipient_key(&private_key, &metadata.recipient_key, &metadata.id)
             .map(|key| key.to_vec())
             .map_err(operation)
+    }
+
+    pub fn account_open_inbox(&self, transfer_id: String, private_key: Vec<u8>) -> Result<OpenedInbox> {
+        let private_key = Zeroizing::new(private_key);
+        self.inner.account().open_inbox(&transfer_id, &private_key).map_err(operation).map(|opened| OpenedInbox {
+            transfer_id: opened.transfer_id,
+            key_bundle_id: opened.key_bundle_id,
+            filenames: opened.filenames,
+            download_link: opened.download_link,
+        })
     }
 
     pub fn account_inbox_metadata(&self, transfer_id: String) -> Result<InboxMetadata> {

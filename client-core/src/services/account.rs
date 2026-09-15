@@ -1,11 +1,12 @@
-use anyhow::{Context, Result, bail};
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
+use anyhow::{bail, Context, Result};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use filebeam_encryption::{
     decrypt_manifest, derive_account_wrapping_key, derive_password_key, encrypt_manifest,
     generate_account_keypair, generate_nonce_prefix, open_recipient_envelope,
     seal_key_for_recipient,
 };
-use reqwest::{Url, blocking::Client};
+use filebeam_transfer::manifest::{validate_manifest, Manifest, ManifestServerItem};
+use reqwest::{blocking::Client, Url};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
@@ -52,6 +53,23 @@ pub struct InboxMetadata {
     pub id: String,
     pub encrypted_manifest: Option<String>,
     pub recipient_key: RecipientKey,
+    pub driver: String,
+    pub protocol_version: u8,
+    pub chunk_bytes: u64,
+    pub items: Vec<InboxServerItem>,
+}
+#[derive(Clone, Debug, Deserialize)]
+pub struct InboxServerItem {
+    pub id: String,
+    pub position: u64,
+    pub chunk_count: u64,
+}
+#[derive(Clone, Debug)]
+pub struct OpenedInbox {
+    pub transfer_id: String,
+    pub key_bundle_id: u64,
+    pub filenames: Vec<String>,
+    pub download_link: String,
 }
 #[derive(Clone, Debug, Deserialize)]
 pub struct RecipientKey {
@@ -93,6 +111,20 @@ struct Login<'a> {
     remember: bool,
 }
 
+#[derive(Serialize)]
+struct Register<'a> {
+    username: &'a str,
+    name: Option<&'a str>,
+    email: &'a str,
+    password: &'a str,
+    password_confirmation: &'a str,
+}
+#[derive(Deserialize)]
+struct ManifestEnvelope {
+    nonce_prefix: String,
+    ciphertext: String,
+}
+
 impl AccountService {
     pub(crate) fn new(instance: Url, http: Client) -> Self {
         Self { instance, http }
@@ -101,6 +133,7 @@ impl AccountService {
         let response = self
             .http
             .post(url(&self.instance, "api/native/v1/session")?)
+            .header("Sec-Fetch-Site", "same-origin")
             .json(&Login {
                 email,
                 password,
@@ -116,10 +149,39 @@ impl AccountService {
             .context("decode native session")
             .map(|v| v.data)
     }
+    pub fn register(
+        &self,
+        username: &str,
+        name: Option<&str>,
+        email: &str,
+        password: &str,
+    ) -> Result<AccountSession> {
+        let response = self
+            .http
+            .post(url(&self.instance, "api/native/v1/register")?)
+            .header("Sec-Fetch-Site", "same-origin")
+            .json(&Register {
+                username,
+                name,
+                email,
+                password,
+                password_confirmation: password,
+            })
+            .send()
+            .context("native registration")?;
+        if response.status().as_u16() != 201 {
+            bail!("native registration returned {}", response.status());
+        }
+        response
+            .json::<Api<AccountSession>>()
+            .context("decode native registration")
+            .map(|v| v.data)
+    }
     pub fn logout(&self) -> Result<()> {
         let response = self
             .http
             .delete(url(&self.instance, "api/native/v1/session")?)
+            .header("Sec-Fetch-Site", "same-origin")
             .send()
             .context("native logout")?;
         if response.status().as_u16() != 204 {
@@ -136,6 +198,60 @@ impl AccountService {
     pub fn inbox_metadata(&self, id: &str) -> Result<InboxMetadata> {
         self.get(&format!("api/native/v1/inbox/{id}/metadata"))
     }
+    /// Opens an inbox transfer entirely in Rust. The returned link contains the
+    /// authenticated share key and must be treated as a host secret.
+    pub fn open_inbox(&self, id: &str, private_key: &[u8]) -> Result<OpenedInbox> {
+        let metadata = self.inbox_metadata(id)?;
+        if metadata.id != id || metadata.protocol_version != 1 || metadata.driver != "http" {
+            bail!("inbox transfer metadata is not a supported HTTP v1 transfer");
+        }
+        validate_self_key(private_key, &metadata.recipient_key.bundle.public_key)?;
+        let key = open_recipient_key(private_key, &metadata.recipient_key, &metadata.id)?;
+        let envelope: ManifestEnvelope = serde_json::from_str(
+            metadata
+                .encrypted_manifest
+                .as_deref()
+                .context("inbox transfer has no encrypted manifest")?,
+        )
+        .context("invalid encrypted inbox manifest")?;
+        let prefix = URL_SAFE_NO_PAD
+            .decode(envelope.nonce_prefix)
+            .context("inbox manifest nonce is not base64url")?;
+        let ciphertext = URL_SAFE_NO_PAD
+            .decode(envelope.ciphertext)
+            .context("inbox manifest ciphertext is not base64url")?;
+        let bytes = decrypt_manifest(
+            &key,
+            &prefix,
+            &ciphertext,
+            format!("filebeam:v1:{}:manifest:manifest", metadata.id).as_bytes(),
+        )
+        .context("could not decrypt inbox manifest")?;
+        let manifest: Manifest =
+            serde_json::from_slice(&bytes).context("invalid decrypted inbox manifest")?;
+        let items = metadata
+            .items
+            .iter()
+            .map(|item| ManifestServerItem {
+                id: item.id.clone(),
+                position: item.position,
+                chunk_count: item.chunk_count,
+            })
+            .collect::<Vec<_>>();
+        validate_manifest(&manifest, &metadata.driver, metadata.chunk_bytes, &items)
+            .map_err(anyhow::Error::msg)?;
+        let share_key = URL_SAFE_NO_PAD.encode(&*key);
+        Ok(OpenedInbox {
+            transfer_id: metadata.id.clone(),
+            key_bundle_id: metadata.recipient_key.bundle.id,
+            filenames: manifest.items.into_iter().map(|item| item.name).collect(),
+            download_link: format!(
+                "{}/{}#k=v1.{share_key}",
+                self.instance.as_str().trim_end_matches('/'),
+                metadata.id
+            ),
+        })
+    }
     pub fn account_keys(&self) -> Result<Vec<AccountKeyBundle>> {
         self.get("api/native/v1/account/keys")
     }
@@ -146,6 +262,7 @@ impl AccountService {
         let response = self
             .http
             .post(url(&self.instance, "api/native/v1/account/keys")?)
+            .header("Sec-Fetch-Site", "same-origin")
             .json(key)
             .send()
             .context("upload native account key")?;
@@ -161,6 +278,7 @@ impl AccountService {
         let response = self
             .http
             .patch(url(&self.instance, "api/native/v1/inbox")?)
+            .header("Sec-Fetch-Site", "same-origin")
             .json(&serde_json::json!({"enabled": enabled}))
             .send()
             .context("update native inbox")?;
@@ -377,5 +495,38 @@ mod tests {
             &private
         );
         assert!(unwrap_password_key(&envelope, b"wrong", 7, &public).is_err());
+    }
+
+    #[test]
+    fn inbox_recipient_envelopes_reject_wrong_private_keys_and_tampering() {
+        let recipient_pair = generate_account_keypair().unwrap();
+        let wrong_pair = generate_account_keypair().unwrap();
+        let public = URL_SAFE_NO_PAD.encode(&recipient_pair[32..]);
+        let recipient = Recipient {
+            id: 7,
+            username: "receiver".into(),
+            public_key: public.clone(),
+            account_key_bundle_id: 11,
+            version: 1,
+            fingerprint: "unused".into(),
+        };
+        let transfer_key = [9_u8; 32];
+        let encrypted_key = seal_recipient_key(&transfer_key, &recipient, "01ARZ3NDEKTSV4RRFFQ69G5FAV").unwrap();
+        let bundle = AccountKeyBundle {
+            id: 11,
+            user_id: 7,
+            version: 1,
+            public_key: public,
+            fingerprint: "unused".into(),
+            custody_mode: "self".into(),
+            encrypted_private_key: None,
+            is_active: true,
+        };
+        let key = RecipientKey { bundle, encrypted_key };
+        assert_eq!(open_recipient_key(&recipient_pair[..32], &key, "01ARZ3NDEKTSV4RRFFQ69G5FAV").unwrap().as_slice(), transfer_key);
+        assert!(open_recipient_key(&wrong_pair[..32], &key, "01ARZ3NDEKTSV4RRFFQ69G5FAV").is_err());
+        let mut tampered = key.clone();
+        tampered.encrypted_key.pop();
+        assert!(open_recipient_key(&recipient_pair[..32], &tampered, "01ARZ3NDEKTSV4RRFFQ69G5FAV").is_err());
     }
 }

@@ -983,11 +983,13 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "filebeam-encryption",
+ "filebeam-transfer",
  "filebeam-transfer-native",
  "reqwest",
  "serde",
  "serde_json",
  "sha2 0.11.0",
+ "tokio",
  "zeroize",
 ]
 

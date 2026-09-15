@@ -3,6 +3,7 @@
 mod client;
 mod error;
 mod job;
+mod notes;
 mod secret_store;
 mod self_test;
 mod services;
@@ -12,7 +13,8 @@ mod types;
 pub use client::TransferClient;
 pub use error::{ClientError, Result, invalid, operation};
 pub use job::TransferJob;
-pub use secret_store::SecretStoreCallback;
+pub use notes::{CreatedNote, NoteRequest, OpenedNote};
+pub use secret_store::{SecretStoreCallback, checkpoint_self_test};
 pub use self_test::{crypto_self_test, webrtc_self_test};
 pub use services::NativeServices;
 pub use source::SourceCallback;
@@ -52,6 +54,7 @@ mod tests {
         let options = client::upload_options(UploadOptions {
             transport: Transport::WebRtc,
             archive: false,
+            turbo: false,
             password: true,
             retention_hours: Some(72),
             authentication: UploadAuthentication {
@@ -75,6 +78,7 @@ mod tests {
             client::upload_options(UploadOptions {
                 transport: Transport::Http,
                 archive: false,
+                turbo: false,
                 password: false,
                 retention_hours: None,
                 authentication: UploadAuthentication {
@@ -89,6 +93,22 @@ mod tests {
             client::upload_options(UploadOptions {
                 transport: Transport::WebRtc,
                 archive: false,
+                turbo: true,
+                password: false,
+                retention_hours: None,
+                authentication: UploadAuthentication {
+                    bearer_token: None,
+                    session_cookie: None,
+                },
+                recipient: None,
+            })
+            .is_err()
+        );
+        assert!(
+            client::upload_options(UploadOptions {
+                transport: Transport::WebRtc,
+                archive: false,
+                turbo: false,
                 password: false,
                 retention_hours: None,
                 authentication: UploadAuthentication {

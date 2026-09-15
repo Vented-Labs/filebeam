@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
+import androidx.core.net.toUri
 import android.os.storage.StorageManager
 import io.filebeam.android.R
 import kotlinx.coroutines.Dispatchers
@@ -18,6 +19,7 @@ import org.json.JSONObject
 /** Sources are durable seekable snapshots; bytes never pass through the FFI. */
 class DocumentStorage(private val context: Context) {
     val root = File(context.noBackupFilesDir, "documents").apply { mkdirs() }
+    private val treeNames = mutableMapOf<String, String>()
 
     data class DocumentSelection(val uri: Uri, val relativePath: String)
     data class ProviderInput(
@@ -175,7 +177,9 @@ class DocumentStorage(private val context: Context) {
                 }
             }
         }
-        return selections.sortedBy { it.relativePath }
+        return selections.sortedBy { it.relativePath }.also { flattened ->
+            flattened.forEach { treeNames[it.uri.toString()] = it.relativePath }
+        }
     }
 
     /** A seekable provider input for the FFI source callback; no bytes are copied. */
@@ -190,17 +194,22 @@ class DocumentStorage(private val context: Context) {
             check(cursor.moveToFirst()) { "The source is unavailable" }
             "${cursor.getLong(0)}:${if (cursor.isNull(1)) 0 else cursor.getLong(1)}"
         } ?: "$length:0"
-        return ProviderInput(uri.toString(), safeName(displayName), offset, length - offset, token)
+        return ProviderInput(uri.toString(), treeNames[uri.toString()] ?: safeRelativePath(displayName), offset, length - offset, token)
+    }
+
+    /** Tree leaves retain relative paths for native ZIP and collision-safe individual names. */
+    fun treeProviderInputs(tree: Uri): List<ProviderInput> = flattenDocumentTree(tree).map {
+        providerInput(it.uri, it.relativePath)
     }
 
     /** Reopens and transfers ownership of a duplicate FD to the native callback. */
     fun openProviderDescriptor(identity: String): Int {
-        val descriptor = context.contentResolver.openFileDescriptor(Uri.parse(identity), "r")
+        val descriptor = context.contentResolver.openFileDescriptor(identity.toUri(), "r")
             ?: error("The source could not be reopened")
         return descriptor.detachFd()
     }
 
-    fun providerMutationToken(identity: String): String = providerInput(Uri.parse(identity), "source").mutationToken
+    fun providerMutationToken(identity: String): String = providerInput(identity.toUri(), "source").mutationToken
 
     /** Deletes only interrupted partial imports; completed snapshots remain resumable. */
     fun cleanupAbandonedImports(recoverableIds: Set<String>) {

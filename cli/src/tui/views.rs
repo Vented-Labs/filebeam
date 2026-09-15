@@ -233,12 +233,12 @@ fn send(area: Rect, buffer: &mut Buffer, state: &mut State, theme: Theme) -> Opt
         Block::default()
             .style(Style::default().bg(theme.raised()))
             .render(tray, buffer);
-        let action_width = 26.min(tray.width / 2);
+        let action_width = tray.width / 2;
         paint::line(
             Rect::new(
                 tray.x + 2,
                 tray.y + u16::from(tray.height > 2),
-                tray.width.saturating_sub(action_width + 3),
+                tray.width.saturating_sub(action_width * 2 + 3),
                 1,
             ),
             buffer,
@@ -251,17 +251,16 @@ fn send(area: Rect, buffer: &mut Buffer, state: &mut State, theme: Theme) -> Opt
                 theme.strong(),
             ),
         );
-        paint::button(
+        send_actions(
             Rect::new(
-                tray.right() - action_width,
+                tray.right() - action_width * 2,
                 tray.y,
-                action_width,
+                action_width * 2,
                 tray.height,
             ),
             buffer,
+            state,
             theme,
-            "Send encrypted  ↵",
-            state.focus == Focus::Action,
         );
         cursor
     }
@@ -565,17 +564,40 @@ fn queue(area: Rect, buffer: &mut Buffer, state: &mut State, theme: Theme) {
             Line::styled(limits, theme.dim()),
         );
     }
-    paint::button(
+    send_actions(
         at(inner, inner.height.saturating_sub(4), 3),
         buffer,
+        state,
         theme,
-        "Send encrypted  ↵",
-        state.focus == Focus::Action,
     );
     paint::line(
         at(inner, inner.height.saturating_sub(1), 1),
         buffer,
         Line::styled("Only your link can unlock it.", theme.dim()),
+    );
+}
+
+fn send_actions(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) {
+    let gap = u16::from(area.width >= 54);
+    let left_width = (area.width.saturating_sub(gap)) / 2;
+    paint::button(
+        Rect::new(area.x, area.y, left_width, area.height),
+        buffer,
+        theme,
+        "Send Encrypted  ↵",
+        state.focus == Focus::Action,
+    );
+    paint::button(
+        Rect::new(
+            area.x + left_width + gap,
+            area.y,
+            area.width.saturating_sub(left_width + gap),
+            area.height,
+        ),
+        buffer,
+        theme,
+        "Turbo Transfer  Shift+↵",
+        state.focus == Focus::Action,
     );
 }
 
@@ -1018,7 +1040,8 @@ fn footer_view(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) {
     } else {
         vec![
             ("Space", "select"),
-            ("u", "send"),
+            ("Enter", "send encrypted"),
+            ("Shift+Enter", "Turbo transfer"),
             ("Tab", "focus"),
             ("/", "search"),
             ("?", "help"),
@@ -1070,6 +1093,10 @@ fn help(area: Rect, buffer: &mut Buffer, theme: Theme) {
         ("Enter / Backspace", "Open folder / go to parent"),
         ("/  then type", "Search files (Enter applies, Esc clears)"),
         (". / Ctrl+R", "Hidden files / refresh directory"),
+        (
+            "Enter / Shift+Enter",
+            "Send encrypted / Turbo transfer (supported terminals)",
+        ),
         ("u / U", "Send selected files / update beam"),
         ("c", "Copy a completed result via terminal clipboard"),
         ("Ctrl+C", "Cancel active transfer, or exit when idle"),
@@ -1213,6 +1240,21 @@ mod tests {
         let text: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
         assert!(text.contains("file-79.txt"));
         assert!(state.scroll > 0);
+    }
+
+    #[test]
+    fn send_form_exposes_both_transfer_actions() {
+        let directory = tempfile::tempdir().unwrap();
+        let config = Config::default();
+        let mut state =
+            State::new(&config, "http://localhost:8000", directory.path().into()).unwrap();
+        state.focus = Focus::Action;
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 120, 36));
+        render(buffer.area, &mut buffer, &mut state, Theme::fixture());
+        let text: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+        assert!(text.contains("Send Encrypted"));
+        assert!(text.contains("Turbo Transfer"));
+        assert!(text.contains("Shift+"));
     }
 
     #[test]

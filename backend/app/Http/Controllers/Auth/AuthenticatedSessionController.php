@@ -58,6 +58,7 @@ class AuthenticatedSessionController extends Controller
         RateLimiter::clear($key);
         RateLimiter::clear($ipKey);
         $request->session()->regenerate();
+        $this->recordPasswordHash($request);
 
         if ($request->expectsJson()) {
             return response()->json(['data' => $this->session($request)]);
@@ -93,5 +94,14 @@ class AuthenticatedSessionController extends Controller
             'inboxEnabled' => $user->inbox_enabled,
             'usernameRoutingEnabled' => app(InstanceSettings::class)->boolean('username_routing'),
         ];
+    }
+
+    private function recordPasswordHash(Request $request): void
+    {
+        $user = $request->user();
+        assert($user !== null);
+
+        // Native cookie sessions need a baseline to detect a later password reset.
+        $request->session()->put('password_hash_'.config('auth.defaults.guard'), $user->getAuthPassword());
     }
 }

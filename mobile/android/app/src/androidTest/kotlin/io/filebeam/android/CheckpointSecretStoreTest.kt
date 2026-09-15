@@ -3,6 +3,8 @@ package io.filebeam.android
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.filebeam.android.platform.security.CheckpointSecretStore
+import io.filebeam.rust.SecretStoreCallback
+import io.filebeam.rust.checkpointSelfTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Test
@@ -29,6 +31,14 @@ class CheckpointSecretStoreTest {
         store.loadOrCreate(scope)
         KeyStore.getInstance("AndroidKeyStore").apply { load(null); deleteEntry(alias(root)) }
         assertThrows(IllegalStateException::class.java) { store.loadOrCreate(scope) }
+    }
+
+    @Test fun installedRustCatalogPublishesFirstImmutableArtifactWithKeystoreCallback() = withStore { store, root, _ ->
+        val callback = object : SecretStoreCallback {
+            override fun loadOrCreate(scope: String): ByteArray = store.loadOrCreate(scope)
+            override fun remove(scope: String) = store.remove(scope)
+        }
+        assertEquals(true, checkpointSelfTest(root.absolutePath, callback))
     }
 
     private fun withStore(block: (CheckpointSecretStore, File, File) -> Unit) {

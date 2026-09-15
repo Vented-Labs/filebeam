@@ -10,12 +10,17 @@ if [[ ${FILEBEAM_ANDROID_DEVICE_CONTAINER:-} != 1 ]]; then
     fi
     # Recent emulator modem simulation uses ::1 with AI_ADDRCONFIG. A network
     # with a non-loopback IPv6 address is required even for this local traffic.
-    network="filebeam-android-test-$$"
-    subnet=$(printf 'fd42:fb:%x::/64' "$(( $$ % 65535 ))")
-    docker network create --ipv6 --subnet "$subnet" "$network" >/dev/null
-    trap 'docker network rm "$network" >/dev/null 2>&1 || true' EXIT
-    docker run --rm --init "${devices[@]}" --network "$network" \
-        --sysctl net.ipv6.conf.all.disable_ipv6=0 --sysctl net.ipv6.conf.default.disable_ipv6=0 \
+    network_args=()
+    if [[ ${FILEBEAM_ANDROID_DEVICE_NETWORK:-isolated} == host ]]; then
+        network_args+=(--network host)
+    else
+        network="filebeam-android-test-$$"
+        subnet=$(printf 'fd42:fb:%x::/64' "$(( $$ % 65535 ))")
+        docker network create --ipv6 --subnet "$subnet" "$network" >/dev/null
+        trap 'docker network rm "$network" >/dev/null 2>&1 || true' EXIT
+        network_args+=(--network "$network" --sysctl net.ipv6.conf.all.disable_ipv6=0 --sysctl net.ipv6.conf.default.disable_ipv6=0)
+    fi
+    docker run --rm --init "${devices[@]}" "${network_args[@]}" \
         --memory "${FILEBEAM_ANDROID_MEMORY:-6g}" --cpus "${FILEBEAM_ANDROID_CPUS:-4}" \
         --user "$(id -u):$(id -g)" --env HOME=/tmp/home \
         --env FILEBEAM_ANDROID_DEVICE_CONTAINER=1 --env FILEBEAM_ANDROID_ACCEL="$accel" \

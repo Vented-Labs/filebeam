@@ -9,6 +9,7 @@ import io.filebeam.android.platform.background.ExecutionGate
 import io.filebeam.android.platform.security.CheckpointSecretStore
 import io.filebeam.android.platform.security.PendingTransferStore
 import io.filebeam.android.platform.storage.DocumentStorage
+import io.filebeam.android.platform.services.AccountSessionRegistry
 import io.filebeam.rust.ClientConfig
 import io.filebeam.rust.JobState
 import io.filebeam.rust.SavedTransfer
@@ -18,7 +19,11 @@ import io.filebeam.rust.TransferSnapshot
 import io.filebeam.rust.Transport
 import io.filebeam.rust.UploadOptions
 import io.filebeam.rust.UploadAuthentication
+import io.filebeam.rust.UploadRecipient
 import io.filebeam.rust.SecretStoreCallback
+import io.filebeam.rust.SourceCallback
+import io.filebeam.rust.SourceKind
+import io.filebeam.rust.UploadSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -51,6 +56,7 @@ data class UploadRequest(
     val uris: List<Uri>,
     val transport: Transport,
     val archive: Boolean,
+    val turbo: Boolean = false,
     val passwordProtected: Boolean = false,
     val retentionHours: ULong? = null,
     val account: String? = null,
@@ -58,7 +64,11 @@ data class UploadRequest(
 )
 
 /** Process-scoped owner. Activities collect state; Android jobs/services execute work. */
-class TransferCoordinator(private val context: Context, private val settings: SettingsStore) {
+class TransferCoordinator(
+    private val context: Context,
+    private val settings: SettingsStore,
+    private val accountSessions: AccountSessionRegistry,
+) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val mutable = MutableStateFlow(TransferUiState())
     val state = mutable.asStateFlow()
@@ -66,26 +76,41 @@ class TransferCoordinator(private val context: Context, private val settings: Se
     private val pending = PendingTransferStore(context)
     val storage = DocumentStorage(context)
     private var active: TransferJob? = null
+    private var nativeClient: TransferClient? = null
+    private var nativeClientRelayOnly: Boolean? = null
     @Volatile private var pauseRequested = false
     @Volatile private var pausedByUser = false
 
     init { refresh() }
 
-    private fun client(relayOnly: Boolean = false): TransferClient {
+    @Synchronized private fun client(relayOnly: Boolean = false): TransferClient {
+        nativeClient?.takeIf { nativeClientRelayOnly == relayOnly }?.let { return it }
+        check(active == null) { "Cannot replace the native scheduler while a transfer is active" }
+        nativeClient?.destroy()
         val root = File(context.noBackupFilesDir, "transfers")
         val config = ClientConfig(root.absolutePath, 128u, 2u, relayOnly, BuildConfig.DEBUG)
         val secrets = CheckpointSecretStore(context, root)
-        return TransferClient.newWithSecretStore(config, object : SecretStoreCallback {
+        return TransferClient.newWithCallbacks(config, object : SecretStoreCallback {
             override fun loadOrCreate(scope: String): ByteArray = secrets.loadOrCreate(scope)
             override fun remove(scope: String) = secrets.remove(scope)
-        })
+        }, object : SourceCallback {
+            override fun open(identity: String): Long = storage.openProviderDescriptor(identity).toLong()
+            override fun mutationToken(identity: String): String = storage.providerMutationToken(identity)
+        }).also { nativeClient = it; nativeClientRelayOnly = relayOnly }
     }
+    private fun platformClient() = client(nativeClientRelayOnly ?: false)
 
     fun upload(uris: List<Uri>, transport: Transport, archive: Boolean) = upload(UploadRequest(uris, transport, archive))
 
     fun upload(request: UploadRequest) = submit { config ->
-        JSONObject().put("kind", "upload").put("uris", JSONArray(request.uris.map(Uri::toString)))
+        val providers = runCatching { JSONArray(request.uris.map { uri ->
+            val input = storage.providerInput(uri, uri.lastPathSegment ?: "file")
+            JSONObject().put("identity", input.identity).put("name", input.displayName)
+                .put("offset", input.offset).put("length", input.length).put("mutation", input.mutationToken)
+        }) }.getOrNull()
+        JSONObject().put("kind", "upload").put("uris", JSONArray(request.uris.map(Uri::toString))).putOpt("providers", providers)
             .put("live", request.transport == Transport.WEB_RTC).put("archive", request.archive)
+            .put("turbo", request.turbo)
             .put("passwordProtected", request.passwordProtected).putOpt("retentionHours", request.retentionHours?.toString())
             .putOpt("account", request.account).put("recipients", JSONArray(request.recipients))
             .put("instance", config.instance).put("relay", config.relayOnly)
@@ -141,7 +166,6 @@ class TransferCoordinator(private val context: Context, private val settings: Se
 
     /** Called only by the active JobService/foreground service. */
     suspend fun execute() = execution.run {
-        var nativeClient: TransferClient? = null
         try {
             if (pausedByUser) return@run
             pauseRequested = false
@@ -156,8 +180,7 @@ class TransferCoordinator(private val context: Context, private val settings: Se
                 mutable.update { it.copy(phase = "complete", message = context.getString(R.string.saved_file)) }
                 return@run
             }
-            nativeClient = client(request.optBoolean("relay"))
-            val api = nativeClient
+            val api = client(request.optBoolean("relay"))
             val id = request.getString("id")
             val checkpoint = request.optString("checkpoint").takeIf(String::isNotBlank)
             active = withContext(Dispatchers.IO) {
@@ -171,26 +194,43 @@ class TransferCoordinator(private val context: Context, private val settings: Se
                             (0 until values.length()).map { Uri.parse(values.getString(it)) }
                         }
                         val info = api.discover(request.getString("instance"))
-                        check(info.anonymousUploads) { "This instance requires an account to send files" }
                         val live = request.optBoolean("live")
-                        check(!request.has("account") && request.optJSONArray("recipients")?.length() == 0) {
-                            "Username recipients require a newer native upload contract"
-                        }
+                        check(!request.optBoolean("turbo") || !live) { "Turbo Transfer requires HTTP" }
+                        val origin = AccountSessionRegistry.normalizeOrigin(request.getString("instance"))
+                        val cookie = accountSessions.cookie(origin)
+                        check(info.anonymousUploads || cookie != null) { "This instance requires an account to send files" }
                         check((if (live) "webrtc" else "http") in info.enabledTransports) { "This transport is disabled by the instance" }
                         val limit = if (live) info.webrtcMaximumFileCount else info.maximumFileCount
                         val count = if (request.optBoolean("archive")) 1uL else uris.size.toULong()
                         check(limit == null || count <= limit) { "The selection exceeds this instance's file-count limit" }
-                        val paths = storage.importFiles(id, uris, live, {
-                            if (pauseRequested) throw CancellationException()
-                        }) { bytes -> mutable.update { it.copy(preparedBytes = bytes) } }
-                        api.startUploadWithOptions(request.getString("instance"), paths, UploadOptions(
+                        val recipientName = request.optJSONArray("recipients")?.optString(0)?.trim()?.takeIf(String::isNotBlank)
+                        val recipient = recipientName?.let { username ->
+                            val resolved = accountSessions.service(origin).accountRecipient(username)
+                            UploadRecipient(resolved.username, resolved.id, resolved.accountKeyBundleId, resolved.publicKey)
+                        }
+                        val options = UploadOptions(
                             transport = if (live) Transport.WEB_RTC else Transport.HTTP,
                             archive = request.optBoolean("archive"),
+                            turbo = request.optBoolean("turbo"),
                             password = request.optBoolean("passwordProtected"),
                             retentionHours = request.optString("retentionHours").takeIf(String::isNotBlank)?.toULong(),
-                            authentication = UploadAuthentication(null, null),
-                            recipient = null,
-                        ))
+                            authentication = UploadAuthentication(null, cookie),
+                            recipient = recipient,
+                        )
+                        val sources = request.optJSONArray("providers")?.let { values ->
+                            (0 until values.length()).map { index -> values.getJSONObject(index) }.map { value ->
+                                UploadSource(SourceKind.PROVIDER, value.getString("name"), value.getString("identity"),
+                                    value.getLong("offset").toULong(), value.getLong("length").toULong(), value.getString("mutation"))
+                            }
+                        }
+                        if (!sources.isNullOrEmpty()) {
+                            api.startUploadSources(request.getString("instance"), sources, options)
+                        } else {
+                            val paths = storage.importFiles(id, uris, live, {
+                                if (pauseRequested) throw CancellationException()
+                            }) { bytes -> mutable.update { it.copy(preparedBytes = bytes) } }
+                            api.startUploadWithOptions(request.getString("instance"), paths, options)
+                        }
                     }
                     else -> api.startDownload(request.getString("instance"), request.getString("link"), storage.outputDirectory(id))
                 }
@@ -228,7 +268,6 @@ class TransferCoordinator(private val context: Context, private val settings: Se
         } finally {
             active?.destroy()
             active = null
-            nativeClient?.destroy()
             mutable.update { it.copy(busy = false) }
             refresh()
         }
@@ -282,8 +321,8 @@ class TransferCoordinator(private val context: Context, private val settings: Se
         scope.launch {
             try {
                 withContext(Dispatchers.IO) {
-                    val api = client()
-                    try { api.discard(id) } finally { api.destroy() }
+                    val api = platformClient()
+                    api.discard(id)
                     val association = association(id)
                     association.load()?.optString("id")?.takeIf { UUID.fromString(it).toString() == it }?.let {
                         File(storage.root, it).deleteRecursively()
@@ -300,8 +339,7 @@ class TransferCoordinator(private val context: Context, private val settings: Se
         scope.launch {
             try {
                 val (saved, hasPending) = withContext(Dispatchers.IO) {
-                    val api = client()
-                    try { api.savedTransfers() to (pending.load() != null) } finally { api.destroy() }
+                    platformClient().savedTransfers() to (pending.load() != null)
                 }
                 mutable.update { it.copy(saved = saved, pending = hasPending) }
             } catch (error: Exception) { message(error.message ?: context.getString(R.string.unknown_error)) }
@@ -311,8 +349,7 @@ class TransferCoordinator(private val context: Context, private val settings: Se
     fun checkInstance(instance: String) = scope.launch {
         try {
             val info = withContext(Dispatchers.IO) {
-                val api = client()
-                try { api.discover(instance) } finally { api.destroy() }
+                platformClient().discover(instance)
             }
             message(context.getString(R.string.connected_instance, info.name))
         } catch (error: Exception) { message(error.message ?: context.getString(R.string.unknown_error)) }

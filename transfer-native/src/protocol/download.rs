@@ -50,8 +50,43 @@ struct DownloadJob {
     #[serde(default = "http_driver")]
     driver: String,
     envelope: String,
+    #[serde(default)]
+    turbo: Option<TurboJob>,
     output: PathBuf,
     items: Vec<SavedItem>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct TurboJob {
+    descriptor: String,
+    session_id: String,
+    session_token: String,
+    sequence: u64,
+}
+
+#[derive(Deserialize)]
+struct TurboDescriptor {
+    version: u8,
+    purpose: String,
+    chunk_bytes: u64,
+    items: Vec<TurboDescriptorItem>,
+}
+
+#[derive(Deserialize)]
+struct TurboDescriptorItem {
+    id: String,
+    name: String,
+    #[serde(rename = "type")]
+    mime: String,
+    size: u64,
+    nonce_prefix: String,
+    chunk_count: u64,
+}
+
+#[derive(Deserialize)]
+struct TurboSession {
+    id: String,
+    token: String,
 }
 
 fn http_driver() -> String {
@@ -105,6 +140,7 @@ struct FetchChunkRequest<'a> {
     item_name: &'a str,
     item_size: u64,
     fresh: bool,
+    turbo: bool,
 }
 
 struct AuthenticateAndWriteRequest<'a> {
@@ -390,10 +426,9 @@ async fn async_run(
     let transfer = metadata(&client, &link.instance, &link.id, &cancel, &control).await?;
     validate_transfer(&transfer, &link.id)?;
     reject_live_note(&transfer)?;
-    let envelope = transfer
-        .encrypted_manifest
-        .clone()
-        .context("transfer has no encrypted manifest")?;
+    let descriptor = transfer.encrypted_manifest.is_none().then(|| transfer.encrypted_descriptor.clone()).flatten();
+    let envelope = transfer.encrypted_manifest.clone().or_else(|| descriptor.clone())
+        .context("transfer has no encrypted manifest or Turbo descriptor")?;
     let unlock_link = Link {
         id: link.id.clone(),
         key: link.key.clone(),
@@ -406,7 +441,11 @@ async fn async_run(
     store.save_secret("share-key", &share_key)?;
     fs::create_dir_all(&output)?;
     let output = fs::canonicalize(&output).context("canonicalize download output directory")?;
-    let manifest = manifest_for(&master, &link.id, &envelope, &transfer, &control)?;
+    let manifest = if descriptor.is_some() {
+        turbo_descriptor_for(&master, &link.id, &envelope, &transfer, &control)?
+    } else {
+        manifest_for(&master, &link.id, &envelope, &transfer, &control)?
+    };
     let live_join_token = live_join_token(&transfer, &manifest)?;
     let total = manifest
         .items
@@ -427,13 +466,17 @@ async fn async_run(
                 size: item.size,
                 nonce_prefix: item.nonce_prefix.clone(),
                 chunk_count: item.chunk_count,
-                digest: item.digest.value.clone(),
+                digest: if descriptor.is_some() { String::new() } else { item.digest.value.clone() },
                 target: collision_free(&output, &safe_filename(&item.name)),
                 verified: vec![false; item.chunk_count as usize],
                 published: false,
             })
         })
         .collect::<Result<Vec<_>>>()?;
+    let turbo = if let Some(descriptor) = descriptor {
+        let session = create_turbo_session(&client, &link.instance, &link.id, &items, &cancel).await?;
+        Some(TurboJob { descriptor, session_id: session.id, session_token: session.token, sequence: 0 })
+    } else { None };
     let job = DownloadJob {
         version: VERSION,
         id: store
@@ -453,6 +496,7 @@ async fn async_run(
         ranges: server_ranges(&capabilities, &transfer),
         driver: transfer.driver.clone(),
         envelope,
+        turbo,
         output,
         items,
     };
@@ -488,8 +532,9 @@ async fn async_resume(store: Store, mut job: DownloadJob, control: Control) -> R
     validate_transfer(&transfer, &job.transfer_id)?;
     reject_live_note(&transfer)?;
     if transfer.chunk_bytes != job.chunk_bytes
-        || transfer.encrypted_manifest.as_deref() != Some(&job.envelope)
         || transfer.driver != job.driver
+        || (job.turbo.is_none() && transfer.encrypted_manifest.as_deref() != Some(&job.envelope))
+        || (job.turbo.is_some() && transfer.encrypted_descriptor.as_deref() != job.turbo.as_ref().map(|turbo| turbo.descriptor.as_str()))
     {
         bail!("transfer identity changed; refusing saved ciphertext");
     }
@@ -498,13 +543,11 @@ async fn async_resume(store: Store, mut job: DownloadJob, control: Control) -> R
     let master = unlock_saved_async(share_key, job.envelope.clone(), control.clone()).await?;
     job.server_concurrency = server_download_limit(&capabilities, &transfer);
     job.ranges = server_ranges(&capabilities, &transfer);
-    let manifest = manifest_for(
-        &master,
-        &job.transfer_id,
-        &job.envelope,
-        &transfer,
-        &control,
-    )?;
+    let manifest = if job.turbo.is_some() {
+        turbo_descriptor_for(&master, &job.transfer_id, &job.envelope, &transfer, &control)?
+    } else {
+        manifest_for(&master, &job.transfer_id, &job.envelope, &transfer, &control)?
+    };
     let live_join_token = live_join_token(&transfer, &manifest)?;
     if manifest.items.len() != job.items.len() {
         bail!("saved download layout changed");
@@ -515,7 +558,7 @@ async fn async_resume(store: Store, mut job: DownloadJob, control: Control) -> R
         if saved.id != item.id
             || saved.size != item.size
             || saved.chunk_count != item.chunk_count
-            || saved.digest != item.digest.value
+            || (job.turbo.is_none() && saved.digest != item.digest.value)
         {
             bail!("saved download layout changed");
         }
@@ -623,7 +666,7 @@ async fn download(
     // queue work on resume, yet still needs the authenticated scratch file
     // published before the job can become complete.
     for item_index in 0..job.items.len() {
-        if !job.items[item_index].published && job.items[item_index].verified.iter().all(|ok| *ok) {
+        if job.turbo.is_none() && !job.items[item_index].published && job.items[item_index].verified.iter().all(|ok| *ok) {
             control.phase(Phase::Finalizing)?;
             let store_path = store.path().to_path_buf();
             let item = job.items[item_index].clone();
@@ -656,6 +699,7 @@ async fn download(
         }
     }
     let mut fetched = FuturesUnordered::new();
+    let turbo_download = job.turbo.is_some();
     while !pending.is_empty() || !fetched.is_empty() {
         // This is the sole request budget for every item. New slots are filled
         // immediately after any body/completion sample raises the adaptive limit.
@@ -716,6 +760,7 @@ async fn download(
                         item_name: &item.name,
                         item_size: item.size,
                         fresh: false,
+                        turbo: turbo_download,
                     })
                     .await?
                 };
@@ -837,6 +882,7 @@ async fn download(
                         item_name: &item.name,
                         item_size: item.size,
                         fresh: true,
+                        turbo: turbo_download,
                     })
                     .await?
                 };
@@ -868,6 +914,8 @@ async fn download(
             .checked_add(expected)
             .context("download progress overflow")?;
         store.save(&job)?;
+        report_turbo(&client, &mut job, "downloading", &cancel).await?;
+        store.save(&job)?;
         let (display_done, item_done) = receiving
             .lock()
             .unwrap()
@@ -879,7 +927,7 @@ async fn download(
         );
         control.advance(display_done, item_done, 0);
         control.commit(job.done);
-        if !job.items[item_index].published && job.items[item_index].verified.iter().all(|ok| *ok) {
+        if job.turbo.is_none() && !job.items[item_index].published && job.items[item_index].verified.iter().all(|ok| *ok) {
             control.phase(Phase::Finalizing)?;
             let store_path = store.path().to_path_buf();
             let item = job.items[item_index].clone();
@@ -894,6 +942,19 @@ async fn download(
                 .await
                 .context("download cleanup worker stopped")?;
         }
+    }
+    if job.turbo.is_some() {
+        finalize_turbo_manifest(&client, &mut job, &master, &cancel, &control).await?;
+        for item_index in 0..job.items.len() {
+            let store_path = store.path().to_path_buf();
+            let item = job.items[item_index].clone();
+            tokio::task::spawn_blocking(move || publish_item(&store_path, &item, item_index)).await
+                .context("Turbo publication worker stopped")??;
+            job.items[item_index].published = true;
+            store.save(&job)?;
+        }
+        report_turbo(&client, &mut job, "completed", &cancel).await?;
+        store.save(&job)?;
     }
     job.state = "complete".into();
     store.save(&job)?;
@@ -1081,11 +1142,13 @@ async fn fetch_chunk(request: FetchChunkRequest<'_>) -> Result<Vec<u8>> {
         item_name,
         item_size,
         fresh,
+        turbo,
     } = request;
     let expected = plain + TAG_BYTES;
     let path = cipher_path(directory, item, chunk);
     let etag_path = etag_path(directory, item, chunk);
-    for attempt in 0..MAX_ATTEMPTS {
+    let attempts = if turbo { MAX_ATTEMPTS.saturating_mul(100) } else { MAX_ATTEMPTS };
+    for attempt in 0..attempts {
         let attempt_started = Instant::now();
         let metadata_path = path.clone();
         let mut existing =
@@ -1380,6 +1443,75 @@ fn manifest_for(
     validate_manifest(&manifest, transfer)?;
     Ok(manifest)
 }
+
+fn turbo_descriptor_for(
+    key: &[u8], id: &str, envelope: &str, transfer: &Transfer, control: &Control,
+) -> Result<Manifest> {
+    if transfer.driver != "http" { bail!("Turbo descriptors require HTTP transfers"); }
+    let envelope: Envelope = serde_json::from_str(envelope).context("invalid Turbo descriptor envelope")?;
+    let _memory = control.reserve_memory(manifest_crypto_bytes(envelope.ciphertext.len())?)?;
+    let bytes = decrypt_manifest(key, &decode(&envelope.nonce_prefix)?, &decode(&envelope.ciphertext)?,
+        format!("filebeam:v1:{id}:descriptor:descriptor").as_bytes()).context("could not decrypt Turbo descriptor")?;
+    let descriptor: TurboDescriptor = serde_json::from_slice(&bytes).context("invalid Turbo descriptor")?;
+    if descriptor.version != 1 || descriptor.purpose != "turbo-descriptor" || descriptor.chunk_bytes != transfer.chunk_bytes
+        || descriptor.items.len() != transfer.items.len() { bail!("Turbo descriptor does not match transfer"); }
+    let mut ids = HashSet::new();
+    let mut value = serde_json::json!({"version": 1, "items": []});
+    for item in descriptor.items {
+        let server = transfer.items.iter().find(|server| server.id == item.id)
+            .context("Turbo descriptor references an unknown item")?;
+        if item.id.is_empty() || item.name.is_empty() || item.mime.len() > 255 || !ids.insert(item.id.clone())
+            || item.chunk_count == 0 || item.chunk_count != server.chunk_count
+            || item.chunk_count != item.size.div_ceil(transfer.chunk_bytes).max(1)
+            || decode(&item.nonce_prefix)?.len() != 16 { bail!("Turbo descriptor item is invalid"); }
+        value["items"].as_array_mut().unwrap().push(serde_json::json!({
+            "id": item.id, "name": item.name, "type": item.mime, "size": item.size,
+            "nonce_prefix": item.nonce_prefix, "chunk_count": item.chunk_count,
+            "digest": {"algorithm":"sha256", "value": ""}
+        }));
+    }
+    Ok(serde_json::from_value(value)?)
+}
+
+async fn create_turbo_session(client: &Client, instance: &str, id: &str, items: &[SavedItem], cancel: &CancellationToken) -> Result<TurboSession> {
+    let response = tokio::select! { _ = cancel.cancelled() => bail!("transfer cancelled"), r = client.post(format!("{instance}/api/v1/transfers/{id}/download-sessions"))
+        .json(&serde_json::json!({"item_ids": items.iter().map(|item| &item.id).collect::<Vec<_>>() })).send() => r? };
+    if !response.status().is_success() { bail!("create Turbo download session returned {}", response.status()); }
+    let session = response_json::<Api<TurboSession>>(response, cancel, "Turbo session response").await?.data;
+    if session.id.is_empty() || session.token.is_empty() { bail!("invalid Turbo download session"); }
+    Ok(session)
+}
+
+async fn report_turbo(client: &Client, job: &mut DownloadJob, status: &str, cancel: &CancellationToken) -> Result<()> {
+    let Some(turbo) = &mut job.turbo else { return Ok(()); };
+    turbo.sequence = turbo.sequence.checked_add(1).context("Turbo session sequence overflow")?;
+    let response = tokio::select! { _ = cancel.cancelled() => bail!("transfer cancelled"), r = client.patch(format!("{}/api/v1/transfers/{}/download-sessions/{}", job.instance, job.transfer_id, turbo.session_id))
+        .header("X-Filebeam-Session-Token", &turbo.session_token)
+        .json(&serde_json::json!({"sequence": turbo.sequence, "progress": if job.total == 0 { 0.0 } else { 100.0 * job.done as f64 / job.total as f64 }, "status": status})).send() => r? };
+    if response.status().as_u16() != 204 { bail!("Turbo session update returned {}", response.status()); }
+    Ok(())
+}
+
+async fn finalize_turbo_manifest(client: &Client, job: &mut DownloadJob, master: &[u8], cancel: &CancellationToken, control: &Control) -> Result<()> {
+    loop {
+        let transfer = metadata(client, &job.instance, &job.transfer_id, cancel, control).await?;
+        if let Some(envelope) = transfer.encrypted_manifest.clone() {
+            let manifest = manifest_for(master, &job.transfer_id, &envelope, &transfer, control)?;
+            if manifest.items.len() != job.items.len() { bail!("final manifest does not bind Turbo descriptor"); }
+            for (saved, final_item) in job.items.iter_mut().zip(manifest.items) {
+                if saved.id != final_item.id || saved.name != final_item.name || saved.size != final_item.size
+                    || saved.nonce_prefix != final_item.nonce_prefix || saved.chunk_count != final_item.chunk_count {
+                    bail!("final manifest does not bind Turbo descriptor");
+                }
+                saved.digest = final_item.digest.value;
+            }
+            job.envelope = envelope;
+            return Ok(());
+        }
+        control.phase(Phase::Waiting)?;
+        tokio::select! { _ = cancel.cancelled() => bail!("transfer cancelled"), _ = tokio::time::sleep(Duration::from_secs(1)) => {} }
+    }
+}
 fn live_join_token(transfer: &Transfer, manifest: &Manifest) -> Result<Option<String>> {
     match transfer.driver.as_str() {
         "http" => Ok(None),
@@ -1450,11 +1582,10 @@ async fn metadata(
         if !response.status().is_success() {
             bail!("metadata request failed: {}", response.status());
         }
-        return Ok(
-            response_json::<Api<Transfer>>(response, cancel, "metadata response body")
-                .await?
-                .data,
-        );
+        let transfer = response_json::<Api<Transfer>>(response, cancel, "metadata response body")
+            .await?
+            .data;
+        return Ok(transfer);
     }
     bail!("transfer is still pending")
 }
@@ -1798,6 +1929,26 @@ mod tests {
         assert!(validate_range(Some(&"bytes 5-19/20".parse().unwrap()), 5, 19, 20).is_ok());
         assert!(validate_range(Some(&"bytes 5-19/21".parse().unwrap()), 5, 19, 20).is_err());
     }
+
+    #[test]
+    fn turbo_descriptor_binds_server_item_identity_before_chunks_arrive() {
+        let key = vec![7; 32];
+        let prefix = filebeam_encryption::generate_nonce_prefix().unwrap();
+        let descriptor = serde_json::json!({"version":1,"purpose":"turbo-descriptor","chunk_bytes":4,"items":[{
+            "id":"item-a","name":"early.bin","type":"application/octet-stream","size":5,
+            "nonce_prefix": URL_SAFE_NO_PAD.encode([3;16]),"chunk_count":2
+        }]});
+        let ciphertext = filebeam_encryption::encrypt_manifest(&key, &prefix, serde_json::to_string(&descriptor).unwrap().as_bytes(),
+            b"filebeam:v1:transfer:descriptor:descriptor").unwrap();
+        let envelope = serde_json::json!({"v":1,"nonce_prefix":URL_SAFE_NO_PAD.encode(prefix),"ciphertext":URL_SAFE_NO_PAD.encode(ciphertext)}).to_string();
+        let transfer = Transfer { driver: "http".into(), id: "transfer".into(), protocol_version: 1, chunk_bytes: 4,
+            encrypted_manifest: None, encrypted_descriptor: Some(envelope.clone()), items: vec![MetadataItem { id: "item-a".into(), position: 0, chunk_count: 2 }],
+            download_concurrency: None, transfer_capabilities: TransferCapabilities::default() };
+        assert_eq!(turbo_descriptor_for(&key, "transfer", &envelope, &transfer, &Control::test_factory()).unwrap().items[0].id, "item-a");
+        let mut rebound = transfer;
+        rebound.items[0].id = "other".into();
+        assert!(turbo_descriptor_for(&key, "transfer", &envelope, &rebound, &Control::test_factory()).is_err());
+    }
     #[test]
     fn checkpoint_requires_complete_bitmap() {
         let job = DownloadJob {
@@ -1814,6 +1965,7 @@ mod tests {
             ranges: false,
             driver: "http".into(),
             envelope: "x".into(),
+            turbo: None,
             output: PathBuf::new(),
             items: vec![SavedItem {
                 id: "x".into(),
@@ -1838,6 +1990,7 @@ mod tests {
             protocol_version: 1,
             chunk_bytes: 1,
             encrypted_manifest: Some("envelope".into()),
+            encrypted_descriptor: None,
             items: Vec::new(),
             download_concurrency: None,
             transfer_capabilities: TransferCapabilities::default(),

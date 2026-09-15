@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     fs,
     path::{Path, PathBuf},
     sync::Arc,
@@ -13,7 +13,17 @@ use filebeam_encryption::{
 };
 #[cfg(test)]
 use filebeam_encryption::{encrypt_manifest, generate_nonce_prefix};
-use filebeam_transfer::{AEAD_TAG_BYTES as TAG_BYTES, MAX_CHUNKS, MAX_CIPHERTEXT_BYTES};
+use filebeam_transfer::{
+    AEAD_TAG_BYTES as TAG_BYTES,
+    capabilities::DriverLimits,
+    link::parse_share_link,
+    manifest::{Manifest, ManifestServerItem, validate_manifest as validate_portable_manifest},
+};
+#[cfg(test)]
+use filebeam_transfer::{
+    capabilities::select_driver_limits,
+    manifest::{DigestValue, ManifestItem},
+};
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -180,34 +190,6 @@ pub struct Info {
     pub transport_limits: HashMap<String, DriverLimits>,
 }
 
-#[derive(Clone, Default, Deserialize)]
-pub struct DriverLimits {
-    pub maximum_transfer_bytes: Option<u64>,
-    pub maximum_file_count: Option<usize>,
-}
-
-impl DriverLimits {
-    pub fn select(
-        driver: &str,
-        advertised: &HashMap<String, Self>,
-        legacy_bytes: Option<u64>,
-        legacy_count: Option<usize>,
-    ) -> Self {
-        advertised.get(driver).cloned().unwrap_or_else(|| {
-            if driver == "http" {
-                Self {
-                    maximum_transfer_bytes: legacy_bytes,
-                    maximum_file_count: legacy_count,
-                }
-            } else {
-                // Older info endpoints advertise only HTTP limits. Reservation
-                // remains authoritative for live transfers on those instances.
-                Self::default()
-            }
-        })
-    }
-}
-
 impl Info {
     pub fn fixture() -> Self {
         Self {
@@ -264,37 +246,13 @@ struct Transfer {
     chunk_bytes: u64,
     encrypted_manifest: Option<String>,
     #[serde(default)]
+    encrypted_descriptor: Option<String>,
+    #[serde(default)]
     items: Vec<MetadataItem>,
     #[serde(default)]
     download_concurrency: Option<u32>,
     #[serde(default)]
     transfer_capabilities: TransferCapabilities,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct Manifest {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    join_token: Option<String>,
-    version: u8,
-    items: Vec<ManifestItem>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct ManifestItem {
-    id: String,
-    name: String,
-    #[serde(rename = "type")]
-    mime: String,
-    size: u64,
-    nonce_prefix: String,
-    chunk_count: u64,
-    digest: DigestValue,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct DigestValue {
-    algorithm: String,
-    value: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -320,6 +278,9 @@ pub enum Transport {
 #[derive(Clone, Default)]
 pub struct UploadOptions {
     pub transport: Transport,
+    /// Publish an authenticated early descriptor so receivers can fetch chunks
+    /// while this HTTP file upload is still pending.
+    pub turbo: bool,
     pub password: bool,
     pub retention_hours: Option<u64>,
     /// Authentication is request-scoped and is never checkpointed.
@@ -351,6 +312,9 @@ pub fn upload(
     options: UploadOptions,
     control: &Control,
 ) -> Result<String> {
+    if options.turbo && (options.transport != Transport::Http || options.recipient.is_some()) {
+        bail!("Turbo requires HTTP file uploads without an inbox recipient");
+    }
     match options.transport {
         Transport::Http => upload::run(instance, paths, mode, options, control),
         Transport::WebRtc => {
@@ -372,8 +336,11 @@ pub fn upload_sources(
     options: UploadOptions,
     control: &Control,
 ) -> Result<String> {
-    if options.transport != Transport::Http {
-        bail!("provider-backed live uploads are not supported yet");
+    if options.turbo && (options.transport != Transport::Http || options.recipient.is_some()) {
+        bail!("Turbo requires HTTP file uploads without an inbox recipient");
+    }
+    if options.transport == Transport::WebRtc && !control.webrtc_relay_only() {
+        control.request_peer_consent(instance.to_owned())?;
     }
     upload::run_sources(instance, sources, mode, options, control)
 }
@@ -476,47 +443,17 @@ pub fn parse_link_for_instance(input: &str, instance: &str) -> Result<Link> {
         }
         (id.to_owned(), fragment.map(str::to_owned))
     };
-    let id = id_candidate.to_ascii_uppercase();
-    if is_uuid(&id_candidate) {
-        bail!("UUIDs are not Filebeam transfer IDs; provide a 26-character ULID");
-    }
-    if !is_ulid(&id) {
-        bail!("transfer ID must be a canonical 26-character ULID");
-    }
-    let key = match fragment.as_deref() {
-        None => None,
-        Some(value) => {
-            let key = value
-                .strip_prefix("k=")
-                .unwrap_or(value)
-                .strip_prefix("v1.")
-                .context("share key must use v1.<base64url>")?;
-            let key = decode(key)?;
-            if key.len() != 32 {
-                bail!("share key must decode to 32 bytes");
-            }
-            Some(key)
-        }
-    };
+    let portable = parse_share_link(&format!(
+        "{id_candidate}{}",
+        fragment.map_or(String::new(), |value| format!("#{value}"))
+    ))
+    .map_err(anyhow::Error::msg)?;
+    let key = portable.key.as_deref().map(decode).transpose()?;
     Ok(Link {
-        id,
+        id: portable.id,
         key,
         instance: configured.origin().ascii_serialization(),
     })
-}
-
-fn is_ulid(value: &str) -> bool {
-    value.len() == 26
-        && matches!(value.as_bytes()[0], b'0'..=b'7')
-        && value.bytes().skip(1).all(|c| matches!(c, b'0'..=b'9' | b'A'..=b'H' | b'J'..=b'K' | b'M'..=b'N' | b'P'..=b'T' | b'V'..=b'Z'))
-}
-
-fn is_uuid(value: &str) -> bool {
-    value.len() == 36
-        && value
-            .bytes()
-            .enumerate()
-            .all(|(i, c)| matches!(i, 8 | 13 | 18 | 23) && c == b'-' || c.is_ascii_hexdigit())
 }
 
 pub fn safe_filename(value: &str) -> String {
@@ -566,69 +503,18 @@ fn collision_free(directory: &Path, name: &str) -> PathBuf {
     unreachable!()
 }
 
-fn valid_digest(value: &str) -> bool {
-    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
-}
-
 fn validate_manifest(manifest: &Manifest, transfer: &Transfer) -> Result<()> {
-    if transfer.driver == "webrtc"
-        && !manifest.join_token.as_ref().is_some_and(|token| {
-            token.len() == 64 && token.bytes().all(|byte| byte.is_ascii_alphanumeric())
+    let items = transfer
+        .items
+        .iter()
+        .map(|item| ManifestServerItem {
+            id: item.id.clone(),
+            position: item.position,
+            chunk_count: item.chunk_count,
         })
-    {
-        bail!("live manifest has an invalid join token");
-    }
-    if manifest.version != 1
-        || manifest.items.is_empty()
-        || manifest.items.len() != transfer.items.len()
-    {
-        bail!("manifest does not match transfer");
-    }
-    if transfer.chunk_bytes == 0 || transfer.chunk_bytes > MAX_CIPHERTEXT_BYTES - TAG_BYTES {
-        bail!("transfer has an invalid chunk size");
-    }
-    let mut server_ids = HashSet::new();
-    let mut server_positions = HashSet::new();
-    for server in &transfer.items {
-        if server.id.is_empty()
-            || !server_ids.insert(&server.id)
-            || !server_positions.insert(server.position)
-            || server.position as usize >= transfer.items.len()
-            || server.chunk_count == 0
-            || server.chunk_count > MAX_CHUNKS
-        {
-            bail!("transfer has invalid item metadata");
-        }
-    }
-    let mut ids = HashSet::new();
-    let mut names = HashSet::new();
-    for item in &manifest.items {
-        let server = transfer
-            .items
-            .iter()
-            .find(|server| server.id == item.id)
-            .context("unknown item")?;
-        let count = item
-            .size
-            .checked_add(transfer.chunk_bytes.saturating_sub(1))
-            .context("manifest chunk count overflow")?
-            / transfer.chunk_bytes;
-        if item.id.is_empty()
-            || item.name.is_empty()
-            || !ids.insert(&item.id)
-            || !names.insert(safe_filename(&item.name))
-            || !valid_digest(&item.digest.value)
-            || item.digest.algorithm != "sha256"
-            || item.chunk_count == 0
-            || item.chunk_count > MAX_CHUNKS
-            || item.chunk_count != count.max(1)
-            || server.chunk_count != item.chunk_count
-            || decode(&item.nonce_prefix)?.len() != 16
-        {
-            bail!("manifest item is invalid");
-        }
-    }
-    Ok(())
+        .collect::<Vec<_>>();
+    validate_portable_manifest(manifest, &transfer.driver, transfer.chunk_bytes, &items)
+        .map_err(anyhow::Error::msg)
 }
 
 fn aad(transfer: &str, item: &str, index: &str) -> String {
@@ -669,15 +555,15 @@ mod tests {
             },
         );
         assert_eq!(
-            DriverLimits::select("webrtc", &advertised, Some(512), Some(2)).maximum_transfer_bytes,
+            select_driver_limits("webrtc", &advertised, Some(512), Some(2)).maximum_transfer_bytes,
             Some(8 * 1024 * 1024 * 1024)
         );
         assert_eq!(
-            DriverLimits::select("http", &advertised, Some(512), Some(2)).maximum_transfer_bytes,
+            select_driver_limits("http", &advertised, Some(512), Some(2)).maximum_transfer_bytes,
             Some(512)
         );
         assert_eq!(
-            DriverLimits::select("webrtc", &HashMap::new(), Some(512), Some(2))
+            select_driver_limits("webrtc", &HashMap::new(), Some(512), Some(2))
                 .maximum_transfer_bytes,
             None
         );
@@ -763,6 +649,7 @@ mod tests {
             protocol_version: 1,
             chunk_bytes: 10,
             encrypted_manifest: None,
+            encrypted_descriptor: None,
             items: vec![MetadataItem {
                 id: "item".into(),
                 position: 1,

@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Support\Branding;
 use App\Support\InstanceSettings;
 use Illuminate\Auth\Events\Registered;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Auth;
 use Inertia\Inertia;
@@ -32,7 +33,7 @@ class RegisteredUserController extends Controller
         ]);
     }
 
-    public function store(RegisterRequest $request): RedirectResponse
+    public function store(RegisterRequest $request): RedirectResponse|JsonResponse
     {
         abort_unless(app(InstanceSettings::class)->boolean('registration'), 404);
 
@@ -55,6 +56,18 @@ class RegisteredUserController extends Controller
         event(new Registered($user));
         Auth::login($user);
         $request->session()->regenerate();
+        $request->session()->put('password_hash_'.config('auth.defaults.guard'), $user->getAuthPassword());
+
+        if ($request->expectsJson()) {
+            return response()->json(['data' => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'username' => $user->username,
+                'email' => $user->email,
+                'inboxEnabled' => $user->inbox_enabled,
+                'usernameRoutingEnabled' => app(InstanceSettings::class)->boolean('username_routing'),
+            ]], 201);
+        }
 
         return to_route('verification.notice');
     }

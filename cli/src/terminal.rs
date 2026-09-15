@@ -8,7 +8,10 @@ use std::{
 
 use crossterm::{
     cursor::Show,
-    event::{DisableBracketedPaste, EnableBracketedPaste},
+    event::{
+        DisableBracketedPaste, EnableBracketedPaste, KeyboardEnhancementFlags,
+        PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    },
     execute,
     style::ResetColor,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
@@ -17,6 +20,7 @@ use crossterm::{
 static RAW: AtomicBool = AtomicBool::new(false);
 static FULLSCREEN: AtomicBool = AtomicBool::new(false);
 static CONTROLS: AtomicBool = AtomicBool::new(false);
+static ENHANCED_KEYBOARD: AtomicBool = AtomicBool::new(false);
 static HOOK: Once = Once::new();
 static INTERRUPT_FLAGS: OnceLock<Mutex<Vec<Weak<AtomicBool>>>> = OnceLock::new();
 static INTERRUPT_HANDLER: OnceLock<Result<(), String>> = OnceLock::new();
@@ -96,7 +100,15 @@ impl Session {
             execute!(io::stdout(), EnterAlternateScreen)?;
         }
         if controls {
-            execute!(io::stderr(), EnableBracketedPaste)?;
+            execute!(
+                io::stderr(),
+                EnableBracketedPaste,
+                PushKeyboardEnhancementFlags(
+                    KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                        | KeyboardEnhancementFlags::REPORT_EVENT_TYPES,
+                )
+            )?;
+            ENHANCED_KEYBOARD.store(true, Ordering::Relaxed);
         }
         Ok(guard)
     }
@@ -112,6 +124,9 @@ fn restore() {
     if RAW.swap(false, Ordering::Relaxed) {
         let _ = disable_raw_mode();
         if CONTROLS.swap(false, Ordering::Relaxed) {
+            if ENHANCED_KEYBOARD.swap(false, Ordering::Relaxed) {
+                let _ = execute!(io::stderr(), PopKeyboardEnhancementFlags);
+            }
             let _ = execute!(io::stderr(), DisableBracketedPaste, ResetColor, Show);
         }
     }

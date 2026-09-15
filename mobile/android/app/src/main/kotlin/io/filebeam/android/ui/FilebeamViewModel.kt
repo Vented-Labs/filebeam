@@ -38,8 +38,10 @@ class FilebeamViewModel(application: Application) : AndroidViewModel(application
     var link by mutableStateOf("")
     var transport by mutableStateOf(Transport.HTTP)
     var archive by mutableStateOf(false)
+    var turboTransfer by mutableStateOf(false)
     var passwordProtected by mutableStateOf(false)
     var retentionHours by mutableStateOf("")
+    var recipientUsername by mutableStateOf("")
     var exportSource: String? = null
 
     fun selectFiles(uris: List<Uri>) { selectedFiles = uris; destination = Destination.Send }
@@ -50,8 +52,11 @@ class FilebeamViewModel(application: Application) : AndroidViewModel(application
             uris = selectedFiles,
             transport = transport,
             archive = archive,
+            turbo = turboTransfer,
             passwordProtected = passwordProtected,
             retentionHours = retentionHours.toULongOrNull(),
+            recipients = recipientUsername.trim().takeIf { !passwordProtected && !turboTransfer && transport == Transport.HTTP && it.isNotBlank() }
+                ?.let(::listOf) ?: emptyList(),
         ))
         destination = Destination.Transfers
     }

@@ -53,7 +53,11 @@ The scaffold is not a claim that this acceptance matrix has been completed.
 - Document-tree selection with existing Rust ZIP/individual-file semantics.
 - Shared note operations and best-effort burn-on-read consumption; native
   editor/viewer, including the live-note receiver's single-claim semantics.
-- Turbo descriptor, availability, heartbeat, and download-session operations.
+- Turbo Transfer is available for HTTP file uploads without inbox recipients. The
+  native sender checkpoints and publishes the encrypted early descriptor before
+  chunk production, exposes the normal share link immediately, and heartbeats
+  while upload work is active. Received Turbo links are opened through the
+  normal native download job, not a transfer-ID endpoint.
 - Native account authentication API, inbox/username delivery, and account-key
   custody/import/export compatible with `fbsk1.`. These flows use native screens.
 - Local completion/inbox UX; server push notifications need their own backend

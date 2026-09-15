@@ -8,6 +8,7 @@ import {
     readChunkWithRetry,
     retryAfterMilliseconds,
     transferConcurrency,
+    transferPolicy,
 } from '../lib/transfer';
 import { waitForWorkerMessage, type WorkerMessage } from '../lib/worker-request';
 import { connectWebRtcReceiver, type WebRtcReceiver } from '../lib/webrtc';
@@ -202,6 +203,16 @@ function validateManifest(candidate: unknown, transfer: Transfer, descriptor = f
         )
     )
         throw new Error('The transfer size is invalid.');
+    if (!descriptor)
+        transferPolicy().validateManifest(value, {
+            driver: transfer.driver ?? 'http',
+            chunk_bytes: transfer.chunk_bytes,
+            items: transfer.items.map(({ id, position, chunk_count }) => ({
+                id,
+                position,
+                chunk_count,
+            })),
+        });
     return value as Manifest;
 }
 
@@ -619,6 +630,8 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
                 password: password || undefined,
             });
             const decrypted = await result;
+            ensureActive(jobId);
+            await initialiseTransferPolicy();
             ensureActive(jobId);
             decryptedKey = new Uint8Array(decrypted.masterKey as ArrayBuffer);
             const decryptedManifest = validateManifest(

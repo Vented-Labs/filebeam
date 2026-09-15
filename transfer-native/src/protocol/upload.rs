@@ -32,7 +32,7 @@ use filebeam_transfer::{
 use futures_util::stream;
 use reqwest::{
     Body, Client, StatusCode,
-    header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, HeaderValue, RETRY_AFTER},
+    header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, HeaderName, HeaderValue, RETRY_AFTER},
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -83,6 +83,12 @@ pub(super) struct UploadJob {
     chunk_bytes: u64,
     server_concurrency: u32,
     upload_status: bool,
+    #[serde(default)]
+    turbo: bool,
+    #[serde(default)]
+    descriptor_published: bool,
+    #[serde(default)]
+    encrypted_descriptor: Option<String>,
     transport: Option<UploadTransport>,
     #[serde(default = "http_driver")]
     driver: String,
@@ -142,6 +148,25 @@ struct Recipient {
     account_key_bundle_id: u64,
     public_key: String,
     encrypted_key: Option<String>,
+}
+
+#[derive(Serialize)]
+struct TurboDescriptor<'a> {
+    version: u8,
+    purpose: &'a str,
+    chunk_bytes: u64,
+    items: Vec<TurboDescriptorItem<'a>>,
+}
+
+#[derive(Serialize)]
+struct TurboDescriptorItem<'a> {
+    id: &'a str,
+    name: &'a str,
+    #[serde(rename = "type")]
+    mime: &'a str,
+    size: u64,
+    nonce_prefix: &'a str,
+    chunk_count: u64,
 }
 
 struct PreparedCiphertext {
@@ -375,11 +400,6 @@ pub(super) fn run_sources(
     if sources.is_empty() {
         bail!("Select at least one source");
     }
-    if mode == DirectoryMode::Zip {
-        bail!(
-            "provider sources cannot be archived until their host exposes a document tree snapshot"
-        );
-    }
     let id = Uuid::new_v4().to_string();
     let store = control.create_checkpoint_store(&id)?;
     crate::runtime::shared_tokio_runtime().block_on(run_new(
@@ -388,7 +408,10 @@ pub(super) fn run_sources(
         mode,
         control,
         Arc::new(store),
-        "http",
+        match options.transport {
+            super::Transport::Http => "http",
+            super::Transport::WebRtc => "webrtc",
+        },
         options,
     ))
 }
@@ -439,7 +462,7 @@ async fn run_new(
         &info.file_retention_options,
         options.retention_hours,
     )?;
-    let limits = super::DriverLimits::select(
+    let limits = filebeam_transfer::capabilities::select_driver_limits(
         driver,
         &info.transport_limits,
         info.maximum_transfer_bytes,
@@ -448,7 +471,7 @@ async fn run_new(
     let mut prepared = match inputs {
         Inputs::Paths(paths) => uploads::prepare(paths, mode, limits.maximum_file_count, control)?,
         Inputs::Sources(sources) => {
-            uploads::Prepared::from_sources(sources, limits.maximum_file_count)?
+            uploads::Prepared::from_sources(sources, mode, limits.maximum_file_count, control)?
         }
     };
     prepared.retain_archive(store.path())?;
@@ -508,6 +531,9 @@ async fn run_new(
         chunk_bytes: info.chunk_bytes,
         server_concurrency: info.upload_concurrency.unwrap_or(8).clamp(1, 8),
         upload_status: info.transfer_capabilities.upload_status,
+        turbo: options.turbo,
+        descriptor_published: false,
+        encrypted_descriptor: None,
         transport: None,
         driver: driver.into(),
         join_token: None,
@@ -647,6 +673,18 @@ async fn continue_job(mut job: UploadJob, store: Arc<Store>, control: &Control) 
         .clone()
         .context("upload token is unavailable")?;
     let client = client(control, &super::UploadAuthentication::Anonymous)?;
+    if job.turbo && !job.descriptor_published {
+        if job.encrypted_descriptor.is_none() {
+            job.encrypted_descriptor = Some(turbo_descriptor(&job, &transfer, control)?);
+            // The exact idempotency value must survive a lost successful PUT.
+            store.save(&job)?;
+        }
+        publish_turbo_descriptor(&mut job, &client, &transfer, &token, control).await?;
+        store.save(&job)?;
+        control.emit(TransferEvent::ShareReady(crate::control::ShareReady {
+            share_url: receipt(&job)?,
+        }));
+    }
     if job.driver == "http" && job.upload_status {
         reconcile(&mut job, &client, &transfer, &token, control).await?;
         store.save(&job)?;
@@ -783,6 +821,9 @@ async fn continue_job(mut job: UploadJob, store: Arc<Store>, control: &Control) 
         }
         tokio::select! {
             _ = cancelled(control) => bail!("Transfer cancelled"),
+            result = turbo_heartbeat(&client, &job.instance, &transfer, &token), if job.turbo => {
+                result?;
+            }
             result = active.join_next(), if !active.is_empty() => {
                 let (index, result) = result.context("upload worker ended unexpectedly")??;
                 active_indices.remove(&index);
@@ -1864,6 +1905,7 @@ fn client(control: &Control, authentication: &super::UploadAuthentication) -> Re
             let mut value = HeaderValue::from_str(cookie).context("invalid session cookie")?;
             value.set_sensitive(true);
             headers.insert(COOKIE, value);
+            headers.insert(HeaderName::from_static("sec-fetch-site"), HeaderValue::from_static("same-origin"));
         }
     }
     Client::builder()
@@ -2079,6 +2121,8 @@ fn validate_job(job: &UploadJob) -> Result<()> {
         || (job.state == "finalizing" && job.chunks.iter().any(|chunk| !chunk.complete))
         || (!matches!(job.driver.as_str(), "http" | "webrtc"))
         || (job.driver == "webrtc" && job.join_token.as_deref().unwrap_or_default().is_empty())
+        || (job.turbo && (job.driver != "http" || job.recipient.is_some()))
+        || (job.descriptor_published && job.encrypted_descriptor.is_none())
     {
         bail!("invalid saved upload checkpoint");
     }
@@ -2202,6 +2246,114 @@ fn encrypted_manifest(job: &UploadJob, control: &Control) -> Result<String> {
         "kdf": job.password_salt.as_ref().map(|_| serde_json::json!({"name":"argon2id","memory_kib":65536,"iterations":3,"parallelism":1})),
         "ciphertext": encode(&ciphertext),
     }))?)
+}
+
+fn turbo_descriptor(job: &UploadJob, transfer: &str, control: &Control) -> Result<String> {
+    if job.driver != "http" || job.recipient.is_some() {
+        bail!("Turbo requires an anonymous HTTP file transfer");
+    }
+    let descriptor = TurboDescriptor {
+        version: 1,
+        purpose: "turbo-descriptor",
+        chunk_bytes: job.chunk_bytes,
+        items: job
+            .items
+            .iter()
+            .map(|item| TurboDescriptorItem {
+                id: &item.id,
+                name: &item.name,
+                mime: "application/octet-stream",
+                size: item.bytes,
+                nonce_prefix: &item.nonce_prefix,
+                chunk_count: item.chunk_count,
+            })
+            .collect(),
+    };
+    let plain = serde_json::to_vec(&descriptor)?;
+    let _crypto_memory = control.reserve_memory(super::manifest_crypto_bytes(plain.len())?)?;
+    let prefix = generate_nonce_prefix()?;
+    let ciphertext = encrypt_manifest(
+        &job.master_key,
+        &prefix,
+        &plain,
+        format!("filebeam:v1:{transfer}:descriptor:descriptor").as_bytes(),
+    )?;
+    Ok(serde_json::to_string(&serde_json::json!({
+        "v": 1,
+        "nonce_prefix": encode(&prefix),
+        "salt": job.password_salt,
+        "kdf": job.password_salt.as_ref().map(|_| serde_json::json!({"name":"argon2id","memory_kib":65536,"iterations":3,"parallelism":1})),
+        "ciphertext": encode(&ciphertext),
+    }))?)
+}
+
+async fn publish_turbo_descriptor(
+    job: &mut UploadJob,
+    client: &Client,
+    transfer: &str,
+    token: &str,
+    control: &Control,
+) -> Result<()> {
+    let envelope = job
+        .encrypted_descriptor
+        .as_deref()
+        .context("Turbo descriptor was not checkpointed")?;
+    for attempt in 0..5 {
+        let response = request(
+            control,
+            client
+                .put(format!(
+                    "{}/api/v1/transfers/{transfer}/descriptor",
+                    job.instance
+                ))
+                .header("X-Filebeam-Upload-Token", token)
+                .json(&serde_json::json!({"encrypted_descriptor": envelope})),
+        )
+        .await;
+        match response {
+            Ok(response) if response.status().is_success() => {
+                job.descriptor_published = true;
+                return Ok(());
+            }
+            Ok(response) if retryable_status(response.status().as_u16(), false) => {
+                control.phase(Phase::Retrying)?;
+                cancellable_sleep(
+                    control,
+                    retry_delay_ms(attempt, retry_after_ms(&response), attempt as u64 * 17),
+                )
+                .await?;
+            }
+            Ok(response) => bail!("could not publish Turbo descriptor: {}", response.status()),
+            Err(error) if attempt == 4 => {
+                return Err(error).context("could not publish Turbo descriptor");
+            }
+            Err(_) => {
+                cancellable_sleep(control, retry_delay_ms(attempt, None, attempt as u64 * 17))
+                    .await?
+            }
+        }
+    }
+    bail!("could not publish Turbo descriptor")
+}
+
+async fn turbo_heartbeat(
+    client: &Client,
+    instance: &str,
+    transfer: &str,
+    token: &str,
+) -> Result<()> {
+    tokio::time::sleep(Duration::from_secs(10)).await;
+    let response = client
+        .patch(format!("{instance}/api/v1/transfers/{transfer}/progress"))
+        .header("X-Filebeam-Upload-Token", token)
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .context("send Turbo heartbeat")?;
+    if response.status().as_u16() != 204 {
+        bail!("Turbo heartbeat returned {}", response.status());
+    }
+    Ok(())
 }
 fn aad(transfer: &str, item: &str, position: u64) -> String {
     format!("filebeam:v1:{transfer}:{item}:{position}")
@@ -2347,6 +2499,9 @@ mod tests {
             chunk_bytes: 10,
             server_concurrency: 1,
             upload_status: false,
+            turbo: false,
+            descriptor_published: false,
+            encrypted_descriptor: None,
             transport: None,
             driver: "http".into(),
             join_token: None,
@@ -2389,6 +2544,9 @@ mod tests {
             chunk_bytes: 10,
             server_concurrency: 1,
             upload_status: false,
+            turbo: false,
+            descriptor_published: false,
+            encrypted_descriptor: None,
             transport: None,
             driver: "http".into(),
             join_token: None,

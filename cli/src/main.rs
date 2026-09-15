@@ -74,6 +74,9 @@ enum Command {
         /// Transfer over the HTTP relay or directly over WebRTC.
         #[arg(long, value_enum, default_value_t = Transport::Http)]
         transport: Transport,
+        /// Publish a Turbo HTTP transfer so recipients can receive verified chunks while uploading.
+        #[arg(long)]
+        turbo: bool,
         /// Require a transfer password in addition to the link key.
         #[arg(long)]
         password: bool,
@@ -103,7 +106,7 @@ enum Command {
     Cancel { id: String },
 }
 
-#[derive(Clone, Copy, ValueEnum)]
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum Transport {
     Http,
     Webrtc,
@@ -112,18 +115,25 @@ enum Transport {
 impl Transport {
     fn upload_options(
         self,
+        turbo: bool,
         password: bool,
         retention_hours: Option<u64>,
-    ) -> protocol::UploadOptions {
-        protocol::UploadOptions {
+    ) -> Result<protocol::UploadOptions> {
+        if turbo && self == Self::Webrtc {
+            anyhow::bail!(
+                "--turbo requires HTTP uploads; remove --transport webrtc or use --transport http"
+            );
+        }
+        Ok(protocol::UploadOptions {
             transport: match self {
                 Self::Http => protocol::Transport::Http,
                 Self::Webrtc => protocol::Transport::WebRtc,
             },
+            turbo,
             password,
             retention_hours,
             ..Default::default()
-        }
+        })
     }
 }
 
@@ -155,6 +165,7 @@ fn main() -> Result<()> {
         Some(Command::Up {
             files,
             transport,
+            turbo,
             password,
             retention_hours,
             zip,
@@ -178,7 +189,7 @@ fn main() -> Result<()> {
                 app::Request::Upload(
                     files,
                     mode,
-                    transport.upload_options(password, retention_hours),
+                    transport.upload_options(turbo, password, retention_hours)?,
                 ),
                 cli.plain,
                 cli.accept_peer_address_exposure,
@@ -246,7 +257,7 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Command, configured_instance};
+    use super::{Cli, Command, Transport, configured_instance};
     use clap::Parser;
 
     #[test]
@@ -281,5 +292,26 @@ mod tests {
         assert!(cli.webrtc_relay_only);
         assert!(matches!(cli.command, Some(Command::Resume { id }) if id == "job-1"));
         assert!(Cli::try_parse_from(["beam", "--memory-limit-mib", "32", "transfers"]).is_err());
+    }
+
+    #[test]
+    fn turbo_is_an_explicit_http_upload_option() {
+        let cli = Cli::try_parse_from(["beam", "up", "--turbo", "report.pdf"]).unwrap();
+        let Some(Command::Up {
+            transport,
+            turbo,
+            password,
+            retention_hours,
+            ..
+        }) = cli.command
+        else {
+            panic!("expected upload command");
+        };
+        let options = transport
+            .upload_options(turbo, password, retention_hours)
+            .unwrap();
+        assert!(options.turbo);
+        assert_eq!(options.transport, crate::protocol::Transport::Http);
+        assert!(Transport::Webrtc.upload_options(true, false, None).is_err());
     }
 }

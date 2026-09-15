@@ -11,12 +11,15 @@ use App\Http\Controllers\Api\V1\TransferController;
 use App\Http\Controllers\Api\V1\TurboTransferController;
 use App\Http\Controllers\Api\V1\WebRtcTransferController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
+use App\Http\Controllers\Auth\RegisteredUserController;
 use App\Http\Controllers\InboxController;
 use App\Http\Controllers\NativeAccountController;
 use App\Http\Middleware\EnsureAnonymousTransferUploadsAreEnabled;
 use App\Http\Middleware\ProtectAuthenticatedTransferCreation;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
+use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
+use Illuminate\Session\Middleware\AuthenticateSession;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Route;
 
@@ -98,9 +101,10 @@ Route::prefix('v1')->group(function (): void {
 
 // Native clients retain Laravel's cookie session and login throttles. These are
 // JSON representations of existing account capabilities, not bearer-token auth.
-Route::prefix('native/v1')->middleware([EncryptCookies::class, AddQueuedCookiesToResponse::class, StartSession::class])->group(function (): void {
+Route::prefix('native/v1')->middleware([EncryptCookies::class, AddQueuedCookiesToResponse::class, StartSession::class, PreventRequestForgery::class, AuthenticateSession::class])->group(function (): void {
     Route::get('/recipients/{username}', [NativeAccountController::class, 'recipient'])->where('username', '[a-z0-9_]{3,24}')->middleware('throttle:transfer-reading');
     Route::post('/session', [AuthenticatedSessionController::class, 'store'])->middleware('guest');
+    Route::post('/register', [RegisteredUserController::class, 'store'])->middleware(['guest', 'throttle:10,1']);
     Route::delete('/session', [AuthenticatedSessionController::class, 'destroy'])->middleware('auth');
     Route::middleware('auth')->group(function (): void {
         Route::get('/session', [NativeAccountController::class, 'session']);

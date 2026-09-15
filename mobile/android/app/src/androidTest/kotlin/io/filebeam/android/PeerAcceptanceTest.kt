@@ -36,8 +36,9 @@ class PeerAcceptanceTest {
             "webrtc" -> Transport.WEB_RTC
             else -> error("transport must be http or webrtc")
         }
+        val stateDirectory = File(context.noBackupFilesDir, "acceptance-${UUID.randomUUID()}").apply { mkdirs() }
         val client = TransferClient(ClientConfig(
-            stateDirectory = File(context.noBackupFilesDir, "acceptance-${UUID.randomUUID()}").absolutePath,
+            stateDirectory = stateDirectory.absolutePath,
             memoryBudgetMib = 128u,
             maxConcurrency = 1u,
             relayOnly = arguments.getString("relayOnly") == "true",

@@ -224,6 +224,10 @@ impl State {
     }
 
     pub fn start(&mut self) {
+        self.start_upload(false);
+    }
+
+    fn start_upload(&mut self, turbo: bool) {
         self.notice = None;
         let request = match self.mode {
             Mode::Send => {
@@ -254,7 +258,10 @@ impl State {
                 Request::Upload(
                     self.selected.keys().cloned().collect(),
                     crate::uploads::DirectoryMode::Individual,
-                    protocol::UploadOptions::default(),
+                    protocol::UploadOptions {
+                        turbo,
+                        ..Default::default()
+                    },
                 )
             }
             Mode::Receive => {
@@ -510,6 +517,13 @@ impl State {
             }
             return Ok(false);
         }
+        if self.mode == Mode::Send
+            && key.code == KeyCode::Enter
+            && key.modifiers.contains(KeyModifiers::SHIFT)
+        {
+            self.start_upload(true);
+            return Ok(false);
+        }
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('r') {
             if let Err(error) = self.refresh() {
                 self.toast(format!("Cannot refresh folder: {error}"));
@@ -688,5 +702,25 @@ mod tests {
         state.key(KeyCode::Down.into()).unwrap();
         assert_eq!(state.queue_cursor, 0);
         assert!(state.job.is_none());
+    }
+
+    #[test]
+    fn send_actions_select_their_upload_mode_once() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("report.pdf"), b"test").unwrap();
+        let mut state = State::new(
+            &Config::default(),
+            "http://localhost:8000",
+            dir.path().into(),
+        )
+        .unwrap();
+        state.key(KeyCode::Char(' ').into()).unwrap();
+        state.focus = Focus::Action;
+        state
+            .key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT))
+            .unwrap();
+        assert!(state.job.is_some());
+        state.cancel();
+        assert!(state.job.is_some());
     }
 }

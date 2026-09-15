@@ -93,7 +93,11 @@ impl TransferClient {
     pub fn discover(&self, instance: String) -> Result<InstanceInfo> {
         let info =
             protocol::instance_info(&origin(&instance, self.allow_http)?).map_err(operation)?;
-        let live = protocol::DriverLimits::select("webrtc", &info.transport_limits, None, None);
+        let live = info
+            .transport_limits
+            .get("webrtc")
+            .cloned()
+            .unwrap_or_default();
         Ok(InstanceInfo {
             name: info.name,
             anonymous_uploads: info.anonymous_uploads_enabled,
@@ -118,6 +122,7 @@ impl TransferClient {
             paths,
             UploadOptions {
                 transport,
+                turbo: false,
                 archive,
                 password: false,
                 retention_hours: None,
@@ -292,6 +297,13 @@ pub(crate) fn source_spec(
 }
 
 pub(crate) fn upload_options(options: UploadOptions) -> Result<protocol::UploadOptions> {
+    if options.turbo
+        && (!matches!(options.transport, Transport::Http) || options.recipient.is_some())
+    {
+        return Err(invalid(
+            "Turbo requires HTTP file uploads without an inbox recipient",
+        ));
+    }
     if options.recipient.as_ref().is_some_and(|recipient| {
         options.password
             || !matches!(options.transport, Transport::Http)
@@ -326,6 +338,7 @@ pub(crate) fn upload_options(options: UploadOptions) -> Result<protocol::UploadO
             Transport::Http => protocol::Transport::Http,
             Transport::WebRtc => protocol::Transport::WebRtc,
         },
+        turbo: options.turbo,
         password: options.password,
         retention_hours: options.retention_hours,
         authentication,

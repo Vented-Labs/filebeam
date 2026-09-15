@@ -64,10 +64,36 @@ Run `beam` for the full-screen Send / Receive workspace. The interface uses File
 - `/`: enter search mode, `Enter`: apply, `Esc`: clear.
 - `Tab` / `Shift+Tab`: move focus between browser, queue, and action (or receive fields).
 - `1` / `2`: Send / Receive; `u`: upload; `U`: update; `?`: help.
+- In the Send action, `Enter` sends the normal encrypted HTTP transfer and
+  `Shift+Enter` starts Turbo Transfer. The two actions are displayed side by
+  side. Beam requests enhanced keyboard reporting only while its full-screen
+  UI is active and restores the terminal setting on exit. Older terminals that
+  do not report modified Enter use normal `Enter`; they cannot select Turbo by
+  hotkey, so use `beam up --turbo FILE`.
 - `c`: request a copy of the complete result through the terminal clipboard (OSC 52).
 - `Ctrl+C`: cancel the active transfer; on an idle screen, exit. Cancellation is cooperative: an active HTTP request may need to finish or time out before stopping.
 
 `beam up` and `beam down` display compact inline progress with transferred bytes, throughput, and ETA when there is enough terminal width and measurement history. Preparing, archiving, and verification have separate activity states. Completion is shown only after server finalization or local integrity verification.
+
+## Turbo and WebRTC uploads
+
+`beam up --turbo FILE...` creates a Turbo HTTP upload. It publishes the normal
+encrypted share link as soon as the authenticated early descriptor is ready,
+then recipients can progressively download and verify available chunks while
+the upload continues. `--turbo` is explicit and does not add a confirmation
+prompt. Password, retention, directory-mode, and security prompts retain their
+normal behavior.
+
+```sh
+beam up --turbo --password --retention-hours 24 report.pdf
+beam up --transport webrtc report.pdf
+beam --webrtc-relay-only up --transport webrtc report.pdf
+```
+
+Turbo requires the HTTP transport. `beam up --turbo --transport webrtc FILE`
+fails before a transfer starts. WebRTC remains a live peer transfer: direct
+connections retain the address-exposure consent prompt unless the receiver
+uses `--accept-peer-address-exposure` or `--webrtc-relay-only` is configured.
 
 Progress goes to stderr. Stdout contains the share URL or saved file paths, so `link=$(beam up file.zip)` works. Interactive share links carry an explicit OSC 8 target including the full key fragment; wrapping or a shortened TUI label does not shorten that target. Use the TUI's **Copy full link** action for a complete clipboard value.
 

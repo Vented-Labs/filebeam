@@ -11,12 +11,14 @@ import io.filebeam.android.platform.services.NativeAccountService
 import io.filebeam.android.platform.services.NativeInboxService
 import io.filebeam.android.platform.services.NativeNotesService
 import io.filebeam.android.platform.services.NativeTurboService
+import io.filebeam.android.platform.services.AccountSessionRegistry
 
 class FilebeamApplication : Application() {
     val settings by lazy { SettingsStore(this) }
-    val transfers by lazy { TransferCoordinator(this, settings) }
-    val accounts: AccountService by lazy { NativeAccountService(BuildConfig.DEBUG) }
-    val notes: NotesService by lazy { NativeNotesService(BuildConfig.DEBUG) }
-    val turbo: TurboService by lazy { NativeTurboService(BuildConfig.DEBUG) }
-    val inbox: InboxService by lazy { NativeInboxService(BuildConfig.DEBUG) }
+    val accountSessions by lazy { AccountSessionRegistry(BuildConfig.DEBUG) }
+    val transfers by lazy { TransferCoordinator(this, settings, accountSessions) }
+    val accounts: AccountService by lazy { NativeAccountService(this, accountSessions) }
+    val notes: NotesService by lazy { NativeNotesService(accountSessions) }
+    val turbo: TurboService by lazy { NativeTurboService(accountSessions) }
+    val inbox: InboxService by lazy { NativeInboxService(accountSessions, accounts) }
 }

@@ -67,4 +67,12 @@ declare module '@filebeam/transfer' {
         ciphertextBytes: number,
         partBytes: number,
     ): void;
+    export function parseShareLink(value: string): { id: string; key: string | null };
+    export function validateManifest(manifest: unknown, transfer: unknown): void;
+    export function selectDriverLimits(
+        driver: string,
+        advertised: unknown,
+        legacyHttpBytes?: number,
+        legacyHttpCount?: number,
+    ): { maximum_transfer_bytes: number | null; maximum_file_count: number | null };
 }

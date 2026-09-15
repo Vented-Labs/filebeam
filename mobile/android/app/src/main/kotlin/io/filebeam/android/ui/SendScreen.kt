@@ -25,6 +25,7 @@ import io.filebeam.rust.Transport
 fun SendScreen(model: FilebeamViewModel, busy: Boolean, pick: () -> Unit, pickTree: () -> Unit, send: () -> Unit) {
     val archiveLabel = stringResource(R.string.archive)
     val passwordLabel = stringResource(R.string.optional_password)
+    val turboLabel = stringResource(R.string.turbo_transfer)
     Text(stringResource(R.string.send_title), style = MaterialTheme.typography.headlineSmall)
     Text(stringResource(R.string.send_description))
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -37,6 +38,10 @@ fun SendScreen(model: FilebeamViewModel, busy: Boolean, pick: () -> Unit, pickTr
         FilterChip(model.transport == Transport.WEB_RTC, { model.transport = Transport.WEB_RTC }, enabled = !busy, label = { Text(stringResource(R.string.webrtc_transport)) })
     }
     if (model.transport == Transport.WEB_RTC) Text(stringResource(R.string.live_description), style = MaterialTheme.typography.bodyMedium)
+    if (model.transport == Transport.HTTP) Row(verticalAlignment = Alignment.CenterVertically) {
+        Checkbox(model.turboTransfer, { model.turboTransfer = it }, enabled = !busy, modifier = Modifier.semantics { contentDescription = turboLabel })
+        Text(turboLabel)
+    }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Checkbox(model.archive, { model.archive = it }, enabled = !busy, modifier = Modifier.semantics { contentDescription = archiveLabel })
         Text(archiveLabel)
@@ -47,5 +52,8 @@ fun SendScreen(model: FilebeamViewModel, busy: Boolean, pick: () -> Unit, pickTr
     }
     OutlinedTextField(model.retentionHours, { model.retentionHours = it.filter(Char::isDigit) }, enabled = !busy,
         label = { Text(stringResource(R.string.retention_hours)) }, modifier = Modifier.fillMaxWidth())
+    OutlinedTextField(model.recipientUsername, { model.recipientUsername = it.lowercase().filter { character -> character.isLetterOrDigit() || character == '_' } },
+        enabled = !busy && !model.passwordProtected && model.transport == Transport.HTTP && !model.turboTransfer,
+        label = { Text(stringResource(R.string.recipient_username)) }, modifier = Modifier.fillMaxWidth())
     Button(enabled = !busy && model.selectedFiles.isNotEmpty(), onClick = send, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.start_upload)) }
 }

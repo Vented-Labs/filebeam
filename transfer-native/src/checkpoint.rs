@@ -113,6 +113,12 @@ impl Store {
         let directory = root.join(id);
         create_private_dir(&directory)
             .with_context(|| format!("create {}", directory.display()))?;
+        // Publish the job directory before any lock, catalog, or ciphertext is
+        // written. A later missing directory is corruption, not an invitation to
+        // recreate a checkpoint whose nonce/material may already have been used.
+        ensure_private_dir(&directory)
+            .with_context(|| format!("validate {}", directory.display()))?;
+        sync_directory(root).with_context(|| format!("sync transfer root {}", root.display()))?;
         open_locked(directory, id, secret_store)
     }
 
@@ -241,6 +247,10 @@ impl Store {
             bail!("immutable ciphertext exceeds {MAX_IMMUTABLE_BYTES} byte limit");
         }
 
+        // Never recreate this directory: that could make a vanished active job
+        // look fresh and allow ciphertext/nonce reuse after a process failure.
+        ensure_private_dir(&self.directory)
+            .with_context(|| format!("validate {}", self.directory.display()))?;
         let path = self.directory.join(name);
         match fs::symlink_metadata(&path) {
             Ok(_) => bail!("immutable ciphertext already exists: {}", path.display()),
@@ -817,6 +827,35 @@ mod tests {
         drop(store);
         Store::discard(root.path(), "job").unwrap();
         assert!(!root.path().join("job").exists());
+    }
+
+    #[test]
+    fn fresh_host_catalog_publishes_job_before_first_ciphertext_artifact() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::create_with_secret_store(root.path(), "job", TestSecrets::with([6; 32]))
+            .unwrap();
+        store
+            .save(&State {
+                offset: 0,
+                checksum: "encrypted-catalog".into(),
+            })
+            .unwrap();
+        let artifact = store.persist_immutable("chunk-0-0", b"ciphertext").unwrap();
+        assert_eq!(artifact, root.path().join("job/chunk-0-0"));
+        assert_eq!(fs::read(artifact).unwrap(), b"ciphertext");
+    }
+
+    #[test]
+    fn fresh_filesystem_catalog_publishes_job_before_first_ciphertext_artifact() {
+        let root = tempfile::tempdir().unwrap();
+        let store = Store::create(root.path(), "job").unwrap();
+        store
+            .save(&State {
+                offset: 0,
+                checksum: "cli-catalog".into(),
+            })
+            .unwrap();
+        assert!(store.persist_immutable("chunk-0-0", b"ciphertext").is_ok());
     }
 
     #[test]

@@ -27,6 +27,7 @@ name = "filebeam-transfer-wasm"
 version = "0.1.0"
 dependencies = [
  "filebeam-transfer",
+ "serde",
  "serde-wasm-bindgen",
  "wasm-bindgen",
 ]

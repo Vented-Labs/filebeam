@@ -18,6 +18,7 @@ pub enum Transport {
 #[derive(Clone, uniffi::Record)]
 pub struct UploadOptions {
     pub transport: Transport,
+    pub turbo: bool,
     pub archive: bool,
     pub password: bool,
     pub retention_hours: Option<u64>,

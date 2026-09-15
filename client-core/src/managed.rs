@@ -154,7 +154,10 @@ impl ManagedJob {
                     Err(error) => {
                         self.snapshot.state = JobState::Failed;
                         self.snapshot.error_kind = Some(error_kind(&error));
-                        self.snapshot.error = Some(error.to_string());
+                        // Android acceptance needs the OS error beneath storage
+                        // context (for example a hard-link errno), not only the
+                        // outer transfer message.
+                        self.snapshot.error = Some(format!("{error:#}"));
                     }
                 }
             }
