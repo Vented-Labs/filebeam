@@ -195,9 +195,11 @@ fn start_live(
     let instance = instance.to_owned();
     let request = note_request(text, password, burn_on_read);
     let sender = thread::spawn(move || {
-        ServiceClient::new(&instance)?
-            .notes()
-            .create_live(request, &worker, std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)))
+        ServiceClient::new(&instance)?.notes().create_live(
+            request,
+            &worker,
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        )
     });
     let deadline = std::time::Instant::now() + Duration::from_secs(30);
     loop {

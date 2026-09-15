@@ -1,6 +1,9 @@
 use std::{
     collections::{HashMap, HashSet},
-    sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex, OnceLock},
+    sync::{
+        Arc, Mutex, OnceLock,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 
@@ -354,7 +357,12 @@ impl NotesService {
 
     /// Owns a live note until cancelled. Ciphertext never leaves this process
     /// except through the authenticated WebRTC data channel.
-    pub fn create_live(&self, request: NoteCreate, control: &Control, end_requested: Arc<AtomicBool>) -> Result<CreatedNote> {
+    pub fn create_live(
+        &self,
+        request: NoteCreate,
+        control: &Control,
+        end_requested: Arc<AtomicBool>,
+    ) -> Result<CreatedNote> {
         ensure!(!request.text.is_empty(), "note cannot be empty");
         if !control.webrtc_relay_only() {
             control.request_peer_consent(self.instance.origin().ascii_serialization())?;

@@ -44,7 +44,9 @@ impl NativeRuntime {
             },
         })
     }
+}
 
+impl NativeRuntime {
     pub(crate) fn reserve_service_memory(
         &self,
         bytes: u64,
