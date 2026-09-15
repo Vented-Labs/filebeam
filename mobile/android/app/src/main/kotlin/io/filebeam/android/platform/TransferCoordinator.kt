@@ -15,6 +15,7 @@ import io.filebeam.rust.ClientConfig
 import io.filebeam.rust.JobState
 import io.filebeam.rust.SavedTransfer
 import io.filebeam.rust.TransferClient
+import io.filebeam.rust.NativeRuntime
 import io.filebeam.rust.TransferJob
 import io.filebeam.rust.TransferSnapshot
 import io.filebeam.rust.Transport
@@ -70,6 +71,7 @@ class TransferCoordinator(
     private val context: Context,
     private val settings: SettingsStore,
     private val accountSessions: AccountSessionRegistry,
+    private val runtime: NativeRuntime,
     private val accounts: AccountService,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -96,7 +98,7 @@ class TransferCoordinator(
         val root = File(context.noBackupFilesDir, "transfers")
         val config = ClientConfig(root.absolutePath, 128u, 2u, relayOnly, BuildConfig.DEBUG)
         val secrets = CheckpointSecretStore(context, root)
-        return TransferClient.newWithCallbacks(config, object : SecretStoreCallback {
+        return TransferClient.newWithRuntimeCallbacks(config, runtime, object : SecretStoreCallback {
             override fun loadOrCreate(scope: String): ByteArray = secrets.loadOrCreate(scope)
             override fun remove(scope: String) = secrets.remove(scope)
         }, object : SourceCallback {
@@ -157,14 +159,7 @@ class TransferCoordinator(
     }
 
     fun resume(id: String) = submit { config ->
-        val association = association(id).load()
-        val kind = association?.optString("kind") ?: "resume"
-        JSONObject().put("kind", association?.optString("kind") ?: "resume")
-            .put("id", association?.optString("id") ?: UUID.randomUUID().toString())
-            .put("checkpoint", id).put("live", association?.optBoolean("live") ?: false)
-            .put("relay", config.relayOnly)
-            .put("instance", association?.optString("instance")?.takeIf(String::isNotBlank) ?: config.instance)
-            .putOpt("transfer", if (kind == "inbox-download") association?.optString("transfer") else null)
+        resumeRequest(id, association(id).load(), config.instance, config.relayOnly)
     }
 
     private fun submit(clearSnapshot: Boolean = true, command: suspend (AppSettings) -> JSONObject) {
@@ -426,4 +421,14 @@ class TransferCoordinator(
         return PendingTransferStore(context, "transfer-$id")
     }
     fun message(value: String?) { mutable.update { it.copy(message = value) } }
+}
+
+internal fun resumeRequest(id: String, association: JSONObject?, instance: String, relayOnly: Boolean): JSONObject {
+    val kind = association?.optString("kind") ?: "resume"
+    return JSONObject().put("kind", kind)
+        .put("id", association?.optString("id") ?: UUID.randomUUID().toString())
+        .put("checkpoint", id).put("live", association?.optBoolean("live") ?: false)
+        .put("relay", relayOnly)
+        .put("instance", association?.optString("instance")?.takeIf(String::isNotBlank) ?: instance)
+        .putOpt("transfer", if (kind == "inbox-download") association?.optString("transfer") else null)
 }

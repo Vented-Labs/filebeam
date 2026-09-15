@@ -5,6 +5,8 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Test
+import org.json.JSONObject
+import io.filebeam.android.platform.resumeRequest
 
 class ServiceFacadesTest {
     @Test fun inboxStartsLoadingUntilTheNativeNetworkCallIsRequested() {
@@ -30,6 +32,17 @@ class ServiceFacadesTest {
         assertThrows(IllegalArgumentException::class.java) {
             AccountSessionRegistry.normalizeOrigin("https://user@filebeam.test")
         }
+    }
+
+    @Test fun inboxResumePreservesItsOriginAndHistoricalTransferWithoutCredentials() {
+        val request = resumeRequest("checkpoint", JSONObject()
+            .put("kind", "inbox-download").put("id", "job")
+            .put("instance", "https://inbox.example").put("transfer", "delivery"),
+            "https://other.example", false)
+        assertEquals("inbox-download", request.getString("kind"))
+        assertEquals("https://inbox.example", request.getString("instance"))
+        assertEquals("delivery", request.getString("transfer"))
+        assertTrue(!request.has("cookie") && !request.has("password") && !request.has("workingKey"))
     }
 
     @Test fun generatedKeyIsExportedAndPersistedBeforeItIsZeroed() {

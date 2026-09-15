@@ -2,7 +2,10 @@ use crate::{
     ErrorCategory, JobState, PendingPrompt, PromptType, Result, TransferSnapshot, operation,
 };
 use filebeam_client_core as core;
-use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 
 #[derive(uniffi::Object)]
 pub struct TransferJob {
@@ -18,7 +21,10 @@ impl TransferJob {
         }
     }
     pub(crate) fn new_live(job: core::Job, end_requested: Arc<AtomicBool>) -> Self {
-        Self { inner: Mutex::new(core::ManagedJob::new(job)), end_requested: Some(end_requested) }
+        Self {
+            inner: Mutex::new(core::ManagedJob::new(job)),
+            end_requested: Some(end_requested),
+        }
     }
 }
 
@@ -86,7 +92,9 @@ impl TransferJob {
     }
     /// Explicitly ends the remote live reservation. `pause` only stops local serving.
     pub fn end_live(&self) {
-        if let Some(end) = &self.end_requested { end.store(true, Ordering::Relaxed); }
+        if let Some(end) = &self.end_requested {
+            end.store(true, Ordering::Relaxed);
+        }
         self.pause();
     }
 }

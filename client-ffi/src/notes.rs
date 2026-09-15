@@ -1,7 +1,10 @@
 use crate::services::NativeServices;
 use crate::{Result, TransferJob, operation};
 use filebeam_client_core::services as core;
-use std::{path::PathBuf, sync::{Arc, atomic::AtomicBool}};
+use std::{
+    path::PathBuf,
+    sync::{Arc, atomic::AtomicBool},
+};
 
 #[derive(Clone, Copy, uniffi::Enum)]
 pub enum NoteTransport {
@@ -85,14 +88,26 @@ impl NativeServices {
         };
         let end_requested = Arc::new(AtomicBool::new(false));
         let ending = end_requested.clone();
-        Ok(Arc::new(TransferJob::new_live(
+        let job = if let Some(runtime) = &self.runtime {
+            filebeam_client_core::Job::spawn_in(
+                &runtime.scheduler,
+                runtime.settings.clone(),
+                None,
+                move |control| {
+                    notes
+                        .create_live(request, control, ending)
+                        .map(|note| vec![note.link])
+                },
+            )
+        } else {
+            // Compatibility constructor callers retain the historical isolated pool.
             filebeam_client_core::Job::spawn(settings, move |control| {
                 notes
                     .create_live(request, control, ending)
                     .map(|note| vec![note.link])
-            }),
-            end_requested,
-        )))
+            })
+        };
+        Ok(Arc::new(TransferJob::new_live(job, end_requested)))
     }
 
     /// Opens, authenticates, and decodes a note before burning it when required.

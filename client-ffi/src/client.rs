@@ -1,7 +1,7 @@
 use crate::{
-    ClientConfig, InstanceInfo, Result, SavedTransfer, SecretStoreCallback, SourceCallback,
-    SourceKind, TransferJob, Transport, UploadAuthentication, UploadOptions, UploadSource, invalid,
-    operation,
+    ClientConfig, InstanceInfo, NativeRuntime, Result, SavedTransfer, SecretStoreCallback,
+    SourceCallback, SourceKind, TransferJob, Transport, UploadAuthentication, UploadOptions,
+    UploadSource, invalid, operation,
 };
 use filebeam_client_core::{self as core, control::TransferSettings, protocol, uploads};
 use std::{path::PathBuf, sync::Arc};
@@ -55,6 +55,26 @@ impl TransferClient {
             scheduler,
             allow_http: config.allow_http,
         })
+    }
+
+    #[uniffi::constructor]
+    pub fn new_with_runtime(config: ClientConfig, runtime: Arc<NativeRuntime>) -> Result<Self> {
+        let mut client = Self::new(config)?;
+        client.scheduler = runtime.scheduler.clone();
+        Ok(client)
+    }
+
+    #[uniffi::constructor]
+    pub fn new_with_runtime_callbacks(
+        config: ClientConfig,
+        runtime: Arc<NativeRuntime>,
+        secret_store: Arc<dyn SecretStoreCallback>,
+        source: Arc<dyn SourceCallback>,
+    ) -> Result<Self> {
+        let mut client = Self::new_with_runtime(config, runtime)?;
+        crate::secret_store::install(&mut client.settings, secret_store);
+        crate::source::install(&mut client.settings, source);
+        Ok(client)
     }
 
     #[uniffi::constructor]
@@ -190,7 +210,9 @@ impl TransferClient {
             || cookie_context.is_empty()
             || cookie_context.contains(['\r', '\n'])
         {
-            return Err(invalid("A valid account session and inbox key are required"));
+            return Err(invalid(
+                "A valid account session and inbox key are required",
+            ));
         }
         if !PathBuf::from(&output_directory).is_absolute() {
             return Err(invalid("The output directory must be absolute"));
@@ -225,7 +247,9 @@ impl TransferClient {
             || cookie_context.is_empty()
             || cookie_context.contains(['\r', '\n'])
         {
-            return Err(invalid("A valid account session and inbox key are required"));
+            return Err(invalid(
+                "A valid account session and inbox key are required",
+            ));
         }
         let instance = origin(&instance, self.allow_http)?;
         Ok(self.start_operation(move |control| {

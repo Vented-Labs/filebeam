@@ -5,6 +5,7 @@ import android.util.Base64
 import io.filebeam.android.platform.security.PendingTransferStore
 import io.filebeam.rust.AccountKeyUpload
 import io.filebeam.rust.NativeServices
+import io.filebeam.rust.NativeRuntime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -32,12 +33,12 @@ interface AccountService {
 }
 
 /** One process owns each origin's Rust cookie jar so account, inbox, and recipient lookup agree. */
-class AccountSessionRegistry(private val allowHttp: Boolean) {
+class AccountSessionRegistry(private val allowHttp: Boolean, private val runtime: NativeRuntime) {
     private val services = mutableMapOf<String, NativeServices>()
     private val cookies = mutableMapOf<String, String>()
 
     @Synchronized fun service(instance: String): NativeServices = services.getOrPut(normalizeOrigin(instance)) {
-        NativeServices(normalizeOrigin(instance), allowHttp)
+        NativeServices.newWithRuntime(normalizeOrigin(instance), allowHttp, runtime)
     }
     @Synchronized fun cookie(instance: String): String? = cookies[normalizeOrigin(instance)]
     @Synchronized fun authenticated(instance: String, cookie: String) { cookies[normalizeOrigin(instance)] = cookie }

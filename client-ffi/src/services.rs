@@ -1,5 +1,6 @@
-use crate::{Result, client::origin, operation};
+use crate::{NativeRuntime, Result, client::origin, operation};
 use filebeam_client_core::services as core;
+use std::sync::Arc;
 use zeroize::Zeroizing;
 
 #[derive(Clone, uniffi::Record)]
@@ -119,6 +120,7 @@ pub struct GeneratedAccountKey {
 #[derive(uniffi::Object)]
 pub struct NativeServices {
     pub(crate) inner: core::ServiceClient,
+    pub(crate) runtime: Option<Arc<NativeRuntime>>,
 }
 
 #[uniffi::export]
@@ -127,6 +129,7 @@ impl NativeServices {
     pub fn new(instance: String, allow_http: bool) -> Result<Self> {
         Ok(Self {
             inner: core::ServiceClient::new(&origin(&instance, allow_http)?).map_err(operation)?,
+            runtime: None,
         })
     }
 
@@ -140,6 +143,19 @@ impl NativeServices {
         Ok(Self {
             inner: core::ServiceClient::new_with_cookie_context(&instance, Some(&cookie_context))
                 .map_err(operation)?,
+            runtime: None,
+        })
+    }
+
+    #[uniffi::constructor]
+    pub fn new_with_runtime(
+        instance: String,
+        allow_http: bool,
+        runtime: Arc<NativeRuntime>,
+    ) -> Result<Self> {
+        Ok(Self {
+            inner: core::ServiceClient::new(&origin(&instance, allow_http)?).map_err(operation)?,
+            runtime: Some(runtime),
         })
     }
 
