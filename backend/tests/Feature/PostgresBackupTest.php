@@ -51,17 +51,16 @@ afterEach(function (): void {
     File::deleteDirectory($this->backupRoot);
 });
 
-test('creates and validates a private custom archive without exposing credentials', function (): void {
+test('creates and validates a private custom archive without exposing credentials', function (array $connection, array $passfileHosts): void {
     $backup = new PostgresBackup([
         'driver' => 'pgsql',
-        'socket' => '/var/run/postgresql',
         'port' => '5432',
         'database' => 'filebeam',
         'username' => 'backup user',
         'password' => 'quotes \\ and spaces:$secret',
         'sslmode' => 'verify-full',
         'sslrootcert' => '/private/ca.pem',
-    ], $this->backupRoot.'/private', $this->dump, $this->restore);
+    ] + $connection, $this->backupRoot.'/private', $this->dump, $this->restore);
     putenv('PGOPTIONS=-c search_path=unsafe');
 
     $file = $backup->backup();
@@ -72,15 +71,20 @@ test('creates and validates a private custom archive without exposing credential
         ->and(fileperms($file) & 0777)->toBe(0600)
         ->and(fileperms(dirname($file)) & 0777)->toBe(0700)
         ->and($records)->toHaveCount(3)
-        ->and($records[0]->argv)->toContain('--host=/var/run/postgresql', '--port=5432', '--username=backup user', '--dbname=filebeam', '--no-password')
+        ->and($records[0]->argv)->toContain('--host='.$passfileHosts[0], '--port=5432', '--username=backup user', '--dbname=filebeam', '--no-password')
         ->and($records[0]->passfile_mode)->toBe(0600)
-        ->and($records[0]->passfile_contents)->toBe('/var/run/postgresql:5432:filebeam:backup user:quotes \\\\ and spaces\:$secret'."\n")
+        ->and($records[0]->passfile_contents)->toBe(implode('', array_map(static fn (string $host): string => $host.':5432:filebeam:backup user:quotes \\\\ and spaces\:$secret'."\n", $passfileHosts)))
         ->and($records[0]->pgpassword)->toBeFalse()
         ->and($records[0]->pgoptions)->toBeFalse()
         ->and($records[0]->sslmode)->toBe('verify-full')
         ->and($records[0]->sslrootcert)->toBe('/private/ca.pem')
         ->and(glob(dirname($file).'/.pgpass-*'))->toBe([]);
-});
+})->with([
+    'default socket' => [['socket' => '/var/run/postgresql'], ['/var/run/postgresql', 'localhost']],
+    'custom socket' => [['socket' => '/private/postgresql'], ['/private/postgresql', 'localhost']],
+    'socket via host' => [['host' => '/var/run/postgresql'], ['/var/run/postgresql', 'localhost']],
+    'TCP host' => [['host' => '127.0.0.1'], ['127.0.0.1']],
+]);
 
 test('removes partial archives and credentials when validation fails', function (): void {
     putenv('POSTGRES_BACKUP_TEST_TRUNCATE=1');

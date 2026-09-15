@@ -274,8 +274,17 @@ final class PostgresBackup
     private function writePassfile(string $path): void
     {
         $this->createPrivateFile($path);
-        $line = implode(':', array_map($this->escapePassfileField(...), [$this->settings['host'], $this->settings['port'], $this->settings['database'], $this->settings['username'], $this->settings['password']]))."\n";
-        if (file_put_contents($path, $line) === false) {
+        $hosts = [$this->settings['host']];
+        // libpq matches its compiled-in default socket directory as localhost.
+        // Keep the literal path too, since custom socket directories match directly.
+        if (str_starts_with($this->settings['host'], '/')) {
+            $hosts[] = 'localhost';
+        }
+        $contents = '';
+        foreach ($hosts as $host) {
+            $contents .= implode(':', array_map($this->escapePassfileField(...), [$host, $this->settings['port'], $this->settings['database'], $this->settings['username'], $this->settings['password']]))."\n";
+        }
+        if (file_put_contents($path, $contents) === false) {
             throw new RuntimeException('Unable to create PostgreSQL credentials file.');
         }
     }
