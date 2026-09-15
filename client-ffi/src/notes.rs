@@ -46,6 +46,14 @@ impl NativeServices {
         if matches!(request.transport, NoteTransport::WebRtc) {
             return Err(crate::invalid("Use start_live_note for WebRTC notes"));
         }
+        let _memory = self
+            .runtime
+            .as_ref()
+            .map(|runtime| {
+                runtime
+                    .reserve_service_memory(filebeam_client_core::TRANSIENT_MEMORY_ALLOWANCE_BYTES)
+            })
+            .transpose()?;
         self.inner
             .notes()
             .create(core::NoteCreate {
@@ -112,6 +120,14 @@ impl NativeServices {
 
     /// Opens, authenticates, and decodes a note before burning it when required.
     pub fn open_note(&self, link: String, password: Option<String>) -> Result<OpenedNote> {
+        let _memory = self
+            .runtime
+            .as_ref()
+            .map(|runtime| {
+                runtime
+                    .reserve_service_memory(filebeam_client_core::TRANSIENT_MEMORY_ALLOWANCE_BYTES)
+            })
+            .transpose()?;
         self.inner
             .notes()
             .open(&link, password.as_deref())

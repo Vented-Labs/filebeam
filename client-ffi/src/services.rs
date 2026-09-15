@@ -159,6 +159,21 @@ impl NativeServices {
         })
     }
 
+    #[uniffi::constructor]
+    pub fn new_with_runtime_cookie_context(
+        instance: String,
+        allow_http: bool,
+        cookie_context: String,
+        runtime: Arc<NativeRuntime>,
+    ) -> Result<Self> {
+        let instance = origin(&instance, allow_http)?;
+        Ok(Self {
+            inner: core::ServiceClient::new_with_cookie_context(&instance, Some(&cookie_context))
+                .map_err(operation)?,
+            runtime: Some(runtime),
+        })
+    }
+
     pub fn read_note(&self, transfer_id: String) -> Result<NoteMetadata> {
         let note = self.inner.notes().read(&transfer_id).map_err(operation)?;
         Ok(NoteMetadata {
@@ -411,6 +426,14 @@ impl NativeServices {
         user_id: u64,
         public_key: String,
     ) -> Result<String> {
+        let _memory = self
+            .runtime
+            .as_ref()
+            .map(|runtime| {
+                runtime
+                    .reserve_service_memory(filebeam_client_core::TRANSIENT_MEMORY_ALLOWANCE_BYTES)
+            })
+            .transpose()?;
         let password = Zeroizing::new(password);
         core::wrap_password_key(&private_key, password.as_bytes(), user_id, &public_key)
             .map_err(operation)
@@ -423,6 +446,14 @@ impl NativeServices {
         user_id: u64,
         public_key: String,
     ) -> Result<Vec<u8>> {
+        let _memory = self
+            .runtime
+            .as_ref()
+            .map(|runtime| {
+                runtime
+                    .reserve_service_memory(filebeam_client_core::TRANSIENT_MEMORY_ALLOWANCE_BYTES)
+            })
+            .transpose()?;
         let password = Zeroizing::new(password);
         core::unwrap_password_key(&envelope, password.as_bytes(), user_id, &public_key)
             .map(|key| key.to_vec())

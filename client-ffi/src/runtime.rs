@@ -44,4 +44,13 @@ impl NativeRuntime {
             },
         })
     }
+
+    pub(crate) fn reserve_service_memory(
+        &self,
+        bytes: u64,
+    ) -> Result<filebeam_client_core::control::MemoryPermit> {
+        self.scheduler
+            .try_reserve_service_memory(bytes)
+            .map_err(operation)
+    }
 }

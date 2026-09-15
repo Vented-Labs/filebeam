@@ -25,7 +25,7 @@ class DocumentStorageExportRecoveryTest {
     @Test fun nonseekableProviderFallsBackToSnapshotAndInterruptedExportResumesExactly() = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val storage = DocumentStorage(context)
-        val bytes = ByteArray(160 * 1024) { (it % 251).toByte() }
+        val bytes = ByteArray(2 * 1024 * 1024) { (it % 251).toByte() }
         TestDocumentsProvider.file = File(context.cacheDir, "provider-${System.nanoTime()}").apply { writeBytes(bytes) }
         TestDocumentsProvider.nonSeekable = true
         assertThrows(Exception::class.java) { storage.providerInput(uri, "pipe.bin") }
@@ -34,7 +34,7 @@ class DocumentStorageExportRecoveryTest {
         TestDocumentsProvider.nonSeekable = false
         val source = File(storage.root, "export-${System.nanoTime()}").apply { parentFile?.mkdirs(); writeBytes(bytes) }
         var checks = 0
-        assertThrows(CancellationException::class.java) { runBlocking { storage.export(source.absolutePath, uri) { if (++checks > 1) throw CancellationException() } } }
+        assertThrows(CancellationException::class.java) { runBlocking { storage.export(source.absolutePath, uri) { if (++checks > 20) throw CancellationException() } } }
         storage.export(source.absolutePath, uri) {}
         assertArrayEquals(bytes, TestDocumentsProvider.file.readBytes())
     }
@@ -42,18 +42,18 @@ class DocumentStorageExportRecoveryTest {
     @Test fun changedDestinationOrSourceNeverAppendsJournaledBytes() = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val storage = DocumentStorage(context)
-        val original = ByteArray(160 * 1024) { 7 }
+        val original = ByteArray(2 * 1024 * 1024) { 7 }
         val source = File(storage.root, "changed-${System.nanoTime()}").apply { parentFile?.mkdirs(); writeBytes(original) }
         TestDocumentsProvider.file = File(context.cacheDir, "destination-${System.nanoTime()}").apply { writeBytes(ByteArray(0)) }
         TestDocumentsProvider.nonSeekable = false
         var checks = 0
-        assertThrows(CancellationException::class.java) { runBlocking { storage.export(source.absolutePath, uri) { if (++checks > 1) throw CancellationException() } } }
+        assertThrows(CancellationException::class.java) { runBlocking { storage.export(source.absolutePath, uri) { if (++checks > 20) throw CancellationException() } } }
         TestDocumentsProvider.file.apply {
             val destination = readBytes()
             destination[96 * 1024] = 3 // Deliberately beyond the former 64 KiB fingerprint window.
             writeBytes(destination)
         }
-        val changed = ByteArray(160 * 1024) { 9 }
+        val changed = ByteArray(2 * 1024 * 1024) { 9 }
         changed[112 * 1024] = 4 // Same-length source mutation beyond the old verification window.
         source.writeBytes(changed)
         storage.export(source.absolutePath, uri) {}

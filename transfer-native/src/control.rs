@@ -176,6 +176,21 @@ impl MemoryBudget {
             bytes,
         })
     }
+
+    /// Non-job service calls have no cancellation handle, so never wait behind
+    /// a transfer: report admission pressure synchronously instead.
+    pub fn try_reserve(&self, bytes: u64) -> Result<MemoryPermit> {
+        let (lock, _) = &*self.state;
+        let mut state = lock.lock().unwrap_or_else(|error| error.into_inner());
+        if bytes > state.limit || state.used > state.limit - bytes {
+            return Err(MemoryExhausted.into());
+        }
+        state.used += bytes;
+        Ok(MemoryPermit {
+            budget: self.clone(),
+            bytes,
+        })
+    }
 }
 
 pub struct MemoryPermit {

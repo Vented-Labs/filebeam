@@ -1,4 +1,5 @@
 import java.io.File
+import java.net.URI
 import java.util.Properties
 import groovy.json.JsonSlurper
 
@@ -130,7 +131,7 @@ tasks.register("validateVerifiedAppLinks") {
     doLast {
         if (enabled.get().toBooleanStrictOrNull() != true) return@doLast
         val domain = host.orNull?.trim().orEmpty()
-        check(runCatching { java.net.URI("https://$domain").host == domain }.getOrDefault(false)) {
+        check(runCatching { URI("https://$domain").host == domain }.getOrDefault(false)) {
             "Verified App Links require -PappLinkHost=<domain>"
         }
         val file = statement.orNull?.let(::file)

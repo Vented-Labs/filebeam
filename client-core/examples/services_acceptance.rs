@@ -197,7 +197,7 @@ fn start_live(
     let sender = thread::spawn(move || {
         ServiceClient::new(&instance)?
             .notes()
-            .create_live(request, &worker)
+            .create_live(request, &worker, std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)))
     });
     let deadline = std::time::Instant::now() + Duration::from_secs(30);
     loop {

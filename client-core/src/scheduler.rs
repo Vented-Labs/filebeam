@@ -122,6 +122,17 @@ impl Scheduler {
             resume_id: resume_id.map(str::to_owned),
         })
     }
+
+    /// Service APIs have no cancellation callback; fail immediately under load.
+    pub fn try_reserve_service_memory(&self, bytes: u64) -> Result<MemoryPermit> {
+        self.memory.try_reserve(bytes).map_err(|error| {
+            if error.is::<MemoryExhausted>() {
+                JobError::resource("shared scheduler memory budget is exhausted").into()
+            } else {
+                error
+            }
+        })
+    }
 }
 
 pub struct Admission {
@@ -220,5 +231,22 @@ mod tests {
             Err(error) => error,
         };
         assert!(error.is::<Cancelled>());
+    }
+
+    #[test]
+    fn service_kdf_contends_with_an_admitted_transfer_and_releases() {
+        let scheduler = Scheduler::new(SchedulerLimits {
+            workers: 1,
+            memory_bytes: RUNTIME_ALLOWANCE_BYTES + 10 + TRANSIENT_MEMORY_ALLOWANCE_BYTES,
+        })
+        .unwrap();
+        let transfer = control(10);
+        let _admission = scheduler.admit(&transfer, None).unwrap();
+        let kdf = scheduler
+            .try_reserve_service_memory(TRANSIENT_MEMORY_ALLOWANCE_BYTES)
+            .unwrap();
+        assert!(scheduler.try_reserve_service_memory(1).is_err());
+        drop(kdf);
+        assert!(scheduler.try_reserve_service_memory(1).is_ok());
     }
 }

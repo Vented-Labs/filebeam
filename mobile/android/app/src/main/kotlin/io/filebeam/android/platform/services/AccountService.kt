@@ -45,7 +45,7 @@ class AccountSessionRegistry(private val allowHttp: Boolean, private val runtime
     @Synchronized fun restore(instance: String, cookie: String) {
         val origin = normalizeOrigin(instance)
         // Existing calls may still be using the previous jar. Let it finish rather than destroying it.
-        services[origin] = NativeServices.newWithCookieContext(origin, allowHttp, cookie)
+        services[origin] = NativeServices.newWithRuntimeCookieContext(origin, allowHttp, cookie, runtime)
         cookies[origin] = cookie
     }
     @Synchronized fun clear(instance: String) { cookies.remove(normalizeOrigin(instance)) }

@@ -112,21 +112,29 @@ class DocumentStorage(private val context: Context) {
         val descriptor = context.contentResolver.openFileDescriptor(uri, "rw")
         if (descriptor == null) {
             context.contentResolver.openOutputStream(uri, "wt")?.use { output ->
-                copyExport(file, output, 0, journalFile, uri, ensureRunning)
+                copyExport(file, output, ensureRunning)
             } ?: error("The destination could not be opened")
             journalFile.delete()
             return@withContext
         }
         descriptor.use { pfd ->
+            val readable = ParcelFileDescriptor.AutoCloseInputStream(ParcelFileDescriptor.dup(pfd.fileDescriptor)).channel
+            val destinationSize = readable.size()
+            val offset = previous?.offset?.takeIf {
+                it in 0..file.length() && destinationSize >= it && fingerprint(readable, it) == previous.destinationHash
+            } ?: 0L
+            readable.close()
             FileOutputStream(pfd.fileDescriptor).channel.use { channel ->
-                val destinationSize = channel.size()
-                val offset = previous?.offset?.takeIf { it in 0..file.length() && destinationSize >= it && fingerprint(channel, it) == previous.destinationHash } ?: 0L
-                if (offset == 0L) channel.truncate(0)
+                // Discard bytes written after the last durable journal checkpoint.
+                channel.truncate(offset)
                 channel.position(offset)
                 file.inputStream().use { input ->
                     if (offset > 0) skipFully(input, offset)
                     val buffer = ByteArray(64 * 1024)
                     var written = offset
+                    var journaled = offset
+                    val destinationDigest = java.security.MessageDigest.getInstance("SHA-256")
+                    if (offset > 0) updateDigest(readableChannel(pfd), offset, destinationDigest)
                     while (true) {
                         currentCoroutineContext().ensureActive()
                         ensureRunning()
@@ -135,12 +143,15 @@ class DocumentStorage(private val context: Context) {
                         val bytes = java.nio.ByteBuffer.wrap(buffer, 0, count)
                         while (bytes.hasRemaining()) channel.write(bytes)
                         written += count
-                        // Never advertise an offset which is still only in the
-                        // provider's write cache: recovery trusts this journal.
-                        channel.force(true)
-                        saveJournal(journalFile, ExportJournal(file.absolutePath, uri.toString(), written, sourceHash, fingerprint(channel, written)))
+                        destinationDigest.update(buffer, 0, count)
+                        if (written - journaled >= JOURNAL_INTERVAL) {
+                            channel.force(true)
+                            saveJournal(journalFile, ExportJournal(file.absolutePath, uri.toString(), written, sourceHash, digestHex(destinationDigest)))
+                            journaled = written
+                        }
                     }
                     channel.force(true)
+                    if (written != journaled) saveJournal(journalFile, ExportJournal(file.absolutePath, uri.toString(), written, sourceHash, digestHex(destinationDigest)))
                 }
             }
         }
@@ -223,18 +234,14 @@ class DocumentStorage(private val context: Context) {
         }
     }
 
-    private fun copyExport(source: File, output: java.io.OutputStream, offset: Long, journal: File, uri: Uri, ensureRunning: () -> Unit) {
+    private fun copyExport(source: File, output: java.io.OutputStream, ensureRunning: () -> Unit) {
         source.inputStream().use { input ->
-            if (offset > 0) skipFully(input, offset)
             val buffer = ByteArray(64 * 1024)
-            var written = offset
             while (true) {
                 ensureRunning()
                 val count = input.read(buffer)
                 if (count < 0) break
                 output.write(buffer, 0, count)
-                written += count
-                saveJournal(journal, ExportJournal(source.absolutePath, uri.toString(), written, fingerprint(source), ""))
             }
             output.flush()
         }
@@ -283,6 +290,22 @@ class DocumentStorage(private val context: Context) {
             digest.digest().joinToString("") { "%02x".format(it) }
         } finally { channel.position(position) }
     }
+    private fun readableChannel(pfd: ParcelFileDescriptor) = ParcelFileDescriptor.AutoCloseInputStream(ParcelFileDescriptor.dup(pfd.fileDescriptor)).channel
+    private fun updateDigest(channel: java.nio.channels.FileChannel, length: Long, digest: java.security.MessageDigest) {
+        try {
+            var remaining = length
+            val buffer = java.nio.ByteBuffer.allocate(64 * 1024)
+            while (remaining > 0) {
+                buffer.clear().limit(minOf(remaining, buffer.capacity().toLong()).toInt())
+                val count = channel.read(buffer)
+                check(count > 0) { "The export destination was truncated" }
+                digest.update(buffer.array(), 0, count)
+                remaining -= count
+            }
+        } finally { channel.close() }
+    }
+    private fun digestHex(digest: java.security.MessageDigest): String =
+        (digest.clone() as java.security.MessageDigest).digest().joinToString("") { "%02x".format(it) }
     private fun fingerprint(input: java.io.InputStream): String {
         val digest = java.security.MessageDigest.getInstance("SHA-256")
         val buffer = ByteArray(64 * 1024)
@@ -296,6 +319,7 @@ class DocumentStorage(private val context: Context) {
 
     companion object {
         private const val RESERVE = 64L * 1024 * 1024
+        private const val JOURNAL_INTERVAL = 1L * 1024 * 1024
         private object IntentFlags {
             const val READ = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
             const val WRITE = android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
