@@ -4,7 +4,10 @@ use filebeam_client_core::services as core;
 use std::{path::PathBuf, sync::Arc};
 
 #[derive(Clone, Copy, uniffi::Enum)]
-pub enum NoteTransport { Http, WebRtc }
+pub enum NoteTransport {
+    Http,
+    WebRtc,
+}
 
 #[derive(Clone, uniffi::Record)]
 pub struct NoteRequest {
@@ -37,7 +40,9 @@ pub struct OpenedNote {
 impl NativeServices {
     /// Passwords are passed only to this call and are never persisted by the native client.
     pub fn create_note(&self, request: NoteRequest) -> Result<CreatedNote> {
-        if matches!(request.transport, NoteTransport::WebRtc) { return Err(crate::invalid("Use start_live_note for WebRTC notes")); }
+        if matches!(request.transport, NoteTransport::WebRtc) {
+            return Err(crate::invalid("Use start_live_note for WebRTC notes"));
+        }
         self.inner
             .notes()
             .create(core::NoteCreate {
@@ -57,11 +62,34 @@ impl NativeServices {
     }
 
     pub fn start_live_note(&self, request: NoteRequest) -> Result<Arc<TransferJob>> {
-        if !matches!(request.transport, NoteTransport::WebRtc) { return Err(crate::invalid("Live note jobs require WebRTC transport")); }
+        if !matches!(request.transport, NoteTransport::WebRtc) {
+            return Err(crate::invalid("Live note jobs require WebRTC transport"));
+        }
         let notes = self.inner.notes().clone();
-        let request = core::NoteCreate { text: request.text, title: request.title, language: request.language, password: request.password, burn_on_read: request.burn_on_read, retention_hours: request.retention_hours };
-        let settings = filebeam_client_core::control::TransferSettings { state_home: PathBuf::from("/tmp/filebeam-notes"), max_concurrency: Some(1), memory_budget: 256 * 1024 * 1024, client_user_agent: None, webrtc_relay_only: false, checkpoint_secret_store: None, source_resolver: None };
-        Ok(Arc::new(TransferJob::new(filebeam_client_core::Job::spawn(settings, move |control| notes.create_live(request, control).map(|note| vec![note.link])))))
+        let request = core::NoteCreate {
+            text: request.text,
+            title: request.title,
+            language: request.language,
+            password: request.password,
+            burn_on_read: request.burn_on_read,
+            retention_hours: request.retention_hours,
+        };
+        let settings = filebeam_client_core::control::TransferSettings {
+            state_home: PathBuf::from("/tmp/filebeam-notes"),
+            max_concurrency: Some(1),
+            memory_budget: 256 * 1024 * 1024,
+            client_user_agent: None,
+            webrtc_relay_only: false,
+            checkpoint_secret_store: None,
+            source_resolver: None,
+        };
+        Ok(Arc::new(TransferJob::new(
+            filebeam_client_core::Job::spawn(settings, move |control| {
+                notes
+                    .create_live(request, control)
+                    .map(|note| vec![note.link])
+            }),
+        )))
     }
 
     /// Opens, authenticates, and decodes a note before burning it when required.

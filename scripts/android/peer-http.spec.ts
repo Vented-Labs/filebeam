@@ -1,13 +1,13 @@
 import { createHash } from 'node:crypto';
-import { createWriteStream, mkdirSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
+import { appendFile } from 'node:fs/promises';
 import { stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { expect, test, type Page } from '@playwright/test';
+import { chromium, expect, test, type Page } from '@playwright/test';
 
 const run = promisify(execFile);
-const root = resolve(import.meta.dirname, '../..');
 const results = process.env.PEER_RESULTS!;
 const fixtures = join(results, 'fixtures');
 const binary = process.env.BROWSER_TEST_CLI_BINARY!;
@@ -20,33 +20,47 @@ async function digest(path: string): Promise<string> {
     return stdout.split(/\s+/)[0];
 }
 
-async function nativeWritable(page: Page, output: string): Promise<() => Promise<string>> {
-    mkdirSync(resolve(output, '..'), { recursive: true });
+async function nativeWritable(page: Page, label: string): Promise<() => Promise<string>> {
     const hash = createHash('sha256');
-    const stream = createWriteStream(output);
+    let peakRss = 0;
     await page.exposeBinding('__peerWrite', async (_source, bytes: Buffer) => {
         const chunk = Buffer.from(bytes);
         hash.update(chunk);
-        if (!stream.write(chunk)) await new Promise<void>((done) => stream.once('drain', done));
-    });
-    await page.exposeBinding('__peerClose', async () => {
-        await new Promise<void>((done, fail) => stream.end((error?: Error | null) => (error ? fail(error) : done())));
+        const { stdout } = await run('ps', ['-C', 'chrome-headless-shell', '-o', 'rss=']);
+        const rss = stdout.split(/\s+/).reduce((total, value) => total + Number(value || 0), 0);
+        peakRss = Math.max(peakRss, rss);
     });
     await page.addInitScript(() => {
         Object.defineProperty(window, 'showSaveFilePicker', {
             configurable: true,
-            value: async () => ({
-                createWritable: async () => ({
-                    // The native binding consumes one decrypted chunk at a time; no full-file buffer exists.
-                    write: async (bytes: Uint8Array) => window.__peerWrite(bytes),
-                    close: async () => window.__peerClose(),
-                    abort: async () => window.__peerClose(),
-                }),
-            }),
+            value: async () => {
+                // OPFS gives headless Chromium a real file handle without retaining the file in JS memory.
+                const root = await navigator.storage.getDirectory();
+                const name = `peer-${crypto.randomUUID()}`;
+                const file = await root.getFileHandle(name, { create: true });
+                window.__peerCleanup = () => root.removeEntry(name);
+                return {
+                    createWritable: async () => {
+                        const writable = await file.createWritable();
+                        return {
+                            write: async (bytes: Uint8Array) => {
+                                await window.__peerWrite(bytes);
+                                await writable.write(bytes);
+                            },
+                            close: async () => writable.close(),
+                            abort: async () => writable.abort(),
+                        };
+                    },
+                };
+            },
         });
     });
     return async () => {
-        await new Promise<void>((done) => stream.once('close', done));
+        await appendFile(
+            join(results, 'logs', 'browser-rss.tsv'),
+            `${label}\tpeak_chromium_rss_kib=${peakRss}\tnode_rss=${process.memoryUsage().rss}\n`,
+        );
+        await page.evaluate(() => window.__peerCleanup());
         return hash.digest('hex');
     };
 }
@@ -55,6 +69,7 @@ declare global {
     interface Window {
         __peerWrite(bytes: Uint8Array): Promise<void>;
         __peerClose(): Promise<void>;
+        __peerCleanup(): Promise<void>;
     }
 }
 
@@ -68,7 +83,7 @@ async function uploadFromCli(file: string, extra: string[] = []): Promise<string
     return stdout.trim().split(/\s+/).at(-1)!;
 }
 
-test('CLI and browser exchange encrypted HTTP files with streamed native writable output', async ({ page }) => {
+test('browser uploads and CLI downloads an encrypted HTTP file', async ({ page }) => {
     const webSource = join(fixtures, 'web-to-cli.txt');
     await page.goto('/');
     await page.locator('#filebeam-picker').setInputFiles(webSource);
@@ -81,21 +96,35 @@ test('CLI and browser exchange encrypted HTTP files with streamed native writabl
     });
     expect(await digest(webOutput)).toBe(await digest(webSource));
 
+});
+
+test('CLI uploads and browser downloads an encrypted HTTP file through OPFS', async ({ page }) => {
     const cliSource = join(fixtures, 'cli-to-web.txt');
     const cliLink = await uploadFromCli(cliSource, ['--retention-hours', '24']);
-    const close = await nativeWritable(page, join(results, 'downloads', 'cli-to-web.browser.txt'));
+    const close = await nativeWritable(page, 'cli-to-web');
     await page.goto(cliLink);
     await page.getByRole('button', { name: 'Download files', exact: true }).click();
-    await expect(page.getByText('Download finished and integrity verified.')).toBeVisible();
+    await expect(page.getByRole('heading', { name: '1 file downloaded' })).toBeVisible();
     expect(await close()).toBe(await digest(cliSource));
 });
 
-test('browser password, retention, and Turbo HTTP flow decrypts through the native writable adapter', async ({ page }) => {
+test('browser password, retention, and Turbo downloader starts before sender finalization', async ({
+    page,
+    browser,
+}) => {
     const source = join(fixtures, 'web-to-cli.txt');
+    let releaseCompletion!: () => void;
+    const completion = new Promise<void>((done) => {
+        releaseCompletion = done;
+    });
+    await page.route('**/api/v1/transfers/*/complete', async (route) => {
+        await completion;
+        await route.continue();
+    });
     await page.goto('/');
     await page.locator('#filebeam-picker').setInputFiles(source);
     await page.getByRole('combobox', { name: 'Retention period' }).click();
-    await page.getByRole('option', { name: /24 hours/i }).click();
+    await page.getByRole('option', { name: '1 day', exact: true }).click();
     await page.getByTestId('prism-password-trigger').click();
     const password = page.getByTestId('prism-password-popover').locator('#transfer-password');
     await password.fill('peer-http-password');
@@ -103,26 +132,60 @@ test('browser password, retention, and Turbo HTTP flow decrypts through the nati
     await page.getByRole('button', { name: 'Turbo Transfer' }).click();
     await expect(page.locator('#share-link')).toBeVisible();
     const link = await page.locator('#share-link').inputValue();
-    const close = await nativeWritable(page, join(results, 'downloads', 'turbo.browser.txt'));
-    await page.goto(link);
-    await page.locator('#transfer-password').fill('peer-http-password');
-    await page.getByRole('button', { name: 'Unlock' }).click();
-    await page.getByRole('button', { name: 'Download files', exact: true }).click();
-    await expect(page.getByText('Download finished and integrity verified.')).toBeVisible();
+    const receiver = await browser.newPage();
+    const close = await nativeWritable(receiver, 'turbo');
+    await receiver.goto(link);
+    await receiver.locator('#transfer-password').fill('peer-http-password');
+    await receiver.getByRole('button', { name: 'Unlock' }).click();
+    await receiver.getByRole('button', { name: 'Download files', exact: true }).click();
+    await expect(receiver.getByRole('heading', { name: '1 file downloading' })).toBeVisible();
+    releaseCompletion();
+    await expect(receiver.getByText('Download finished and integrity verified.')).toBeVisible();
     expect(await close()).toBe(await digest(source));
+    await receiver.close();
 });
 
-test('513 MiB and 4097 MiB CLI-to-browser files retain streamed hash and bounded browser output', async ({ page }) => {
+test('513 MiB and 4097 MiB browser-to-CLI files retain streamed hashes', async ({ page }) => {
     test.skip(!large, 'run with peer-http.sh run-large');
     for (const name of ['peer-513MiB.bin', 'peer-4097MiB.bin']) {
         const source = join(fixtures, name);
-        const link = await uploadFromCli(source);
-        const output = join(results, 'downloads', `${name}.browser`);
-        const close = await nativeWritable(page, output);
-        await page.goto(link);
-        await page.getByRole('button', { name: 'Download files', exact: true }).click();
-        await expect(page.getByText('Download finished and integrity verified.')).toBeVisible();
-        expect(await close()).toBe(await digest(source));
+        await page.goto('/');
+        await page.locator('#filebeam-picker').setInputFiles(source);
+        await page.getByRole('button', { name: 'Encrypt and share' }).click();
+        await expect(page.locator('#share-link')).toBeVisible({ timeout: 7_000_000 });
+        const link = await page.locator('#share-link').inputValue();
+        const outputDirectory = join(results, 'downloads', `browser-to-cli-${name}`);
+        const output = join(outputDirectory, name);
+        mkdirSync(outputDirectory, { recursive: true });
+        await run(binary, ['--plain', 'down', link, '--output', outputDirectory], {
+            env: { ...process.env, FILEBEAM_INSTANCE: process.env.BASE_URL!, FILEBEAM_HOME: join(results, 'cli-home') },
+            timeout: 7_000_000,
+        });
+        expect(await digest(output)).toBe(await digest(source));
         expect((await stat(output)).size).toBe((await stat(source)).size);
+    }
+});
+
+test('513 MiB and 4097 MiB CLI-to-browser files retain streamed OPFS hashes', async () => {
+    test.skip(!large, 'run with peer-http.sh run-large');
+    const context = await chromium.launchPersistentContext(join(results, 'opfs-profile'), {
+        headless: true,
+    });
+    try {
+        for (const name of ['peer-513MiB.bin', 'peer-4097MiB.bin']) {
+            const page = await context.newPage();
+            const source = join(fixtures, name);
+            const link = await uploadFromCli(source);
+            const close = await nativeWritable(page, `cli-${name}`);
+            await page.goto(link);
+            await page.getByRole('button', { name: 'Download files', exact: true }).click();
+            await expect(page.getByRole('heading', { name: '1 file downloaded' })).toBeVisible({
+                timeout: 7_000_000,
+            });
+            expect(await close()).toBe(await digest(source));
+            await page.close();
+        }
+    } finally {
+        await context.close();
     }
 });

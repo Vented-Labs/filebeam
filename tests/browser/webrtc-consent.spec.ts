@@ -51,7 +51,7 @@ test.describe('WebRTC consent', () => {
             if (request.method() === 'POST' && request.url().endsWith('/api/v1/transfers'))
                 transferPosts.push(request.url());
         });
-        await page.getByRole('button', { name: 'Encrypt and share' }).click();
+        await page.getByRole('button', { name: 'Send encrypted' }).click();
         await expect(page.getByRole('heading', { name: 'WebRTC privacy' })).toBeVisible();
         expect(transferPosts).toEqual([]);
 
@@ -67,7 +67,7 @@ test.describe('WebRTC consent', () => {
             ),
         ).toBe(0);
 
-        await page.getByRole('button', { name: 'Encrypt and share' }).click();
+        await page.getByRole('button', { name: 'Send encrypted' }).click();
         await page.getByRole('button', { name: 'Accept and continue' }).click();
         await expect(page.getByRole('heading', { name: 'WebRTC privacy' })).not.toBeVisible();
         expect(
@@ -86,7 +86,7 @@ test.describe('WebRTC consent', () => {
             mimeType: 'text/plain',
             buffer: Buffer.from('accepted'),
         });
-        await page.getByRole('button', { name: 'Encrypt and share' }).click();
+        await page.getByRole('button', { name: 'Send encrypted' }).click();
         await page.getByRole('button', { name: 'Accept and continue' }).click();
         await page.reload();
         await selectWebRtc(page);
@@ -95,7 +95,7 @@ test.describe('WebRTC consent', () => {
             mimeType: 'text/plain',
             buffer: Buffer.from('again'),
         });
-        await page.getByRole('button', { name: 'Encrypt and share' }).click();
+        await page.getByRole('button', { name: 'Send encrypted' }).click();
         await expect(page.getByRole('heading', { name: 'WebRTC privacy' })).not.toBeVisible();
 
         const fresh = await browser.newContext();
@@ -108,7 +108,7 @@ test.describe('WebRTC consent', () => {
                 mimeType: 'text/plain',
                 buffer: Buffer.from('fresh'),
             });
-            await freshPage.getByRole('button', { name: 'Encrypt and share' }).click();
+            await freshPage.getByRole('button', { name: 'Send encrypted' }).click();
             await expect(freshPage.getByRole('heading', { name: 'WebRTC privacy' })).toBeVisible();
             await freshPage.keyboard.press('Escape');
             await expect(

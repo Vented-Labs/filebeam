@@ -41,16 +41,15 @@ test('WASM policy matches the native transfer trace for scheduling, retry, and s
         expect(maximumRecord).toBe(1_048_592);
         expect(transferConcurrency(8, maximumRecord)).toBe(8);
         expect(retryDelayMilliseconds(2, undefined, 1)).toBe(1_000);
-        expect(
-            transferPolicy().parseShareLink(
-                fixture.link,
-            ),
-        ).toMatchObject({ id: '01ARZ3NDEKTSV4RRFFQ69G5FAV' });
+        expect(transferPolicy().parseShareLink(fixture.link)).toMatchObject({
+            id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+        });
         expect(() =>
-            transferPolicy().validateManifest(
-                fixture.manifest,
-                { driver: 'webrtc', chunk_bytes: 10, items: fixture.server_items },
-            ),
+            transferPolicy().validateManifest(fixture.manifest, {
+                driver: 'webrtc',
+                chunk_bytes: 10,
+                items: fixture.server_items,
+            }),
         ).toThrow();
 
         const session = new StageSession('stage', 8, 'checksum');

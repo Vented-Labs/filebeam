@@ -119,17 +119,19 @@ test('desktop platform detection ignores mobile and iPadOS user agents', () => {
     expect(detectDesktopPlatform({ platform: 'Unknown', userAgent: 'Unknown' })).toBeUndefined();
 });
 
-test('installer publication and real CLI capability gate actionable commands', () => {
+test('CLI command availability matches supported file transports and remaining restrictions', () => {
     const ready = { kind: 'files' as const, driver: 'http' as const, available: true };
     expect(cliUnavailableReason(ready)).toBeUndefined();
     for (const transfer of [
         { ...ready, available: false },
         { ...ready, kind: 'note' as const },
-        { ...ready, driver: 'webrtc' as const },
         { ...ready, inbox: true },
         { ...ready, burnOnRead: true },
         { ...ready, expiresAt: '2000-01-01T00:00:00Z' },
         { ...ready, expiresAt: 'invalid' },
     ])
         expect(cliUnavailableReason(transfer)).toBeTruthy();
+    expect(cliUnavailableReason({ ...ready, driver: 'webrtc' })).toBeUndefined();
+    expect(cliUnavailableReason({ ...ready, pending: true, turbo: true })).toBeUndefined();
+    expect(cliUnavailableReason({ ...ready, pending: true })).toBeTruthy();
 });

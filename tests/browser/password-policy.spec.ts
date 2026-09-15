@@ -29,7 +29,7 @@ for (const kind of ['files', 'note']) {
             'aria-invalid',
             'true',
         );
-        await expect(page.getByRole('button', { name: 'Encrypt and share' })).toBeDisabled();
+        await expect(page.getByRole('button', { name: 'Send encrypted' })).toBeDisabled();
 
         await password.fill('\u{1f512}'.repeat(8));
         await popover.getByRole('button', { name: 'Done' }).click();
@@ -38,7 +38,7 @@ for (const kind of ['files', 'note']) {
                 response.request().method() === 'POST' &&
                 response.url().endsWith('/api/v1/transfers'),
         );
-        await page.getByRole('button', { name: 'Encrypt and share' }).click();
+        await page.getByRole('button', { name: 'Send encrypted' }).click();
         const response = await creation;
         expect(response.ok()).toBe(true);
         const { data } = await response.json();

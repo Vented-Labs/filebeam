@@ -6,13 +6,25 @@ evidence.
 
 ## Fast CI
 
-`bash scripts/android/check.sh` is the required Android build gate. It runs Rust
+`Tests / Android` is the required Android gate and runs on every pull request,
+including changes under `client-core/`, `client-ffi/`, `transfer-native/`,
+`encryption/`, `transfer/`, and `mobile/`. It remains part of the required
+`Tests / Test` aggregate alongside the web, CLI, and server jobs. It runs `bash scripts/android/check.sh`, which runs Rust
 formatting, Clippy with warnings denied, Rust tests, Android lint/unit tests,
 debug and unsigned release (R8) APK builds, and native ELF/APK 16 KiB alignment
 validation. `bash scripts/android/device-test.sh` boots the pinned API 35 16 KiB
 emulator and runs installed-ABI instrumentation. The standard workflow retains
 the debug APK and reports; it deliberately does not run large fixtures or depend
 on a public TURN service.
+
+## Opt-in acceptance
+
+The `Android acceptance` workflow is manual-only. Its default API 35 image has
+16 KiB pages; select `api26-4k` to build the existing Docker image with
+`SYSTEM_IMAGE=system-images;android-26;google_apis;x86_64`. It runs the normal
+native binding instrumentation but does not create large fixtures unless
+`prepare_large_fixtures` is selected. It does not claim peer interoperability
+until the peer harness records the evidence below.
 
 ## Opt-in peer acceptance
 
@@ -31,6 +43,33 @@ two routable peers. TURN validation needs a dedicated TURN-over-UDP deployment
 and relay-only client configuration. Do not use a loopback ICE self-test as
 evidence for either condition.
 
+### Local WebRTC peer environment
+
+`scripts/android/peer-webrtc.sh` owns an isolated local backend at
+`http://127.0.0.1:8027` and coturn at
+`turn:<host-lan-ip>:34790?transport=udp`, with relay UDP ports
+`49200-49220`. It configures the backend with:
+
+```dotenv
+FILEBEAM_ENABLED_TRANSFER_DRIVERS=["http","webrtc"]
+FILEBEAM_DEFAULT_TRANSFER_DRIVER=webrtc
+FILEBEAM_WEBRTC_ICE_SERVERS=[]
+FILEBEAM_WEBRTC_TURN_URLS=turn:<host-lan-ip>:34790?transport=udp
+FILEBEAM_WEBRTC_TURN_SECRET=<per-run-private-secret>
+FILEBEAM_WEBRTC_TURN_TTL_SECONDS=120
+```
+
+The backend generates the ephemeral coturn REST username and HMAC credential;
+the Android peer must use the `ice_servers` returned by the signaling API, not
+the private secret. For an emulator, configure its instance/signaling base URL
+as `http://10.0.2.2:8027`; use the host LAN TURN address emitted by the run's
+`environment.txt`, not `127.0.0.1`. A physical device needs a reachable LAN
+binding and the same generated ICE response. Relay validation must set Android
+relay-only mode and record selected `relay/relay` candidates plus both hashes.
+The script removes its app, coturn, and volumes at exit; set
+`KEEP_PEER_WEBRTC_ENV=1` only while an acceptance owner is attached, then run
+the cleanup command in `environment.txt`.
+
 The harness reserves these result names for verified runs:
 
 | Requirement | Required evidence | Current status |
@@ -43,6 +82,15 @@ The harness reserves these result names for verified runs:
 | Flat memory growth | repeated 513 MiB/4097 MiB run RSS samples and configuration/revision | harness sampling available; measurements pending |
 | Debug and release/R8 | APK paths, build logs, native alignment report | covered by `check.sh`; release remains unsigned |
 | API 26/current, ARM64/ARMv7, physical low-memory, 4/16 KiB, release signing | device inventory and signed artifact provenance | pending hardware/signing availability |
+
+### Local signed R8 smoke
+
+[`docs/signed-r8.md`](signed-r8.md) defines the local test-key properties and
+post-build `signedR8Smoke` command. It validates unsigned APK native alignment,
+creates a separate test-signed minified APK, and verifies that signature without
+claiming production signing or release provenance. `validateVerifiedAppLinks`
+remains independent and requires explicit production association evidence only
+when `-PappLinkAutoVerify=true`.
 
 ## Memory evidence
 

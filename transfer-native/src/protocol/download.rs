@@ -14,11 +14,15 @@ use std::{
 use crate::checkpoint::Store;
 use crate::webrtc::{NativePeer, ReceiverSession, Signaling, connect_receiver, request_chunk};
 use anyhow::{Context, Result, bail};
+use base64::Engine;
 use filebeam_transfer::{AdaptiveConcurrency, concurrency_limit, retry_delay_ms, retryable_status};
 use futures_util::{StreamExt, stream::FuturesUnordered};
 use reqwest::{
     Client, StatusCode,
-    header::{CONTENT_LENGTH, CONTENT_RANGE, ETAG, IF_RANGE, RANGE, RETRY_AFTER},
+    header::{
+        CONTENT_LENGTH, CONTENT_RANGE, COOKIE, ETAG, HeaderMap, HeaderValue, IF_RANGE, RANGE,
+        RETRY_AFTER,
+    },
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -51,9 +55,18 @@ struct DownloadJob {
     driver: String,
     envelope: String,
     #[serde(default)]
+    source: DownloadSource,
+    #[serde(default)]
     turbo: Option<TurboJob>,
     output: PathBuf,
     items: Vec<SavedItem>,
+}
+
+#[derive(Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+enum DownloadSource {
+    #[default]
+    Public,
+    Inbox,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -399,6 +412,38 @@ pub(super) fn run(
     let store = control.create_checkpoint_store(&id)?;
     crate::runtime::shared_tokio_runtime().block_on(async_run(
         parsed,
+        DownloadSource::Public,
+        None,
+        output.to_path_buf(),
+        store,
+        control.clone(),
+    ))
+}
+
+pub(super) fn run_inbox(
+    instance: &str,
+    transfer_id: &str,
+    working_key: &[u8],
+    cookie: &str,
+    output: &Path,
+    control: &Control,
+) -> Result<Vec<PathBuf>> {
+    if working_key.len() != 32 || cookie.is_empty() || cookie.contains(['\r', '\n']) {
+        bail!("invalid authenticated inbox download credentials");
+    }
+    let parsed = parse_link_for_instance(
+        &format!(
+            "{transfer_id}#k=v1.{}",
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(working_key)
+        ),
+        instance,
+    )?;
+    let id = uuid::Uuid::new_v4().to_string();
+    let store = control.create_checkpoint_store(&id)?;
+    crate::runtime::shared_tokio_runtime().block_on(async_run(
+        parsed,
+        DownloadSource::Inbox,
+        Some(cookie),
         output.to_path_buf(),
         store,
         control.clone(),
@@ -410,24 +455,84 @@ pub(super) fn resume(store: Store, control: &Control) -> Result<Vec<String>> {
         .load::<DownloadJob>()?
         .context("saved download checkpoint is empty")?;
     job.checked()?;
-    crate::runtime::shared_tokio_runtime().block_on(async_resume(store, job, control.clone()))
+    if job.source == DownloadSource::Inbox {
+        bail!("inbox download resume requires reauthentication");
+    }
+    crate::runtime::shared_tokio_runtime().block_on(async_resume(
+        store,
+        job,
+        None,
+        None,
+        control.clone(),
+    ))
+}
+
+pub(super) fn resume_inbox(
+    id: &str,
+    instance: &str,
+    working_key: &[u8],
+    cookie: &str,
+    control: &Control,
+) -> Result<Vec<String>> {
+    if working_key.len() != 32 || cookie.is_empty() || cookie.contains(['\r', '\n']) {
+        bail!("invalid authenticated inbox download credentials");
+    }
+    let id = uuid::Uuid::parse_str(id)
+        .context("invalid saved transfer id")?
+        .to_string();
+    let store = control.open_checkpoint_store(&id)?;
+    let job = store
+        .load::<DownloadJob>()?
+        .context("saved download checkpoint is empty")?;
+    job.checked()?;
+    if job.source != DownloadSource::Inbox {
+        bail!("saved transfer is not an inbox download");
+    }
+    if job.instance != instance {
+        bail!("inbox session origin does not match the saved download");
+    }
+    control.set_checkpoint_id(id);
+    crate::runtime::shared_tokio_runtime().block_on(async_resume(
+        store,
+        job,
+        Some(Zeroizing::new(working_key.to_vec())),
+        Some(cookie),
+        control.clone(),
+    ))
 }
 
 async fn async_run(
     link: Link,
+    source: DownloadSource,
+    cookie: Option<&str>,
     output: PathBuf,
     store: Store,
     control: Control,
 ) -> Result<Vec<PathBuf>> {
     let cancel = cancellation_bridge(control.clone());
-    let client = async_client(&control)?;
+    let client = async_client(&control, cookie)?;
     control.phase(Phase::Connecting)?;
     let capabilities = capabilities(&client, &link.instance, &cancel).await?;
-    let transfer = metadata(&client, &link.instance, &link.id, &cancel, &control).await?;
+    let transfer = metadata(
+        &client,
+        &link.instance,
+        &link.id,
+        &source,
+        &cancel,
+        &control,
+    )
+    .await?;
     validate_transfer(&transfer, &link.id)?;
     reject_live_note(&transfer)?;
-    let descriptor = transfer.encrypted_manifest.is_none().then(|| transfer.encrypted_descriptor.clone()).flatten();
-    let envelope = transfer.encrypted_manifest.clone().or_else(|| descriptor.clone())
+    let descriptor = transfer
+        .encrypted_manifest
+        .is_none()
+        .then(|| transfer.encrypted_descriptor.clone())
+        .flatten();
+    let envelope = transfer
+        .encrypted_manifest
+        .clone()
+        .or_else(|| descriptor.clone())
         .context("transfer has no encrypted manifest or Turbo descriptor")?;
     let unlock_link = Link {
         id: link.id.clone(),
@@ -438,7 +543,9 @@ async fn async_run(
         unlock_async(unlock_link, envelope.clone(), control.clone()).await?;
     // The share key is secret state, but the checkpoint Store guarantees a
     // private, owner-only file. Passwords and password-derived keys are never stored.
-    store.save_secret("share-key", &share_key)?;
+    if source == DownloadSource::Public {
+        store.save_secret("share-key", &share_key)?;
+    }
     fs::create_dir_all(&output)?;
     let output = fs::canonicalize(&output).context("canonicalize download output directory")?;
     let manifest = if descriptor.is_some() {
@@ -466,7 +573,11 @@ async fn async_run(
                 size: item.size,
                 nonce_prefix: item.nonce_prefix.clone(),
                 chunk_count: item.chunk_count,
-                digest: if descriptor.is_some() { String::new() } else { item.digest.value.clone() },
+                digest: if descriptor.is_some() {
+                    String::new()
+                } else {
+                    item.digest.value.clone()
+                },
                 target: collision_free(&output, &safe_filename(&item.name)),
                 verified: vec![false; item.chunk_count as usize],
                 published: false,
@@ -474,9 +585,17 @@ async fn async_run(
         })
         .collect::<Result<Vec<_>>>()?;
     let turbo = if let Some(descriptor) = descriptor {
-        let session = create_turbo_session(&client, &link.instance, &link.id, &items, &cancel).await?;
-        Some(TurboJob { descriptor, session_id: session.id, session_token: session.token, sequence: 0 })
-    } else { None };
+        let session =
+            create_turbo_session(&client, &link.instance, &link.id, &items, &cancel).await?;
+        Some(TurboJob {
+            descriptor,
+            session_id: session.id,
+            session_token: session.token,
+            sequence: 0,
+        })
+    } else {
+        None
+    };
     let job = DownloadJob {
         version: VERSION,
         id: store
@@ -496,6 +615,7 @@ async fn async_run(
         ranges: server_ranges(&capabilities, &transfer),
         driver: transfer.driver.clone(),
         envelope,
+        source,
         turbo,
         output,
         items,
@@ -512,29 +632,50 @@ async fn async_run(
     )
 }
 
-async fn async_resume(store: Store, mut job: DownloadJob, control: Control) -> Result<Vec<String>> {
+async fn async_resume(
+    store: Store,
+    mut job: DownloadJob,
+    inbox_key: Option<Zeroizing<Vec<u8>>>,
+    cookie: Option<&str>,
+    control: Control,
+) -> Result<Vec<String>> {
     if job.state == "complete" {
         return completed_paths(&job);
     }
     let cancel = cancellation_bridge(control.clone());
-    let client = async_client(&control)?;
+    let client = async_client(&control, cookie)?;
     let capabilities = capabilities(&client, &job.instance, &cancel).await?;
-    let share_key = store.load_secret("share-key").and_then(|key| {
-        key.context("saved download key is unavailable; restart with the original link")
-    })?;
-    let share_key = Zeroizing::new(share_key);
+    let share_key = if job.source == DownloadSource::Inbox {
+        inbox_key.context("inbox download resume requires reauthentication")?
+    } else {
+        Zeroizing::new(store.load_secret("share-key").and_then(|key| {
+            key.context("saved download key is unavailable; restart with the original link")
+        })?)
+    };
     if share_key.len() != 32 {
         bail!("saved download key is invalid");
     }
-    store.save_secret("share-key", &share_key)?;
+    if job.source == DownloadSource::Public {
+        store.save_secret("share-key", &share_key)?;
+    }
     // Re-authenticate the original manifest before trusting any retained data.
-    let transfer = metadata(&client, &job.instance, &job.transfer_id, &cancel, &control).await?;
+    let transfer = metadata(
+        &client,
+        &job.instance,
+        &job.transfer_id,
+        &job.source,
+        &cancel,
+        &control,
+    )
+    .await?;
     validate_transfer(&transfer, &job.transfer_id)?;
     reject_live_note(&transfer)?;
     if transfer.chunk_bytes != job.chunk_bytes
         || transfer.driver != job.driver
         || (job.turbo.is_none() && transfer.encrypted_manifest.as_deref() != Some(&job.envelope))
-        || (job.turbo.is_some() && transfer.encrypted_descriptor.as_deref() != job.turbo.as_ref().map(|turbo| turbo.descriptor.as_str()))
+        || (job.turbo.is_some()
+            && transfer.encrypted_descriptor.as_deref()
+                != job.turbo.as_ref().map(|turbo| turbo.descriptor.as_str()))
     {
         bail!("transfer identity changed; refusing saved ciphertext");
     }
@@ -544,9 +685,21 @@ async fn async_resume(store: Store, mut job: DownloadJob, control: Control) -> R
     job.server_concurrency = server_download_limit(&capabilities, &transfer);
     job.ranges = server_ranges(&capabilities, &transfer);
     let manifest = if job.turbo.is_some() {
-        turbo_descriptor_for(&master, &job.transfer_id, &job.envelope, &transfer, &control)?
+        turbo_descriptor_for(
+            &master,
+            &job.transfer_id,
+            &job.envelope,
+            &transfer,
+            &control,
+        )?
     } else {
-        manifest_for(&master, &job.transfer_id, &job.envelope, &transfer, &control)?
+        manifest_for(
+            &master,
+            &job.transfer_id,
+            &job.envelope,
+            &transfer,
+            &control,
+        )?
     };
     let live_join_token = live_join_token(&transfer, &manifest)?;
     if manifest.items.len() != job.items.len() {
@@ -666,7 +819,10 @@ async fn download(
     // queue work on resume, yet still needs the authenticated scratch file
     // published before the job can become complete.
     for item_index in 0..job.items.len() {
-        if job.turbo.is_none() && !job.items[item_index].published && job.items[item_index].verified.iter().all(|ok| *ok) {
+        if job.turbo.is_none()
+            && !job.items[item_index].published
+            && job.items[item_index].verified.iter().all(|ok| *ok)
+        {
             control.phase(Phase::Finalizing)?;
             let store_path = store.path().to_path_buf();
             let item = job.items[item_index].clone();
@@ -712,9 +868,12 @@ async fn download(
             let cancel = cancel.clone();
             let store_path = store.path().to_path_buf();
             let item = job.items[item_index].clone();
-            let url = format!(
-                "{}/api/v1/transfers/{}/items/{}/chunks/{index}",
-                job.instance, job.transfer_id, item.id
+            let url = chunk_url(
+                &job.instance,
+                &job.transfer_id,
+                &item.id,
+                index,
+                &job.source,
             );
             let adaptive = adaptive.clone();
             let receiving = receiving.clone();
@@ -863,9 +1022,12 @@ async fn download(
                     control.advance(display_done, item_done, data.len() as u64);
                     data
                 } else {
-                    let url = format!(
-                        "{}/api/v1/transfers/{}/items/{}/chunks/{index}",
-                        job.instance, job.transfer_id, item.id
+                    let url = chunk_url(
+                        &job.instance,
+                        &job.transfer_id,
+                        &item.id,
+                        index,
+                        &job.source,
                     );
                     fetch_chunk(FetchChunkRequest {
                         client: &client,
@@ -927,7 +1089,10 @@ async fn download(
         );
         control.advance(display_done, item_done, 0);
         control.commit(job.done);
-        if job.turbo.is_none() && !job.items[item_index].published && job.items[item_index].verified.iter().all(|ok| *ok) {
+        if job.turbo.is_none()
+            && !job.items[item_index].published
+            && job.items[item_index].verified.iter().all(|ok| *ok)
+        {
             control.phase(Phase::Finalizing)?;
             let store_path = store.path().to_path_buf();
             let item = job.items[item_index].clone();
@@ -948,7 +1113,8 @@ async fn download(
         for item_index in 0..job.items.len() {
             let store_path = store.path().to_path_buf();
             let item = job.items[item_index].clone();
-            tokio::task::spawn_blocking(move || publish_item(&store_path, &item, item_index)).await
+            tokio::task::spawn_blocking(move || publish_item(&store_path, &item, item_index))
+                .await
                 .context("Turbo publication worker stopped")??;
             job.items[item_index].published = true;
             store.save(&job)?;
@@ -1147,7 +1313,11 @@ async fn fetch_chunk(request: FetchChunkRequest<'_>) -> Result<Vec<u8>> {
     let expected = plain + TAG_BYTES;
     let path = cipher_path(directory, item, chunk);
     let etag_path = etag_path(directory, item, chunk);
-    let attempts = if turbo { MAX_ATTEMPTS.saturating_mul(100) } else { MAX_ATTEMPTS };
+    let attempts = if turbo {
+        MAX_ATTEMPTS.saturating_mul(100)
+    } else {
+        MAX_ATTEMPTS
+    };
     for attempt in 0..attempts {
         let attempt_started = Instant::now();
         let metadata_path = path.clone();
@@ -1445,62 +1615,140 @@ fn manifest_for(
 }
 
 fn turbo_descriptor_for(
-    key: &[u8], id: &str, envelope: &str, transfer: &Transfer, control: &Control,
+    key: &[u8],
+    id: &str,
+    envelope: &str,
+    transfer: &Transfer,
+    control: &Control,
 ) -> Result<Manifest> {
-    if transfer.driver != "http" { bail!("Turbo descriptors require HTTP transfers"); }
-    let envelope: Envelope = serde_json::from_str(envelope).context("invalid Turbo descriptor envelope")?;
+    if transfer.driver != "http" {
+        bail!("Turbo descriptors require HTTP transfers");
+    }
+    let envelope: Envelope =
+        serde_json::from_str(envelope).context("invalid Turbo descriptor envelope")?;
     let _memory = control.reserve_memory(manifest_crypto_bytes(envelope.ciphertext.len())?)?;
-    let bytes = decrypt_manifest(key, &decode(&envelope.nonce_prefix)?, &decode(&envelope.ciphertext)?,
-        format!("filebeam:v1:{id}:descriptor:descriptor").as_bytes()).context("could not decrypt Turbo descriptor")?;
-    let descriptor: TurboDescriptor = serde_json::from_slice(&bytes).context("invalid Turbo descriptor")?;
-    if descriptor.version != 1 || descriptor.purpose != "turbo-descriptor" || descriptor.chunk_bytes != transfer.chunk_bytes
-        || descriptor.items.len() != transfer.items.len() { bail!("Turbo descriptor does not match transfer"); }
+    let bytes = decrypt_manifest(
+        key,
+        &decode(&envelope.nonce_prefix)?,
+        &decode(&envelope.ciphertext)?,
+        format!("filebeam:v1:{id}:descriptor:descriptor").as_bytes(),
+    )
+    .context("could not decrypt Turbo descriptor")?;
+    let descriptor: TurboDescriptor =
+        serde_json::from_slice(&bytes).context("invalid Turbo descriptor")?;
+    if descriptor.version != 1
+        || descriptor.purpose != "turbo-descriptor"
+        || descriptor.chunk_bytes != transfer.chunk_bytes
+        || descriptor.items.len() != transfer.items.len()
+    {
+        bail!("Turbo descriptor does not match transfer");
+    }
     let mut ids = HashSet::new();
     let mut value = serde_json::json!({"version": 1, "items": []});
     for item in descriptor.items {
-        let server = transfer.items.iter().find(|server| server.id == item.id)
+        let server = transfer
+            .items
+            .iter()
+            .find(|server| server.id == item.id)
             .context("Turbo descriptor references an unknown item")?;
-        if item.id.is_empty() || item.name.is_empty() || item.mime.len() > 255 || !ids.insert(item.id.clone())
-            || item.chunk_count == 0 || item.chunk_count != server.chunk_count
+        if item.id.is_empty()
+            || item.name.is_empty()
+            || item.mime.len() > 255
+            || !ids.insert(item.id.clone())
+            || item.chunk_count == 0
+            || item.chunk_count != server.chunk_count
             || item.chunk_count != item.size.div_ceil(transfer.chunk_bytes).max(1)
-            || decode(&item.nonce_prefix)?.len() != 16 { bail!("Turbo descriptor item is invalid"); }
-        value["items"].as_array_mut().unwrap().push(serde_json::json!({
-            "id": item.id, "name": item.name, "type": item.mime, "size": item.size,
-            "nonce_prefix": item.nonce_prefix, "chunk_count": item.chunk_count,
-            "digest": {"algorithm":"sha256", "value": ""}
-        }));
+            || decode(&item.nonce_prefix)?.len() != 16
+        {
+            bail!("Turbo descriptor item is invalid");
+        }
+        value["items"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+                "id": item.id, "name": item.name, "type": item.mime, "size": item.size,
+                "nonce_prefix": item.nonce_prefix, "chunk_count": item.chunk_count,
+                "digest": {"algorithm":"sha256", "value": ""}
+            }));
     }
     Ok(serde_json::from_value(value)?)
 }
 
-async fn create_turbo_session(client: &Client, instance: &str, id: &str, items: &[SavedItem], cancel: &CancellationToken) -> Result<TurboSession> {
+async fn create_turbo_session(
+    client: &Client,
+    instance: &str,
+    id: &str,
+    items: &[SavedItem],
+    cancel: &CancellationToken,
+) -> Result<TurboSession> {
     let response = tokio::select! { _ = cancel.cancelled() => bail!("transfer cancelled"), r = client.post(format!("{instance}/api/v1/transfers/{id}/download-sessions"))
-        .json(&serde_json::json!({"item_ids": items.iter().map(|item| &item.id).collect::<Vec<_>>() })).send() => r? };
-    if !response.status().is_success() { bail!("create Turbo download session returned {}", response.status()); }
-    let session = response_json::<Api<TurboSession>>(response, cancel, "Turbo session response").await?.data;
-    if session.id.is_empty() || session.token.is_empty() { bail!("invalid Turbo download session"); }
+    .json(&serde_json::json!({"item_ids": items.iter().map(|item| &item.id).collect::<Vec<_>>() })).send() => r? };
+    if !response.status().is_success() {
+        bail!(
+            "create Turbo download session returned {}",
+            response.status()
+        );
+    }
+    let session = response_json::<Api<TurboSession>>(response, cancel, "Turbo session response")
+        .await?
+        .data;
+    if session.id.is_empty() || session.token.is_empty() {
+        bail!("invalid Turbo download session");
+    }
     Ok(session)
 }
 
-async fn report_turbo(client: &Client, job: &mut DownloadJob, status: &str, cancel: &CancellationToken) -> Result<()> {
-    let Some(turbo) = &mut job.turbo else { return Ok(()); };
-    turbo.sequence = turbo.sequence.checked_add(1).context("Turbo session sequence overflow")?;
+async fn report_turbo(
+    client: &Client,
+    job: &mut DownloadJob,
+    status: &str,
+    cancel: &CancellationToken,
+) -> Result<()> {
+    let Some(turbo) = &mut job.turbo else {
+        return Ok(());
+    };
+    turbo.sequence = turbo
+        .sequence
+        .checked_add(1)
+        .context("Turbo session sequence overflow")?;
     let response = tokio::select! { _ = cancel.cancelled() => bail!("transfer cancelled"), r = client.patch(format!("{}/api/v1/transfers/{}/download-sessions/{}", job.instance, job.transfer_id, turbo.session_id))
-        .header("X-Filebeam-Session-Token", &turbo.session_token)
-        .json(&serde_json::json!({"sequence": turbo.sequence, "progress": if job.total == 0 { 0.0 } else { 100.0 * job.done as f64 / job.total as f64 }, "status": status})).send() => r? };
-    if response.status().as_u16() != 204 { bail!("Turbo session update returned {}", response.status()); }
+    .header("X-Filebeam-Session-Token", &turbo.session_token)
+    .json(&serde_json::json!({"sequence": turbo.sequence, "progress": if job.total == 0 { 0.0 } else { 100.0 * job.done as f64 / job.total as f64 }, "status": status})).send() => r? };
+    if response.status().as_u16() != 204 {
+        bail!("Turbo session update returned {}", response.status());
+    }
     Ok(())
 }
 
-async fn finalize_turbo_manifest(client: &Client, job: &mut DownloadJob, master: &[u8], cancel: &CancellationToken, control: &Control) -> Result<()> {
+async fn finalize_turbo_manifest(
+    client: &Client,
+    job: &mut DownloadJob,
+    master: &[u8],
+    cancel: &CancellationToken,
+    control: &Control,
+) -> Result<()> {
     loop {
-        let transfer = metadata(client, &job.instance, &job.transfer_id, cancel, control).await?;
+        let transfer = metadata(
+            client,
+            &job.instance,
+            &job.transfer_id,
+            &job.source,
+            cancel,
+            control,
+        )
+        .await?;
         if let Some(envelope) = transfer.encrypted_manifest.clone() {
             let manifest = manifest_for(master, &job.transfer_id, &envelope, &transfer, control)?;
-            if manifest.items.len() != job.items.len() { bail!("final manifest does not bind Turbo descriptor"); }
+            if manifest.items.len() != job.items.len() {
+                bail!("final manifest does not bind Turbo descriptor");
+            }
             for (saved, final_item) in job.items.iter_mut().zip(manifest.items) {
-                if saved.id != final_item.id || saved.name != final_item.name || saved.size != final_item.size
-                    || saved.nonce_prefix != final_item.nonce_prefix || saved.chunk_count != final_item.chunk_count {
+                if saved.id != final_item.id
+                    || saved.name != final_item.name
+                    || saved.size != final_item.size
+                    || saved.nonce_prefix != final_item.nonce_prefix
+                    || saved.chunk_count != final_item.chunk_count
+                {
                     bail!("final manifest does not bind Turbo descriptor");
                 }
                 saved.digest = final_item.digest.value;
@@ -1566,11 +1814,16 @@ async fn metadata(
     client: &Client,
     instance: &str,
     id: &str,
+    source: &DownloadSource,
     cancel: &CancellationToken,
     control: &Control,
 ) -> Result<Transfer> {
     for attempt in 0..MAX_ATTEMPTS {
-        let response = tokio::select! { _ = cancel.cancelled() => bail!("transfer cancelled"), r = client.get(format!("{instance}/api/v1/transfers/{id}")).send() => r? };
+        let endpoint = match source {
+            DownloadSource::Public => format!("{instance}/api/v1/transfers/{id}"),
+            DownloadSource::Inbox => format!("{instance}/api/native/v1/inbox/{id}/metadata"),
+        };
+        let response = tokio::select! { _ = cancel.cancelled() => bail!("transfer cancelled"), r = client.get(endpoint).send() => r? };
         if response.status() == StatusCode::ACCEPTED {
             control.phase(Phase::Waiting)?;
             retry_wait(response.headers().get(RETRY_AFTER), attempt, cancel).await?;
@@ -1631,13 +1884,37 @@ async fn response_json<T: serde::de::DeserializeOwned>(
     .with_context(|| format!("{label} timed out or could not be read"))??;
     serde_json::from_slice(&body).with_context(|| format!("invalid {label} JSON"))
 }
-fn async_client(control: &Control) -> Result<Client> {
+fn async_client(control: &Control, cookie: Option<&str>) -> Result<Client> {
+    let mut headers = HeaderMap::new();
+    if let Some(cookie) = cookie {
+        let mut value = HeaderValue::from_str(cookie).context("invalid session cookie")?;
+        value.set_sensitive(true);
+        headers.insert(COOKIE, value);
+    }
     Client::builder()
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(90))
         .user_agent(control.client_user_agent())
+        .default_headers(headers)
         .build()
         .context("create HTTP client")
+}
+
+fn chunk_url(
+    instance: &str,
+    transfer: &str,
+    item: &str,
+    position: u64,
+    source: &DownloadSource,
+) -> String {
+    match source {
+        DownloadSource::Public => {
+            format!("{instance}/api/v1/transfers/{transfer}/items/{item}/chunks/{position}")
+        }
+        DownloadSource::Inbox => {
+            format!("{instance}/api/native/v1/inbox/{transfer}/items/{item}/chunks/{position}")
+        }
+    }
 }
 async fn retry_wait(
     value: Option<&reqwest::header::HeaderValue>,
@@ -1938,16 +2215,54 @@ mod tests {
             "id":"item-a","name":"early.bin","type":"application/octet-stream","size":5,
             "nonce_prefix": URL_SAFE_NO_PAD.encode([3;16]),"chunk_count":2
         }]});
-        let ciphertext = filebeam_encryption::encrypt_manifest(&key, &prefix, serde_json::to_string(&descriptor).unwrap().as_bytes(),
-            b"filebeam:v1:transfer:descriptor:descriptor").unwrap();
+        let ciphertext = filebeam_encryption::encrypt_manifest(
+            &key,
+            &prefix,
+            serde_json::to_string(&descriptor).unwrap().as_bytes(),
+            b"filebeam:v1:transfer:descriptor:descriptor",
+        )
+        .unwrap();
         let envelope = serde_json::json!({"v":1,"nonce_prefix":URL_SAFE_NO_PAD.encode(prefix),"ciphertext":URL_SAFE_NO_PAD.encode(ciphertext)}).to_string();
-        let transfer = Transfer { driver: "http".into(), id: "transfer".into(), protocol_version: 1, chunk_bytes: 4,
-            encrypted_manifest: None, encrypted_descriptor: Some(envelope.clone()), items: vec![MetadataItem { id: "item-a".into(), position: 0, chunk_count: 2 }],
-            download_concurrency: None, transfer_capabilities: TransferCapabilities::default() };
-        assert_eq!(turbo_descriptor_for(&key, "transfer", &envelope, &transfer, &Control::test_factory()).unwrap().items[0].id, "item-a");
+        let transfer = Transfer {
+            driver: "http".into(),
+            id: "transfer".into(),
+            protocol_version: 1,
+            chunk_bytes: 4,
+            encrypted_manifest: None,
+            encrypted_descriptor: Some(envelope.clone()),
+            items: vec![MetadataItem {
+                id: "item-a".into(),
+                position: 0,
+                chunk_count: 2,
+            }],
+            download_concurrency: None,
+            transfer_capabilities: TransferCapabilities::default(),
+        };
+        assert_eq!(
+            turbo_descriptor_for(
+                &key,
+                "transfer",
+                &envelope,
+                &transfer,
+                &Control::test_factory()
+            )
+            .unwrap()
+            .items[0]
+                .id,
+            "item-a"
+        );
         let mut rebound = transfer;
         rebound.items[0].id = "other".into();
-        assert!(turbo_descriptor_for(&key, "transfer", &envelope, &rebound, &Control::test_factory()).is_err());
+        assert!(
+            turbo_descriptor_for(
+                &key,
+                "transfer",
+                &envelope,
+                &rebound,
+                &Control::test_factory()
+            )
+            .is_err()
+        );
     }
     #[test]
     fn checkpoint_requires_complete_bitmap() {
@@ -1965,6 +2280,7 @@ mod tests {
             ranges: false,
             driver: "http".into(),
             envelope: "x".into(),
+            source: DownloadSource::Public,
             turbo: None,
             output: PathBuf::new(),
             items: vec![SavedItem {
@@ -1980,6 +2296,54 @@ mod tests {
             }],
         };
         assert!(job.checked().is_err());
+    }
+
+    #[test]
+    fn inbox_checkpoint_cannot_resume_without_host_reauthentication() {
+        let root = tempfile::tempdir().unwrap();
+        let id = uuid::Uuid::new_v4().to_string();
+        let store = Store::create(root.path(), &id).unwrap();
+        let output = root.path().join("output");
+        std::fs::create_dir(&output).unwrap();
+        store
+            .save(&DownloadJob {
+                version: VERSION,
+                id: id.clone(),
+                direction: "download".into(),
+                state: "paused".into(),
+                instance: "https://filebeam.example".into(),
+                done: 0,
+                total: 1,
+                transfer_id: "01ARZ3NDEKTSV4RRFFQ69G5FAV".into(),
+                chunk_bytes: 1,
+                server_concurrency: 1,
+                ranges: false,
+                driver: "http".into(),
+                envelope: "opaque".into(),
+                source: DownloadSource::Inbox,
+                turbo: None,
+                output: output.clone(),
+                items: vec![SavedItem {
+                    id: "item".into(),
+                    name: "file".into(),
+                    size: 1,
+                    nonce_prefix: "x".into(),
+                    chunk_count: 1,
+                    digest: "x".into(),
+                    target: output.join("file"),
+                    verified: vec![false],
+                    published: false,
+                }],
+            })
+            .unwrap();
+        drop(store);
+        let store = Store::open(root.path(), &id).unwrap();
+        assert!(
+            resume(store, &Control::test_factory())
+                .unwrap_err()
+                .to_string()
+                .contains("requires reauthentication")
+        );
     }
 
     #[test]

@@ -27,7 +27,6 @@
     <string name="optional_password">Optional transfer password</string>
     <string name="retention_hours">Retention in hours</string>
     <string name="recipient_username">Deliver to username</string>
-    <string name="file_options_unavailable">Passwords, expiry, username delivery, and folder trees are unavailable until the Android service facade integrates their native APIs.</string>
     <string name="start_upload">Encrypt and share</string>
     <string name="receive_title">Receive a transfer</string>
     <string name="transfer_link">Transfer link or ID</string>
@@ -50,8 +49,6 @@
     <string name="remove_local">Remove local state</string>
     <string name="end_live_share">End live share</string>
     <string name="revoke_remote">Revoke remote share</string>
-    <string name="live_end_unavailable">Ending a live share is not available in this build. Pause only stops this device.</string>
-    <string name="revoke_unavailable">Remote revocation is not available in this build. Remove local state does not revoke a share.</string>
     <string name="no_transfers">Your transfers will appear here.</string>
     <string name="share_link">Share link</string>
     <string name="save_file">Save %1$s…</string>
@@ -63,12 +60,7 @@
     <string name="peer_consent_title">WebRTC connection</string>
     <string name="peer_consent_body">A direct connection can reveal your network address to the other participant. Continue with this transfer?</string>
     <string name="prompt_unavailable">This transfer needs a native response that is not available in this build. Pause it and continue after an update.</string>
-    <string name="notes_unavailable">Encrypted notes, burn-on-read, and live single-claim viewing need the shared notes service.</string>
-    <string name="inbox_unavailable">Inbox and username delivery need the native account service.</string>
-    <string name="turbo_unavailable">Turbo descriptors, availability, and download sessions need the shared Turbo service.</string>
-    <string name="account_unavailable">Sign-in and fbsk1 account-key import/export need the native account service.</string>
     <string name="signed_in_as">Signed in as %1$s</string>
-    <string name="account_credential">Account credential</string>
     <string name="account_username">Email or username</string>
     <string name="account_password">Password</string>
     <string name="account_email">Email</string>
@@ -90,11 +82,7 @@
     <string name="note_link">Note link</string>
     <string name="open_note">Open note</string>
     <string name="turbo_description">Check encrypted Turbo availability or open a received descriptor.</string>
-    <string name="check_availability">Check availability</string>
-    <string name="turbo_available">Turbo is available</string>
-    <string name="turbo_not_available">Turbo is not available</string>
     <string name="turbo_descriptor">Turbo descriptor</string>
-    <string name="turbo_transfer_id">Turbo transfer ID</string>
     <string name="open_turbo_download">Open Turbo download</string>
     <string name="open_transfer">Open transfer</string>
     <string name="phase_connecting">Connecting</string>

@@ -1,12 +1,12 @@
-use anyhow::{bail, Context, Result};
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use anyhow::{Context, Result, bail};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use filebeam_encryption::{
     decrypt_manifest, derive_account_wrapping_key, derive_password_key, encrypt_manifest,
     generate_account_keypair, generate_nonce_prefix, open_recipient_envelope,
     seal_key_for_recipient,
 };
-use filebeam_transfer::manifest::{validate_manifest, Manifest, ManifestServerItem};
-use reqwest::{blocking::Client, Url};
+use filebeam_transfer::manifest::{Manifest, ManifestServerItem, validate_manifest};
+use reqwest::{Url, blocking::Client};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
@@ -69,7 +69,6 @@ pub struct OpenedInbox {
     pub transfer_id: String,
     pub key_bundle_id: u64,
     pub filenames: Vec<String>,
-    pub download_link: String,
 }
 #[derive(Clone, Debug, Deserialize)]
 pub struct RecipientKey {
@@ -134,6 +133,7 @@ impl AccountService {
             .http
             .post(url(&self.instance, "api/native/v1/session")?)
             .header("Sec-Fetch-Site", "same-origin")
+            .header(reqwest::header::ACCEPT, "application/json")
             .json(&Login {
                 email,
                 password,
@@ -160,6 +160,7 @@ impl AccountService {
             .http
             .post(url(&self.instance, "api/native/v1/register")?)
             .header("Sec-Fetch-Site", "same-origin")
+            .header(reqwest::header::ACCEPT, "application/json")
             .json(&Register {
                 username,
                 name,
@@ -182,6 +183,7 @@ impl AccountService {
             .http
             .delete(url(&self.instance, "api/native/v1/session")?)
             .header("Sec-Fetch-Site", "same-origin")
+            .header(reqwest::header::ACCEPT, "application/json")
             .send()
             .context("native logout")?;
         if response.status().as_u16() != 204 {
@@ -198,8 +200,8 @@ impl AccountService {
     pub fn inbox_metadata(&self, id: &str) -> Result<InboxMetadata> {
         self.get(&format!("api/native/v1/inbox/{id}/metadata"))
     }
-    /// Opens an inbox transfer entirely in Rust. The returned link contains the
-    /// authenticated share key and must be treated as a host secret.
+    /// Opens an inbox transfer entirely in Rust. The key is returned only to
+    /// the caller for an authenticated, request-scoped inbox download.
     pub fn open_inbox(&self, id: &str, private_key: &[u8]) -> Result<OpenedInbox> {
         let metadata = self.inbox_metadata(id)?;
         if metadata.id != id || metadata.protocol_version != 1 || metadata.driver != "http" {
@@ -240,16 +242,10 @@ impl AccountService {
             .collect::<Vec<_>>();
         validate_manifest(&manifest, &metadata.driver, metadata.chunk_bytes, &items)
             .map_err(anyhow::Error::msg)?;
-        let share_key = URL_SAFE_NO_PAD.encode(&*key);
         Ok(OpenedInbox {
             transfer_id: metadata.id.clone(),
             key_bundle_id: metadata.recipient_key.bundle.id,
             filenames: manifest.items.into_iter().map(|item| item.name).collect(),
-            download_link: format!(
-                "{}/{}#k=v1.{share_key}",
-                self.instance.as_str().trim_end_matches('/'),
-                metadata.id
-            ),
         })
     }
     pub fn account_keys(&self) -> Result<Vec<AccountKeyBundle>> {
@@ -511,7 +507,8 @@ mod tests {
             fingerprint: "unused".into(),
         };
         let transfer_key = [9_u8; 32];
-        let encrypted_key = seal_recipient_key(&transfer_key, &recipient, "01ARZ3NDEKTSV4RRFFQ69G5FAV").unwrap();
+        let encrypted_key =
+            seal_recipient_key(&transfer_key, &recipient, "01ARZ3NDEKTSV4RRFFQ69G5FAV").unwrap();
         let bundle = AccountKeyBundle {
             id: 11,
             user_id: 7,
@@ -522,11 +519,26 @@ mod tests {
             encrypted_private_key: None,
             is_active: true,
         };
-        let key = RecipientKey { bundle, encrypted_key };
-        assert_eq!(open_recipient_key(&recipient_pair[..32], &key, "01ARZ3NDEKTSV4RRFFQ69G5FAV").unwrap().as_slice(), transfer_key);
+        let key = RecipientKey {
+            bundle,
+            encrypted_key,
+        };
+        assert_eq!(
+            open_recipient_key(&recipient_pair[..32], &key, "01ARZ3NDEKTSV4RRFFQ69G5FAV")
+                .unwrap()
+                .as_slice(),
+            transfer_key
+        );
         assert!(open_recipient_key(&wrong_pair[..32], &key, "01ARZ3NDEKTSV4RRFFQ69G5FAV").is_err());
         let mut tampered = key.clone();
         tampered.encrypted_key.pop();
-        assert!(open_recipient_key(&recipient_pair[..32], &tampered, "01ARZ3NDEKTSV4RRFFQ69G5FAV").is_err());
+        assert!(
+            open_recipient_key(
+                &recipient_pair[..32],
+                &tampered,
+                "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+            )
+            .is_err()
+        );
     }
 }

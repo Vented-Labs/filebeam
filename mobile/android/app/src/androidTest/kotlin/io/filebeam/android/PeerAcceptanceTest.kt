@@ -1,5 +1,6 @@
 package io.filebeam.android
 
+import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.filebeam.rust.ClientConfig
@@ -65,9 +66,12 @@ class PeerAcceptanceTest {
         println("FILEBEAM_ACCEPTANCE_SOURCE_SHA256=$expected")
         when (mode) {
             "roundtrip" -> {
+                // HTTP publication consumes the single scheduler worker through
+                // finalization. Do not admit its download until that worker exits.
+                if (transport == Transport.HTTP) waitForTerminal(job, "upload")
                 val output = File(context.cacheDir, "acceptance-output-${UUID.randomUUID()}")
                 output.mkdirs()
-                waitForTerminal(client.startDownload(instance, link, output.absolutePath))
+                waitForTerminal(client.startDownload(instance, link, output.absolutePath), "download")
                 assertEquals(expected, sha256(File(output, source.name)))
                 println("FILEBEAM_ACCEPTANCE_OUTPUT_SHA256=$expected")
             }
@@ -79,7 +83,7 @@ class PeerAcceptanceTest {
         val link = requireNotNull(arguments.getString("link")) { "link is required for download" }
         val output = File(context.cacheDir, "acceptance-output-${UUID.randomUUID()}")
         output.mkdirs()
-        val done = waitForTerminal(client.startDownload(instance, link, output.absolutePath))
+        val done = waitForTerminal(client.startDownload(instance, link, output.absolutePath), "download")
         val path = File(done.results.single())
         println("FILEBEAM_ACCEPTANCE_OUTPUT_SHA256=${sha256(path)}")
         println("FILEBEAM_ACCEPTANCE_OUTPUT_BYTES=${path.length()}")
@@ -88,8 +92,7 @@ class PeerAcceptanceTest {
     private fun waitForLink(job: TransferJob): String {
         val deadline = System.nanoTime() + 20L * 60 * 1_000_000_000
         while (System.nanoTime() < deadline) {
-            val snapshot = job.snapshot()
-            respondToPeerConsent(job, snapshot.prompt?.id, snapshot.prompt?.kind)
+            val snapshot = observe(job, "upload")
             snapshot.shareUrl?.let { return it }
             if (snapshot.state == JobState.FAILED) error(snapshot.error ?: "upload failed")
             Thread.sleep(100)
@@ -97,11 +100,10 @@ class PeerAcceptanceTest {
         error("upload did not publish a link")
     }
 
-    private fun waitForTerminal(job: TransferJob) = run {
+    private fun waitForTerminal(job: TransferJob, label: String) = run {
         val deadline = System.nanoTime() + 30L * 60 * 1_000_000_000
         while (System.nanoTime() < deadline) {
-            val snapshot = job.snapshot()
-            respondToPeerConsent(job, snapshot.prompt?.id, snapshot.prompt?.kind)
+            val snapshot = observe(job, label)
             if (snapshot.state == JobState.COMPLETE) return@run snapshot
             if (snapshot.state == JobState.FAILED) error(snapshot.error ?: "transfer failed")
             Thread.sleep(100)
@@ -109,8 +111,16 @@ class PeerAcceptanceTest {
         error("transfer did not complete")
     }
 
-    private fun respondToPeerConsent(job: TransferJob, id: ULong?, prompt: PromptType?) {
-        if (prompt == PromptType.PEER_CONSENT && id != null) job.respond(id, "yes")
+    private fun observe(job: TransferJob, label: String): io.filebeam.rust.TransferSnapshot {
+        val snapshot = job.snapshot()
+        val prompt = snapshot.prompt
+        Log.i(TAG, "$label state=${snapshot.state} phase=${snapshot.phase} done=${snapshot.done}/${snapshot.total} prompt=${prompt?.kind} error=${snapshot.error}")
+        if (prompt != null) when (prompt.kind) {
+            PromptType.PEER_CONSENT -> job.respond(prompt.id, "yes")
+            PromptType.SHARE_READY -> job.respond(prompt.id, "continue")
+            else -> error("$label requires unsupported prompt ${prompt.kind}")
+        }
+        return snapshot
     }
 
     private fun writeFixture(file: File, bytes: Long) {
@@ -138,4 +148,6 @@ class PeerAcceptanceTest {
         }
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
+
+    private companion object { const val TAG = "FilebeamPeer" }
 }

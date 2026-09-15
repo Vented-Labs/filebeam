@@ -1,0 +1,75 @@
+name: Android acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      system_image:
+        description: Emulator image; API 26 is compatibility coverage, API 35 uses 16 KiB pages.
+        required: true
+        default: api35-16k
+        type: choice
+        options:
+          - api35-16k
+          - api26-4k
+      prepare_large_fixtures:
+        description: Create and hash the opt-in 513 MiB and 4097 MiB acceptance fixtures.
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-acceptance-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  acceptance:
+    name: Android acceptance (${{ inputs.system_image }})
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 90
+    env:
+      FILEBEAM_ANDROID_BUILD_IMAGE: 'false'
+      FILEBEAM_ANDROID_CACHE: ${{ github.workspace }}/.android-cache
+      FILEBEAM_ANDROID_EMULATOR_IMAGE: filebeam-android-emulator:acceptance
+    steps:
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+        with:
+          persist-credentials: false
+      - uses: useblacksmith/setup-docker-builder@19215110ab936351210feebdfa5b440b4493e184 # v2
+        with:
+          cache-key: docker/android/Dockerfile
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            .android-cache/cargo
+            .android-cache/gradle/caches
+            .android-cache/gradle/wrapper
+            client-ffi/target
+            client-core/target
+          key: android-acceptance-${{ runner.os }}-rust1.98.0-${{ inputs.system_image }}-${{ hashFiles('docker/android/Dockerfile', 'docker/android/Emulator.Dockerfile', 'client-ffi/Cargo.lock', 'client-core/Cargo.lock', 'mobile/android/gradle/libs.versions.toml') }}-${{ github.sha }}
+          restore-keys: android-acceptance-${{ runner.os }}-rust1.98.0-${{ inputs.system_image }}-${{ hashFiles('docker/android/Dockerfile', 'docker/android/Emulator.Dockerfile', 'client-ffi/Cargo.lock', 'client-core/Cargo.lock', 'mobile/android/gradle/libs.versions.toml') }}-
+      - name: Build pinned Android tooling
+        run: docker buildx build --load --tag filebeam-android-tooling:rust-1.98.0-sdk37 docker/android
+      - name: Build selected emulator image
+        env:
+          SYSTEM_IMAGE: ${{ inputs.system_image == 'api26-4k' && 'system-images;android-26;google_apis;x86_64' || 'system-images;android-35;google_apis_ps16k;x86_64' }}
+        run: docker buildx build --load --file docker/android/Emulator.Dockerfile --build-arg "SYSTEM_IMAGE=$SYSTEM_IMAGE" --tag filebeam-android-emulator:acceptance docker/android
+      - name: Build Android and native checks
+        run: bash scripts/android/check.sh
+      - name: Exercise native bindings on selected emulator
+        run: bash scripts/android/device-test.sh
+      - name: Prepare large acceptance fixtures
+        if: inputs.prepare_large_fixtures
+        run: bash scripts/android/acceptance.sh --prepare
+      - name: Upload acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: android-acceptance-${{ inputs.system_image }}
+          path: |
+            mobile/android/app/build/reports/
+            test-results/android/
+          if-no-files-found: ignore
+          retention-days: 14

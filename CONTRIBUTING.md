@@ -48,6 +48,11 @@ Tests run when a PR is opened, updated, or reopened, and on pushes to `master`. 
 
 Frontend build/checks, Rust, and PHP static checks start independently. The compiled frontend is shared with isolated SQLite, MySQL, Sail PostgreSQL/Redis, distribution, and browser jobs. Main browser tests run in two Sail shards with two workers each; small-chunk tests use their own SQLite application. The final `Test` check requires every job and matrix entry to succeed.
 
+Android runs in that required aggregate on every PR, covering changes to the
+shared client, transfer/encryption engine, and `mobile/` without excluding the
+web or CLI jobs. The separate `Android acceptance` workflow is manual-only so
+its optional 4 GiB fixture work is never imposed on ordinary PRs.
+
 ### Blacksmith caching
 
 - Checkouts use `useblacksmith/checkout`, retaining the requested source ref and fetch settings. Container-mounted source checkouts use `dissociate: true` so Git objects remain accessible inside Docker.

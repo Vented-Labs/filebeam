@@ -1,8 +1,8 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use reqwest::{
+    Url,
     blocking::Client,
     cookie::{CookieStore, Jar},
-    Url,
 };
 use std::sync::Arc;
 

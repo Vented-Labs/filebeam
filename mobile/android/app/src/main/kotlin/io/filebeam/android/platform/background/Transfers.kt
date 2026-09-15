@@ -74,10 +74,11 @@ object TransferScheduler {
     }
 
     fun canPostNotifications(context: Context): Boolean =
-        notificationsAllowed(
-            Build.VERSION.SDK_INT,
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED,
-        )
+        Build.VERSION.SDK_INT < 33 || notificationPermissionGranted(context)
+
+    @RequiresApi(33)
+    private fun notificationPermissionGranted(context: Context): Boolean =
+        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
     internal fun notificationsAllowed(sdkInt: Int, permissionGranted: Boolean): Boolean =
         sdkInt < 33 || permissionGranted

@@ -24,7 +24,7 @@ The web application detects supported desktop operating systems and initially se
 
 The web amendment's supplied `up <url or ulid>` reference differs from the parser: `beam up <files...>` uploads local paths, while `beam down <url or ulid>` receives a shared transfer. Download commands preserve the original link's key fragment, never add a separately shared key or a password, and use interactive key/password prompts. Clipboard failure leaves the command selected for manual copying.
 
-The current CLI supports stored HTTP files. Notes, burn-on-read, account-key inbox delivery, and WebRTC are not supported by the web command card. Pending Turbo transfers become eligible after completion as ordinary stored HTTP files. Expired or unavailable transfers have no copyable command. URLs must have a single ULID path, no query, and an optional unencoded v1 share key, matching the CLI parser.
+The web command card supports stored HTTP files, live WebRTC file links, and pending Turbo file links once their authenticated early descriptor is available. The CLI receives Turbo chunks progressively while the sender continues uploading. Notes, burn-on-read, and account-key inbox delivery remain browser-only because those APIs are not exposed through the CLI. Expired, ended, or otherwise unavailable transfers have no copyable command. URLs must have a single ULID path, no query, and an optional unencoded v1 share key, matching the CLI parser. Commands quote the complete link literally; a separate key and any password stay out of shell history and are entered only at the CLI prompt.
 
 Full URLs select their own origin, including self-hosted servers and local development. The web download card copies the full URL directly:
 

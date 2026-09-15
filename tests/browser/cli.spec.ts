@@ -184,7 +184,7 @@ for (const variant of ['included', 'separate', 'password'] as const) {
                 response.request().method() === 'POST' &&
                 new URL(response.url()).pathname === '/api/v1/transfers',
         );
-        await page.getByRole('button', { name: 'Encrypt and share' }).click();
+        await page.getByRole('button', { name: 'Send encrypted' }).click();
         const { data } = await (await created).json();
         try {
             await expect(page.locator('#share-link')).toBeVisible();
@@ -248,7 +248,7 @@ test('CLI instructions leave a burn-on-read note unread and non-actionable', asy
             response.request().method() === 'POST' &&
             new URL(response.url()).pathname === '/api/v1/transfers',
     );
-    await page.getByRole('button', { name: 'Encrypt and share' }).click();
+    await page.getByRole('button', { name: 'Send encrypted' }).click();
     const { data } = await (await created).json();
     try {
         await expect(page.locator('#share-link')).toBeVisible();

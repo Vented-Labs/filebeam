@@ -3,6 +3,7 @@ package io.filebeam.android.platform.services
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class ServiceFacadesTest {
@@ -24,6 +25,10 @@ class ServiceFacadesTest {
 
     @Test fun sessionOriginsAreNormalizedBeforeTheyAreShared() {
         assertTrue(AccountSessionRegistry.normalizeOrigin("HTTPS://Filebeam.test:443/") == "https://filebeam.test")
+        assertEquals("https://filebeam.test:8443", AccountSessionRegistry.normalizeOrigin("https://filebeam.test:8443/"))
+        assertThrows(IllegalArgumentException::class.java) {
+            AccountSessionRegistry.normalizeOrigin("https://user@filebeam.test")
+        }
     }
 
     @Test fun generatedKeyIsExportedAndPersistedBeforeItIsZeroed() {

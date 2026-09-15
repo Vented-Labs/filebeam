@@ -217,6 +217,9 @@ test('publishes a Turbo files link before completion and reports anonymous waiti
 
         const cancelled = await receiver(browser);
         await cancelled.goto(transfer.link);
+        await expect(
+            cancelled.getByRole('region', { name: 'Download with CLI' }).getByRole('textbox'),
+        ).toHaveValue(`beam down '${transfer.link}'`);
         let forcedUnavailable = false;
         let receiverChunkGets = 0;
         await cancelled.route('**/api/v1/transfers/*/items/*/chunks/*', async (route) => {
@@ -456,7 +459,7 @@ test('keeps normal Encrypt and share transfers private until every chunk complet
             mimeType: 'application/octet-stream',
             buffer: Buffer.from('ordinary uploads do not publish early'),
         });
-        await page.getByRole('button', { name: 'Encrypt and share' }).click();
+        await page.getByRole('button', { name: 'Send encrypted' }).click();
         await page.waitForTimeout(300);
         expect(descriptorRequests).toBe(0);
         await expect(page.locator('#share-link')).toHaveCount(0);
@@ -524,12 +527,14 @@ test('offers Turbo only for files, beside normal sharing on desktop and stacked 
         buffer: Buffer.from('turbo option'),
     });
     const turbo = page.getByRole('button', { name: 'Turbo Transfer' });
-    const normal = page.getByRole('button', { name: 'Encrypt and share' });
+    const normal = page.getByRole('button', { name: 'Send encrypted' });
     const tooltip = page.getByText('Share the link while files are still uploading.', {
         exact: true,
     });
     await expect(turbo).toHaveCount(1);
     await expect(normal).toHaveCount(1);
+    await expect(turbo).toContainText('⇧↵');
+    await expect(normal).toContainText('↵');
     await expect(tooltip).toHaveCount(0);
     await turbo.hover();
     await expect(tooltip).toBeVisible();
@@ -551,6 +556,33 @@ test('offers Turbo only for files, beside normal sharing on desktop and stacked 
     await page.screenshot({ path: test.info().outputPath('turbo-mobile.png'), fullPage: true });
     await page.getByRole('tab', { name: 'Notes' }).click();
     await expect(turbo).toHaveCount(0);
+});
+
+test('file shortcuts send once and do not intercept note editing', async ({ page }) => {
+    await page.goto('/');
+    let requests = 0;
+    await page.route('**/api/v1/transfers', async (route) => {
+        if (route.request().method() === 'POST') requests++;
+        await route.abort();
+    });
+    await page.locator('#filebeam-picker').setInputFiles({
+        name: 'shortcut.txt',
+        mimeType: 'text/plain',
+        buffer: Buffer.from('shortcut'),
+    });
+    await page.keyboard.down('Enter');
+    await expect.poll(() => requests).toBe(1);
+    await page.keyboard.down('Enter');
+    await page.keyboard.up('Enter');
+    await page.waitForTimeout(100);
+    expect(requests).toBe(1);
+
+    await page.getByRole('tab', { name: 'Notes' }).click();
+    const editor = page.locator('.cm-content[contenteditable="true"]');
+    await editor.fill('first line');
+    await editor.press('Shift+Enter');
+    await expect(editor).toContainText('first line\n');
+    expect(requests).toBe(1);
 });
 
 test('unlocks a password-protected Turbo link before its small upload completes', async ({

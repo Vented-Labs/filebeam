@@ -51,6 +51,7 @@ fun NotesScreen(model: FilebeamViewModel, instance: String) {
     OutlinedTextField(retention, { retention = it.filter(Char::isDigit) }, label = { Text(stringResource(R.string.retention_hours)) }, modifier = Modifier.fillMaxWidth())
     val burnLabel = stringResource(R.string.burn_on_read)
     val consumedMessage = stringResource(R.string.note_consumed)
+    val shareNote = stringResource(R.string.share_note)
     Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(burn, { burn = it }); Text(burnLabel) }
     Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(live, { live = it }); Text(stringResource(R.string.webrtc_transport)) }
     Button(enabled = body.isNotBlank(), onClick = { scope.launch {
@@ -60,7 +61,8 @@ fun NotesScreen(model: FilebeamViewModel, instance: String) {
     } }) { Text(stringResource(R.string.create_note)) }
     createdLink?.let { created ->
         Text(created, style = MaterialTheme.typography.bodySmall)
-        Button(onClick = { context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, created), context.getString(R.string.share_note))) }) { Text(stringResource(R.string.share_note)) }
+        Button(onClick = { context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, created), shareNote)) }) { Text(shareNote) }
+        if (live) Button(onClick = { model.notes.endLive(created) }) { Text(stringResource(R.string.end_live_share)) }
     }
     OutlinedTextField(link, { link = it }, label = { Text(stringResource(R.string.note_link)) }, modifier = Modifier.fillMaxWidth())
     Button(enabled = link.isNotBlank(), onClick = { scope.launch {
@@ -69,7 +71,7 @@ fun NotesScreen(model: FilebeamViewModel, instance: String) {
     viewer?.let { text ->
         OutlinedCard(Modifier.fillMaxWidth()) { Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(text)
-            Button(onClick = { context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), context.getString(R.string.share_note))) }) { Text(stringResource(R.string.share_note)) }
+            Button(onClick = { context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), shareNote)) }) { Text(shareNote) }
         } }
     }
     when (state) { is ServiceState.Failed -> Text(state.message, color = MaterialTheme.colorScheme.error); is ServiceState.Unavailable -> Text(state.reason, color = MaterialTheme.colorScheme.error); else -> Unit }

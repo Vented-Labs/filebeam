@@ -32,7 +32,9 @@ use filebeam_transfer::{
 use futures_util::stream;
 use reqwest::{
     Body, Client, StatusCode,
-    header::{AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, HeaderName, HeaderValue, RETRY_AFTER},
+    header::{
+        AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, HeaderName, HeaderValue, RETRY_AFTER,
+    },
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -1905,7 +1907,10 @@ fn client(control: &Control, authentication: &super::UploadAuthentication) -> Re
             let mut value = HeaderValue::from_str(cookie).context("invalid session cookie")?;
             value.set_sensitive(true);
             headers.insert(COOKIE, value);
-            headers.insert(HeaderName::from_static("sec-fetch-site"), HeaderValue::from_static("same-origin"));
+            headers.insert(
+                HeaderName::from_static("sec-fetch-site"),
+                HeaderValue::from_static("same-origin"),
+            );
         }
     }
     Client::builder()
@@ -2239,13 +2244,21 @@ fn encrypted_manifest(job: &UploadJob, control: &Control) -> Result<String> {
         &plain,
         format!("filebeam:v1:{transfer}:manifest:manifest").as_bytes(),
     )?;
-    Ok(serde_json::to_string(&serde_json::json!({
+    let mut envelope = serde_json::json!({
         "v": 1,
         "nonce_prefix": encode(&prefix),
-        "salt": job.password_salt,
-        "kdf": job.password_salt.as_ref().map(|_| serde_json::json!({"name":"argon2id","memory_kib":65536,"iterations":3,"parallelism":1})),
         "ciphertext": encode(&ciphertext),
-    }))?)
+    });
+    if let Some(salt) = &job.password_salt {
+        envelope["salt"] = serde_json::Value::String(salt.clone());
+        envelope["kdf"] = serde_json::json!({
+            "name": "argon2id",
+            "memory_kib": 65_536,
+            "iterations": 3,
+            "parallelism": 1,
+        });
+    }
+    Ok(serde_json::to_string(&envelope)?)
 }
 
 fn turbo_descriptor(job: &UploadJob, transfer: &str, control: &Control) -> Result<String> {
@@ -2278,13 +2291,21 @@ fn turbo_descriptor(job: &UploadJob, transfer: &str, control: &Control) -> Resul
         &plain,
         format!("filebeam:v1:{transfer}:descriptor:descriptor").as_bytes(),
     )?;
-    Ok(serde_json::to_string(&serde_json::json!({
+    let mut envelope = serde_json::json!({
         "v": 1,
         "nonce_prefix": encode(&prefix),
-        "salt": job.password_salt,
-        "kdf": job.password_salt.as_ref().map(|_| serde_json::json!({"name":"argon2id","memory_kib":65536,"iterations":3,"parallelism":1})),
         "ciphertext": encode(&ciphertext),
-    }))?)
+    });
+    if let Some(salt) = &job.password_salt {
+        envelope["salt"] = serde_json::Value::String(salt.clone());
+        envelope["kdf"] = serde_json::json!({
+            "name": "argon2id",
+            "memory_kib": 65_536,
+            "iterations": 3,
+            "parallelism": 1,
+        });
+    }
+    Ok(serde_json::to_string(&envelope)?)
 }
 
 async fn publish_turbo_descriptor(
@@ -2641,7 +2662,40 @@ mod tests {
         assert_eq!(envelope["salt"], encode(&[3; 16]));
         assert_eq!(envelope["kdf"]["name"], "argon2id");
         assert_eq!(envelope["kdf"]["memory_kib"], 65_536);
+        assert!(browser_password_metadata_is_valid(&envelope));
         assert!(!envelope.to_string().contains("eight-char"));
+    }
+
+    #[test]
+    fn unprotected_manifest_and_descriptor_omit_password_metadata() {
+        let saved = job("sending");
+        let control = Control::test_factory();
+        for encoded in [
+            encrypted_manifest(&saved, &control).unwrap(),
+            turbo_descriptor(&saved, saved.transfer_id.as_deref().unwrap(), &control).unwrap(),
+        ] {
+            let envelope: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+            assert!(envelope.get("salt").is_none());
+            assert!(envelope.get("kdf").is_none());
+            assert!(browser_password_metadata_is_valid(&envelope));
+        }
+    }
+
+    fn browser_password_metadata_is_valid(envelope: &serde_json::Value) -> bool {
+        let salt = envelope.get("salt");
+        match salt {
+            None | Some(serde_json::Value::Null) => envelope.get("kdf").is_none(),
+            Some(serde_json::Value::String(value)) if !value.is_empty() => {
+                let Some(kdf) = envelope.get("kdf") else {
+                    return false;
+                };
+                kdf["name"] == "argon2id"
+                    && kdf["memory_kib"] == 65_536
+                    && kdf["iterations"] == 3
+                    && kdf["parallelism"] == 1
+            }
+            _ => false,
+        }
     }
 
     #[test]

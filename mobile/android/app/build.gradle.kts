@@ -1,6 +1,23 @@
+import java.io.File
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+}
+
+val testSigningPropertiesFile = providers.gradleProperty("testSigningPropertiesFile")
+    .map { path -> file(path) }
+    .orElse(rootDir.resolve("../../.filebeam/android-test-signing.properties"))
+val testSigningProperties = Properties()
+val hasTestSigning = testSigningPropertiesFile.get().isFile
+
+if (hasTestSigning) {
+    testSigningPropertiesFile.get().inputStream().use(testSigningProperties::load)
+    val required = setOf("storeFile", "storePassword", "keyAlias", "keyPassword")
+    check(required.all(testSigningProperties::containsKey)) {
+        "Test signing properties must define: ${required.joinToString(", ")}"
+    }
 }
 
 android {
@@ -21,12 +38,24 @@ android {
         manifestPlaceholders["appLinkHost"] = providers.gradleProperty("appLinkHost").orElse("filebeam.io").get()
         manifestPlaceholders["appLinkAutoVerify"] = providers.gradleProperty("appLinkAutoVerify").orElse("false").get()
     }
+    signingConfigs {
+        create("testRelease") {
+            if (hasTestSigning) {
+                val configuredStore = File(testSigningProperties.getProperty("storeFile"))
+                storeFile = if (configuredStore.isAbsolute) configuredStore else testSigningPropertiesFile.get().parentFile.resolve(configuredStore)
+                storePassword = testSigningProperties.getProperty("storePassword")
+                keyAlias = testSigningProperties.getProperty("keyAlias")
+                keyPassword = testSigningProperties.getProperty("keyPassword")
+            }
+        }
+    }
     buildTypes {
         debug { applicationIdSuffix = ".debug" }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (hasTestSigning) signingConfig = signingConfigs.getByName("testRelease")
         }
     }
     buildFeatures { compose = true; buildConfig = true }
@@ -93,3 +122,35 @@ tasks.register("validateVerifiedAppLinks") {
 }
 tasks.matching { it.name == "preReleaseBuild" || it.name == "assembleRelease" }
     .configureEach { dependsOn("validateVerifiedAppLinks") }
+
+// This consumes an existing R8 APK so post-build signing checks do not trigger a
+// native rebuild. The ignored key is test-only and never represents production.
+tasks.register("signedR8Smoke") {
+    group = "verification"
+    description = "Checks, test-signs, and verifies an existing unsigned R8 release APK."
+    onlyIf { hasTestSigning }
+    doLast {
+        val unsigned = layout.buildDirectory.file("outputs/apk/release/app-release-unsigned.apk").get().asFile
+        val signed = layout.buildDirectory.file("outputs/apk/release/app-release-test-signed.apk").get().asFile
+        val configuredStore = File(testSigningProperties.getProperty("storeFile"))
+        val keystore = if (configuredStore.isAbsolute) configuredStore else testSigningPropertiesFile.get().parentFile.resolve(configuredStore)
+        check(unsigned.isFile) { "Build the unsigned R8 APK before running signedR8Smoke: ${unsigned.path}" }
+        check(keystore.isFile) { "Configured test keystore does not exist" }
+        fun run(vararg command: String) {
+            val renderedCommand = command.joinToString(" ")
+            check(ProcessBuilder(*command).inheritIO().start().waitFor() == 0) {
+                "Command failed: $renderedCommand"
+            }
+        }
+        run("python3", rootDir.resolve("../../scripts/android/check-native.py").path, unsigned.path)
+        signed.delete()
+        run(
+            "apksigner", "sign", "--ks", keystore.path,
+            "--ks-key-alias", testSigningProperties.getProperty("keyAlias"),
+            "--ks-pass", "pass:${testSigningProperties.getProperty("storePassword")}",
+            "--key-pass", "pass:${testSigningProperties.getProperty("keyPassword")}",
+            "--out", signed.path, unsigned.path,
+        )
+        run("apksigner", "verify", "--verbose", signed.path)
+    }
+}

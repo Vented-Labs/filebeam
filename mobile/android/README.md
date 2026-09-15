@@ -71,6 +71,12 @@ For Android 8 coverage, build a second emulator image with
 `--build-arg 'SYSTEM_IMAGE=system-images;android-26;google_apis;x86_64'` and select
 it using `FILEBEAM_ANDROID_EMULATOR_IMAGE`.
 
+The manual `Android acceptance` workflow exposes the same API 26 4 KiB and API
+35 16 KiB image choices. Its 513 MiB and 4097 MiB fixtures are an explicit
+workflow input, never part of normal pull-request coverage. See
+[`docs/acceptance-ci.md`](../../docs/acceptance-ci.md) for its evidence limits
+and the local test-signed R8 smoke procedure; that key is not production signing.
+
 `check.sh` also checks APK ZIP alignment and native ELF load/RELRO layout for
 all packaged 64-bit libraries, including transitive AndroidX and JNA libraries.
 
@@ -82,6 +88,8 @@ all packaged 64-bit libraries, including transitive AndroidX and JNA libraries.
   preparation, and saving verified downloads through document providers.
 - HTTP and WebRTC file jobs, progress, secret/peer-consent prompts, pause, local
   recovery catalog, resume, and local-state removal through the shared engine.
+- Turbo HTTP file uploads publish their encrypted early descriptor and share link
+  before chunk production; native receivers progressively consume those links.
 - User-initiated transfer jobs on Android 14+ for finite transfers; foreground
   services for older versions and live senders. Export also runs in a foreground
   service. Foreground-service timeouts pause work rather than keeping a hidden
@@ -136,7 +144,8 @@ interface. Bindings and the native library are generated from the same checkout.
 ## Next milestones
 
 See [the Android roadmap](../../docs/android.md) for the remaining work before a
-feature-parity release: source descriptors, a unified runtime/scheduler, full
-checkpoint-secret wrapping, publication recovery, send passwords/retention,
-remote deletion and live-end controls, notes, Turbo, account/inbox APIs, and
-large-file interoperability/device validation.
+ feature-parity release: source descriptors, a unified runtime/scheduler, full
+ checkpoint-secret wrapping, publication recovery, send passwords/retention,
+ remote deletion and live-end controls, notes, account/inbox APIs, and large-file
+ interoperability/device validation. The available test harness builds debug and
+ unsigned release/R8 APKs; it does not claim release signing or store publication.

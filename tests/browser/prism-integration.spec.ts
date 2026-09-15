@@ -159,7 +159,7 @@ test.describe('Prism production integration contract', () => {
         await expect(page.getByText('Or drag and drop anywhere', { exact: true })).toBeVisible();
         await expect(page.getByTestId('prism-settings')).toBeVisible();
         await expect(
-            page.getByRole('button', { name: 'Encrypt and share', exact: true }),
+            page.getByRole('button', { name: 'Send encrypted', exact: true }),
         ).toBeDisabled();
         await expect(page.getByRole('switch', { name: 'Burn on read', exact: true })).toHaveCount(
             0,
@@ -335,7 +335,7 @@ test.describe('Prism production integration contract', () => {
         await expect(page.getByTestId('prism-file-row')).toHaveCount(1);
         await expect(page.getByTestId('prism-policy-error')).toBeVisible();
         await expect(
-            page.getByRole('button', { name: 'Encrypt and share', exact: true }),
+            page.getByRole('button', { name: 'Send encrypted', exact: true }),
         ).toBeDisabled();
         await page.getByRole('button', { name: 'Use WebRTC', exact: true }).click();
         await expect(rtc(page)).toBeChecked();
@@ -352,7 +352,7 @@ test.describe('Prism production integration contract', () => {
             config.transport_policy!.limits.webrtc.maximum_file_count = 2;
         });
         const picker = page.locator('#filebeam-picker');
-        const submit = page.getByRole('button', { name: 'Encrypt and share', exact: true });
+        const submit = page.getByRole('button', { name: 'Send encrypted', exact: true });
         await picker.setInputFiles({
             name: 'http-boundary.bin',
             mimeType: 'application/octet-stream',
@@ -395,7 +395,7 @@ test.describe('Prism production integration contract', () => {
             config.transport_policy!.limits.http.maximum_note_bytes = 32;
         });
         await notesTab(page).click();
-        const submit = page.getByRole('button', { name: 'Encrypt and share', exact: true });
+        const submit = page.getByRole('button', { name: 'Send encrypted', exact: true });
         await editor(page).fill('\u{1f512}'.repeat(4));
         await expect(submit).toBeEnabled();
         await editor(page).fill('\u{1f512}'.repeat(5));
@@ -529,7 +529,7 @@ test.describe('Prism production integration contract', () => {
     }) => {
         await addTinyFile(page);
         await rtc(page).click();
-        const submit = page.getByRole('button', { name: 'Encrypt and share', exact: true });
+        const submit = page.getByRole('button', { name: 'Send encrypted', exact: true });
         await submit.click();
         const dialog = page.getByRole('dialog', { name: 'WebRTC privacy' });
         await expect(dialog).toBeVisible();
@@ -561,7 +561,7 @@ test.describe('Prism production integration contract', () => {
         holdCreation = true;
         expectedCreationAttempts = 1;
         await addTinyFile(page);
-        await page.getByRole('button', { name: 'Encrypt and share', exact: true }).click();
+        await page.getByRole('button', { name: 'Send encrypted', exact: true }).click();
         await expect.poll(() => creationAttempts.length).toBe(1);
 
         await expect(page.getByTestId('prism-settings-controls')).toHaveAttribute('inert', '');
@@ -641,7 +641,7 @@ test.describe('Prism production integration contract', () => {
             page.getByText('The server may shorten this lifetime.', { exact: true }),
         ).toBeVisible();
         await expect(
-            page.getByRole('button', { name: 'Encrypt and share', exact: true }),
+            page.getByRole('button', { name: 'Send encrypted', exact: true }),
         ).toBeVisible();
         await expectNoHorizontalOverflow(page);
     });

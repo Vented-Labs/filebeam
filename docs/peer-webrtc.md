@@ -2,7 +2,7 @@
 
 `scripts/android/peer-webrtc.sh` runs a disposable local Filebeam backend at
 `http://127.0.0.1:8027` and a local coturn service. It builds the current CLI
-and browser assets, then verifies the four actual peer combinations below with
+and browser assets, then attempts the four actual peer combinations below with
 SHA-256 digests:
 
 - Browser sender to native CLI receiver, direct ICE.
@@ -16,9 +16,26 @@ Run it from the repository root:
 scripts/android/peer-webrtc.sh
 ```
 
+To run a single case while diagnosing a peer, set `PEER_WEBRTC_CASES`; accepted
+values are `web-to-native-direct`, `native-to-web-direct`,
+`web-to-native-turn`, and `native-to-web-turn`.
+
+Native-to-browser cases use Chromium's OPFS-backed File System Access flow and
+incrementally hash writes, rather than Playwright's download event or a Blob.
+For an opt-in real streaming run, provide a size in bytes; this creates a sparse
+native source and still reads and hashes every transferred byte:
+
+```sh
+PEER_WEBRTC_CASES=native-to-web-direct PEER_WEBRTC_LARGE_BYTES=$((513 * 1024 * 1024)) scripts/android/peer-webrtc.sh
+PEER_SCRATCH_ROOT="$PWD/test-results/android/peers/.scratch" PEER_WEBRTC_CASES=native-to-web-direct PEER_WEBRTC_LARGE_BYTES=$((4097 * 1024 * 1024)) scripts/android/peer-webrtc.sh
+```
+
+The 4,097 MiB case needs roughly 9 GiB of scratch space for the native spool
+and OPFS output; use a filesystem with that capacity rather than `/tmp`.
+
 The harness selects a non-loopback host address and publishes its concrete
 TURN URL as `turn:<host-ip>:34790?transport=udp`; the exact URL and relay port
-range are recorded in `test-results/android/peers/<run>/environment.txt`.
+range are recorded in `test-results/android/peers/webrtc-<run>/environment.txt`.
 The backend mints coturn REST credentials using its per-run HMAC secret and a
 120-second expiry. The secret, live links, session tokens, and credentials are
 not written to results.

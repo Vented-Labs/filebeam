@@ -97,8 +97,6 @@ pub struct OpenedInbox {
     pub transfer_id: String,
     pub key_bundle_id: u64,
     pub filenames: Vec<String>,
-    /// Secret-bearing v1 link. Store only in encrypted request state.
-    pub download_link: String,
 }
 
 #[derive(Clone, uniffi::Record)]
@@ -431,14 +429,21 @@ impl NativeServices {
             .map_err(operation)
     }
 
-    pub fn account_open_inbox(&self, transfer_id: String, private_key: Vec<u8>) -> Result<OpenedInbox> {
+    pub fn account_open_inbox(
+        &self,
+        transfer_id: String,
+        private_key: Vec<u8>,
+    ) -> Result<OpenedInbox> {
         let private_key = Zeroizing::new(private_key);
-        self.inner.account().open_inbox(&transfer_id, &private_key).map_err(operation).map(|opened| OpenedInbox {
-            transfer_id: opened.transfer_id,
-            key_bundle_id: opened.key_bundle_id,
-            filenames: opened.filenames,
-            download_link: opened.download_link,
-        })
+        self.inner
+            .account()
+            .open_inbox(&transfer_id, &private_key)
+            .map_err(operation)
+            .map(|opened| OpenedInbox {
+                transfer_id: opened.transfer_id,
+                key_bundle_id: opened.key_bundle_id,
+                filenames: opened.filenames,
+            })
     }
 
     pub fn account_inbox_metadata(&self, transfer_id: String) -> Result<InboxMetadata> {

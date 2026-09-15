@@ -3,7 +3,10 @@
 set -euo pipefail
 
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
-results="$root/test-results/android/peers/$(date -u +%Y%m%dT%H%M%SZ)-$$"
+run_stamp="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+results=$(mktemp -d "/tmp/opencode/filebeam-peer-webrtc-$run_stamp.XXXXXX")
+published_results="$root/test-results/android/peers/webrtc-$run_stamp"
+environment_file=$(mktemp /tmp/opencode/filebeam-peer-webrtc-env.XXXXXX)
 run_id="peer-webrtc-$$"
 app="filebeam-$run_id-app"
 turn="filebeam-$run_id-turn"
@@ -26,10 +29,13 @@ done
 
 cleanup() {
     local status=$?
+    mkdir -p "$root/test-results/android/peers"
+    cp -a "$results" "$published_results" 2>/dev/null || true
     if [[ ${KEEP_PEER_WEBRTC_ENV:-0} != 1 ]]; then
         docker rm -f "$app" "$turn" >/dev/null 2>&1 || true
         docker volume rm "$vendor" "$runtime" "$storage" "$cache" >/dev/null 2>&1 || true
     fi
+    rm -f "$environment_file"
     exit "$status"
 }
 trap cleanup EXIT
@@ -49,6 +55,9 @@ cargo build --manifest-path "$root/cli/Cargo.toml" --release >"$results/logs/cli
 for volume in "$vendor" "$runtime" "$storage" "$cache"; do
     docker volume create "$volume" >/dev/null
 done
+docker run --rm -v "$runtime:/runtime" -v "$storage:/storage" -v "$cache:/cache" \
+    --entrypoint sh filebeam-sail-php85/app -c \
+    'mkdir -p /runtime /storage/app/public /storage/app/private /storage/framework/cache/data /storage/framework/sessions /storage/framework/testing /storage/framework/views /storage/logs /cache && chmod -R 777 /runtime /storage /cache'
 
 # Dependencies live in a harness-owned volume, never in the source checkout or
 # either pre-existing verification environment.
@@ -65,29 +74,37 @@ docker run -d --rm --name "$turn" --network host coturn/coturn:4.6.2 \
     --listening-port="$turn_port" --external-ip="$host_ip" \
     --min-port="$relay_min" --max-port="$relay_max" >"$results/turn-container-id"
 
+printf '%s\n' \
+    'APP_NAME="Filebeam Peer WebRTC"' 'APP_ENV=local' 'APP_DEBUG=true' \
+    'APP_KEY=base64:9g1g7bGh5A0Hrr9dBYqVgN4bPJ8VxuwYzvVYk8KQp9c=' "APP_URL=$base_url" \
+    'DB_CONNECTION=sqlite' 'DB_DATABASE=/runtime/filebeam.sqlite' 'CACHE_STORE=database' \
+    'QUEUE_CONNECTION=database' 'SESSION_DRIVER=cookie' 'FILESYSTEM_DISK=local' \
+    'FILEBEAM_FILESYSTEMS=transfers' 'FILEBEAM_FILESTORE_ROOT=/runtime/filestore' \
+    'FILEBEAM_STAGING_ROOT=/runtime/staging' 'FILEBEAM_ENABLED_TRANSFER_DRIVERS=["http","webrtc"]' \
+    'FILEBEAM_DEFAULT_TRANSFER_DRIVER=webrtc' 'FILEBEAM_WEBRTC_ICE_SERVERS=[]' \
+    "FILEBEAM_WEBRTC_TURN_URLS=turn:$host_ip:$turn_port?transport=udp" \
+    "FILEBEAM_WEBRTC_TURN_SECRET=$turn_secret" 'FILEBEAM_WEBRTC_TURN_TTL_SECONDS=120' \
+    'FILEBEAM_WEBRTC_SESSION_IDLE_SECONDS=120' 'FILEBEAM_DEFAULT_TRANSFER_BYTES=10737418240' \
+    'CHUNK_MAX_SIZE=25000000' 'FILEBEAM_CREATIONS_PER_HOUR=300' >"$environment_file"
+chmod 600 "$environment_file"
+
 docker run -d --rm --name "$app" -p "127.0.0.1:8027:8080" \
-    -e APP_ENV=local -e APP_DEBUG=true -e APP_KEY='base64:9g1g7bGh5A0Hrr9dBYqVgN4bPJ8VxuwYzvVYk8KQp9c=' \
-    -e APP_URL="$base_url" -e DB_CONNECTION=sqlite -e DB_DATABASE=/runtime/filebeam.sqlite \
-    -e CACHE_STORE=database -e QUEUE_CONNECTION=database -e SESSION_DRIVER=cookie \
-    -e FILESYSTEM_DISK=local -e FILEBEAM_FILESYSTEMS=transfers \
-    -e FILEBEAM_FILESTORE_ROOT=/runtime/filestore -e FILEBEAM_STAGING_ROOT=/runtime/staging \
-    -e FILEBEAM_ENABLED_TRANSFER_DRIVERS='["http","webrtc"]' -e FILEBEAM_DEFAULT_TRANSFER_DRIVER=webrtc \
-    -e FILEBEAM_WEBRTC_ICE_SERVERS='[]' -e FILEBEAM_WEBRTC_TURN_URLS="turn:$host_ip:$turn_port?transport=udp" \
-    -e FILEBEAM_WEBRTC_TURN_SECRET="$turn_secret" -e FILEBEAM_WEBRTC_TURN_TTL_SECONDS=120 \
-    -e FILEBEAM_WEBRTC_SESSION_IDLE_SECONDS=120 -e FILEBEAM_DEFAULT_TRANSFER_BYTES=10737418240 \
-    -e CHUNK_MAX_SIZE=25000000 -e FILEBEAM_CREATIONS_PER_HOUR=300 \
     -v "$root:/var/www/html" -v "$vendor:/var/www/html/backend/vendor" \
     -v "$runtime:/runtime" -v "$storage:/var/www/html/backend/storage" \
     -v "$cache:/var/www/html/backend/bootstrap/cache" \
+    -v "$environment_file:/var/www/html/backend/.env:ro" \
     filebeam-sail-php85/app >"$results/app-container-id"
 
 for _ in {1..30}; do
-    if docker exec "$app" php artisan migrate --force >"$results/logs/migrate.log" 2>&1; then
+    if docker exec "$app" php artisan migrate --force --seed >"$results/logs/migrate.log" 2>&1; then
         break
     fi
     sleep 1
 done
 docker exec "$app" php artisan migrate:status >"$results/logs/migrate-status.log" 2>&1
+# Migrations run through docker exec as root while the supervised app runs as
+# sail, so make the disposable SQLite database and its WAL sidecars writable.
+docker exec "$app" sh -c 'chmod -R 777 /runtime'
 
 for _ in {1..30}; do
     if curl --fail --silent "$base_url/up" >"$results/up.json"; then
@@ -97,17 +114,17 @@ for _ in {1..30}; do
 done
 curl --fail --silent "$base_url/up" >"$results/up.json"
 
-cat >"$results/environment.txt" <<EOF
-base_url=$base_url
-turn_url=turn:$host_ip:$turn_port?transport=udp
-relay_ports=$relay_min-$relay_max/udp
-lifecycle=resources are removed on exit; set KEEP_PEER_WEBRTC_ENV=1 to inspect, then docker rm -f $app $turn and docker volume rm $vendor $runtime $storage $cache
-EOF
+printf '%s\n' \
+    "base_url=$base_url" \
+    "turn_url=turn:$host_ip:$turn_port?transport=udp" \
+    "relay_ports=$relay_min-$relay_max/udp" \
+    "lifecycle=resources are removed on exit; set KEEP_PEER_WEBRTC_ENV=1 to inspect, then docker rm -f $app $turn and docker volume rm $vendor $runtime $storage $cache" \
+    >"$results/environment.txt"
 chmod 600 "$results/environment.txt"
 
-BASE_URL="$base_url" TURN_URL="turn:$host_ip:$turn_port?transport=udp" RESULTS_DIR="$results" \
+BASE_URL="$base_url" TURN_URL="turn:$host_ip:$turn_port?transport=udp" RESULTS_DIR="$results" PEER_WEBRTC_CASES="${PEER_WEBRTC_CASES:-}" \
     node "$root/scripts/android/peer-webrtc.mjs" | tee "$results/summary.json"
 docker logs "$turn" >"$results/logs/coturn.log" 2>&1
 docker logs "$app" >"$results/logs/backend.log" 2>&1
 chmod 600 "$results"/logs/* "$results"/*.json "$results"/*.txt
-printf 'Peer WebRTC evidence: %s\n' "$results"
+printf 'Peer WebRTC evidence: %s\n' "$published_results"

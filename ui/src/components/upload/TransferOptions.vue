@@ -191,6 +191,7 @@ function setRetention(value: unknown): void {
                             @click="emit('turbo')"
                         >
                             <Icon name="bolt" :size="16" />Turbo Transfer
+                            <kbd aria-hidden="true">⇧↵</kbd>
                         </Button>
                     </Tooltip>
                     <Button
@@ -200,7 +201,7 @@ function setRetention(value: unknown): void {
                         @click="emit('submit')"
                     >
                         <Icon name="lock" :size="16" />
-                        {{ recipient ? 'Encrypt and send' : 'Encrypt and share' }}
+                        Send encrypted <kbd aria-hidden="true">↵</kbd>
                         <Icon name="arrow-right" :size="16" />
                     </Button>
                 </template>
@@ -331,6 +332,12 @@ function setRetention(value: unknown): void {
 }
 .transfer-options__action--turbo {
     min-width: 10rem;
+}
+.transfer-options__action kbd {
+    color: inherit;
+    font: inherit;
+    font-size: 0.625rem;
+    opacity: 0.7;
 }
 .retention-menu {
     min-width: 12.8125rem;

@@ -45,7 +45,7 @@ async function recipientPage(browser: Browser, initScript?: () => void): Promise
 
 async function completeUpload(page: Page): Promise<void> {
     const ready = page.getByRole('heading', { name: 'Your encrypted link is ready' });
-    await page.getByRole('button', { name: 'Encrypt and share' }).click();
+    await page.getByRole('button', { name: 'Send encrypted' }).click();
     await expect(ready).toBeVisible({ timeout: 30_000 });
 }
 

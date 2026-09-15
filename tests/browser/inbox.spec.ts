@@ -112,7 +112,7 @@ async function sendToInbox(
         mimeType: 'text/plain',
         buffer: Buffer.from(marker),
     });
-    await sender.getByRole('button', { name: 'Encrypt and send' }).click();
+    await sender.getByRole('button', { name: 'Send encrypted' }).click();
     await expect(sender.getByRole('heading', { name: 'Files sent' })).toBeVisible({
         timeout: 30_000,
     });

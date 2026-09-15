@@ -4,8 +4,8 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{bail, ensure, Context, Result};
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use anyhow::{Context, Result, bail, ensure};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use filebeam_encryption::{
     decrypt_chunk, decrypt_manifest, derive_item_key, derive_password_key,
     derive_password_protected_key, encrypt_chunk, encrypt_manifest, generate_nonce_prefix,
@@ -14,9 +14,9 @@ use filebeam_encryption::{
 use filebeam_transfer_native::{
     control::{Control, Phase, ShareReady},
     runtime::shared_tokio_runtime,
-    webrtc::{connect_receiver, connect_sender, request_chunk, serve_channel, Signaling},
+    webrtc::{Signaling, connect_receiver, connect_sender, request_chunk, serve_channel},
 };
-use reqwest::{blocking::Client, cookie::Jar, header::HeaderValue, Url};
+use reqwest::{Url, blocking::Client, cookie::Jar, header::HeaderValue};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
@@ -178,7 +178,9 @@ impl NotesService {
             bail!("note has no encrypted envelope");
         }
         ensure!(
-            note.protocol_version == 1 && matches!(note.driver.as_str(), "http" | "webrtc") && note.items.len() == 1,
+            note.protocol_version == 1
+                && matches!(note.driver.as_str(), "http" | "webrtc")
+                && note.items.len() == 1,
             "unsupported note transfer"
         );
         Ok(note)
@@ -354,45 +356,127 @@ impl NotesService {
     /// except through the authenticated WebRTC data channel.
     pub fn create_live(&self, request: NoteCreate, control: &Control) -> Result<CreatedNote> {
         ensure!(!request.text.is_empty(), "note cannot be empty");
-        if !control.webrtc_relay_only() { control.request_peer_consent(self.instance.origin().ascii_serialization())?; }
-        let info = self.http.get(url(&self.instance, "api/v1/info")?).send()?.json::<Api<Info>>()?.data;
+        if !control.webrtc_relay_only() {
+            control.request_peer_consent(self.instance.origin().ascii_serialization())?;
+        }
+        let info = self
+            .http
+            .get(url(&self.instance, "api/v1/info")?)
+            .send()?
+            .json::<Api<Info>>()?
+            .data;
         let chunk_bytes = usize::try_from(info.chunk_bytes)?;
-        ensure!(chunk_bytes > 0 && chunk_bytes <= 24_999_984, "invalid note chunk policy");
-        let bytes = request.text.as_bytes(); let chunk_count = bytes.len().div_ceil(chunk_bytes).max(1);
+        ensure!(
+            chunk_bytes > 0 && chunk_bytes <= 24_999_984,
+            "invalid note chunk policy"
+        );
+        let bytes = request.text.as_bytes();
+        let chunk_count = bytes.len().div_ceil(chunk_bytes).max(1);
         let reservation = self.http.post(url(&self.instance, "api/v1/transfers")?).json(&serde_json::json!({
             "kind":"note", "driver":"webrtc", "protocol_version":1, "chunk_bytes":chunk_bytes,
             "retention_hours":request.retention_hours, "burn_on_read":request.burn_on_read,
             "items":[{"ciphertext_bytes":bytes.len() + chunk_count * TAG_BYTES,"chunk_count":chunk_count}]
         })).send()?;
-        if !reservation.status().is_success() { bail!("live note reservation returned {}", reservation.status()); }
+        if !reservation.status().is_success() {
+            bail!("live note reservation returned {}", reservation.status());
+        }
         let reservation = reservation.json::<Api<Reservation>>()?.data;
-        ensure!(reservation.driver == "webrtc" && reservation.items.len() == 1, "invalid live note reservation");
-        let join_token = reservation.join_token.clone().context("live note join capability is unavailable")?;
-        let item = &reservation.items[0]; let share_key = Zeroizing::new(generate_transfer_key()?);
-        let salt = request.password.as_ref().map(|_| generate_nonce_prefix().map(|v| v[..16].to_vec())).transpose()?;
+        ensure!(
+            reservation.driver == "webrtc" && reservation.items.len() == 1,
+            "invalid live note reservation"
+        );
+        let join_token = reservation
+            .join_token
+            .clone()
+            .context("live note join capability is unavailable")?;
+        let item = &reservation.items[0];
+        let share_key = Zeroizing::new(generate_transfer_key()?);
+        let salt = request
+            .password
+            .as_ref()
+            .map(|_| generate_nonce_prefix().map(|v| v[..16].to_vec()))
+            .transpose()?;
         let master = password_key(&share_key, request.password.as_deref(), salt.as_deref())?;
-        let prefix = generate_nonce_prefix()?; let key = Zeroizing::new(derive_item_key(&master, &reservation.id, &item.id)?);
+        let prefix = generate_nonce_prefix()?;
+        let key = Zeroizing::new(derive_item_key(&master, &reservation.id, &item.id)?);
         let mut chunks = HashMap::new();
         for (index, plain) in bytes.chunks(chunk_bytes).enumerate() {
-            chunks.insert((item.id.clone(), index as u64), encrypt_chunk(&key, &prefix, index as u32, plain, aad(&reservation.id, &item.id, index).as_bytes())?);
+            chunks.insert(
+                (item.id.clone(), index as u64),
+                encrypt_chunk(
+                    &key,
+                    &prefix,
+                    index as u32,
+                    plain,
+                    aad(&reservation.id, &item.id, index).as_bytes(),
+                )?,
+            );
         }
-        let manifest = Manifest { version: 1, title: request.title.filter(|title| !title.is_empty()), language: Some(request.language), read_token: reservation.read_token.clone(), items: vec![ManifestItem { id:item.id.clone(), name:"note.txt".into(), mime:"text/plain".into(), size:bytes.len() as u64, nonce_prefix:encode(&prefix), chunk_count:chunk_count as u64, digest:DigestValue { algorithm:"sha256".into(), value:hex_digest(bytes) } }] };
-        let mp = generate_nonce_prefix()?; let mut value = serde_json::to_value(&manifest)?; value["join_token"] = serde_json::Value::String(join_token);
+        let manifest = Manifest {
+            version: 1,
+            title: request.title.filter(|title| !title.is_empty()),
+            language: Some(request.language),
+            read_token: reservation.read_token.clone(),
+            items: vec![ManifestItem {
+                id: item.id.clone(),
+                name: "note.txt".into(),
+                mime: "text/plain".into(),
+                size: bytes.len() as u64,
+                nonce_prefix: encode(&prefix),
+                chunk_count: chunk_count as u64,
+                digest: DigestValue {
+                    algorithm: "sha256".into(),
+                    value: hex_digest(bytes),
+                },
+            }],
+        };
+        let mp = generate_nonce_prefix()?;
+        let mut value = serde_json::to_value(&manifest)?;
+        value["join_token"] = serde_json::Value::String(join_token);
         let encrypted_manifest = serde_json::json!({"v":1,"nonce_prefix":encode(&mp),"salt":salt.as_ref().map(|x| encode(x)),"kdf":salt.as_ref().map(|_| serde_json::json!({"name":"argon2id","memory_kib":65536,"iterations":3,"parallelism":1})),"ciphertext":encode(&encrypt_manifest(&master, &mp, &serde_json::to_vec(&value)?, aad(&reservation.id,"manifest","manifest").as_bytes())?)}).to_string();
-        let signal = Signaling::new(self.async_http.clone(), self.instance.as_str(), &reservation.id)?;
-        shared_tokio_runtime().block_on(signal.publish(&reservation.upload_token, &encrypted_manifest))?;
-        let share_url = self.instance.join(reservation.share_url.trim_start_matches('/'))?;
-        let created = CreatedNote { id: reservation.id.clone(), link:format!("{}#k=v1.{}", share_url, encode(&share_key)), delete_token:reservation.delete_token };
-        control.emit(filebeam_transfer_native::control::TransferEvent::ShareReady(ShareReady { share_url: created.link.clone() }));
+        let signal = Signaling::new(
+            self.async_http.clone(),
+            self.instance.as_str(),
+            &reservation.id,
+        )?;
+        shared_tokio_runtime()
+            .block_on(signal.publish(&reservation.upload_token, &encrypted_manifest))?;
+        let share_url = self
+            .instance
+            .join(reservation.share_url.trim_start_matches('/'))?;
+        let created = CreatedNote {
+            id: reservation.id.clone(),
+            link: format!("{}#k=v1.{}", share_url, encode(&share_key)),
+            delete_token: reservation.delete_token,
+        };
+        control.emit(
+            filebeam_transfer_native::control::TransferEvent::ShareReady(ShareReady {
+                share_url: created.link.clone(),
+            }),
+        );
         control.phase(Phase::Waiting)?;
         shared_tokio_runtime().block_on(async {
             let mut served = HashSet::new();
             while !control.cancelled.load(std::sync::atomic::Ordering::Relaxed) {
                 let (sessions, servers) = signal.sender_sessions(&reservation.upload_token).await?;
-                for session in sessions.into_iter().filter(|session| session.offer.is_some() && served.insert(session.id.clone())) {
-                    let (peer, channel) = connect_sender(&signal, &reservation.upload_token, &session, &servers, control.webrtc_relay_only(), control.cancelled.clone()).await?;
+                for session in sessions
+                    .into_iter()
+                    .filter(|session| session.offer.is_some() && served.insert(session.id.clone()))
+                {
+                    let (peer, channel) = connect_sender(
+                        &signal,
+                        &reservation.upload_token,
+                        &session,
+                        &servers,
+                        control.webrtc_relay_only(),
+                        control.cancelled.clone(),
+                    )
+                    .await?;
                     let payload = chunks.clone();
-                    tokio::spawn(async move { let _peer = peer; let _ = serve_channel(channel, payload).await; });
+                    tokio::spawn(async move {
+                        let _peer = peer;
+                        let _ = serve_channel(channel, payload).await;
+                    });
                 }
                 tokio::time::sleep(Duration::from_millis(1800)).await;
             }
@@ -417,12 +501,7 @@ impl NotesService {
         let master_key = password_key(
             &share_key,
             password,
-            envelope
-                .salt
-                .as_deref()
-                .map(|value| decode(value))
-                .transpose()?
-                .as_deref(),
+            envelope.salt.as_deref().map(decode).transpose()?.as_deref(),
         )?;
         let manifest_bytes = decrypt_manifest(
             &master_key,
@@ -431,7 +510,13 @@ impl NotesService {
             aad(&note.id, "manifest", "manifest").as_bytes(),
         )
         .context("could not decrypt note manifest")?;
-        let join_token = serde_json::from_slice::<serde_json::Value>(&manifest_bytes).ok().and_then(|v| v.get("join_token").and_then(|v| v.as_str()).map(str::to_owned));
+        let join_token = serde_json::from_slice::<serde_json::Value>(&manifest_bytes)
+            .ok()
+            .and_then(|v| {
+                v.get("join_token")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_owned)
+            });
         let manifest: Manifest =
             serde_json::from_slice(&manifest_bytes).context("invalid decrypted note manifest")?;
         ensure!(
@@ -457,27 +542,39 @@ impl NotesService {
                 let (peer, session, channel) = connect_receiver(&signal, &token, false).await?;
                 Ok::<_, anyhow::Error>((peer, session, channel, signal))
             })?)
-        } else { None };
+        } else {
+            None
+        };
         for index in 0..item.chunk_count {
             let ciphertext = if let Some((_, _session, channel, _)) = &live_session {
-                let expected = if index + 1 == item.chunk_count { item.size - index * note.chunk_bytes + TAG_BYTES as u64 } else { note.chunk_bytes + TAG_BYTES as u64 };
-                shared_tokio_runtime().block_on(request_chunk(channel.clone(), (index + 1) as u32, item.id.clone(), index, expected))?
+                let expected = if index + 1 == item.chunk_count {
+                    item.size - index * note.chunk_bytes + TAG_BYTES as u64
+                } else {
+                    note.chunk_bytes + TAG_BYTES as u64
+                };
+                shared_tokio_runtime().block_on(request_chunk(
+                    channel.clone(),
+                    (index + 1) as u32,
+                    item.id.clone(),
+                    index,
+                    expected,
+                ))?
             } else {
-            let response = self
-                .http
-                .get(url(
-                    &self.instance,
-                    &format!(
-                        "api/v1/transfers/{}/items/{}/chunks/{index}",
-                        note.id, item.id
-                    ),
-                )?)
-                .send()
-                .context("download encrypted note chunk")?;
-            if !response.status().is_success() {
-                bail!("note chunk download returned {}", response.status());
-            }
-            response.bytes()?.to_vec()
+                let response = self
+                    .http
+                    .get(url(
+                        &self.instance,
+                        &format!(
+                            "api/v1/transfers/{}/items/{}/chunks/{index}",
+                            note.id, item.id
+                        ),
+                    )?)
+                    .send()
+                    .context("download encrypted note chunk")?;
+                if !response.status().is_success() {
+                    bail!("note chunk download returned {}", response.status());
+                }
+                response.bytes()?.to_vec()
             };
             text.extend(decrypt_chunk(
                 &key,
@@ -505,10 +602,9 @@ impl NotesService {
                 .context("burn note has no read token")?;
             if let Some((_, session, _, _)) = &live_session {
                 self.consume_live(&note.id, token, &session.token)? == BurnResult::Consumed
-            } else { self.consume_once(
-                &note.id,
-                token,
-            )? == BurnResult::Consumed }
+            } else {
+                self.consume_once(&note.id, token)? == BurnResult::Consumed
+            }
         } else {
             false
         };
@@ -553,12 +649,30 @@ impl NotesService {
             status => bail!("burn note consumption returned {status}"),
         }
     }
-    fn consume_live(&self, transfer_id: &str, read_token: &str, session_token: &str) -> Result<BurnResult> {
-        let response = self.http.post(url(&self.instance, &format!("api/v1/transfers/{transfer_id}/consume"))?)
+    fn consume_live(
+        &self,
+        transfer_id: &str,
+        read_token: &str,
+        session_token: &str,
+    ) -> Result<BurnResult> {
+        let response = self
+            .http
+            .post(url(
+                &self.instance,
+                &format!("api/v1/transfers/{transfer_id}/consume"),
+            )?)
             .header("X-Filebeam-Read-Token", HeaderValue::from_str(read_token)?)
-            .header("X-Filebeam-Session-Token", HeaderValue::from_str(session_token)?)
-            .json(&serde_json::json!({})).send()?;
-        match response.status().as_u16() { 202 => Ok(BurnResult::Consumed), 404 => Ok(BurnResult::AlreadyConsumed), status => bail!("burn note consumption returned {status}") }
+            .header(
+                "X-Filebeam-Session-Token",
+                HeaderValue::from_str(session_token)?,
+            )
+            .json(&serde_json::json!({}))
+            .send()?;
+        match response.status().as_u16() {
+            202 => Ok(BurnResult::Consumed),
+            404 => Ok(BurnResult::AlreadyConsumed),
+            status => bail!("burn note consumption returned {status}"),
+        }
     }
 }
 fn aad(transfer: &str, item: &str, position: impl std::fmt::Display) -> String {
@@ -652,13 +766,15 @@ mod tests {
         );
         assert!(password_key(&share, Some("wrong password"), Some(&salt)).is_ok());
         let wrong = password_key(&share, Some("wrong password"), Some(&salt)).unwrap();
-        assert!(decrypt_manifest(
-            &wrong,
-            &envelope_prefix,
-            &manifest,
-            aad(transfer, "manifest", "manifest").as_bytes()
-        )
-        .is_err());
+        assert!(
+            decrypt_manifest(
+                &wrong,
+                &envelope_prefix,
+                &manifest,
+                aad(transfer, "manifest", "manifest").as_bytes()
+            )
+            .is_err()
+        );
     }
 
     #[test]

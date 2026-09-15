@@ -92,8 +92,10 @@ fun InboxScreen(model: FilebeamViewModel, instance: String) {
                     Text(item.id, style = MaterialTheme.typography.labelMedium)
                     item.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                     TextButton(enabled = item.link.isNotBlank(), onClick = {
-                        model.coordinator.download(item.link)
-                        model.destination = Destination.Transfers
+                        scope.launch {
+                            runCatching { model.inbox.download(instance, item.id, password.ifBlank { null }) }
+                                .onSuccess { model.destination = Destination.Transfers }
+                        }
                     }) { Text(stringResource(R.string.open_transfer)) }
                 }
             }

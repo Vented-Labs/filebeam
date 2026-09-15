@@ -101,6 +101,8 @@ export type CliTransfer = {
     kind: 'files' | 'note';
     driver: 'http' | 'webrtc';
     available: boolean;
+    pending?: boolean;
+    turbo?: boolean;
     expiresAt?: string;
     inbox?: boolean;
     burnOnRead?: boolean;
@@ -110,8 +112,8 @@ export function cliUnavailableReason(transfer: CliTransfer, now = Date.now()): s
     if (!transfer.available) return 'This transfer is not currently available for CLI download.';
     if (transfer.expiresAt && !(Date.parse(transfer.expiresAt) > now))
         return 'This transfer has expired.';
-    if (transfer.driver === 'webrtc')
-        return 'The CLI supports stored HTTP files. Use the browser for this live transfer and keep the sender’s tab open.';
+    if (transfer.pending && !transfer.turbo)
+        return 'This transfer is still being prepared for CLI download.';
     if (transfer.inbox) return 'Use the browser to unlock files received with your account key.';
     if (transfer.kind !== 'files' || transfer.burnOnRead)
         return 'Use the browser for notes and burn-on-read transfers.';

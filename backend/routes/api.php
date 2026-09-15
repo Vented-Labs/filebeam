@@ -111,6 +111,10 @@ Route::prefix('native/v1')->middleware([EncryptCookies::class, AddQueuedCookiesT
         Route::get('/inbox', [NativeAccountController::class, 'inbox']);
         Route::patch('/inbox', [InboxController::class, 'update']);
         Route::get('/inbox/{transfer}/metadata', [InboxController::class, 'metadata'])->middleware('throttle:transfer-reading');
+        Route::get('/inbox/{transfer}/items/{item}/chunks/{position}', [InboxController::class, 'chunk'])
+            ->whereNumber('position')
+            ->scopeBindings()
+            ->middleware('throttle:transfer-reading');
         Route::get('/account/keys', [NativeAccountController::class, 'keys']);
         Route::post('/account/keys', [AccountKeyController::class, 'store'])->middleware('throttle:account-key-writing');
     });

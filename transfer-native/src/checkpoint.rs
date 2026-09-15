@@ -586,10 +586,40 @@ fn replace_private_file(
     replace_existing: bool,
 ) -> std::io::Result<()> {
     if replace_existing {
-        fs::rename(source, destination)
-    } else {
+        return fs::rename(source, destination);
+    }
+    #[cfg(target_os = "android")]
+    return android_rename_noreplace(source, destination);
+
+    #[cfg(not(target_os = "android"))]
+    {
         fs::hard_link(source, destination)?;
         fs::remove_file(source)
+    }
+}
+
+#[cfg(target_os = "android")]
+fn android_rename_noreplace(source: &Path, destination: &Path) -> std::io::Result<()> {
+    use std::{ffi::CString, os::unix::ffi::OsStrExt};
+
+    let source = CString::new(source.as_os_str().as_bytes())?;
+    let destination = CString::new(destination.as_os_str().as_bytes())?;
+    // Android's SELinux policy rejects hard links in app data. renameat2 keeps
+    // the required atomic no-replace publication without creating a link.
+    let result = unsafe {
+        libc::syscall(
+            libc::SYS_renameat2,
+            libc::AT_FDCWD,
+            source.as_ptr(),
+            libc::AT_FDCWD,
+            destination.as_ptr(),
+            libc::RENAME_NOREPLACE,
+        )
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
     }
 }
 

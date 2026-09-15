@@ -1,5 +1,5 @@
-use anyhow::{bail, Context, Result};
-use reqwest::{blocking::Client, header::HeaderValue, Url};
+use anyhow::{Context, Result, bail};
+use reqwest::{Url, blocking::Client, header::HeaderValue};
 use serde::{Deserialize, Serialize};
 
 use super::client::url;

@@ -24,6 +24,7 @@ import io.filebeam.rust.SecretStoreCallback
 import io.filebeam.rust.SourceCallback
 import io.filebeam.rust.SourceKind
 import io.filebeam.rust.UploadSource
+import io.filebeam.rust.NoteRequest as NativeNoteRequest
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -80,6 +81,9 @@ class TransferCoordinator(
     private var nativeClientRelayOnly: Boolean? = null
     @Volatile private var pauseRequested = false
     @Volatile private var pausedByUser = false
+    private var inboxCredentials: InboxCredentials? = null
+
+    private data class InboxCredentials(val transferId: String, val key: ByteArray, val cookie: String)
 
     init { refresh() }
 
@@ -119,6 +123,35 @@ class TransferCoordinator(
     fun download(link: String) = submit { config ->
         JSONObject().put("kind", "download").put("link", link)
             .put("instance", config.instance).put("relay", config.relayOnly)
+    }
+
+    /** Credentials stay in memory while this process starts the authenticated job. */
+    @Synchronized fun inboxDownload(instance: String, transferId: String, key: ByteArray, cookie: String) {
+        check(key.size == 32 && cookie.isNotBlank()) { "Sign in and unlock the inbox key again" }
+        inboxCredentials?.key?.fill(0)
+        inboxCredentials = InboxCredentials(transferId, key.copyOf(), cookie)
+        submit { config ->
+            JSONObject().put("kind", "inbox-download").put("transfer", transferId)
+                .put("instance", AccountSessionRegistry.normalizeOrigin(instance)).put("relay", config.relayOnly)
+        }
+    }
+
+    /** Starts immediately so password and peer-consent prompts remain RAM-only;
+     * the foreground service only observes this process-owned live sender. */
+    fun startLiveNote(instance: String, request: NativeNoteRequest): TransferJob {
+        check(!mutable.value.busy && active == null) { context.getString(R.string.work_already_running) }
+        val job = accountSessions.service(instance).startLiveNote(request)
+        active = job
+        mutable.update { it.copy(busy = true, phase = "preparing", snapshot = null, message = null) }
+        scope.launch {
+            val config = settings.values.first()
+            withContext(Dispatchers.IO) {
+                pending.save(JSONObject().put("kind", "note-live").put("id", UUID.randomUUID().toString())
+                    .put("instance", instance).put("relay", config.relayOnly))
+            }
+            TransferScheduler.start(context, true)
+        }
+        return job
     }
 
     fun resume(id: String) = submit { config ->
@@ -180,10 +213,11 @@ class TransferCoordinator(
                 mutable.update { it.copy(phase = "complete", message = context.getString(R.string.saved_file)) }
                 return@run
             }
-            val api = client(request.optBoolean("relay"))
+            val api = if (active == null) client(request.optBoolean("relay")) else null
             val id = request.getString("id")
             val checkpoint = request.optString("checkpoint").takeIf(String::isNotBlank)
-            active = withContext(Dispatchers.IO) {
+            active = active ?: withContext(Dispatchers.IO) {
+                val api = requireNotNull(api)
                 if (pauseRequested) throw CancellationException()
                 when {
                     request.getString("kind") == "live-end" -> api.endLive(request.getString("checkpoint"))
@@ -230,6 +264,17 @@ class TransferCoordinator(
                                 if (pauseRequested) throw CancellationException()
                             }) { bytes -> mutable.update { it.copy(preparedBytes = bytes) } }
                             api.startUploadWithOptions(request.getString("instance"), paths, options)
+                        }
+                    }
+                    request.getString("kind") == "inbox-download" -> {
+                        val credentials = synchronized(this@TransferCoordinator) {
+                            inboxCredentials?.takeIf { it.transferId == request.getString("transfer") }
+                        } ?: error("Inbox download paused. Sign in and open the delivery again to reauthenticate.")
+                        try {
+                            api.startInboxDownload(request.getString("instance"), credentials.transferId, credentials.key, credentials.cookie, storage.outputDirectory(id))
+                        } finally {
+                            credentials.key.fill(0)
+                            synchronized(this@TransferCoordinator) { inboxCredentials = null }
                         }
                     }
                     else -> api.startDownload(request.getString("instance"), request.getString("link"), storage.outputDirectory(id))

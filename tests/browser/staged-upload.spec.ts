@@ -55,7 +55,7 @@ async function startUpload(page: Page): Promise<Transfer> {
             response.url().endsWith('/api/v1/transfers') &&
             response.status() === 201,
     );
-    await page.getByRole('button', { name: 'Encrypt and share' }).click();
+    await page.getByRole('button', { name: 'Send encrypted' }).click();
     const payload = (await (await created).json()) as {
         data: { id: string; delete_token: string };
     };

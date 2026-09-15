@@ -33,6 +33,7 @@ interface NotesService {
     val state: StateFlow<ServiceState<List<NoteSummary>>>
     suspend fun create(request: NoteRequest): NoteSummary
     suspend fun claim(link: String, password: String? = null): NoteContent
+    fun endLive(link: String)
 }
 
 interface TurboService {
@@ -40,7 +41,10 @@ interface TurboService {
     suspend fun refresh(instance: String, transferId: String): TurboAvailability
 }
 
-class NativeNotesService(private val sessions: AccountSessionRegistry) : NotesService {
+class NativeNotesService(
+    private val sessions: AccountSessionRegistry,
+    private val startLive: (String, NativeNoteRequest) -> io.filebeam.rust.TransferJob,
+) : NotesService {
     private val mutable = MutableStateFlow<ServiceState<List<NoteSummary>>>(ServiceState.Loading)
     private val liveJobs = mutableMapOf<String, io.filebeam.rust.TransferJob>()
     override val state = mutable.asStateFlow()
@@ -55,18 +59,18 @@ class NativeNotesService(private val sessions: AccountSessionRegistry) : NotesSe
             transport = if (request.live) NoteTransport.WEB_RTC else NoteTransport.HTTP,
         )
         val created = if (request.live) {
-            val job = sessions.service(request.instance).startLiveNote(native)
-            var link: String? = null
-            while (true) {
+            val job = startLive(request.instance, native)
+            var created: io.filebeam.rust.CreatedNote? = null
+            while (created == null) {
                 val snapshot = job.snapshot()
                 snapshot.shareUrl?.let { ready ->
                     liveJobs[ready] = job
-                    link = ready
-                    return@withContext io.filebeam.rust.CreatedNote("", ready, "")
+                    created = io.filebeam.rust.CreatedNote(transferId(ready), ready, "")
                 }
                 snapshot.error?.let { error(it) }
                 delay(100)
             }
+            requireNotNull(created)
         } else sessions.service(request.instance).createNote(native)
         NoteSummary(created.id, request.title.ifBlank { "Encrypted note" }, null, created.link).also {
             mutable.value = ServiceState.Ready(listOf(it))
@@ -78,6 +82,7 @@ class NativeNotesService(private val sessions: AccountSessionRegistry) : NotesSe
         mutable.value = ServiceState.Ready(listOf(NoteSummary(opened.id, opened.title ?: "Encrypted note", null)))
         NoteContent(opened.id, opened.text, opened.title, opened.language, opened.consumed)
     }
+    override fun endLive(link: String) { liveJobs.remove(link)?.pause() }
 }
 
 class NativeTurboService(private val sessions: AccountSessionRegistry) : TurboService {

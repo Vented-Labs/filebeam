@@ -2,6 +2,7 @@ package io.filebeam.android.platform.storage
 
 import android.content.Context
 import android.net.Uri
+import android.os.ParcelFileDescriptor
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import androidx.core.net.toUri
@@ -36,7 +37,7 @@ class DocumentStorage(private val context: Context) {
         fun abort()
     }
 
-    private data class ExportJournal(val source: String, val uri: String, val offset: Long)
+    private data class ExportJournal(val source: String, val uri: String, val offset: Long, val prefix: String)
 
     init { cleanupAbandonedImports(emptySet()) }
 
@@ -104,7 +105,8 @@ class DocumentStorage(private val context: Context) {
         require(file.toPath().startsWith(root.canonicalFile.toPath()))
         retainGrant(uri, IntentFlags.WRITE)
         val journalFile = exportJournal(uri)
-        val previous = loadJournal(journalFile)?.takeIf { it.source == file.absolutePath && it.uri == uri.toString() }
+        val prefix = fingerprint(file)
+        val previous = loadJournal(journalFile)?.takeIf { it.source == file.absolutePath && it.uri == uri.toString() && it.prefix == prefix }
         // A provider FD permits a durable offset journal. Providers without one
         // use the safe truncating stream fallback rather than pretending resume works.
         val descriptor = context.contentResolver.openFileDescriptor(uri, "rw")
@@ -116,9 +118,11 @@ class DocumentStorage(private val context: Context) {
             return@withContext
         }
         descriptor.use { pfd ->
+            val (destinationSize, destinationPrefix) = ParcelFileDescriptor.AutoCloseInputStream(
+                ParcelFileDescriptor.dup(pfd.fileDescriptor),
+            ).channel.use { channel -> channel.size() to fingerprint(channel) }
             FileOutputStream(pfd.fileDescriptor).channel.use { channel ->
-                val destinationSize = channel.size()
-                val offset = previous?.offset?.takeIf { it in 0..file.length() && destinationSize >= it } ?: 0L
+                val offset = previous?.offset?.takeIf { it in 0..file.length() && destinationSize >= it && destinationPrefix == prefix } ?: 0L
                 if (offset == 0L) channel.truncate(0)
                 channel.position(offset)
                 file.inputStream().use { input ->
@@ -136,7 +140,7 @@ class DocumentStorage(private val context: Context) {
                         // Never advertise an offset which is still only in the
                         // provider's write cache: recovery trusts this journal.
                         channel.force(true)
-                        saveJournal(journalFile, ExportJournal(file.absolutePath, uri.toString(), written))
+                        saveJournal(journalFile, ExportJournal(file.absolutePath, uri.toString(), written, prefix))
                     }
                     channel.force(true)
                 }
@@ -232,18 +236,18 @@ class DocumentStorage(private val context: Context) {
                 if (count < 0) break
                 output.write(buffer, 0, count)
                 written += count
-                saveJournal(journal, ExportJournal(source.absolutePath, uri.toString(), written))
+                saveJournal(journal, ExportJournal(source.absolutePath, uri.toString(), written, fingerprint(source)))
             }
             output.flush()
         }
     }
 
     private fun exportJournal(uri: Uri) = File(root, "exports/${uri.toString().hashCode().toUInt().toString(16)}.json").apply { parentFile?.mkdirs() }
-    private fun loadJournal(file: File) = runCatching { JSONObject(file.readText()).let { ExportJournal(it.getString("source"), it.getString("uri"), it.getLong("offset")) } }.getOrNull()
+    private fun loadJournal(file: File) = runCatching { JSONObject(file.readText()).let { ExportJournal(it.getString("source"), it.getString("uri"), it.getLong("offset"), it.getString("prefix")) } }.getOrNull()
     private fun saveJournal(file: File, journal: ExportJournal) {
         val partial = File(file.parentFile, ".${file.name}.part")
         FileOutputStream(partial).use { output ->
-            output.write(JSONObject().put("source", journal.source).put("uri", journal.uri).put("offset", journal.offset).toString().toByteArray())
+            output.write(JSONObject().put("source", journal.source).put("uri", journal.uri).put("offset", journal.offset).put("prefix", journal.prefix).toString().toByteArray())
             output.fd.sync()
         }
         check(partial.renameTo(file)) { "Could not persist export journal" }
@@ -261,6 +265,21 @@ class DocumentStorage(private val context: Context) {
             else if (input.read() < 0) error("The export source was truncated")
             else remaining--
         }
+    }
+
+    private fun fingerprint(file: File): String = file.inputStream().use { input -> fingerprint(input) }
+    private fun fingerprint(channel: java.nio.channels.FileChannel): String {
+        val position = channel.position()
+        return try {
+            channel.position(0)
+            val bytes = ByteArray(minOf(channel.size(), 64L * 1024).toInt())
+            channel.read(java.nio.ByteBuffer.wrap(bytes))
+            java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+        } finally { channel.position(position) }
+    }
+    private fun fingerprint(input: java.io.InputStream): String {
+        val bytes = input.readNBytes(64 * 1024)
+        return java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
     }
 
     companion object {

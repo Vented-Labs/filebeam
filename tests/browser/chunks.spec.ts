@@ -121,7 +121,7 @@ async function uploadChunked(
             response.url().endsWith('/api/v1/transfers') &&
             response.status() === 201,
     );
-    await page.getByRole('button', { name: 'Encrypt and share' }).click();
+    await page.getByRole('button', { name: 'Send encrypted' }).click();
     const data = (await (await created).json()).data as {
         id: string;
         delete_token: string;
@@ -265,7 +265,7 @@ test('round-trips a full-size encrypted chunk and its final tail', async ({ page
     const [data, completed] = await Promise.all([
         creation,
         completion,
-        page.getByRole('button', { name: 'Encrypt and share' }).click(),
+        page.getByRole('button', { name: 'Send encrypted' }).click(),
     ]);
     expect(completed.status()).toBe(200);
     expect(new URL(completed.url()).pathname).toBe(`/api/v1/transfers/${data.id}/complete`);

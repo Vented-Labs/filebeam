@@ -364,6 +364,31 @@ pub fn download(
     download::run(instance, raw, output, control)
 }
 
+/// Download a recipient delivery through the authenticated inbox endpoints.
+/// The cookie and opened delivery key are request-scoped and are never saved.
+pub fn download_inbox(
+    instance: &str,
+    transfer_id: &str,
+    working_key: &[u8],
+    cookie: &str,
+    output: &Path,
+    control: &Control,
+) -> Result<Vec<PathBuf>> {
+    download::run_inbox(instance, transfer_id, working_key, cookie, output, control)
+}
+
+/// Resume an inbox job after the host has restored a session for its recorded
+/// origin and supplied the recipient key again.
+pub fn resume_inbox(
+    id: &str,
+    instance: &str,
+    working_key: &[u8],
+    cookie: &str,
+    control: &Control,
+) -> Result<Vec<String>> {
+    download::resume_inbox(id, instance, working_key, cookie, control)
+}
+
 #[derive(Debug, PartialEq)]
 pub struct Link {
     pub id: String,

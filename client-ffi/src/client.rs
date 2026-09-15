@@ -175,6 +175,70 @@ impl TransferClient {
         }))
     }
 
+    /// Starts a recipient-authorized inbox download. Credentials are supplied
+    /// only for this job and are deliberately absent from its checkpoint.
+    pub fn start_inbox_download(
+        &self,
+        instance: String,
+        transfer_id: String,
+        working_key: Vec<u8>,
+        cookie_context: String,
+        output_directory: String,
+    ) -> Result<Arc<TransferJob>> {
+        let instance = origin(&instance, self.allow_http)?;
+        if working_key.len() != 32
+            || cookie_context.is_empty()
+            || cookie_context.contains(['\r', '\n'])
+        {
+            return Err(invalid("A valid account session and inbox key are required"));
+        }
+        if !PathBuf::from(&output_directory).is_absolute() {
+            return Err(invalid("The output directory must be absolute"));
+        }
+        Ok(self.start_operation(move |control| {
+            protocol::download_inbox(
+                &instance,
+                &transfer_id,
+                &working_key,
+                &cookie_context,
+                PathBuf::from(&output_directory).as_path(),
+                control,
+            )
+            .map(|paths| {
+                paths
+                    .into_iter()
+                    .map(|path| path.display().to_string())
+                    .collect()
+            })
+        }))
+    }
+
+    /// Inbox checkpoints require a renewed same-origin session and key.
+    pub fn resume_inbox_download(
+        &self,
+        checkpoint_id: String,
+        instance: String,
+        working_key: Vec<u8>,
+        cookie_context: String,
+    ) -> Result<Arc<TransferJob>> {
+        if working_key.len() != 32
+            || cookie_context.is_empty()
+            || cookie_context.contains(['\r', '\n'])
+        {
+            return Err(invalid("A valid account session and inbox key are required"));
+        }
+        let instance = origin(&instance, self.allow_http)?;
+        Ok(self.start_operation(move |control| {
+            protocol::resume_inbox(
+                &checkpoint_id,
+                &instance,
+                &working_key,
+                &cookie_context,
+                control,
+            )
+        }))
+    }
+
     /// Starts a bounded provider/path source upload. Provider handles are opened
     /// synchronously by the installed callback and their detached FDs are owned by Rust.
     pub fn start_upload_sources(
