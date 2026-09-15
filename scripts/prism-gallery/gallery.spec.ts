@@ -108,7 +108,9 @@ test('CLI copy states retain full payloads, reject stale results, and offer pers
     expect(
         await page.evaluate(() => (window as Window & { cliLongCopy?: string }).cliLongCopy),
     ).toBe(expected);
-    for (const variant of ['expired', 'unavailable', 'live', 'note']) {
+    await page.getByRole('button', { name: 'live', exact: true }).click();
+    await expect(field).toHaveValue(/^beam down /);
+    for (const variant of ['expired', 'unavailable', 'note']) {
         await page.getByRole('button', { name: variant, exact: true }).click();
         await expect(card.getByRole('textbox')).toHaveCount(0);
         await expect(card.getByRole('button', { name: /^Copy command/ })).toHaveCount(0);

@@ -33,6 +33,11 @@ import CliProvider from '../../ui/src/components/cli/CliProvider.vue';
 import CliInstallButton from '../../ui/src/components/cli/CliInstallButton.vue';
 import CliDownloadCard from '../../ui/src/components/cli/CliDownloadCard.vue';
 import CliCommandField from '../../ui/src/components/cli/CliCommandField.vue';
+import AppShell from '../../ui/src/components/layout/AppShell.vue';
+import AppInstallButton from '../../ui/src/components/layout/AppInstallButton.vue';
+import CliFooterLauncher from '../../ui/src/components/cli/CliFooterLauncher.vue';
+
+const placementPreview = new URLSearchParams(window.location.search).has('placement');
 
 type Section =
     | 'cli'
@@ -342,7 +347,21 @@ onBeforeUnmount(() => {
 
 <template>
     <CliProvider :config="cliConfig">
-        <div class="prism-gallery" :style="slowMotionStyle">
+        <AppShell v-if="placementPreview">
+            <div style="padding: 2rem">
+                <h1>App / CLI placement — production shell</h1>
+                <NoteComposer
+                    v-model="note"
+                    v-model:title="noteTitle"
+                    v-model:language="noteLanguage"
+                    :disabled="false"
+                    :maximum-bytes="null"
+                    :retention-hours="24"
+                />
+                <CliInstallButton />
+            </div>
+        </AppShell>
+        <div v-else class="prism-gallery" :style="slowMotionStyle">
             <header class="gallery-header">
                 <div class="gallery-header__brand">
                     <img src="/brand/filebeam-logo-header.svg" alt="Filebeam" />
@@ -397,6 +416,15 @@ onBeforeUnmount(() => {
                                 pressed, and focus states.
                             </p>
                         </div>
+                        <div class="gallery-fixture-controls">
+                            <AppInstallButton />
+                            <a href="?placement">Open responsive production shell</a>
+                        </div>
+                        <CliFooterLauncher />
+                        <p>
+                            Terminal: hover, hold to press, Tab to focus, and open/dismiss to verify
+                            return focus. Resize below 901px for the mobile app entry.
+                        </p>
                         <div class="gallery-fixture-controls">
                             <CliInstallButton />
                             <label class="gallery-inline-switch"

@@ -37,7 +37,7 @@ class DocumentStorage(private val context: Context) {
         fun abort()
     }
 
-    private data class ExportJournal(val source: String, val uri: String, val offset: Long, val prefix: String)
+    private data class ExportJournal(val source: String, val uri: String, val offset: Long, val sourceHash: String, val destinationHash: String)
 
     init { cleanupAbandonedImports(emptySet()) }
 
@@ -105,8 +105,8 @@ class DocumentStorage(private val context: Context) {
         require(file.toPath().startsWith(root.canonicalFile.toPath()))
         retainGrant(uri, IntentFlags.WRITE)
         val journalFile = exportJournal(uri)
-        val prefix = fingerprint(file)
-        val previous = loadJournal(journalFile)?.takeIf { it.source == file.absolutePath && it.uri == uri.toString() && it.prefix == prefix }
+        val sourceHash = fingerprint(file)
+        val previous = loadJournal(journalFile)?.takeIf { it.source == file.absolutePath && it.uri == uri.toString() && it.sourceHash == sourceHash }
         // A provider FD permits a durable offset journal. Providers without one
         // use the safe truncating stream fallback rather than pretending resume works.
         val descriptor = context.contentResolver.openFileDescriptor(uri, "rw")
@@ -118,11 +118,9 @@ class DocumentStorage(private val context: Context) {
             return@withContext
         }
         descriptor.use { pfd ->
-            val (destinationSize, destinationPrefix) = ParcelFileDescriptor.AutoCloseInputStream(
-                ParcelFileDescriptor.dup(pfd.fileDescriptor),
-            ).channel.use { channel -> channel.size() to fingerprint(channel) }
             FileOutputStream(pfd.fileDescriptor).channel.use { channel ->
-                val offset = previous?.offset?.takeIf { it in 0..file.length() && destinationSize >= it && destinationPrefix == prefix } ?: 0L
+                val destinationSize = channel.size()
+                val offset = previous?.offset?.takeIf { it in 0..file.length() && destinationSize >= it && fingerprint(channel, it) == previous.destinationHash } ?: 0L
                 if (offset == 0L) channel.truncate(0)
                 channel.position(offset)
                 file.inputStream().use { input ->
@@ -140,7 +138,7 @@ class DocumentStorage(private val context: Context) {
                         // Never advertise an offset which is still only in the
                         // provider's write cache: recovery trusts this journal.
                         channel.force(true)
-                        saveJournal(journalFile, ExportJournal(file.absolutePath, uri.toString(), written, prefix))
+                        saveJournal(journalFile, ExportJournal(file.absolutePath, uri.toString(), written, sourceHash, fingerprint(channel, written)))
                     }
                     channel.force(true)
                 }
@@ -236,18 +234,18 @@ class DocumentStorage(private val context: Context) {
                 if (count < 0) break
                 output.write(buffer, 0, count)
                 written += count
-                saveJournal(journal, ExportJournal(source.absolutePath, uri.toString(), written, fingerprint(source)))
+                saveJournal(journal, ExportJournal(source.absolutePath, uri.toString(), written, fingerprint(source), ""))
             }
             output.flush()
         }
     }
 
     private fun exportJournal(uri: Uri) = File(root, "exports/${uri.toString().hashCode().toUInt().toString(16)}.json").apply { parentFile?.mkdirs() }
-    private fun loadJournal(file: File) = runCatching { JSONObject(file.readText()).let { ExportJournal(it.getString("source"), it.getString("uri"), it.getLong("offset"), it.getString("prefix")) } }.getOrNull()
+    private fun loadJournal(file: File) = runCatching { JSONObject(file.readText()).let { ExportJournal(it.getString("source"), it.getString("uri"), it.getLong("offset"), it.getString("sourceHash"), it.getString("destinationHash")) } }.getOrNull()
     private fun saveJournal(file: File, journal: ExportJournal) {
         val partial = File(file.parentFile, ".${file.name}.part")
         FileOutputStream(partial).use { output ->
-            output.write(JSONObject().put("source", journal.source).put("uri", journal.uri).put("offset", journal.offset).put("prefix", journal.prefix).toString().toByteArray())
+            output.write(JSONObject().put("source", journal.source).put("uri", journal.uri).put("offset", journal.offset).put("sourceHash", journal.sourceHash).put("destinationHash", journal.destinationHash).toString().toByteArray())
             output.fd.sync()
         }
         check(partial.renameTo(file)) { "Could not persist export journal" }
@@ -268,18 +266,32 @@ class DocumentStorage(private val context: Context) {
     }
 
     private fun fingerprint(file: File): String = file.inputStream().use { input -> fingerprint(input) }
-    private fun fingerprint(channel: java.nio.channels.FileChannel): String {
+    private fun fingerprint(channel: java.nio.channels.FileChannel, length: Long): String {
         val position = channel.position()
         return try {
             channel.position(0)
-            val bytes = ByteArray(minOf(channel.size(), 64L * 1024).toInt())
-            channel.read(java.nio.ByteBuffer.wrap(bytes))
-            java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+            val digest = java.security.MessageDigest.getInstance("SHA-256")
+            val buffer = java.nio.ByteBuffer.allocate(64 * 1024)
+            var remaining = length
+            while (remaining > 0) {
+                buffer.clear().limit(minOf(remaining, buffer.capacity().toLong()).toInt())
+                val count = channel.read(buffer)
+                check(count > 0) { "The export destination was truncated" }
+                digest.update(buffer.array(), 0, count)
+                remaining -= count
+            }
+            digest.digest().joinToString("") { "%02x".format(it) }
         } finally { channel.position(position) }
     }
     private fun fingerprint(input: java.io.InputStream): String {
-        val bytes = input.readNBytes(64 * 1024)
-        return java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        val buffer = ByteArray(64 * 1024)
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            digest.update(buffer, 0, count)
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
     companion object {

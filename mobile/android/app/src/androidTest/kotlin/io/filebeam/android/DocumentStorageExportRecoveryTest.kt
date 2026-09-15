@@ -48,8 +48,13 @@ class DocumentStorageExportRecoveryTest {
         TestDocumentsProvider.nonSeekable = false
         var checks = 0
         assertThrows(CancellationException::class.java) { runBlocking { storage.export(source.absolutePath, uri) { if (++checks > 1) throw CancellationException() } } }
-        TestDocumentsProvider.file.writeBytes(ByteArray(TestDocumentsProvider.file.length().toInt()) { 3 })
+        TestDocumentsProvider.file.apply {
+            val destination = readBytes()
+            destination[96 * 1024] = 3 // Deliberately beyond the former 64 KiB fingerprint window.
+            writeBytes(destination)
+        }
         val changed = ByteArray(160 * 1024) { 9 }
+        changed[112 * 1024] = 4 // Same-length source mutation beyond the old verification window.
         source.writeBytes(changed)
         storage.export(source.absolutePath, uri) {}
         assertArrayEquals(changed, TestDocumentsProvider.file.readBytes())

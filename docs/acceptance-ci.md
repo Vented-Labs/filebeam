@@ -74,14 +74,14 @@ The harness reserves these result names for verified runs:
 
 | Requirement | Required evidence | Current status |
 | --- | --- | --- |
-| Android to CLI, HTTP, both directions | source and destination SHA-256, Android instrumentation output | pending peer harness integration |
-| Android to Web, HTTP, both directions | source and destination SHA-256, browser trace/output | pending peer harness integration |
-| Android to CLI/Web, direct WebRTC, both directions | peer candidates/transport classification with redacted links, hashes | pending; self-test is not sufficient |
-| Android to CLI/Web, TURN relay, both directions | relay-only configuration and relay candidate classification, hashes | pending; no shared TURN fixture in CI |
-| Greater than 512 MiB and greater than 4 GiB | real fixture size, completed hashes, configured instance limits | fixtures available; transfers pending |
-| Flat memory growth | repeated 513 MiB/4097 MiB run RSS samples and configuration/revision | harness sampling available; measurements pending |
+| Android to CLI, HTTP, both directions | source and destination SHA-256, Android instrumentation output | pending Android peer run; Web/CLI equivalent passed |
+| Android to Web, HTTP, both directions | source and destination SHA-256, browser trace/output | pending Android peer run; Web/CLI equivalent passed at 513/4097 MiB |
+| Android to CLI/Web, direct WebRTC, both directions | peer candidates/transport classification with redacted links, hashes | pending Android peer run; browser/CLI small matrix passed |
+| Android to CLI/Web, TURN relay, both directions | relay-only configuration and relay candidate classification, hashes | pending Android peer run; browser/CLI small relay matrix passed |
+| Greater than 512 MiB and greater than 4 GiB | real fixture size, completed hashes, configured instance limits | Web/CLI HTTP passed both sizes; native-to-browser direct WebRTC passed 4097 MiB; Android pending |
+| Flat memory growth | repeated 513 MiB/4097 MiB run RSS samples and configuration/revision | browser OPFS clean peaks recorded as 930692/936332 KiB; Android measurements pending |
 | Debug and release/R8 | APK paths, build logs, native alignment report | covered by `check.sh`; release remains unsigned |
-| API 26/current, ARM64/ARMv7, physical low-memory, 4/16 KiB, release signing | device inventory and signed artifact provenance | pending hardware/signing availability |
+| API 26/current, ARM64/ARMv7, physical low-memory, 4/16 KiB, release signing | device inventory and signed artifact provenance | API 26, physical ARM, production signing/domain keys pending |
 
 ### Local signed R8 smoke
 
@@ -105,4 +105,6 @@ result directory. Record the device, configured managed-buffer budget, fixture,
 transport, revision, and both runs before comparing growth. RSS is observational
 evidence, not a process-memory limit.
 
-No test is marked complete here until it has the specified peer and hash evidence.
+The previous 10-test Android full gate passed. Rebuilding/running the new export
+and inbox coverage, the real Android peer matrix, and API 26 remains pending;
+Web/CLI results above do not complete those Android gates.

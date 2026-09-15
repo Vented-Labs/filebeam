@@ -16,7 +16,11 @@ provide(cliInstallKey, (event) => {
 function restoreFocus(event: Event): void {
     event.preventDefault();
     void nextTick(() => {
-        if (trigger?.isConnected) trigger.focus({ preventScroll: true });
+        const visible = (element: HTMLElement | null | undefined): element is HTMLElement =>
+            Boolean(element?.isConnected && element.getClientRects().length);
+        const fallback = document.querySelector<HTMLElement>('[data-app-install-entry]');
+        if (visible(trigger)) trigger.focus({ preventScroll: true });
+        else if (visible(fallback)) fallback.focus({ preventScroll: true });
     });
 }
 </script>

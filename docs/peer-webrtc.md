@@ -57,6 +57,13 @@ KEEP_PEER_WEBRTC_ENV=1 scripts/android/peer-webrtc.sh
 Use the cleanup command recorded in that run's `environment.txt` afterward.
 The harness does not use or modify the existing RTC verification servers.
 
-The checked-in runner is suitable for the Android `acceptance-ci` owner to
-reuse for its URLs and signaling lifecycle. It intentionally does not build or
-run Android itself.
+## Recorded Results
+
+- Small fixtures passed browser-to-native and native-to-browser over direct ICE
+and forced TURN UDP relay, with SHA-256 verification.
+- Native-to-browser direct WebRTC passed with a 4097 MiB sparse fixture and
+incremental browser hashing.
+
+The checked-in runner is suitable for the Android `acceptance-ci` owner to reuse
+for its URLs and signaling lifecycle. It intentionally does not build or run an
+Android APK, so these results are not Android peer acceptance.

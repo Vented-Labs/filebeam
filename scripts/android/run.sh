@@ -20,8 +20,8 @@ else
 fi
 exec docker run --rm --init "${limits[@]}" \
     --user "$(id -u):$(id -g)" \
-    --env HOME=/tmp/home --env CARGO_HOME=/tmp/cargo --env GRADLE_USER_HOME=/tmp/gradle \
+    --env HOME=/cache/home --env CARGO_HOME=/cache/cargo --env GRADLE_USER_HOME=/cache/gradle \
     --env CI="${CI:-false}" --env CARGO_BUILD_JOBS="$cargo_jobs" \
-    --volume "$cache/home:/tmp/home" --volume "$cache/cargo:/tmp/cargo" --volume "$cache/gradle:/tmp/gradle" \
+    --volume "$cache/home:/cache/home" --volume "$cache/cargo:/cache/cargo" --volume "$cache/gradle:/cache/gradle" \
     --volume "$root:/workspace" --workdir /workspace/mobile/android \
     "$image" "$@"

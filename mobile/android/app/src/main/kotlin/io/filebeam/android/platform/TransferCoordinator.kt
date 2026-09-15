@@ -10,6 +10,7 @@ import io.filebeam.android.platform.security.CheckpointSecretStore
 import io.filebeam.android.platform.security.PendingTransferStore
 import io.filebeam.android.platform.storage.DocumentStorage
 import io.filebeam.android.platform.services.AccountSessionRegistry
+import io.filebeam.android.platform.services.AccountService
 import io.filebeam.rust.ClientConfig
 import io.filebeam.rust.JobState
 import io.filebeam.rust.SavedTransfer
@@ -69,6 +70,7 @@ class TransferCoordinator(
     private val context: Context,
     private val settings: SettingsStore,
     private val accountSessions: AccountSessionRegistry,
+    private val accounts: AccountService,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val mutable = MutableStateFlow(TransferUiState())
@@ -156,10 +158,13 @@ class TransferCoordinator(
 
     fun resume(id: String) = submit { config ->
         val association = association(id).load()
+        val kind = association?.optString("kind") ?: "resume"
         JSONObject().put("kind", association?.optString("kind") ?: "resume")
             .put("id", association?.optString("id") ?: UUID.randomUUID().toString())
             .put("checkpoint", id).put("live", association?.optBoolean("live") ?: false)
-            .put("relay", config.relayOnly).put("instance", config.instance)
+            .put("relay", config.relayOnly)
+            .put("instance", association?.optString("instance")?.takeIf(String::isNotBlank) ?: config.instance)
+            .putOpt("transfer", if (kind == "inbox-download") association?.optString("transfer") else null)
     }
 
     private fun submit(clearSnapshot: Boolean = true, command: suspend (AppSettings) -> JSONObject) {
@@ -222,6 +227,16 @@ class TransferCoordinator(
                 when {
                     request.getString("kind") == "live-end" -> api.endLive(request.getString("checkpoint"))
                     request.getString("kind") == "revoke" -> api.revokeUpload(request.getString("checkpoint"))
+                    checkpoint != null && request.getString("kind") == "inbox-download" -> {
+                        val origin = AccountSessionRegistry.normalizeOrigin(request.getString("instance"))
+                        val transfer = request.getString("transfer")
+                        val credentials = accounts.inboxDownloadCredentials(origin, transfer)
+                        try {
+                            api.resumeInboxDownload(checkpoint, origin, credentials.workingKey, credentials.cookie)
+                        } finally {
+                            credentials.workingKey.fill(0)
+                        }
+                    }
                     checkpoint != null -> api.resume(checkpoint)
                     request.getString("kind") == "upload" -> {
                         val uris = request.getJSONArray("uris").let { values ->
@@ -289,7 +304,9 @@ class TransferCoordinator(
                     withContext(Dispatchers.IO) {
                         pending.save(request)
                         association(newCheckpoint).save(JSONObject().put("id", id)
-                            .put("kind", request.getString("kind")).put("live", request.optBoolean("live")))
+                            .put("kind", request.getString("kind")).put("live", request.optBoolean("live"))
+                            .put("instance", request.getString("instance"))
+                            .putOpt("transfer", request.optString("transfer").takeIf(String::isNotBlank)))
                     }
                 }
                 mutable.update { it.copy(snapshot = snapshot, phase = snapshot.phase) }

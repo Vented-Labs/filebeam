@@ -2,7 +2,7 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
     testDir: '.',
-    testMatch: 'gallery.spec.ts',
+    testMatch: ['gallery.spec.ts', 'placement.spec.ts'],
     outputDir: '../../test-results/prism-gallery',
     fullyParallel: false,
     use: {

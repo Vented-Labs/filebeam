@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, Mutex, OnceLock},
+    sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex, OnceLock},
     time::Duration,
 };
 
@@ -354,7 +354,7 @@ impl NotesService {
 
     /// Owns a live note until cancelled. Ciphertext never leaves this process
     /// except through the authenticated WebRTC data channel.
-    pub fn create_live(&self, request: NoteCreate, control: &Control) -> Result<CreatedNote> {
+    pub fn create_live(&self, request: NoteCreate, control: &Control, end_requested: Arc<AtomicBool>) -> Result<CreatedNote> {
         ensure!(!request.text.is_empty(), "note cannot be empty");
         if !control.webrtc_relay_only() {
             control.request_peer_consent(self.instance.origin().ascii_serialization())?;
@@ -457,7 +457,7 @@ impl NotesService {
         control.phase(Phase::Waiting)?;
         shared_tokio_runtime().block_on(async {
             let mut served = HashSet::new();
-            while !control.cancelled.load(std::sync::atomic::Ordering::Relaxed) {
+            while !control.cancelled.load(Ordering::Relaxed) {
                 let (sessions, servers) = signal.sender_sessions(&reservation.upload_token).await?;
                 for session in sessions
                     .into_iter()
@@ -480,7 +480,19 @@ impl NotesService {
                 }
                 tokio::time::sleep(Duration::from_millis(1800)).await;
             }
-            signal.end(&reservation.upload_token).await
+            if end_requested.load(Ordering::Relaxed) {
+                let mut last = None;
+                for attempt in 0..3 {
+                    match signal.end(&reservation.upload_token).await {
+                        Ok(()) => return Ok(()),
+                        Err(error) => last = Some(error),
+                    }
+                    tokio::time::sleep(Duration::from_millis(200 * (attempt + 1))).await;
+                }
+                Err(last.expect("live end retry recorded an error"))
+            } else {
+                Ok(())
+            }
         })?;
         Ok(created)
     }

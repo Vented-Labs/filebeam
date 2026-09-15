@@ -174,7 +174,7 @@ test.describe('WebRTC live transfers', () => {
         await page
             .locator('#share-link')
             .evaluate((node) => Object.assign(window, { cliLiveLink: node }));
-        await page.locator('.fb-header').getByRole('button', { name: 'Install CLI' }).click();
+        await page.locator('.cli-footer-launcher').click();
         await expect(page.getByRole('dialog', { name: 'Install CLI', exact: true })).toBeVisible();
         await page.keyboard.press('Escape');
         await expect(page.locator('#share-link')).toHaveValue(live.link);

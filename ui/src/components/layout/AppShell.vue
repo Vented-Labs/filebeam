@@ -16,7 +16,8 @@ import {
 import BrandLogo from '../brand/BrandLogo.vue';
 import AppLink from '../primitives/AppLink.vue';
 import AuthLink from '../auth/AuthLink.vue';
-import CliInstallButton from '../cli/CliInstallButton.vue';
+import AppInstallButton from './AppInstallButton.vue';
+import CliFooterLauncher from '../cli/CliFooterLauncher.vue';
 import Icon, { type IconName } from '../primitives/Icon.vue';
 import { computed, nextTick, ref } from 'vue';
 import { useBranding } from '../../lib/branding';
@@ -144,7 +145,7 @@ function goHome(event: MouseEvent): void {
                     ><span>GitHub</span><Icon name="arrow-up-right" :size="14"
                 /></a>
             </nav>
-            <CliInstallButton class="fb-header__cli" />
+            <AppInstallButton class="fb-header__app" />
             <div class="fb-header__actions">
                 <AppLink
                     v-if="user?.unread_inbox_notifications"
@@ -258,6 +259,7 @@ function goHome(event: MouseEvent): void {
                     >v{{ branding.version }}</span
                 >
             </div>
+            <CliFooterLauncher />
             <nav
                 v-if="communityLinks.length"
                 class="fb-footer__community"
@@ -310,10 +312,47 @@ function goHome(event: MouseEvent): void {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-.fb-header__cli {
-    border: 1px solid var(--fb-border);
-    background: var(--fb-surface);
-    font-size: 0.75rem;
+.fb-footer {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 556px) auto minmax(0, 1fr);
+    column-gap: 20px;
+}
+.fb-footer__copyright {
+    justify-self: end;
+    text-align: right;
+}
+.fb-footer__identity {
+    flex-wrap: nowrap;
+    gap: 0.5rem;
+}
+.fb-footer__identity :deep(.fb-brand) {
+    min-width: 0;
+    flex: 0 1 auto;
+}
+.fb-footer__identity :deep(.fb-brand__lockup) {
+    min-width: 0;
+    max-width: 100%;
+    height: auto;
+}
+.fb-footer__version {
+    flex: none;
+    white-space: nowrap;
+    overflow-wrap: normal;
+}
+@media (min-width: 901px) and (max-width: 1100px) {
+    .fb-header {
+        gap: 0.75rem;
+        padding-inline: 1.5rem;
+    }
+    .fb-header__nav {
+        gap: 0;
+    }
+    .fb-nav-link {
+        padding-inline: 0.4rem;
+    }
+    .fb-footer {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 460px) auto minmax(0, 1fr);
+    }
 }
 
 @media (max-width: 900px) {
@@ -327,7 +366,7 @@ function goHome(event: MouseEvent): void {
     .fb-header {
         gap: 0.5rem;
     }
-    .fb-header__cli {
+    .fb-header__app {
         margin-left: auto;
     }
 
@@ -349,14 +388,13 @@ function goHome(event: MouseEvent): void {
         display: inline-flex;
         flex: none;
     }
+    .fb-footer {
+        grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    }
 }
 @media (max-width: 560px) {
     .fb-header .fb-header__actions {
         display: none;
-    }
-    .fb-header__cli {
-        padding-inline: 0.625rem;
-        font-size: 0.6875rem;
     }
 }
 

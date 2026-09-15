@@ -19,6 +19,7 @@ class ServiceFacadesTest {
             override suspend fun importKey(value: String) = Unit
             override suspend fun privateKeyForInbox(bundleId: ULong, userId: ULong, custodyMode: String, envelope: String?, publicKey: String, password: String?) = ByteArray(32)
             override suspend fun rememberInboxKey(bundleId: ULong, privateKey: ByteArray) = Unit
+            override suspend fun inboxDownloadCredentials(instance: String, transferId: String) = InboxDownloadCredentials(ByteArray(32), "session=opaque")
         })
         assertTrue(service.state.value is ServiceState.Loading)
     }

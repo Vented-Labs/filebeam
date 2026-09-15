@@ -82,7 +82,7 @@ class NativeNotesService(
         mutable.value = ServiceState.Ready(listOf(NoteSummary(opened.id, opened.title ?: "Encrypted note", null)))
         NoteContent(opened.id, opened.text, opened.title, opened.language, opened.consumed)
     }
-    override fun endLive(link: String) { liveJobs.remove(link)?.pause() }
+    override fun endLive(link: String) { liveJobs.remove(link)?.endLive() }
 }
 
 class NativeTurboService(private val sessions: AccountSessionRegistry) : TurboService {

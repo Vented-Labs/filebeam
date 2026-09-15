@@ -15,7 +15,7 @@ interface InboxService {
     suspend fun download(instance: String, transferId: String, password: String? = null)
 }
 
-class NativeInboxService(private val sessions: AccountSessionRegistry, private val accounts: AccountService, private val transfers: TransferCoordinator) : InboxService {
+class NativeInboxService(private val sessions: AccountSessionRegistry, private val accounts: AccountService, private val transfers: TransferCoordinator? = null) : InboxService {
     private val mutable = MutableStateFlow<ServiceState<List<InboxItem>>>(ServiceState.Loading)
     override val state: StateFlow<ServiceState<List<InboxItem>>> = mutable.asStateFlow()
 
@@ -50,7 +50,7 @@ class NativeInboxService(private val sessions: AccountSessionRegistry, private v
             // Native opens the HPKE envelope and passes only the working key to the job.
             val workingKey = service.accountOpenInboxKey(transferId, privateKey)
             try {
-                transfers.inboxDownload(origin, transferId, workingKey, service.accountCookieContext())
+                requireNotNull(transfers) { "Inbox downloads are unavailable" }.inboxDownload(origin, transferId, workingKey, service.accountCookieContext())
             } finally {
                 workingKey.fill(0)
             }

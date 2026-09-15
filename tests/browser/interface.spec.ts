@@ -215,7 +215,7 @@ test('unavailable state and footer version are centered and branded', async ({ p
 test('CLI instructions stay accessible on mobile and restore header focus', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto('/');
-    const trigger = page.locator('header').getByRole('button', { name: 'Install CLI' });
+    const trigger = page.locator('.cli-footer-launcher');
     await trigger.click();
     const dialog = page.getByRole('dialog');
     await expect(dialog.getByRole('heading', { name: 'Install CLI', exact: true })).toBeVisible();

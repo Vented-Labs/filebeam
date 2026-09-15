@@ -1,7 +1,7 @@
 use crate::services::NativeServices;
 use crate::{Result, TransferJob, operation};
 use filebeam_client_core::services as core;
-use std::{path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::{Arc, atomic::AtomicBool}};
 
 #[derive(Clone, Copy, uniffi::Enum)]
 pub enum NoteTransport {
@@ -83,12 +83,15 @@ impl NativeServices {
             checkpoint_secret_store: None,
             source_resolver: None,
         };
-        Ok(Arc::new(TransferJob::new(
+        let end_requested = Arc::new(AtomicBool::new(false));
+        let ending = end_requested.clone();
+        Ok(Arc::new(TransferJob::new_live(
             filebeam_client_core::Job::spawn(settings, move |control| {
                 notes
-                    .create_live(request, control)
+                    .create_live(request, control, ending)
                     .map(|note| vec![note.link])
             }),
+            end_requested,
         )))
     }
 

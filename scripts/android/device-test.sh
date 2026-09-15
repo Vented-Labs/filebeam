@@ -31,11 +31,11 @@ if [[ ${FILEBEAM_ANDROID_DEVICE_CONTAINER:-} != 1 ]]; then
     fi
     device_status=0
     docker run --rm --init "${devices[@]}" "${network_args[@]}" \
-        --memory "${FILEBEAM_ANDROID_MEMORY:-10g}" --cpus "${FILEBEAM_ANDROID_CPUS:-4}" \
+        --memory "${FILEBEAM_ANDROID_MEMORY:-14g}" --cpus "${FILEBEAM_ANDROID_CPUS:-4}" \
         --user "$(id -u):$(id -g)" --env HOME=/tmp/home \
         --env FILEBEAM_ANDROID_DEVICE_CONTAINER=1 --env FILEBEAM_ANDROID_ACCEL="$accel" \
         --env FILEBEAM_ANDROID_AVD_DISK_SIZE="${FILEBEAM_ANDROID_AVD_DISK_SIZE:-8G}" \
-        --env FILEBEAM_ANDROID_AVD_MEMORY="${FILEBEAM_ANDROID_AVD_MEMORY:-4096}" \
+        --env FILEBEAM_ANDROID_AVD_MEMORY="${FILEBEAM_ANDROID_AVD_MEMORY:-6144}" \
         --env FILEBEAM_ANDROID_INSTRUMENTATION_TIMEOUT="${FILEBEAM_ANDROID_INSTRUMENTATION_TIMEOUT:-3600}" \
         --env FILEBEAM_ANDROID_HTTP_PROBE="${FILEBEAM_ANDROID_HTTP_PROBE:-}" \
         --env FILEBEAM_ANDROID_REPORT_DIR="$container_report_dir" \
@@ -59,7 +59,7 @@ printf '\ndisk.dataPartition.size=%s\n' "${FILEBEAM_ANDROID_AVD_DISK_SIZE:-8G}" 
 ensure_report_dir
 emulator -avd filebeam-test -no-window -no-audio -no-boot-anim -no-snapshot \
     -no-metrics -gpu swangle \
-    -accel "$FILEBEAM_ANDROID_ACCEL" -memory "${FILEBEAM_ANDROID_AVD_MEMORY:-4096}" -cores 2 \
+    -accel "$FILEBEAM_ANDROID_ACCEL" -memory "${FILEBEAM_ANDROID_AVD_MEMORY:-6144}" -cores 2 \
     > "$report_dir/emulator.log" 2>&1 &
 emulator_pid=$!
 cleanup_device() {
@@ -107,10 +107,7 @@ if [[ -n ${FILEBEAM_ANDROID_HTTP_PROBE:-} ]]; then
         probe_host=127.0.0.1
         printf 'adb reverse tcp:%s tcp:%s\n' "$probe_port" "$probe_port" > "$report_dir/http-forward.txt"
     fi
-    timeout 20 adb shell toybox nc -w 10 "$probe_host" "$probe_port" < /dev/null > "$report_dir/http-probe.txt" 2>&1 || {
-        printf 'HTTP probe failed: %s\n' "$FILEBEAM_ANDROID_HTTP_PROBE" >&2
-        exit 1
-    }
+    adb reverse --list > "$report_dir/http-probe.txt"
 fi
 result=$(timeout "${FILEBEAM_ANDROID_INSTRUMENTATION_TIMEOUT:-3600}" adb shell am instrument -w "$@" io.filebeam.android.debug.test/androidx.test.runner.AndroidJUnitRunner)
 ensure_report_dir

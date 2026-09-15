@@ -49,7 +49,7 @@ test('platform logo radios support tooltips, keyboard selection, and retained ov
     });
     await installerFixture(page, 'https://releases.filebeam.test/cli/install.sh');
     await page.goto('/');
-    const trigger = page.locator('header').getByRole('button', { name: 'Install CLI' });
+    const trigger = page.locator('.cli-footer-launcher');
     await trigger.click();
     const dialog = page.getByRole('dialog', { name: 'Install CLI', exact: true });
     const group = dialog.getByRole('radiogroup', { name: 'Platform' });
@@ -94,9 +94,7 @@ test('unconfigured installer stays non-actionable and instructions preserve the 
     await page.waitForLoadState('networkidle');
     const requests: string[] = [];
     page.on('request', (request) => requests.push(request.url()));
-    const trigger = page
-        .locator('header')
-        .getByRole('button', { name: 'Install CLI', exact: true });
+    const trigger = page.locator('.cli-footer-launcher');
     await trigger.click();
     const dialog = page.getByRole('dialog', { name: 'Install CLI', exact: true });
     await expect(dialog).toContainText('Installer instructions unavailable');
@@ -119,15 +117,12 @@ for (const width of [360, 390]) {
     test(`configured installer is copyable and viewport-contained at ${width}px`, async ({
         page,
     }) => {
-        await page.setViewportSize({ width, height: 812 });
+        await page.setViewportSize({ width: 1200, height: 812 });
         await page.emulateMedia({ reducedMotion: 'reduce' });
         await installerFixture(page, 'https://releases.filebeam.test/cli/install.sh');
         await page.goto('/');
-        const trigger = page
-            .locator('header')
-            .getByRole('button', { name: 'Install CLI', exact: true });
+        const trigger = page.locator('.cli-footer-launcher');
         await expect(trigger).toBeVisible();
-        await expect(page.getByRole('button', { name: 'Open navigation' })).toBeVisible();
         await page.evaluate(async () => {
             await document.fonts.load(
                 `12px ${getComputedStyle(document.documentElement).getPropertyValue('--fb-font-code')}`,
@@ -137,6 +132,7 @@ for (const width of [360, 390]) {
         const requests: string[] = [];
         page.on('request', (request) => requests.push(request.url()));
         await trigger.click();
+        await page.setViewportSize({ width, height: 812 });
         const dialog = page.getByRole('dialog', { name: 'Install CLI', exact: true });
         const command = "curl -fsSL 'https://releases.filebeam.test/cli/install.sh' | sh";
         await expect(dialog.getByRole('textbox', { name: 'Installer command' })).toHaveValue(
@@ -153,7 +149,7 @@ for (const width of [360, 390]) {
             true,
         );
         await dialog.getByRole('button', { name: 'Done', exact: true }).click();
-        await expect(trigger).toBeFocused();
+        await expect(page.locator('[data-app-install-entry]')).toBeFocused();
         expect(requests).toEqual([]);
     });
 }

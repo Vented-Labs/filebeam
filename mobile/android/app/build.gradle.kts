@@ -1,5 +1,30 @@
 import java.io.File
 import java.util.Properties
+import groovy.json.JsonSlurper
+
+private fun validateAssetLinksAssociation(
+    statement: File,
+    applicationId: String,
+    certificate: String,
+) {
+    val associations = runCatching { JsonSlurper().parse(statement) }.getOrElse {
+        error("assetlinks.json must be valid JSON")
+    }
+    check(associations is List<*>) { "assetlinks.json must contain a JSON array" }
+    val expectedFingerprint = certificate.replace(":", "").uppercase()
+    val hasMatchingAssociation = associations.filterIsInstance<Map<*, *>>().any { association ->
+        val relations = association["relation"] as? List<*>
+        val target = association["target"] as? Map<*, *>
+        val fingerprints = target?.get("sha256_cert_fingerprints") as? List<*>
+        relations?.contains("delegate_permission/common.handle_all_urls") == true &&
+            target?.get("namespace") == "android_app" &&
+            target["package_name"] == applicationId &&
+            fingerprints?.any { it is String && it.replace(":", "").uppercase() == expectedFingerprint } == true
+    }
+    check(hasMatchingAssociation) {
+        "assetlinks.json lacks handle_all_urls for android_app $applicationId with the configured certificate"
+    }
+}
 
 plugins {
     alias(libs.plugins.android.application)
@@ -55,7 +80,6 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            if (hasTestSigning) signingConfig = signingConfigs.getByName("testRelease")
         }
     }
     buildFeatures { compose = true; buildConfig = true }
@@ -105,8 +129,10 @@ tasks.register("validateVerifiedAppLinks") {
     val certificate = providers.gradleProperty("appLinkCertificateSha256")
     doLast {
         if (enabled.get().toBooleanStrictOrNull() != true) return@doLast
-        val domain = host.orNull?.trim()?.lowercase().orEmpty()
-        check(domain.isNotBlank()) { "Verified App Links require -PappLinkHost" }
+        val domain = host.orNull?.trim().orEmpty()
+        check(runCatching { java.net.URI("https://$domain").host == domain }.getOrDefault(false)) {
+            "Verified App Links require -PappLinkHost=<domain>"
+        }
         val file = statement.orNull?.let(::file)
             ?: error("Verified App Links require -PappLinkStatementFile=<assetlinks.json>")
         check(file.isFile) { "Configured assetlinks.json does not exist" }
@@ -114,14 +140,24 @@ tasks.register("validateVerifiedAppLinks") {
         check(fingerprint.matches(Regex("[0-9A-F]{64}"))) {
             "Verified App Links require a 64-hex -PappLinkCertificateSha256"
         }
-        val association = file.readText().uppercase()
-        check(domain.uppercase() in association && fingerprint in association.replace(":", "")) {
-            "assetlinks.json does not contain the configured domain and signing certificate"
-        }
+        validateAssetLinksAssociation(file, "io.filebeam.android", fingerprint)
     }
 }
 tasks.matching { it.name == "preReleaseBuild" || it.name == "assembleRelease" }
     .configureEach { dependsOn("validateVerifiedAppLinks") }
+
+tasks.register("checkVerifiedAppLinksFixtures") {
+    group = "verification"
+    description = "Checks valid and invalid standard Digital Asset Links statements."
+    doLast {
+        val fixtureDirectory = file("src/test/fixtures")
+        val certificate = "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF"
+        validateAssetLinksAssociation(fixtureDirectory.resolve("assetlinks-valid.json"), "io.filebeam.android", certificate)
+        check(runCatching {
+            validateAssetLinksAssociation(fixtureDirectory.resolve("assetlinks-invalid.json"), "io.filebeam.android", certificate)
+        }.isFailure) { "Invalid assetlinks fixture unexpectedly passed validation" }
+    }
+}
 
 // This consumes an existing R8 APK so post-build signing checks do not trigger a
 // native rebuild. The ignored key is test-only and never represents production.
@@ -137,9 +173,8 @@ tasks.register("signedR8Smoke") {
         check(unsigned.isFile) { "Build the unsigned R8 APK before running signedR8Smoke: ${unsigned.path}" }
         check(keystore.isFile) { "Configured test keystore does not exist" }
         fun run(vararg command: String) {
-            val renderedCommand = command.joinToString(" ")
             check(ProcessBuilder(*command).inheritIO().start().waitFor() == 0) {
-                "Command failed: $renderedCommand"
+                "APK signing or verification command failed"
             }
         }
         run("python3", rootDir.resolve("../../scripts/android/check-native.py").path, unsigned.path)

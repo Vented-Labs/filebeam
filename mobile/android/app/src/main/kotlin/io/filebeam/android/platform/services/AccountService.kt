@@ -15,6 +15,7 @@ import java.net.URI
 import java.security.MessageDigest
 
 data class AccountSummary(val id: ULong, val username: String, val instance: String, val inboxEnabled: Boolean)
+data class InboxDownloadCredentials(val workingKey: ByteArray, val cookie: String)
 
 interface AccountService {
     val state: StateFlow<ServiceState<AccountSummary>>
@@ -27,6 +28,7 @@ interface AccountService {
     suspend fun importKey(value: String)
     suspend fun privateKeyForInbox(bundleId: ULong, userId: ULong, custodyMode: String, envelope: String?, publicKey: String, password: String?): ByteArray
     suspend fun rememberInboxKey(bundleId: ULong, privateKey: ByteArray)
+    suspend fun inboxDownloadCredentials(instance: String, transferId: String): InboxDownloadCredentials
 }
 
 /** One process owns each origin's Rust cookie jar so account, inbox, and recipient lookup agree. */
@@ -146,6 +148,21 @@ class NativeAccountService(
         require(privateKey.size == 32) { "Invalid account private key" }
         keyStore(account, bundleId).save(JSONObject().put("key", Base64.encodeToString(privateKey, Base64.NO_WRAP)))
         importedKeyStore(account).clear()
+    }
+
+    override suspend fun inboxDownloadCredentials(instance: String, transferId: String) = withContext(Dispatchers.IO) {
+        val origin = AccountSessionRegistry.normalizeOrigin(instance)
+        val account = requireAccount()
+        check(account.instance == origin) { "Sign in to the inbox download's original instance" }
+        val service = sessions.service(origin)
+        val metadata = service.accountInboxMetadata(transferId)
+        val bundle = metadata.recipientKey.bundle
+        val privateKey = privateKeyForInbox(bundle.id, bundle.userId, bundle.custodyMode, bundle.encryptedPrivateKey, bundle.publicKey, null)
+        try {
+            InboxDownloadCredentials(service.accountOpenInboxKey(transferId, privateKey), service.accountCookieContext())
+        } finally {
+            privateKey.fill(0)
+        }
     }
 
     private fun completeSession(origin: String, id: ULong, username: String, inboxEnabled: Boolean) {

@@ -1,75 +1,67 @@
-# Native Android roadmap
+# Native Android Status
 
-The Android project is under `mobile/android/`, supports API 26+, and shares Rust
-client logic with the CLI. Both HTTP and WebRTC are part of the first usable
-file-transfer milestone. Kotlin/Compose handles Android UI; Rust owns encryption
-and transfer behavior. Future iOS/desktop frontends reuse those Rust boundaries.
+Android supports API 26+ and uses Kotlin/Compose with the shared Rust HTTP and
+WebRTC engine. This is an implementation and acceptance record, not a claim of
+complete release acceptance.
 
-## Scaffold delivered
+## Implemented
 
-- Reproducible Android/Rust/UniFFI build, native Material 3 screens, native
-  transfer control, file-provider snapshots and exports, and background adapters.
-- Shared `client-core` worker ownership adopted by the CLI, with non-blocking
-  prompt snapshots, stale-response rejection, and explicit cancellation.
-- Per-transport capability discovery instead of applying HTTP limits to WebRTC.
-- WebRTC receiver ciphertext retention for authenticated partial-item recovery.
-- ABI/crypto/WebRTC instrumentation and native-library alignment checks.
+1. **Storage and durable publication:** seekable provider inputs retain bounded,
+reopenable identities; transient/non-seekable inputs snapshot. Export journals,
+persisted grants, mutation checks, commit/abort handling, and cleanup are
+implemented. Instrumentation covers provider recovery and interrupted export.
+2. **Shared execution:** `client-core` owns worker lifetime, cancellation,
+prompt snapshots, stale-response rejection, and the managed transfer budget.
+The managed budget is not a total-process-memory bound.
+3. **Secret custody:** Android Keystore wraps checkpoint/catalog secrets;
+invalidated or restored keys fail closed. Transfer passwords are re-requested
+after restart.
+4. **File options:** password, retention, delete/revocation, and live-end
+semantics are implemented in shared Rust. Pause, ending live sharing, revoking,
+and removing local state remain separate operations.
+5. **Platform integration:** UIDT/foreground-service adapters, recovery,
+network and permission handling, document export, and paste/share links are
+implemented. App Links still require production signing and domain association.
+6. **Parity:** document trees, notes including burn-on-read and live single
+claim, Turbo, account authentication/key `fbsk1.` import/export, username/inbox
+delivery, and native inbox/download UI are implemented.
 
-## Complete the first file-transfer milestone
+Server push notifications remain a separate backend capability; existing email
+or database notices are not treated as push delivery.
 
-1. **Storage and durable publication:** add a source handle abstraction for
-   seekable document-provider descriptors, with explicit descriptor ownership,
-   reopenable identities, offset/length bounds, and source-mutation checks. Keep
-   snapshots for transient/non-seekable providers. Persist destination grants
-   and export offsets where supported; test provider-specific commit/abort and
-   process death during publication. Add abandoned-import cleanup.
-2. **Shared execution:** consolidate operation-specific Tokio runtimes and
-   cancellation bridges into an owned scheduler with a global memory budget.
-   Account for KDF, manifests, crypto copies, and runtime overhead. Provide
-   structured error categories and authenticated, versioned job catalogs.
-3. **Secret custody:** wrap all native checkpoint keys/tokens through a host
-   secret-store interface using Android Keystore. Preserve the existing policy
-   of re-prompting for transfer passwords after restart. Test invalidated keys,
-   restored backups, and interrupted checkpoint migrations.
-4. **Core file options:** add password-protected sending, retention options,
-   remote delete-token persistence/revocation, and explicit live-end semantics.
-   Pause, ending a live share, revoking a transfer, and removing local data must
-   remain distinct operations. Implement these in shared Rust.
-5. **Platform reliability:** test system-stopped UIDT jobs, foreground-service
-   time budgets, force-stop, network changes, notification denial, low storage,
-   permission revocation, and resume while the original worker is stopping.
-   Configure verified App Links once release signing/domain association exists;
-   retain paste/share handling for arbitrary self-hosted instances.
-6. **Release acceptance:** Android↔Web and Android↔CLI in both directions, HTTP,
-   direct WebRTC, and TURN relay; >512 MiB and >4 GiB real file fixtures on an
-   appropriately configured instance; flat memory growth as file size grows;
-   physical low-memory ARM64 and ARMv7 devices, API 26/current Android, 4/16 KiB
-   kernels, accessibility, and signed release/R8 smoke tests.
+## Verified Outside Android Devices
 
-The scaffold is not a claim that this acceptance matrix has been completed.
+- Native-service acceptance passed for hosted and live notes, passwords,
+burn-on-read, single claim, replay rejection, and authenticated account inbox
+delivery/download. It retains request-scoped inbox cookies and keys; no public
+link or checkpoint stores them.
+- Disposable Web/CLI HTTP acceptance passed in both directions at 513 MiB and
+4097 MiB with matching SHA-256 values. Browser OPFS RSS clean peaks were
+930692 KiB and 936332 KiB (delta 5640 KiB).
+- Disposable native CLI/browser WebRTC acceptance passed for direct and forced
+TURN relay in both directions with small fixtures, plus native-to-browser direct
+4097 MiB. The runner verifies relay candidates for TURN; it does not run Android.
 
-## Remaining parity
+## Remaining Release Acceptance
 
-- Document-tree selection with existing Rust ZIP/individual-file semantics.
-- Shared note operations and best-effort burn-on-read consumption; native
-  editor/viewer, including the live-note receiver's single-claim semantics.
-- Turbo Transfer is available for HTTP file uploads without inbox recipients. The
-  native sender checkpoints and publishes the encrypted early descriptor before
-  chunk production, exposes the normal share link immediately, and heartbeats
-  while upload work is active. Received Turbo links are opened through the
-  normal native download job, not a transfer-ID endpoint.
-- Native account authentication API, inbox/username delivery, and account-key
-  custody/import/export compatible with `fbsk1.`. These flows use native screens.
-- Local completion/inbox UX; server push notifications need their own backend
-  capability rather than being inferred from existing email/database notices.
+- **Android full gate:** the previous 10-test gate passed. Rebuild and run the
+new export and inbox coverage, then record its final result: `pending`.
+- **Real Android peer matrix:** run Android-to-browser/CLI HTTP and direct/TURN
+WebRTC in both directions, including 513 MiB and 4097 MiB hashes and Android RSS:
+`pending`.
+- **Device/release matrix:** API 26 and current Android, physical low-memory
+ARM64 and ARMv7, 4/16 KiB kernels, accessibility, signed release/R8 smoke, and
+production App Links/domain keys: `pending`. Test signing is not production
+signing; physical ARM hardware and production-domain keys are not available as
+acceptance evidence.
 
-## Cross-platform direction
+### Result Fields
 
-Move portable link/manifest validation and capability policies into `transfer/`
-as those areas are extracted; expose them to the browser through `transfer-wasm`.
-Keep key/envelope operations in `encryption/`. The native engine and client
-facade are shared by CLI, Android, future Swift/iOS, and desktop applications.
-
-iOS must retain a transport/scheduling seam for background `URLSession`
-operations on encrypted artifacts. Kotlin/Swift bindings do not abstract away
-platform file permissions, secure storage, or background-execution restrictions.
+| Gate | Result | Evidence path/run |
+| --- | --- | --- |
+| Export and inbox Android build/instrumentation | pending | |
+| Android HTTP peer matrix | pending | |
+| Android direct WebRTC peer matrix | pending | |
+| Android TURN WebRTC peer matrix | pending | |
+| API 26 device run | pending | |
+| Physical ARM/release/domain acceptance | pending | |

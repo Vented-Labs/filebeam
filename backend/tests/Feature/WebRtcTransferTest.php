@@ -141,7 +141,18 @@ test('sender expiry and end revoke admitted sessions', function (): void {
     $this->getJson("/api/v1/transfers/{$transfer['id']}/webrtc/sessions/{$session['id']}", ['X-Filebeam-Session-Token' => $session['token']])->assertNotFound();
     $this->getJson("/api/v1/transfers/{$transfer['id']}/webrtc/sessions", ['X-Filebeam-Upload-Token' => $transfer['upload_token']])->assertOk();
     $this->postJson("/api/v1/transfers/{$transfer['id']}/webrtc/end", [], ['X-Filebeam-Upload-Token' => $transfer['upload_token']])->assertNoContent();
+    expect(Transfer::query()->findOrFail($transfer['id'])->status)->toBe(TransferStatus::Ended);
     $this->getJson("/api/v1/transfers/{$transfer['id']}/webrtc/sessions/{$session['id']}", ['X-Filebeam-Session-Token' => $session['token']])->assertNotFound();
+    $this->postJson("/api/v1/transfers/{$transfer['id']}/webrtc/sessions", [], ['X-Filebeam-Join-Token' => $transfer['join_token']])->assertNotFound();
+});
+
+test('pausing a sender does not end its live reservation', function (): void {
+    $transfer = reserveWebRtc('note');
+    publishWebRtc($transfer);
+    expect(Transfer::query()->findOrFail($transfer['id'])->status)->toBe(TransferStatus::Live);
+    // A local sender stop is deliberately not the authenticated /end capability call.
+    $this->postJson("/api/v1/transfers/{$transfer['id']}/webrtc/sessions", [], ['X-Filebeam-Join-Token' => $transfer['join_token']])->assertCreated();
+    expect(Transfer::query()->findOrFail($transfer['id'])->status)->toBe(TransferStatus::Live);
 });
 
 test('sender liveness accepts Redis integer strings but rejects malformed, absent, and stale heartbeats', function (): void {
