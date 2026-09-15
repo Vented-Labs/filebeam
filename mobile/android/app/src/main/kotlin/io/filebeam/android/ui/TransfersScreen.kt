@@ -70,8 +70,8 @@ private fun TransferCard(state: TransferUiState, pause: () -> Unit, endLive: (St
             if (state.busy) TextButton(onClick = pause) { Text(stringResource(R.string.pause)) }
             snapshot?.checkpointId?.let { checkpoint ->
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(enabled = !state.busy, onClick = { endLive(checkpoint) }) { Text(stringResource(R.string.end_live_share)) }
-                    TextButton(enabled = !state.busy, onClick = { revoke(checkpoint) }) { Text(stringResource(R.string.revoke_remote)) }
+                    TextButton(onClick = { endLive(checkpoint) }) { Text(stringResource(R.string.end_live_share)) }
+                    TextButton(onClick = { revoke(checkpoint) }) { Text(stringResource(R.string.revoke_remote)) }
                 }
             }
         }

@@ -14,6 +14,7 @@ import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import java.io.FileOutputStream
 import java.io.FileInputStream
 import java.security.MessageDigest
 import java.util.UUID
@@ -27,6 +28,7 @@ import java.util.UUID
 class PeerAcceptanceTest {
     private val arguments = InstrumentationRegistry.getArguments()
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
+    private val observedStates = mutableMapOf<String, String>()
 
     @Test fun transferAgainstDisposablePeer() {
         assumeTrue(arguments.getString("filebeam.acceptance") == "true")
@@ -94,7 +96,9 @@ class PeerAcceptanceTest {
         while (System.nanoTime() < deadline) {
             val snapshot = observe(job, "upload")
             snapshot.shareUrl?.let { return it }
+            snapshot.results.singleOrNull()?.takeIf { it.isNotBlank() }?.let { return it }
             if (snapshot.state == JobState.FAILED) error(snapshot.error ?: "upload failed")
+            if (snapshot.state == JobState.COMPLETE) error("upload completed without a share link")
             Thread.sleep(100)
         }
         error("upload did not publish a link")
@@ -114,7 +118,10 @@ class PeerAcceptanceTest {
     private fun observe(job: TransferJob, label: String): io.filebeam.rust.TransferSnapshot {
         val snapshot = job.snapshot()
         val prompt = snapshot.prompt
-        Log.i(TAG, "$label state=${snapshot.state} phase=${snapshot.phase} done=${snapshot.done}/${snapshot.total} prompt=${prompt?.kind} error=${snapshot.error}")
+        val state = "state=${snapshot.state} phase=${snapshot.phase} prompt=${prompt?.kind} error=${snapshot.error}"
+        if (observedStates.put(label, state) != state) {
+            Log.i(TAG, "$label $state done=${snapshot.done}/${snapshot.total}")
+        }
         if (prompt != null) when (prompt.kind) {
             PromptType.PEER_CONSENT -> job.respond(prompt.id, "yes")
             PromptType.SHARE_READY -> job.respond(prompt.id, "continue")
@@ -126,13 +133,21 @@ class PeerAcceptanceTest {
     private fun writeFixture(file: File, bytes: Long) {
         require(bytes >= 0) { "bytes must not be negative" }
         val buffer = ByteArray(64 * 1024) { it.toByte() }
-        file.outputStream().use { output ->
+        FileOutputStream(file).use { output ->
             var remaining = bytes
+            var unsynced = 0L
             while (remaining > 0) {
                 val count = minOf(buffer.size.toLong(), remaining).toInt()
                 output.write(buffer, 0, count)
                 remaining -= count
+                unsynced += count
+                // Bound dirty cache growth while still generating and hashing every byte.
+                if (unsynced >= 8L * 1024 * 1024) {
+                    output.fd.sync()
+                    unsynced = 0
+                }
             }
+            output.fd.sync()
         }
     }
 

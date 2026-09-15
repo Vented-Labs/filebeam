@@ -31,11 +31,11 @@ if [[ ${FILEBEAM_ANDROID_DEVICE_CONTAINER:-} != 1 ]]; then
     fi
     device_status=0
     docker run --rm --init "${devices[@]}" "${network_args[@]}" \
-        --memory "${FILEBEAM_ANDROID_MEMORY:-14g}" --cpus "${FILEBEAM_ANDROID_CPUS:-4}" \
+        --memory "${FILEBEAM_ANDROID_MEMORY:-6g}" --cpus "${FILEBEAM_ANDROID_CPUS:-4}" \
         --user "$(id -u):$(id -g)" --env HOME=/tmp/home \
         --env FILEBEAM_ANDROID_DEVICE_CONTAINER=1 --env FILEBEAM_ANDROID_ACCEL="$accel" \
         --env FILEBEAM_ANDROID_AVD_DISK_SIZE="${FILEBEAM_ANDROID_AVD_DISK_SIZE:-8G}" \
-        --env FILEBEAM_ANDROID_AVD_MEMORY="${FILEBEAM_ANDROID_AVD_MEMORY:-6144}" \
+        --env FILEBEAM_ANDROID_AVD_MEMORY="${FILEBEAM_ANDROID_AVD_MEMORY:-2048}" \
         --env FILEBEAM_ANDROID_INSTRUMENTATION_TIMEOUT="${FILEBEAM_ANDROID_INSTRUMENTATION_TIMEOUT:-3600}" \
         --env FILEBEAM_ANDROID_HTTP_PROBE="${FILEBEAM_ANDROID_HTTP_PROBE:-}" \
         --env FILEBEAM_ANDROID_REPORT_DIR="$container_report_dir" \
@@ -59,7 +59,7 @@ printf '\ndisk.dataPartition.size=%s\n' "${FILEBEAM_ANDROID_AVD_DISK_SIZE:-8G}" 
 ensure_report_dir
 emulator -avd filebeam-test -no-window -no-audio -no-boot-anim -no-snapshot \
     -no-metrics -gpu swangle \
-    -accel "$FILEBEAM_ANDROID_ACCEL" -memory "${FILEBEAM_ANDROID_AVD_MEMORY:-6144}" -cores 2 \
+    -accel "$FILEBEAM_ANDROID_ACCEL" -memory "${FILEBEAM_ANDROID_AVD_MEMORY:-2048}" -cores 2 \
     > "$report_dir/emulator.log" 2>&1 &
 emulator_pid=$!
 cleanup_device() {
@@ -109,7 +109,23 @@ if [[ -n ${FILEBEAM_ANDROID_HTTP_PROBE:-} ]]; then
     fi
     adb reverse --list > "$report_dir/http-probe.txt"
 fi
-result=$(timeout "${FILEBEAM_ANDROID_INSTRUMENTATION_TIMEOUT:-3600}" adb shell am instrument -w "$@" io.filebeam.android.debug.test/androidx.test.runner.AndroidJUnitRunner)
 ensure_report_dir
-printf '%s\n' "$result" | tee "$report_dir/instrumentation.txt"
+adb shell cat /proc/meminfo > "$report_dir/meminfo-before.txt" 2>&1 || true
+timeout "${FILEBEAM_ANDROID_INSTRUMENTATION_TIMEOUT:-3600}" adb shell am instrument -w "$@" io.filebeam.android.debug.test/androidx.test.runner.AndroidJUnitRunner > "$report_dir/instrumentation.txt" 2>&1 &
+instrumentation_pid=$!
+(
+    while kill -0 "$instrumentation_pid" 2>/dev/null; do
+        printf 'timestamp=%s\n' "$(date --iso-8601=seconds)"
+        adb shell cat /proc/meminfo 2>&1 || true
+        adb shell dumpsys meminfo io.filebeam.android.debug 2>&1 || true
+        sleep 5
+    done
+) > "$report_dir/rss.txt" &
+rss_pid=$!
+if wait "$instrumentation_pid"; then instrumentation_status=0; else instrumentation_status=$?; fi
+kill "$rss_pid" 2>/dev/null || true
+wait "$rss_pid" 2>/dev/null || true
+result=$(<"$report_dir/instrumentation.txt")
+printf '%s\n' "$result"
+[[ $instrumentation_status == 0 ]] || exit "$instrumentation_status"
 [[ $result == *'OK ('* ]] || exit 1

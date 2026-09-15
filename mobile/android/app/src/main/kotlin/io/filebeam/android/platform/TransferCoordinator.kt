@@ -85,6 +85,8 @@ class TransferCoordinator(
     private var nativeClientRelayOnly: Boolean? = null
     @Volatile private var pauseRequested = false
     @Volatile private var pausedByUser = false
+    @Volatile private var activeCheckpoint: String? = null
+    private var controlIntent: Pair<String, String>? = null
     private var inboxCredentials: InboxCredentials? = null
 
     private data class InboxCredentials(val transferId: String, val key: ByteArray, val cookie: String)
@@ -216,6 +218,7 @@ class TransferCoordinator(
             val api = if (active == null) client(request.optBoolean("relay")) else null
             val id = request.getString("id")
             val checkpoint = request.optString("checkpoint").takeIf(String::isNotBlank)
+            activeCheckpoint = checkpoint
             active = active ?: withContext(Dispatchers.IO) {
                 val api = requireNotNull(api)
                 if (pauseRequested) throw CancellationException()
@@ -296,6 +299,7 @@ class TransferCoordinator(
                 val newCheckpoint = snapshot.checkpointId
                 if (newCheckpoint != null && request.optString("checkpoint") != newCheckpoint) {
                     request.put("checkpoint", newCheckpoint)
+                    activeCheckpoint = newCheckpoint
                     withContext(Dispatchers.IO) {
                         pending.save(request)
                         association(newCheckpoint).save(JSONObject().put("id", id)
@@ -325,6 +329,7 @@ class TransferCoordinator(
         } finally {
             active?.destroy()
             active = null
+            activeCheckpoint = null
             mutable.update { it.copy(busy = false) }
             refresh()
         }
@@ -355,8 +360,34 @@ class TransferCoordinator(
     /** Remote revocation consumes the checkpoint's delete token, not local recovery data. */
     fun revoke(checkpointId: String) = control("revoke", checkpointId)
 
-    private fun control(kind: String, checkpointId: String) = submit(clearSnapshot = false) { config ->
+    private fun control(kind: String, checkpointId: String) {
         require(checkpointId.isNotBlank())
+        if (!mutable.value.busy) {
+            submitControl(kind, checkpointId)
+            return
+        }
+        synchronized(this) {
+            if (!canControlActive(activeCheckpoint, checkpointId, controlIntent)) {
+                message(if (controlIntent != null) "A remote control request is already pending" else "This action does not match the active transfer")
+                return
+            }
+            controlIntent = kind to checkpointId
+        }
+        scope.launch {
+            try {
+                mutable.update { it.copy(phase = "pausing", message = null) }
+                awaitNativeStop()
+                while (mutable.value.busy) delay(20)
+                submitControl(kind, checkpointId)
+            } catch (error: Exception) {
+                message(error.message ?: context.getString(R.string.unknown_error))
+            } finally {
+                synchronized(this@TransferCoordinator) { controlIntent = null }
+            }
+        }
+    }
+
+    private fun submitControl(kind: String, checkpointId: String) = submit(clearSnapshot = false) { config ->
         JSONObject().put("kind", kind).put("checkpoint", checkpointId)
             .put("instance", config.instance).put("relay", config.relayOnly)
     }
@@ -432,3 +463,6 @@ internal fun resumeRequest(id: String, association: JSONObject?, instance: Strin
         .put("instance", association?.optString("instance")?.takeIf(String::isNotBlank) ?: instance)
         .putOpt("transfer", if (kind == "inbox-download") association?.optString("transfer") else null)
 }
+
+internal fun canControlActive(activeCheckpoint: String?, checkpointId: String, intent: Pair<String, String>?): Boolean =
+    intent == null && activeCheckpoint == checkpointId

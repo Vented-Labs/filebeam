@@ -7,10 +7,13 @@ import org.junit.Assert.assertThrows
 import org.junit.Test
 import org.json.JSONObject
 import io.filebeam.android.platform.resumeRequest
+import io.filebeam.android.platform.canControlActive
+import io.filebeam.rust.NativeRuntime
+import io.filebeam.rust.NoHandle
 
 class ServiceFacadesTest {
     @Test fun inboxStartsLoadingUntilTheNativeNetworkCallIsRequested() {
-        val service = NativeInboxService(AccountSessionRegistry(false), object : AccountService {
+        val service = NativeInboxService(AccountSessionRegistry(false, NativeRuntime(NoHandle)), object : AccountService {
             override val state = kotlinx.coroutines.flow.MutableStateFlow<ServiceState<AccountSummary>>(ServiceState.Loading)
             override suspend fun signIn(instance: String, username: String, password: String) = Unit
             override suspend fun signUp(instance: String, username: String, name: String?, email: String, password: String) = Unit
@@ -43,6 +46,12 @@ class ServiceFacadesTest {
         assertEquals("https://inbox.example", request.getString("instance"))
         assertEquals("delivery", request.getString("transfer"))
         assertTrue(!request.has("cookie") && !request.has("password") && !request.has("workingKey"))
+    }
+
+    @Test fun activeEndControlsOnlyItsWorkerAndRejectsASecondIntent() {
+        assertTrue(canControlActive("checkpoint", "checkpoint", null))
+        assertTrue(!canControlActive("other", "checkpoint", null))
+        assertTrue(!canControlActive("checkpoint", "checkpoint", "live-end" to "checkpoint"))
     }
 
     @Test fun generatedKeyIsExportedAndPersistedBeforeItIsZeroed() {

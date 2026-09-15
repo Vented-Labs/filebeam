@@ -113,6 +113,7 @@ dependencies {
     debugImplementation(libs.compose.tooling)
     debugImplementation(libs.compose.test.manifest)
     testImplementation(libs.junit)
+    testImplementation(libs.json)
     androidTestImplementation(platform(libs.compose.bom))
     androidTestImplementation(libs.compose.test)
     androidTestImplementation(libs.androidx.junit)
@@ -163,6 +164,8 @@ tasks.register("checkVerifiedAppLinksFixtures") {
 // This consumes an existing R8 APK so post-build signing checks do not trigger a
 // native rebuild. The ignored key is test-only and never represents production.
 tasks.register("signedR8Smoke") {
+    val sdkDirectory = androidComponents.sdkComponents.sdkDirectory
+    val buildToolsVersion = android.buildToolsVersion
     group = "verification"
     description = "Checks, test-signs, and verifies an existing unsigned R8 release APK."
     onlyIf { hasTestSigning }
@@ -171,8 +174,10 @@ tasks.register("signedR8Smoke") {
         val signed = layout.buildDirectory.file("outputs/apk/release/app-release-test-signed.apk").get().asFile
         val configuredStore = File(testSigningProperties.getProperty("storeFile"))
         val keystore = if (configuredStore.isAbsolute) configuredStore else testSigningPropertiesFile.get().parentFile.resolve(configuredStore)
+        val apksigner = sdkDirectory.get().asFile.resolve("build-tools/$buildToolsVersion/apksigner")
         check(unsigned.isFile) { "Build the unsigned R8 APK before running signedR8Smoke: ${unsigned.path}" }
         check(keystore.isFile) { "Configured test keystore does not exist" }
+        check(apksigner.isFile) { "Android SDK build tools do not contain apksigner" }
         fun run(vararg command: String) {
             check(ProcessBuilder(*command).inheritIO().start().waitFor() == 0) {
                 "APK signing or verification command failed"
@@ -181,12 +186,12 @@ tasks.register("signedR8Smoke") {
         run("python3", rootDir.resolve("../../scripts/android/check-native.py").path, unsigned.path)
         signed.delete()
         run(
-            "apksigner", "sign", "--ks", keystore.path,
+            apksigner.path, "sign", "--ks", keystore.path,
             "--ks-key-alias", testSigningProperties.getProperty("keyAlias"),
             "--ks-pass", "pass:${testSigningProperties.getProperty("storePassword")}",
             "--key-pass", "pass:${testSigningProperties.getProperty("keyPassword")}",
             "--out", signed.path, unsigned.path,
         )
-        run("apksigner", "verify", "--verbose", signed.path)
+        run(apksigner.path, "verify", "--verbose", signed.path)
     }
 }

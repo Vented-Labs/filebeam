@@ -651,9 +651,15 @@ async fn run_new(
 async fn continue_job(mut job: UploadJob, store: Arc<Store>, control: &Control) -> Result<String> {
     validate_job(&job)?;
     if job.state == "complete" {
-        return job
+        let url = job
             .receipt
             .context("completed upload receipt is unavailable");
+        if let Ok(url) = &url {
+            control.emit(TransferEvent::ShareReady(crate::control::ShareReady {
+                share_url: url.clone(),
+            }));
+        }
+        return url;
     }
     if job.state == "ended" {
         return receipt(&job);
@@ -919,6 +925,9 @@ async fn continue_job(mut job: UploadJob, store: Arc<Store>, control: &Control) 
     if archive.exists() {
         fs::remove_file(archive).context("remove completed upload archive")?;
     }
+    control.emit(TransferEvent::ShareReady(crate::control::ShareReady {
+        share_url: url.clone(),
+    }));
     Ok(url)
 }
 

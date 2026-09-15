@@ -104,17 +104,7 @@ impl ManagedJob {
         if matches!(self.snapshot.state, JobState::Running | JobState::Pausing) {
             self.snapshot.progress = self.job.control.snapshot();
             self.snapshot.checkpoint_id = self.job.control.checkpoint_id();
-            while let Ok(event) = self.job.events.try_recv() {
-                match event {
-                    TransferEvent::ShareReady(value) => {
-                        self.snapshot.share_url = Some(value.share_url)
-                    }
-                    TransferEvent::PeerFailed(value) => {
-                        self.snapshot.peer_warning = Some(value.message)
-                    }
-                    TransferEvent::PeerConsent(_) => {} // The reply-bearing prompt is authoritative.
-                }
-            }
+            self.drain_events();
             if self.reply.is_none()
                 && self.snapshot.state == JobState::Running
                 && let Ok(prompt) = self.job.prompts.try_recv()
@@ -142,6 +132,8 @@ impl ManagedJob {
                 self.snapshot.checkpoint_id = self.job.control.checkpoint_id();
                 self.reply = None;
                 self.snapshot.prompt = None;
+                // Completion may race the final publication event on the worker.
+                self.drain_events();
                 match result {
                     Ok(results) => {
                         self.snapshot.state = JobState::Complete;
@@ -163,6 +155,18 @@ impl ManagedJob {
             }
         }
         self.snapshot.clone()
+    }
+
+    fn drain_events(&mut self) {
+        while let Ok(event) = self.job.events.try_recv() {
+            match event {
+                TransferEvent::ShareReady(value) => self.snapshot.share_url = Some(value.share_url),
+                TransferEvent::PeerFailed(value) => {
+                    self.snapshot.peer_warning = Some(value.message)
+                }
+                TransferEvent::PeerConsent(_) => {} // The reply-bearing prompt is authoritative.
+            }
+        }
     }
 
     pub fn respond(&mut self, id: u64, value: String) -> Result<()> {
@@ -322,5 +326,17 @@ mod tests {
         assert_eq!(done.progress.total, Some(bytes));
         assert_eq!(done.progress.committed, bytes - 1);
         assert_eq!(done.checkpoint_id.as_deref(), Some("saved-job"));
+    }
+
+    #[test]
+    fn terminal_snapshot_drains_a_final_share_ready_event() {
+        let mut job = job(|control| {
+            control.emit(TransferEvent::ShareReady(crate::control::ShareReady {
+                share_url: "https://example.test/HTTP".into(),
+            }));
+            Ok(vec!["https://example.test/HTTP".into()])
+        });
+        let done = wait(&mut job, |snapshot| snapshot.state == JobState::Complete);
+        assert_eq!(done.share_url.as_deref(), Some("https://example.test/HTTP"));
     }
 }

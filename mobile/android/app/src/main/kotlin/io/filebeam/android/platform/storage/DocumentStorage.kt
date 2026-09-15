@@ -274,33 +274,33 @@ class DocumentStorage(private val context: Context) {
 
     private fun fingerprint(file: File): String = file.inputStream().use { input -> fingerprint(input) }
     private fun fingerprint(channel: java.nio.channels.FileChannel, length: Long): String {
-        val position = channel.position()
-        return try {
-            channel.position(0)
-            val digest = java.security.MessageDigest.getInstance("SHA-256")
-            val buffer = java.nio.ByteBuffer.allocate(64 * 1024)
-            var remaining = length
-            while (remaining > 0) {
-                buffer.clear().limit(minOf(remaining, buffer.capacity().toLong()).toInt())
-                val count = channel.read(buffer)
-                check(count > 0) { "The export destination was truncated" }
-                digest.update(buffer.array(), 0, count)
-                remaining -= count
-            }
-            digest.digest().joinToString("") { "%02x".format(it) }
-        } finally { channel.position(position) }
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        val buffer = java.nio.ByteBuffer.allocate(64 * 1024)
+        var remaining = length
+        var position = 0L
+        while (remaining > 0) {
+            buffer.clear().limit(minOf(remaining, buffer.capacity().toLong()).toInt())
+            val count = channel.read(buffer, position)
+            check(count > 0) { "The export destination was truncated" }
+            digest.update(buffer.array(), 0, count)
+            remaining -= count
+            position += count
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
     }
     private fun readableChannel(pfd: ParcelFileDescriptor) = ParcelFileDescriptor.AutoCloseInputStream(ParcelFileDescriptor.dup(pfd.fileDescriptor)).channel
     private fun updateDigest(channel: java.nio.channels.FileChannel, length: Long, digest: java.security.MessageDigest) {
         try {
             var remaining = length
+            var position = 0L
             val buffer = java.nio.ByteBuffer.allocate(64 * 1024)
             while (remaining > 0) {
                 buffer.clear().limit(minOf(remaining, buffer.capacity().toLong()).toInt())
-                val count = channel.read(buffer)
+                val count = channel.read(buffer, position)
                 check(count > 0) { "The export destination was truncated" }
                 digest.update(buffer.array(), 0, count)
                 remaining -= count
+                position += count
             }
         } finally { channel.close() }
     }
