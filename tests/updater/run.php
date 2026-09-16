@@ -137,7 +137,7 @@ try {
     file_put_contents($manifestRoot.'/updater/ActivityLock.php', 'test');
     file_put_contents($manifestRoot.'/updater/PostgresBackup.php', 'test');
     mkdir($manifestRoot.'/docs', 0700, true);
-    foreach (['LICENSE', 'README.md', 'SECURITY.md', 'docs/deployment.md', 'docs/social-previews.md'] as $path) {
+    foreach (['LICENSE', 'README.md', 'SECURITY.md', 'docs/deployment.md'] as $path) {
         file_put_contents($manifestRoot.'/'.$path, 'test');
     }
     $manifestFiles = [
@@ -149,7 +149,6 @@ try {
         'README.md' => hash_file('sha256', $manifestRoot.'/README.md'),
         'SECURITY.md' => hash_file('sha256', $manifestRoot.'/SECURITY.md'),
         'docs/deployment.md' => hash_file('sha256', $manifestRoot.'/docs/deployment.md'),
-        'docs/social-previews.md' => hash_file('sha256', $manifestRoot.'/docs/social-previews.md'),
     ];
     file_put_contents($manifestRoot.'/package-files.json', json_encode(['schema' => 1, 'files' => $manifestFiles], JSON_THROW_ON_ERROR));
     Package::verify($manifestRoot, Package::manifest($manifestRoot));

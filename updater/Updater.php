@@ -779,7 +779,7 @@ final class Package
     private static function packagePath(string $path): bool
     {
         return self::safePath($path)
-            && ($path === 'LICENSE' || $path === 'README.md' || $path === 'SECURITY.md' || $path === 'docs/deployment.md' || $path === 'docs/social-previews.md' || str_starts_with($path, 'backend/') || str_starts_with($path, 'updater/') || $path === 'update.php');
+            && ($path === 'LICENSE' || $path === 'README.md' || $path === 'SECURITY.md' || $path === 'docs/deployment.md' || str_starts_with($path, 'backend/') || str_starts_with($path, 'updater/') || $path === 'update.php');
     }
 
     private static function displayPath(string $path): string

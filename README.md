@@ -42,4 +42,3 @@ docker compose -f backend/compose.yaml run --rm --no-deps laravel.test bash -c '
 - [Shared transfer policy](transfer/README.md)
 - [Native transfer runtime](transfer-native/README.md)
 - [Native Android app](mobile/android/README.md)
-- [Android and shared-client roadmap](docs/android.md)

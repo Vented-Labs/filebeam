@@ -1,6 +1,6 @@
 # Beam CLI
 
-`beam` is the Linux, macOS, and Windows CLI for Filebeam. Merging to `master` and pushing an application release tag such as `v0.2.0` runs the application release workflow and its reusable Beam pipeline. That pipeline builds and signs the CLI artifacts, publishes the installers/catalog to R2, smoke-tests the public installer, and creates the matching `beam-v0.2.0` GitHub release automatically. No separate CLI tag or manual Cargo version edit is needed. Standalone `beam-vX.Y.Z` tags from master remain supported.
+`beam` is the Linux, macOS, and Windows CLI for Filebeam.
 
 Install the latest release with:
 
@@ -33,28 +33,6 @@ beam down 'https://files.company.test/01K46FN13WJVCWKMBWRMC9Q9KN'
 ```
 
 For a ULID alone, `beam down` uses `https://filebeam.io`, or the explicit `FILEBEAM_INSTANCE` override. Uploads also use the configured instance.
-
-Installer publication and signed-binary smoke testing are separate from local CLI builds; a successful web or fixture test does not certify published artifacts.
-
-Local Rust commands are Docker-only and default to Rust 1.98.0, 2 GB memory and memory-swap, 2 CPUs, and one Cargo build job:
-
-```sh
-scripts/cli/check.sh
-scripts/cli/test.sh
-scripts/cli/build.sh x86_64
-BEAM_RELEASE_PUBLIC_KEY=BASE64_ED25519_PUBLIC_KEY scripts/cli/package.sh beam-v1.2.3 dist/beam
-```
-
-Set `BEAM_DOCKER_MEMORY`, `BEAM_DOCKER_MEMORY_SWAP`, `BEAM_DOCKER_CPUS`, or `CARGO_BUILD_JOBS` to change those limits. `BEAM_DOCKER_BUILD=false` reuses an already-built tooling image.
-
-Browser builds run inside Sail in the normal application workflow. Build the Rust/WASM packages with the separately capped local tooling wrapper; do not run `wasm-pack` through Sail:
-
-```sh
-scripts/cli/wasm.sh encryption
-scripts/cli/wasm.sh transfer-wasm
-```
-
-The wrapper defaults to 512 MiB, one CPU, and one Cargo job. Its Docker limits use the same `BEAM_DOCKER_MEMORY`, `BEAM_DOCKER_MEMORY_SWAP`, `BEAM_DOCKER_CPUS`, and `CARGO_BUILD_JOBS` environment variables.
 
 ## Terminal experience
 
@@ -143,36 +121,3 @@ Individual mode recursively sends regular files into the recipient's chosen dest
 A completed private-transfer receipt includes the complete share link, including its secret fragment. Treat the receipt as sensitive: anyone with the complete link can use the corresponding share capability.
 
 The server initially retains a pending upload for two hours. Each accepted pending Turbo chunk refreshes that pending lifetime to two hours from the latest accepted chunk, but never beyond 24 hours from transfer creation. Adaptive server stages have a separate one-hour default TTL. A local resume therefore remains subject to server-side stage and pending-transfer expiry; resume may need to retransmit a missing chunk and cannot revive an expired transfer.
-
-## Verification
-
-```sh
-scripts/cli/check.sh
-scripts/cli/test.sh
-scripts/cli/build.sh
-bash scripts/cli/terminal.test.sh
-```
-
-The PTY suite runs in capped Docker and exercises slow single-chunk transfers, output redirection, resizing, key prompts, cancellation, full-screen input, directory modes, ZIP contents, and complete hyperlink/copy targets. Visual fixtures can be exported with `BEAM_VISUAL_DIR=/workspace/cli/target/visual` inside `scripts/cli/run.sh` when running the `export_visual_fixtures` Rust test.
-
-## Local installation
-
-To install a Docker-built development binary that targets the running Sail instance on port 8000:
-
-```sh
-scripts/cli/install-local.sh
-export PATH="$HOME/.filebeam/bin:$PATH"
-beam
-```
-
-Use `--instance http://localhost:PORT` or `--dir DIRECTORY` to override either local wrapper default. The CLI binary defaults to `https://filebeam.io`. `FILEBEAM_INSTANCE` overrides the compiled default; the local installer sets this explicitly for the development server.
-
-Publishing requires R2 and Ed25519 release credentials, then writes immutable artifacts below `cli/versions/vX.Y.Z/`, a signed `cli/index.json`, and mutable no-cache `cli/install.sh` and `cli/install.ps1` entry points:
-
-```sh
-scripts/release/cli-publish.sh beam-v1.2.3 dist/beam
-```
-
-The GitHub `release` environment supplies `R2_ENDPOINT_URL`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `RELEASE_SIGNING_KEY`; `RELEASE_PUBLIC_KEY` is shared with the package build. The R2 bucket must be reachable at `https://releases.filebeam.io`. Both the CLI executable and installer embed the verification key. Production publishing only accepts a source tag reachable from `origin/master`. The `beam-v…` GitHub release is marked non-latest so it does not replace the main application release.
-
-`BEAM_RELEASE_VERSION` is supplied by packaging from the release tag. It controls `beam --version`, the HTTP User-Agent, and the CLI updater's current-version comparison; development builds use the Cargo package version. Release assets cover Linux x86_64/ARM64, macOS Intel/Apple Silicon, and Windows x86_64. `scripts/cli/smoke-package.sh` verifies the Linux archives and executes the native package; native release jobs execute the macOS Apple Silicon and Windows binaries. `scripts/cli/smoke-install.sh` streams the public installer into a disposable HOME and checks the installed version and production instance default. Neither smoke test writes to a user's normal shell configuration.

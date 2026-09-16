@@ -7,11 +7,6 @@ grep -Fq 'icons/NOTICE' "$root/scripts/release/package.sh"
 grep -Fq 'ICONSAX-NOTICE' "$root/scripts/release/package.sh"
 grep -Fq 'Iconsax Free License' "$root/icons/NOTICE"
 grep -Fq 'validate-manifest.php' "$root/scripts/release/package.sh"
-if grep -Fq '"$root/docs/social-previews.md"' "$root/scripts/release/package.sh"; then
-    printf 'Protocol 1 package paths must remain backward compatible.\n' >&2
-    exit 1
-fi
-
 stage=$(mktemp -d "${TMPDIR:-/tmp}/filebeam-manifest-test.XXXXXX")
 cleanup() { rm -rf "$stage"; }
 trap cleanup EXIT
