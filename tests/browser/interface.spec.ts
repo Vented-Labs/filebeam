@@ -212,11 +212,12 @@ test('unavailable state and footer version are centered and branded', async ({ p
     await expect(page.locator('.fb-footer')).toContainText('v0.1.0');
 });
 
-test('CLI instructions stay accessible on mobile and restore header focus', async ({ page }) => {
-    await page.setViewportSize({ width: 375, height: 812 });
+test('CLI instructions restore focus to the mobile header install entry', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 812 });
     await page.goto('/');
     const trigger = page.locator('.cli-footer-launcher');
-    await trigger.click();
+    await trigger.focus();
+    await page.keyboard.press('Enter');
     const dialog = page.getByRole('dialog');
     await expect(dialog.getByRole('heading', { name: 'Install CLI', exact: true })).toBeVisible();
     const platforms = dialog.getByRole('radiogroup', { name: 'Platform' });
@@ -232,9 +233,13 @@ test('CLI instructions stay accessible on mobile and restore header focus', asyn
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
         true,
     );
+    await page.setViewportSize({ width: 375, height: 812 });
+    const mobileInstall = page.locator('header [data-app-install-entry]');
+    await expect(mobileInstall).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
-    await expect(trigger).toBeFocused();
+    await expect(mobileInstall).toHaveAccessibleName('Install Mobile App');
+    await expect(mobileInstall).toBeFocused();
 });
 
 test('editor selection stays visible when switching modes', async ({ page }) => {

@@ -11,6 +11,7 @@ for crate in client-core client-ffi; do
     cargo test --manifest-path "$root/$crate/Cargo.toml" --locked
 done
 "$root/mobile/android/gradlew" --project-dir "$root/mobile/android" --no-daemon \
-    :app:lintDebug :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease :app:assembleDebugAndroidTest "$@"
+    :app:lintDebug :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease :app:assembleDebugAndroidTest \
+    :app:checkVerifiedAppLinksFixtures "$@"
 python3 "$root/scripts/android/check-native.py" "$root/mobile/android/app/build/outputs/apk/debug/app-debug.apk"
 python3 "$root/scripts/android/check-native.py" "$root/mobile/android/app/build/outputs/apk/release/app-release-unsigned.apk"

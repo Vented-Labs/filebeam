@@ -260,34 +260,36 @@ function goHome(event: MouseEvent): void {
                 >
             </div>
             <CliFooterLauncher />
-            <nav
-                v-if="communityLinks.length"
-                class="fb-footer__community"
-                aria-label="Community links"
-            >
-                <a
-                    v-for="link in communityLinks"
-                    :key="link.platform"
-                    class="fb-footer__community-link"
-                    :href="link.url"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    :aria-label="link.label"
-                    :title="link.label"
-                    ><Icon :name="socialIcon(link)" :size="16"
-                /></a>
-            </nav>
-            <span class="fb-footer__copyright"
-                >&copy; {{ branding.copyright_year }}
-                <a
-                    v-if="copyrightUrl"
-                    class="fb-footer__copyright-link"
-                    :href="copyrightUrl"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    >{{ copyrightHolder }}</a
-                ><template v-else>{{ copyrightHolder }}</template></span
-            >
+            <div class="fb-footer__right">
+                <nav
+                    v-if="communityLinks.length"
+                    class="fb-footer__community"
+                    aria-label="Community links"
+                >
+                    <a
+                        v-for="link in communityLinks"
+                        :key="link.platform"
+                        class="fb-footer__community-link"
+                        :href="link.url"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        :aria-label="link.label"
+                        :title="link.label"
+                        ><Icon :name="socialIcon(link)" :size="16"
+                    /></a>
+                </nav>
+                <span class="fb-footer__copyright"
+                    >&copy; {{ branding.copyright_year }}
+                    <a
+                        v-if="copyrightUrl"
+                        class="fb-footer__copyright-link"
+                        :href="copyrightUrl"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        >{{ copyrightHolder }}</a
+                    ><template v-else>{{ copyrightHolder }}</template></span
+                >
+            </div>
         </footer>
     </div>
 </template>
@@ -314,11 +316,17 @@ function goHome(event: MouseEvent): void {
 }
 .fb-footer {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 556px) auto minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) minmax(0, 556px) minmax(0, 1fr);
     column-gap: 20px;
 }
+.fb-footer__right {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    justify-content: end;
+    gap: 20px;
+}
 .fb-footer__copyright {
-    justify-self: end;
     text-align: right;
 }
 .fb-footer__identity {
@@ -351,7 +359,7 @@ function goHome(event: MouseEvent): void {
         padding-inline: 0.4rem;
     }
     .fb-footer {
-        grid-template-columns: minmax(0, 1fr) minmax(0, 460px) auto minmax(0, 1fr);
+        grid-template-columns: minmax(0, 1fr) minmax(0, 460px) minmax(0, 1fr);
     }
 }
 
@@ -390,6 +398,9 @@ function goHome(event: MouseEvent): void {
     }
     .fb-footer {
         grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    }
+    .fb-footer__right {
+        display: contents;
     }
 }
 @media (max-width: 560px) {

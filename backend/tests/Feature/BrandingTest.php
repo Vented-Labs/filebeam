@@ -30,6 +30,9 @@ test('shares public branding configuration without changing retention fields', f
         'copyright_holder' => 'Acme, Inc.',
         'copyright_year' => 2030,
         'github_url' => 'https://github.com/acme/share',
+        'community_links' => [
+            ['platform' => 'discord', 'label' => 'Acme Discord', 'url' => 'https://discord.gg/acme'],
+        ],
     ]);
 
     $this->get('/')
@@ -44,6 +47,11 @@ test('shares public branding configuration without changing retention fields', f
             ->where('branding.copyright_holder', 'Acme, Inc.')
             ->where('branding.copyright_year', 2030)
             ->where('branding.github_url', 'https://github.com/acme/share')
+            ->where('filebeam.community_links.0', [
+                'platform' => 'discord',
+                'label' => 'Discord',
+                'url' => 'https://discord.gg/acme',
+            ])
             ->where('filebeam.file_retention_hours', 24)
             ->where('filebeam.note_retention_hours', 720));
 });

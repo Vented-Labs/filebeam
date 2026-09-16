@@ -122,6 +122,11 @@ printf '%s\n' \
     >"$results/environment.txt"
 chmod 600 "$results/environment.txt"
 
+if [[ ${PEER_WEBRTC_SETUP_ONLY:-0} == 1 ]]; then
+    printf 'Peer WebRTC environment: %s\n' "$published_results"
+    exit 0
+fi
+
 BASE_URL="$base_url" TURN_URL="turn:$host_ip:$turn_port?transport=udp" RESULTS_DIR="$results" PEER_WEBRTC_CASES="${PEER_WEBRTC_CASES:-}" \
     node "$root/scripts/android/peer-webrtc.mjs" | tee "$results/summary.json"
 docker logs "$turn" >"$results/logs/coturn.log" 2>&1

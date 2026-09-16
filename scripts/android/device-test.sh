@@ -38,6 +38,7 @@ if [[ ${FILEBEAM_ANDROID_DEVICE_CONTAINER:-} != 1 ]]; then
         --env FILEBEAM_ANDROID_AVD_MEMORY="${FILEBEAM_ANDROID_AVD_MEMORY:-2048}" \
         --env FILEBEAM_ANDROID_INSTRUMENTATION_TIMEOUT="${FILEBEAM_ANDROID_INSTRUMENTATION_TIMEOUT:-3600}" \
         --env FILEBEAM_ANDROID_HTTP_PROBE="${FILEBEAM_ANDROID_HTTP_PROBE:-}" \
+        --env FILEBEAM_ANDROID_LIVE_LOGCAT_TAG="${FILEBEAM_ANDROID_LIVE_LOGCAT_TAG:-}" \
         --env FILEBEAM_ANDROID_REPORT_DIR="$container_report_dir" \
         --volume "$root:/workspace" --workdir /workspace \
         "${FILEBEAM_ANDROID_EMULATOR_IMAGE:-filebeam-android-emulator:api35-16k}" \
@@ -62,8 +63,12 @@ emulator -avd filebeam-test -no-window -no-audio -no-boot-anim -no-snapshot \
     -accel "$FILEBEAM_ANDROID_ACCEL" -memory "${FILEBEAM_ANDROID_AVD_MEMORY:-2048}" -cores 2 \
     > "$report_dir/emulator.log" 2>&1 &
 emulator_pid=$!
+live_logcat_pid=''
 cleanup_device() {
     ensure_report_dir
+    if [[ -n $live_logcat_pid ]]; then
+        kill "$live_logcat_pid" 2>/dev/null || true
+    fi
     adb logcat -d > "$report_dir/logcat.txt" 2>/dev/null || true
     adb emu kill >/dev/null 2>&1 || true
     kill "$emulator_pid" 2>/dev/null || true
@@ -83,7 +88,19 @@ for ((attempt=0; attempt<30; attempt++)); do
     sleep 2
 done
 [[ $package_ready == true ]] || { printf '%s\n' 'Package manager did not become ready' >&2; exit 1; }
-page_size=$(adb shell getconf PAGE_SIZE | tr -d '\r')
+# Probe variables must expand in the Android shell, not on the host.
+# shellcheck disable=SC2016
+page_size=$(adb shell '
+    if command -v getconf >/dev/null 2>&1; then
+        getconf PAGE_SIZE
+    else
+        while read -r key value _; do
+            if [ "$key" = KernelPageSize: ]; then printf "%s\n" "$((value * 1024))"; exit 0; fi
+        done < /proc/self/smaps
+    fi
+' | tr -d '\r')
+[[ $page_size =~ ^[0-9]+$ ]] || { printf 'Could not determine guest page size: %s\n' "$page_size" >&2; exit 1; }
+printf '%s\n' "$page_size" > "$report_dir/page-size.txt"
 if [[ $FILEBEAM_TEST_SYSTEM_IMAGE == *ps16k* ]]; then
     [[ $page_size == 16384 ]] || { printf 'Expected 16-KiB pages, got %s\n' "$page_size" >&2; exit 1; }
 fi
@@ -93,6 +110,8 @@ adb install --no-streaming -r "$root/mobile/android/app/build/outputs/apk/debug/
 adb install --no-streaming -r "$root/mobile/android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk"
 if [[ -n ${FILEBEAM_ANDROID_HTTP_PROBE:-} ]]; then
     ensure_report_dir
+    adb shell svc wifi enable >/dev/null 2>&1 || true
+    adb shell svc data enable >/dev/null 2>&1 || true
     adb shell ip route > "$report_dir/http-routes.txt" 2>&1 || true
     probe=${FILEBEAM_ANDROID_HTTP_PROBE#http://}
     probe=${probe#https://}
@@ -111,7 +130,23 @@ if [[ -n ${FILEBEAM_ANDROID_HTTP_PROBE:-} ]]; then
 fi
 ensure_report_dir
 adb shell cat /proc/meminfo > "$report_dir/meminfo-before.txt" 2>&1 || true
-timeout "${FILEBEAM_ANDROID_INSTRUMENTATION_TIMEOUT:-3600}" adb shell am instrument -w "$@" io.filebeam.android.debug.test/androidx.test.runner.AndroidJUnitRunner > "$report_dir/instrumentation.txt" 2>&1 &
+# Acceptance commands accept a trailing test class. Convert it to AndroidX's
+# class filter so the runner remains the only instrumentation component.
+instrumentation_args=("$@")
+if [[ ${#instrumentation_args[@]} -gt 0 && ${instrumentation_args[-1]} == io.* ]]; then
+    test_class=${instrumentation_args[-1]}
+    unset 'instrumentation_args[-1]'
+    instrumentation_args+=(-e class "$test_class")
+fi
+if [[ -n ${FILEBEAM_ANDROID_LIVE_LOGCAT_TAG:-} ]]; then
+    adb logcat -v brief "${FILEBEAM_ANDROID_LIVE_LOGCAT_TAG}:I" '*:S' &
+    live_logcat_pid=$!
+fi
+if [[ -n ${FILEBEAM_ANDROID_LIVE_LOGCAT_TAG:-} ]]; then
+    timeout "${FILEBEAM_ANDROID_INSTRUMENTATION_TIMEOUT:-3600}" adb shell am instrument -w "${instrumentation_args[@]}" io.filebeam.android.debug.test/androidx.test.runner.AndroidJUnitRunner 2>&1 | tee "$report_dir/instrumentation.txt" &
+else
+    timeout "${FILEBEAM_ANDROID_INSTRUMENTATION_TIMEOUT:-3600}" adb shell am instrument -w "${instrumentation_args[@]}" io.filebeam.android.debug.test/androidx.test.runner.AndroidJUnitRunner > "$report_dir/instrumentation.txt" 2>&1 &
+fi
 instrumentation_pid=$!
 (
     while kill -0 "$instrumentation_pid" 2>/dev/null; do

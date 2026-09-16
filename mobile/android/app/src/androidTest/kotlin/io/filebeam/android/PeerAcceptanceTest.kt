@@ -1,5 +1,6 @@
 package io.filebeam.android
 
+import android.os.Bundle
 import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -64,8 +65,13 @@ class PeerAcceptanceTest {
         val expected = sha256(source)
         val job = client.startUpload(instance, listOf(source.absolutePath), transport, false)
         val link = waitForLink(job)
-        println("FILEBEAM_ACCEPTANCE_LINK=$link")
-        println("FILEBEAM_ACCEPTANCE_SOURCE_SHA256=$expected")
+        Log.i(TAG, "FILEBEAM_ACCEPTANCE_LINK=$link")
+        Log.i(TAG, "FILEBEAM_ACCEPTANCE_SOURCE_SHA256=$expected")
+        // The external peer harness needs the disposable link while this test
+        // keeps the live sender and its consent pump running.
+        InstrumentationRegistry.getInstrumentation().sendStatus(0, Bundle().apply {
+            putString("filebeam.acceptance.link", link)
+        })
         when (mode) {
             "roundtrip" -> {
                 // HTTP publication consumes the single scheduler worker through
@@ -75,9 +81,9 @@ class PeerAcceptanceTest {
                 output.mkdirs()
                 waitForTerminal(client.startDownload(instance, link, output.absolutePath), "download")
                 assertEquals(expected, sha256(File(output, source.name)))
-                println("FILEBEAM_ACCEPTANCE_OUTPUT_SHA256=$expected")
+                Log.i(TAG, "FILEBEAM_ACCEPTANCE_OUTPUT_SHA256=$expected")
             }
-            "serve" -> Thread.sleep(arguments.getString("serveSeconds", "180").toLong() * 1000)
+            "serve" -> serve(job)
         }
     }
 
@@ -87,8 +93,17 @@ class PeerAcceptanceTest {
         output.mkdirs()
         val done = waitForTerminal(client.startDownload(instance, link, output.absolutePath), "download")
         val path = File(done.results.single())
-        println("FILEBEAM_ACCEPTANCE_OUTPUT_SHA256=${sha256(path)}")
-        println("FILEBEAM_ACCEPTANCE_OUTPUT_BYTES=${path.length()}")
+        Log.i(TAG, "FILEBEAM_ACCEPTANCE_OUTPUT_SHA256=${sha256(path)}")
+        Log.i(TAG, "FILEBEAM_ACCEPTANCE_OUTPUT_BYTES=${path.length()}")
+    }
+
+    private fun serve(job: TransferJob) {
+        val deadline = System.nanoTime() + arguments.getString("serveSeconds", "180").toLong() * 1_000_000_000
+        while (System.nanoTime() < deadline) {
+            val snapshot = observe(job, "serve")
+            if (snapshot.state == JobState.FAILED) error(snapshot.error ?: "transfer failed")
+            Thread.sleep(100)
+        }
     }
 
     private fun waitForLink(job: TransferJob): String {

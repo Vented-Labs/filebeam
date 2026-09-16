@@ -87,7 +87,7 @@ test('browser uploads and CLI downloads an encrypted HTTP file', async ({ page }
     const webSource = join(fixtures, 'web-to-cli.txt');
     await page.goto('/');
     await page.locator('#filebeam-picker').setInputFiles(webSource);
-    await page.getByRole('button', { name: 'Encrypt and share' }).click();
+    await page.getByRole('button', { name: /Encrypt and share|Send encrypted/ }).click();
     await expect(page.locator('#share-link')).toBeVisible();
     const webLink = await page.locator('#share-link').inputValue();
     const webOutput = join(results, 'downloads', 'web-to-cli.txt');
@@ -151,7 +151,7 @@ test('513 MiB and 4097 MiB browser-to-CLI files retain streamed hashes', async (
         const source = join(fixtures, name);
         await page.goto('/');
         await page.locator('#filebeam-picker').setInputFiles(source);
-        await page.getByRole('button', { name: 'Encrypt and share' }).click();
+        await page.getByRole('button', { name: /Encrypt and share|Send encrypted/ }).click();
         await expect(page.locator('#share-link')).toBeVisible({ timeout: 7_000_000 });
         const link = await page.locator('#share-link').inputValue();
         const outputDirectory = join(results, 'downloads', `browser-to-cli-${name}`);

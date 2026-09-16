@@ -70,18 +70,22 @@ The script removes its app, coturn, and volumes at exit; set
 `KEEP_PEER_WEBRTC_ENV=1` only while an acceptance owner is attached, then run
 the cleanup command in `environment.txt`.
 
-The harness reserves these result names for verified runs:
+The harness reserves these result names for verified runs. Current durable
+reports are `.filebeam/final-android-build.md`,
+`.filebeam/final-device-summary.md`, `.filebeam/android-final-peer-summary.md`,
+and `.filebeam/receiver-fix.md`.
 
 | Requirement | Required evidence | Current status |
 | --- | --- | --- |
-| Android to CLI, HTTP, both directions | source and destination SHA-256, Android instrumentation output | pending Android peer run; Web/CLI equivalent passed |
-| Android to Web, HTTP, both directions | source and destination SHA-256, browser trace/output | pending Android peer run; Web/CLI equivalent passed at 513/4097 MiB |
-| Android to CLI/Web, direct WebRTC, both directions | peer candidates/transport classification with redacted links, hashes | pending Android peer run; browser/CLI small matrix passed |
-| Android to CLI/Web, TURN relay, both directions | relay-only configuration and relay candidate classification, hashes | pending Android peer run; browser/CLI small relay matrix passed |
-| Greater than 512 MiB and greater than 4 GiB | real fixture size, completed hashes, configured instance limits | Web/CLI HTTP passed both sizes; native-to-browser direct WebRTC passed 4097 MiB; Android pending |
-| Flat memory growth | repeated 513 MiB/4097 MiB run RSS samples and configuration/revision | browser OPFS clean peaks recorded as 930692/936332 KiB; Android measurements pending |
-| Debug and release/R8 | APK paths, build logs, native alignment report | covered by `check.sh`; release remains unsigned |
-| API 26/current, ARM64/ARMv7, physical low-memory, 4/16 KiB, release signing | device inventory and signed artifact provenance | API 26, physical ARM, production signing/domain keys pending |
+| Android to CLI, HTTP, both directions | source and destination SHA-256, Android instrumentation output | passed; recorded hashes |
+| Android to Web, HTTP, both directions | source and destination SHA-256, browser trace/output | passed; recorded hashes |
+| Android to browser, direct WebRTC, both directions | peer candidates/transport classification with redacted links, hashes | passed; direct `host/prflx` routes and hashes |
+| Android to browser, TURN relay, both directions | relay-only configuration and relay candidate classification, hashes | passed; non-loopback `relay/relay` routes and hashes |
+| Android to CLI, direct/TURN WebRTC, both directions | peer candidates/transport classification, hashes | passed; four small cases, both directions, direct and relay-only |
+| Greater than 512 MiB and greater than 4 GiB | real fixture size, completed hashes, configured instance limits | API 35 4097 MiB send and fresh API 26 receive passed; SHA-256 `117b24fa...c9b8de6` |
+| Memory observation | PSS/RSS samples, device/configuration/revision | fresh API 26 4097 MiB receive: PSS 157746 KiB, native PSS 113332 KiB; not a memory limit |
+| Debug and release/R8 | APK paths, build logs, native alignment report | lint/unit, R8, all ABIs, 16 KiB alignment, App Link fixtures, and test-signed R8 launch passed |
+| API 26/current, ARM64/ARMv7, physical low-memory, 4/16 KiB, release signing | device inventory and signed artifact provenance | API 26 and emulator 16 KiB evidence passed; physical ARM, low-memory, and production matrix pending |
 
 ### Local signed R8 smoke
 
@@ -105,6 +109,8 @@ result directory. Record the device, configured managed-buffer budget, fixture,
 transport, revision, and both runs before comparing growth. RSS is observational
 evidence, not a process-memory limit.
 
-The previous 10-test Android full gate passed. Rebuilding/running the new export
-and inbox coverage, the real Android peer matrix, and API 26 remains pending;
-Web/CLI results above do not complete those Android gates.
+API 35 16 KiB emulator history includes an LMKD kill at 212272 KiB RSS and a
+separate `SEGV_MAPERR`; this does not establish an application heap leak.
+Untested external gates are physical ARM64/ARMv7, physical low-memory behavior,
+real-device OS force-stop, network and low-storage paths, manual accessibility,
+and the production domain/signing matrix. Test signing is not production signing.
