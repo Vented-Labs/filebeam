@@ -11,6 +11,8 @@ import io.filebeam.android.platform.security.PendingTransferStore
 import io.filebeam.android.platform.storage.DocumentStorage
 import io.filebeam.android.platform.services.AccountSessionRegistry
 import io.filebeam.android.platform.services.AccountService
+import io.filebeam.android.ui.JobCapabilities
+import io.filebeam.android.ui.dedupeActiveCatalog
 import io.filebeam.rust.ClientConfig
 import io.filebeam.rust.JobState
 import io.filebeam.rust.SavedTransfer
@@ -52,7 +54,11 @@ data class TransferUiState(
     val saved: List<SavedTransfer> = emptyList(),
     val pending: Boolean = false,
     val message: String? = null,
+    val receipt: TransferReceipt? = null,
+    val capabilities: JobCapabilities = JobCapabilities(),
 )
+
+data class TransferReceipt(val id: String, val disposition: String, val result: String? = null, val message: String? = null)
 
 /** Durable upload intent. Password text is intentionally not an option: native prompts hold it only in RAM. */
 data class UploadRequest(
@@ -113,6 +119,13 @@ class TransferCoordinator(
     fun upload(uris: List<Uri>, transport: Transport, archive: Boolean) = upload(UploadRequest(uris, transport, archive))
 
     fun upload(request: UploadRequest) = submit { config ->
+        require(request.uris.isNotEmpty()) { "Select at least one source" }
+        require(request.recipients.size <= 1) { "Filebeam currently supports one recipient" }
+        require(request.retentionHours == null || request.retentionHours > 0uL) { "Retention must be positive" }
+        require(request.transport == Transport.HTTP || !request.turbo) { "Turbo Transfer requires HTTP" }
+        require(request.recipients.isEmpty() || (!request.passwordProtected && !request.turbo && request.transport == Transport.HTTP)) {
+            "Recipient delivery conflicts with the selected transfer options"
+        }
         val providers = runCatching { JSONArray(request.uris.map { uri ->
             val input = storage.providerInput(uri, uri.lastPathSegment ?: "file")
             JSONObject().put("identity", input.identity).put("name", input.displayName)
@@ -212,7 +225,9 @@ class TransferCoordinator(
                     if (pauseRequested) throw CancellationException()
                 }
                 withContext(Dispatchers.IO) { pending.clear() }
-                mutable.update { it.copy(phase = "complete", message = context.getString(R.string.saved_file)) }
+                val receipt = TransferReceipt(request.optString("id"), "exported", request.getString("uri"), context.getString(R.string.saved_file))
+                saveReceipt(receipt)
+                mutable.update { it.copy(phase = "complete", message = context.getString(R.string.saved_file), receipt = receipt) }
                 return@run
             }
             val api = if (active == null) client(request.optBoolean("relay")) else null
@@ -308,12 +323,25 @@ class TransferCoordinator(
                             .putOpt("transfer", request.optString("transfer").takeIf(String::isNotBlank)))
                     }
                 }
-                mutable.update { it.copy(snapshot = snapshot, phase = snapshot.phase) }
+                val capabilities = JobCapabilities(
+                    canPause = snapshot.state in listOf(JobState.RUNNING, JobState.PAUSING),
+                    canResume = snapshot.state == JobState.PAUSED && snapshot.checkpointId != null,
+                    canRetryExport = request.getString("kind") == "export" && snapshot.state == JobState.FAILED,
+                    canEndLive = request.optBoolean("live") && snapshot.checkpointId != null,
+                    canRevoke = request.getString("kind") == "upload" && snapshot.checkpointId != null,
+                    canRemoveLocal = !mutable.value.busy && snapshot.checkpointId != null,
+                )
+                mutable.update { it.copy(snapshot = snapshot, phase = snapshot.phase, capabilities = capabilities) }
                 if (snapshot.state !in listOf(JobState.RUNNING, JobState.PAUSING)) {
                     withContext(Dispatchers.IO) {
                         if (snapshot.state == JobState.COMPLETE) {
                             pending.clear()
                             if (request.getString("kind") == "upload") File(storage.root, "$id/sources").deleteRecursively()
+                            val result = snapshot.results.firstOrNull()
+                            val disposition = if (request.getString("kind") == "download") "private-verified" else "complete"
+                            val receipt = TransferReceipt(id, disposition, result, null)
+                            saveReceipt(receipt)
+                            mutable.update { it.copy(receipt = receipt) }
                         }
                     }
                     break
@@ -429,7 +457,8 @@ class TransferCoordinator(
                 val (saved, hasPending) = withContext(Dispatchers.IO) {
                     platformClient().savedTransfers() to (pending.load() != null)
                 }
-                mutable.update { it.copy(saved = saved, pending = hasPending) }
+                val activeId = mutable.value.snapshot?.checkpointId
+                mutable.update { it.copy(saved = dedupeActiveCatalog(activeId, saved) { item -> item.id }, pending = hasPending) }
             } catch (error: Exception) { message(error.message ?: context.getString(R.string.unknown_error)) }
         }
     }
@@ -443,13 +472,32 @@ class TransferCoordinator(
         } catch (error: Exception) { message(error.message ?: context.getString(R.string.unknown_error)) }
     }
 
+    /** Uses the same origin-scoped service and recipient contract that upload uses. */
+    fun validateRecipient(username: String, complete: (String?) -> Unit) = scope.launch {
+        val error = runCatching {
+            val config = settings.values.first()
+            withContext(Dispatchers.IO) {
+                accountSessions.service(config.instance).accountRecipient(username.trim())
+            }
+        }.exceptionOrNull()?.message
+        complete(error)
+    }
+
     fun export(source: String, uri: Uri) = submit(clearSnapshot = false) {
-        JSONObject().put("kind", "export").put("source", source).put("uri", uri.toString())
+        JSONObject().put("kind", "export").put("id", UUID.randomUUID().toString()).put("source", source).put("uri", uri.toString())
     }
 
     private fun association(id: String): PendingTransferStore {
         require(UUID.fromString(id).toString() == id)
         return PendingTransferStore(context, "transfer-$id")
+    }
+    /** Notification intents carry only opaque IDs; the activity reads authoritative encrypted state. */
+    fun notificationRoute(): String? = state.value.snapshot?.prompt?.id?.let { "prompt:$it" }
+        ?: state.value.receipt?.id?.let { "transfer:$it" }
+        ?: activeCheckpoint?.let { "transfer:$it" }
+    private suspend fun saveReceipt(receipt: TransferReceipt) = withContext(Dispatchers.IO) {
+        PendingTransferStore(context, "receipt-${receipt.id}").save(JSONObject().put("id", receipt.id)
+            .put("disposition", receipt.disposition).putOpt("result", receipt.result).putOpt("message", receipt.message))
     }
     fun message(value: String?) { mutable.update { it.copy(message = value) } }
 }

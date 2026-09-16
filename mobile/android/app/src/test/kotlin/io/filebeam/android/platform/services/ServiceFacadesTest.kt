@@ -19,8 +19,15 @@ class ServiceFacadesTest {
             override suspend fun signUp(instance: String, username: String, name: String?, email: String, password: String) = Unit
             override suspend fun resume(instance: String) = Unit
             override suspend fun signOut() = Unit
+            override suspend fun resendVerification() = Unit
+            override suspend fun verifyEmail(hash: String) = Unit
+            override suspend fun requestPasswordReset(instance: String, email: String) = Unit
+            override suspend fun resetPassword(instance: String, email: String, token: String, password: String) = Unit
+            override suspend fun setInboxEnabled(enabled: Boolean) = Unit
+            override suspend fun setNotificationChannel(channel: String) = Unit
             override suspend fun generateKey() = ""
             override suspend fun exportKey() = ""
+            override suspend fun exportKeyTo(destination: android.net.Uri) = Unit
             override suspend fun importKey(value: String) = Unit
             override suspend fun privateKeyForInbox(bundleId: ULong, userId: ULong, custodyMode: String, envelope: String?, publicKey: String, password: String?) = ByteArray(32)
             override suspend fun rememberInboxKey(bundleId: ULong, privateKey: ByteArray) = Unit

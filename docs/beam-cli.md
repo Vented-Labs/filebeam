@@ -18,15 +18,11 @@ Use `--dir DIRECTORY` with the shell installer or `-InstallDir DIRECTORY` when i
 
 Open a new terminal after installation to load the PATH change.
 
-## Web instructions
+## Links and instances
 
-The web application detects supported desktop operating systems and initially selects the matching command; users can always choose Linux, macOS, or Windows manually. `FILEBEAM_CLI_INSTALLER_URL` and `FILEBEAM_CLI_WINDOWS_INSTALLER_URL` configure the Unix and PowerShell HTTPS distribution URLs. Opening the instructions does not contact the release service or run the command.
+`beam up` uploads local paths and `beam down` receives a shared transfer. Full URLs select their own origin, including self-hosted servers and local development. A ULID alone uses `https://filebeam.io`, or `FILEBEAM_INSTANCE`. Quote complete links literally. Passwords are never accepted as command arguments.
 
-The web amendment's supplied `up <url or ulid>` reference differs from the parser: `beam up <files...>` uploads local paths, while `beam down <url or ulid>` receives a shared transfer. Download commands preserve the original link's key fragment, never add a separately shared key or a password, and use interactive key/password prompts. Clipboard failure leaves the command selected for manual copying.
-
-The web command card supports stored HTTP files, live WebRTC file links, and pending Turbo file links once their authenticated early descriptor is available. The CLI receives Turbo chunks progressively while the sender continues uploading. Notes, burn-on-read, and account-key inbox delivery remain browser-only because those APIs are not exposed through the CLI. Expired, ended, or otherwise unavailable transfers have no copyable command. URLs must have a single ULID path, no query, and an optional unencoded v1 share key, matching the CLI parser. Commands quote the complete link literally; a separate key and any password stay out of shell history and are entered only at the CLI prompt.
-
-Full URLs select their own origin, including self-hosted servers and local development. The web download card copies the full URL directly:
+For example:
 
 ```sh
 beam down 'https://files.company.test/01K46FN13WJVCWKMBWRMC9Q9KN'
@@ -52,6 +48,35 @@ Run `beam` for the full-screen Send / Receive workspace. The interface uses File
 - `Ctrl+C`: cancel the active transfer; on an idle screen, exit. Cancellation is cooperative: an active HTTP request may need to finish or time out before stopping.
 
 `beam up` and `beam down` display compact inline progress with transferred bytes, throughput, and ETA when there is enough terminal width and measurement history. Preparing, archiving, and verification have separate activity states. Completion is shown only after server finalization or local integrity verification.
+
+## Notes
+
+Hosted notes are created and opened by the native client, with the same encrypted note service used by other native clients. Input is a file or standard input, so note text is not placed in shell history.
+
+```sh
+beam note create --input incident.md --title 'Incident notes' --language markdown
+printf '%s' 'one-time note' | beam note create --burn-on-read
+beam note create --input secrets.txt --password --separate-key
+beam note open 'https://files.company.test/01...#k=v1....' --password
+```
+
+`--separate-key` prints the link and key as separate sensitive output lines; deliver them independently. `--burn-on-read` consumes a note only after successful decryption and integrity verification. `--password` opens a masked terminal prompt. For automation, use exactly one of `--password-file FILE` or `--password-stdin`; password files must be owner-only on Unix (`chmod 600 FILE`). Passwords are never persisted by Beam.
+
+## Accounts
+
+Account sessions are scoped to the selected instance origin. After sign-in or registration, Beam stores only the opaque same-origin session cookie in encrypted, owner-only local state under `~/.filebeam/accounts`; it never writes an account password.
+
+```sh
+beam account register alice alice@example.test --name Alice
+beam account login alice@example.test
+beam account profile
+beam account resend-verification
+beam account recovery-request alice@example.test
+beam account recovery-reset alice@example.test RECOVERY_TOKEN
+beam account logout
+```
+
+Use the same password input rules as Notes. `logout` ends the remote session and removes the local encrypted session state. Verification and recovery use native account APIs. Custody-key setup/import/export/replacement, Inbox unlock/download, and username-directed delivery are not yet available in Beam; Beam does not open a browser as a substitute.
 
 ## Turbo and WebRTC uploads
 

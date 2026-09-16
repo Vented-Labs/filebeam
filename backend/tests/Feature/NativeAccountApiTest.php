@@ -11,6 +11,8 @@ use Database\Seeders\FilestoreSeeder;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\Cookie;
 
 beforeEach(function (): void {
@@ -134,6 +136,33 @@ test('native account endpoints keep key envelopes and inbox data private', funct
     auth()->logout();
     $this->getJson('/api/native/v1/account/keys')->assertUnauthorized();
     $this->actingAs($user)->getJson('/api/native/v1/inbox')->assertOk()->assertHeader('Cache-Control', 'no-store, private');
+});
+
+test('native inbox listing never acknowledges notifications without an explicit action', function (): void {
+    $user = User::factory()->create();
+    $notification = $user->notifications()->create(['id' => (string) Str::uuid(), 'type' => \App\Notifications\InboxTransferCompleted::class, 'data' => []]);
+
+    $this->actingAs($user)->getJson('/api/native/v1/inbox')->assertOk();
+    expect($notification->fresh()->read_at)->toBeNull();
+    $this->actingAs($user)->postJson('/api/native/v1/inbox/notifications/read', [], ['Sec-Fetch-Site' => 'same-origin'])->assertNoContent();
+    expect($notification->fresh()->read_at)->not->toBeNull();
+});
+
+test('native account preference and recovery APIs use persisted web behavior', function (): void {
+    Notification::fake();
+    $user = User::factory()->unverified()->create(['email' => 'native-actions@example.test']);
+
+    $this->actingAs($user)->patchJson('/api/native/v1/account/notifications', ['channel' => 'database'], ['Sec-Fetch-Site' => 'same-origin'])
+        ->assertOk()->assertJsonPath('data.channel', 'database');
+    expect($user->fresh()->notification_channel)->toBe('database');
+    $this->actingAs($user)->postJson('/api/native/v1/account/email/verification-notification', [], ['Sec-Fetch-Site' => 'same-origin'])->assertNoContent();
+    auth()->logout();
+    $this->postJson('/api/native/v1/password/recovery', ['email' => $user->email], ['Sec-Fetch-Site' => 'same-origin'])->assertNoContent();
+
+    $token = Password::broker()->createToken($user);
+    $this->postJson('/api/native/v1/password/reset', ['email' => $user->email, 'token' => $token, 'password' => 'another-long-secure-password', 'password_confirmation' => 'another-long-secure-password'], ['Sec-Fetch-Site' => 'same-origin'])
+        ->assertNoContent();
+    expect(Hash::check('another-long-secure-password', $user->fresh()->password))->toBeTrue();
 });
 
 test('native recipient lookup exposes only an active username delivery key', function (): void {

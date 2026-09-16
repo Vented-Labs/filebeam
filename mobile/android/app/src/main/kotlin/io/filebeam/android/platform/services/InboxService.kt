@@ -7,12 +7,25 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import io.filebeam.android.platform.TransferCoordinator
 
-data class InboxItem(val id: String, val title: String, val link: String, val receivedAtMillis: Long, val error: String? = null)
+sealed interface InboxItemState {
+    data object Locked : InboxItemState
+    data object NotSetup : InboxItemState
+    data object Expired : InboxItemState
+    data object UserDisabled : InboxItemState
+    data object InstanceDisabled : InboxItemState
+    data class Error(val message: String) : InboxItemState
+}
+
+/** Inbox metadata stays opaque until the user explicitly opens a delivery. */
+data class InboxItem(val id: String, val title: String, val link: String, val receivedAtMillis: Long, val state: InboxItemState = InboxItemState.Locked) {
+    val error: String? get() = (state as? InboxItemState.Error)?.message
+}
 
 interface InboxService {
     val state: StateFlow<ServiceState<List<InboxItem>>>
     suspend fun refresh(instance: String, password: String? = null): List<InboxItem>
     suspend fun download(instance: String, transferId: String, password: String? = null)
+    suspend fun acknowledgeNotificationsRead(instance: String)
 }
 
 class NativeInboxService(private val sessions: AccountSessionRegistry, private val accounts: AccountService, private val transfers: TransferCoordinator? = null) : InboxService {
@@ -23,20 +36,7 @@ class NativeInboxService(private val sessions: AccountSessionRegistry, private v
         val origin = AccountSessionRegistry.normalizeOrigin(instance)
         check(sessions.cookie(origin) != null) { "Sign in to view your inbox" }
         sessions.service(origin).accountInbox().map { item ->
-            runCatching {
-                val metadata = sessions.service(origin).accountInboxMetadata(item.id)
-                val bundle = metadata.recipientKey.bundle
-                val privateKey = accounts.privateKeyForInbox(bundle.id, bundle.userId, bundle.custodyMode, bundle.encryptedPrivateKey, bundle.publicKey, password)
-                try {
-                    val opened = sessions.service(origin).accountOpenInbox(item.id, privateKey)
-                    accounts.rememberInboxKey(opened.keyBundleId, privateKey)
-                    InboxItem(item.id, opened.filenames.joinToString().ifBlank { "${item.itemCount} encrypted files" }, "authenticated", 0)
-                } finally {
-                    privateKey.fill(0)
-                }
-            }.getOrElse { error ->
-                InboxItem(item.id, "${item.itemCount} encrypted files", "", 0, error.message ?: "Could not open inbox delivery")
-            }
+            InboxItem(item.id, "${item.itemCount} encrypted files", "authenticated", 0)
         }.also { mutable.value = ServiceState.Ready(it) }
     }
 
@@ -57,5 +57,11 @@ class NativeInboxService(private val sessions: AccountSessionRegistry, private v
         } finally {
             privateKey.fill(0)
         }
+    }
+
+    override suspend fun acknowledgeNotificationsRead(instance: String) = withContext(Dispatchers.IO) {
+        val origin = AccountSessionRegistry.normalizeOrigin(instance)
+        check(sessions.cookie(origin) != null) { "Sign in to acknowledge inbox notifications" }
+        sessions.service(origin).accountMarkInboxNotificationsRead()
     }
 }

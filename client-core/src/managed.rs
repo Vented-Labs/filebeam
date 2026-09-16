@@ -56,6 +56,21 @@ pub struct PendingPrompt {
     pub id: u64,
     pub kind: PromptType,
     pub peer: Option<String>,
+    pub directory: Option<DirectoryPrompt>,
+}
+
+#[derive(Clone, Debug)]
+pub struct DirectoryPrompt {
+    pub files: u64,
+    pub bytes: u64,
+    pub maximum_files: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SecretRetryKind {
+    ShareKey,
+    Password,
+    Generic,
 }
 
 #[derive(Clone, Debug)]
@@ -69,6 +84,7 @@ pub struct JobSnapshot {
     pub error: Option<String>,
     pub error_kind: Option<JobErrorKind>,
     pub peer_warning: Option<String>,
+    pub secret_retry: Option<SecretRetryKind>,
 }
 
 /// Non-blocking facade over the worker also used by the CLI. The host serializes
@@ -78,6 +94,7 @@ pub struct ManagedJob {
     snapshot: JobSnapshot,
     reply: Option<Prompt>,
     next_prompt: u64,
+    last_secret_kind: Option<SecretRetryKind>,
 }
 
 impl ManagedJob {
@@ -94,9 +111,11 @@ impl ManagedJob {
                 error: None,
                 error_kind: None,
                 peer_warning: None,
+                secret_retry: None,
             },
             reply: None,
             next_prompt: 1,
+            last_secret_kind: None,
         }
     }
 
@@ -109,19 +128,32 @@ impl ManagedJob {
                 && self.snapshot.state == JobState::Running
                 && let Ok(prompt) = self.job.prompts.try_recv()
             {
-                let (kind, peer) = match &prompt.kind {
-                    PromptKind::Secret(SecretKind::ShareKey) => (PromptType::ShareKey, None),
-                    PromptKind::Secret(SecretKind::Password) => (PromptType::Password, None),
+                let (kind, peer, directory) = match &prompt.kind {
+                    PromptKind::Secret(SecretKind::ShareKey) => (PromptType::ShareKey, None, None),
+                    PromptKind::Secret(SecretKind::Password) => (PromptType::Password, None, None),
                     PromptKind::PeerConsent { peer_id } => {
-                        (PromptType::PeerConsent, Some(peer_id.clone()))
+                        (PromptType::PeerConsent, Some(peer_id.clone()), None)
                     }
-                    PromptKind::Directory { .. } => (PromptType::Directory, None),
-                    PromptKind::ShareReady => (PromptType::ShareReady, None),
+                    PromptKind::Directory {
+                        files,
+                        bytes,
+                        maximum_files,
+                    } => (
+                        PromptType::Directory,
+                        None,
+                        Some(DirectoryPrompt {
+                            files: *files as u64,
+                            bytes: *bytes,
+                            maximum_files: maximum_files.map(|value| value as u64),
+                        }),
+                    ),
+                    PromptKind::ShareReady => (PromptType::ShareReady, None, None),
                 };
                 self.snapshot.prompt = Some(PendingPrompt {
                     id: self.next_prompt,
                     kind,
                     peer,
+                    directory,
                 });
                 self.next_prompt += 1;
                 self.reply = Some(prompt);
@@ -150,6 +182,10 @@ impl ManagedJob {
                         // context (for example a hard-link errno), not only the
                         // outer transfer message.
                         self.snapshot.error = Some(format!("{error:#}"));
+                        if self.snapshot.error_kind == Some(JobErrorKind::Crypto) {
+                            self.snapshot.secret_retry =
+                                Some(self.last_secret_kind.unwrap_or(SecretRetryKind::Generic));
+                        }
                     }
                 }
             }
@@ -174,14 +210,49 @@ impl ManagedJob {
         if self.snapshot.prompt.as_ref().map(|prompt| prompt.id) != Some(id) {
             bail!("This transfer prompt is no longer active");
         }
+        if self
+            .reply
+            .as_ref()
+            .is_some_and(|prompt| matches!(&prompt.kind, PromptKind::Directory { .. }))
+        {
+            bail!("Directory prompts require an explicit ZIP or individual-files choice");
+        }
         let prompt = self
             .reply
             .take()
             .ok_or_else(|| anyhow::anyhow!("Transfer prompt is closed"))?;
+        self.last_secret_kind = match &prompt.kind {
+            PromptKind::Secret(SecretKind::ShareKey) => Some(SecretRetryKind::ShareKey),
+            PromptKind::Secret(SecretKind::Password) => Some(SecretRetryKind::Password),
+            _ => None,
+        };
         self.snapshot.prompt = None;
         prompt
             .reply
             .send(value)
+            .map_err(|_| anyhow::anyhow!("Transfer prompt is closed"))
+    }
+
+    pub fn respond_directory(&mut self, id: u64, zip: bool) -> Result<()> {
+        if self.snapshot.prompt.as_ref().map(|prompt| prompt.id) != Some(id) {
+            bail!("This transfer prompt is no longer active");
+        }
+        let prompt = self
+            .reply
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("Transfer prompt is closed"))?;
+        if !matches!(&prompt.kind, PromptKind::Directory { .. }) {
+            bail!("This transfer prompt does not accept a directory choice");
+        }
+        self.snapshot.prompt = None;
+        self.last_secret_kind = None;
+        prompt
+            .reply
+            .send(Zeroizing::new(if zip {
+                "zip".into()
+            } else {
+                "individual".into()
+            }))
             .map_err(|_| anyhow::anyhow!("Transfer prompt is closed"))
     }
 
@@ -310,6 +381,30 @@ mod tests {
         let paused = wait(&mut job, |s| s.state == JobState::Paused);
         assert!(paused.prompt.is_none());
         assert!(paused.error.is_none());
+    }
+
+    #[test]
+    fn directory_prompts_require_a_bound_explicit_choice() {
+        let mut job = job(|control| {
+            let answer = control.ask(PromptKind::Directory {
+                files: 3,
+                bytes: 42,
+                maximum_files: Some(5),
+            })?;
+            assert_eq!(answer.as_str(), "individual");
+            Ok(Vec::new())
+        });
+        let prompt = wait(&mut job, |snapshot| snapshot.prompt.is_some())
+            .prompt
+            .unwrap();
+        assert_eq!(prompt.directory.as_ref().unwrap().files, 3);
+        assert!(job.respond(prompt.id, "yes".into()).is_err());
+        // The rejected generic response must leave the same prompt actionable.
+        job.respond_directory(prompt.id, false).unwrap();
+        assert_eq!(
+            wait(&mut job, |snapshot| snapshot.state == JobState::Complete).state,
+            JobState::Complete
+        );
     }
 
     #[test]

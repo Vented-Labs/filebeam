@@ -24,10 +24,16 @@ pub struct AccountSession {
     pub name: String,
     pub username: Option<String>,
     pub email: String,
+    #[serde(rename = "emailVerifiedAt")]
+    pub email_verified_at: Option<String>,
+    #[serde(rename = "profileUrl")]
+    pub profile_url: Option<String>,
     #[serde(rename = "inboxEnabled")]
     pub inbox_enabled: bool,
     #[serde(rename = "usernameRoutingEnabled")]
     pub username_routing_enabled: bool,
+    #[serde(rename = "notificationChannel")]
+    pub notification_channel: String,
 }
 #[derive(Clone, Debug, Deserialize)]
 pub struct AccountKeyBundle {
@@ -280,6 +286,62 @@ impl AccountService {
             .context("update native inbox")?;
         if !response.status().is_success() {
             bail!("native inbox update returned {}", response.status());
+        }
+        Ok(())
+    }
+    pub fn mark_inbox_notifications_read(&self) -> Result<()> {
+        self.no_content("api/native/v1/inbox/notifications/read")
+    }
+    pub fn set_notification_channel(&self, channel: &str) -> Result<()> {
+        if !matches!(channel, "mail" | "database") {
+            bail!("notification channel must be mail or database");
+        }
+        let response = self
+            .http
+            .patch(url(&self.instance, "api/native/v1/account/notifications")?)
+            .header("Sec-Fetch-Site", "same-origin")
+            .json(&serde_json::json!({"channel": channel}))
+            .send()
+            .context("update native notification preference")?;
+        if !response.status().is_success() {
+            bail!(
+                "native notification preference returned {}",
+                response.status()
+            );
+        }
+        Ok(())
+    }
+    pub fn resend_verification(&self) -> Result<()> {
+        self.no_content("api/native/v1/account/email/verification-notification")
+    }
+    pub fn verify_email(&self, hash: &str) -> Result<()> {
+        self.post_no_content(
+            "api/native/v1/account/email/verify",
+            serde_json::json!({"hash": hash}),
+        )
+    }
+    pub fn request_password_reset(&self, email: &str) -> Result<()> {
+        self.post_no_content(
+            "api/native/v1/password/recovery",
+            serde_json::json!({"email": email}),
+        )
+    }
+    pub fn reset_password(&self, email: &str, token: &str, password: &str) -> Result<()> {
+        self.post_no_content("api/native/v1/password/reset", serde_json::json!({"email": email, "token": token, "password": password, "password_confirmation": password}))
+    }
+    fn no_content(&self, path: &str) -> Result<()> {
+        self.post_no_content(path, serde_json::json!({}))
+    }
+    fn post_no_content(&self, path: &str, body: serde_json::Value) -> Result<()> {
+        let response = self
+            .http
+            .post(url(&self.instance, path)?)
+            .header("Sec-Fetch-Site", "same-origin")
+            .json(&body)
+            .send()
+            .context("native account update")?;
+        if response.status().as_u16() != 204 {
+            bail!("native account update returned {}", response.status());
         }
         Ok(())
     }

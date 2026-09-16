@@ -1,7 +1,7 @@
 use crate::{
-    ClientConfig, InstanceInfo, NativeRuntime, Result, SavedTransfer, SecretStoreCallback,
-    SourceCallback, SourceKind, TransferJob, Transport, UploadAuthentication, UploadOptions,
-    UploadSource, invalid, operation,
+    ClientConfig, DriverLimit, InstanceInfo, NativeRuntime, Result, SavedTransfer,
+    SavedTransferDetails, SecretStoreCallback, ShareLinkPresentation, SourceCallback, SourceKind,
+    TransferJob, Transport, UploadAuthentication, UploadOptions, UploadSource, invalid, operation,
 };
 use filebeam_client_core::{self as core, control::TransferSettings, protocol, uploads};
 use std::{path::PathBuf, sync::Arc};
@@ -127,6 +127,16 @@ impl TransferClient {
             retention_hours: info.file_retention_hours,
             webrtc_maximum_transfer_bytes: live.maximum_transfer_bytes,
             webrtc_maximum_file_count: live.maximum_file_count.map(|n| n as u64),
+            retention_options_hours: info.file_retention_options,
+            drivers: info
+                .transport_limits
+                .into_iter()
+                .map(|(driver, limits)| DriverLimit {
+                    driver,
+                    maximum_transfer_bytes: limits.maximum_transfer_bytes,
+                    maximum_file_count: limits.maximum_file_count.map(|value| value as u64),
+                })
+                .collect(),
         })
     }
 
@@ -321,6 +331,42 @@ impl TransferClient {
             })
     }
 
+    /// Authenticated checkpoint details without keys, cookies, or operation tokens.
+    pub fn saved_transfer_details(&self, id: String) -> Result<SavedTransferDetails> {
+        let secrets = self
+            .settings
+            .checkpoint_secret_store
+            .clone()
+            .unwrap_or_else(|| {
+                filebeam_transfer_native::checkpoint::FilesystemSecretStore::for_state_root(
+                    &self.settings.state_home,
+                )
+            });
+        let detail = protocol::saved_transfer_details_with_secret_store(
+            &self.settings.state_home,
+            &id,
+            secrets,
+        )
+        .map_err(operation)?;
+        Ok(SavedTransferDetails {
+            id: detail.id,
+            direction: detail.direction,
+            kind: detail.kind,
+            transport: detail.transport,
+            state: detail.state,
+            done: detail.done,
+            total: detail.total,
+            verified_privately: detail.verified_privately,
+            exported: detail.exported,
+            expires_at: detail.expires_at,
+            can_resume: detail.can_resume,
+            can_retry_save: detail.can_retry_save,
+            can_end_live: detail.can_end_live,
+            can_revoke_remote: detail.can_revoke_remote,
+            can_remove_local: detail.can_remove_local,
+        })
+    }
+
     pub fn resume(&self, id: String) -> Arc<TransferJob> {
         self.start(core::Request::Resume { id })
     }
@@ -479,4 +525,22 @@ pub(crate) fn origin(value: &str, allow_http: bool) -> Result<String> {
         ));
     }
     Ok(url.origin().ascii_serialization())
+}
+
+/// Formats the same link/key presentation as the web client. The key is caller
+/// supplied and never read from a saved transfer checkpoint.
+#[uniffi::export]
+pub fn present_share_link(
+    instance: String,
+    share_url: String,
+    share_key: String,
+    include_key: bool,
+) -> Result<ShareLinkPresentation> {
+    let presentation =
+        core::link_presentation::present_share_link(&instance, &share_url, &share_key, include_key)
+            .map_err(operation)?;
+    Ok(ShareLinkPresentation {
+        link: presentation.link,
+        separate_key: presentation.separate_key,
+    })
 }

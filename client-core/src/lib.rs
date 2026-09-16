@@ -4,6 +4,7 @@
 //! never cancels a transfer. Dropping the owning job requests a checkpointed stop.
 
 mod error;
+pub mod link_presentation;
 mod managed;
 mod scheduler;
 pub mod services;
@@ -13,7 +14,8 @@ pub use filebeam_transfer_native::source;
 pub use filebeam_transfer_native::webrtc::loopback_self_test as webrtc_self_test;
 pub use filebeam_transfer_native::{control, protocol, uploads};
 pub use managed::{
-    JobErrorKind, JobSnapshot, JobState, ManagedJob, PendingPrompt, PromptType, phase_name,
+    DirectoryPrompt, JobErrorKind, JobSnapshot, JobState, ManagedJob, PendingPrompt, PromptType,
+    SecretRetryKind, phase_name,
 };
 pub use scheduler::{
     RUNTIME_ALLOWANCE_BYTES, Scheduler, SchedulerLimits, TRANSIENT_MEMORY_ALLOWANCE_BYTES,

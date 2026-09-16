@@ -1,6 +1,7 @@
 package io.filebeam.android.platform.services
 
 import android.content.Context
+import android.net.Uri
 import android.util.Base64
 import io.filebeam.android.platform.security.PendingTransferStore
 import io.filebeam.rust.AccountKeyUpload
@@ -15,7 +16,15 @@ import org.json.JSONObject
 import java.net.URI
 import java.security.MessageDigest
 
-data class AccountSummary(val id: ULong, val username: String, val instance: String, val inboxEnabled: Boolean)
+data class AccountSummary(
+    val id: ULong,
+    val username: String,
+    val instance: String,
+    val inboxEnabled: Boolean,
+    val emailVerifiedAt: String? = null,
+    val profileUrl: String? = null,
+    val notificationChannel: String = "mail",
+)
 data class InboxDownloadCredentials(val workingKey: ByteArray, val cookie: String)
 
 interface AccountService {
@@ -24,8 +33,16 @@ interface AccountService {
     suspend fun signUp(instance: String, username: String, name: String?, email: String, password: String)
     suspend fun resume(instance: String)
     suspend fun signOut()
+    suspend fun resendVerification()
+    suspend fun verifyEmail(hash: String)
+    suspend fun requestPasswordReset(instance: String, email: String)
+    suspend fun resetPassword(instance: String, email: String, token: String, password: String)
+    suspend fun setInboxEnabled(enabled: Boolean)
+    suspend fun setNotificationChannel(channel: String)
     suspend fun generateKey(): String
     suspend fun exportKey(): String
+    /** Writes an explicit self-custody export to a caller-selected SAF document. */
+    suspend fun exportKeyTo(destination: Uri)
     suspend fun importKey(value: String)
     suspend fun privateKeyForInbox(bundleId: ULong, userId: ULong, custodyMode: String, envelope: String?, publicKey: String, password: String?): ByteArray
     suspend fun rememberInboxKey(bundleId: ULong, privateKey: ByteArray)
@@ -74,14 +91,14 @@ class NativeAccountService(
         val origin = AccountSessionRegistry.normalizeOrigin(instance)
         val session = sessions.service(origin).accountLogin(username, password, true)
         recoverPasswordCustody(origin, session.id, password)
-        completeSession(origin, session.id, session.username ?: session.name, session.inboxEnabled)
+        completeSession(origin, session)
     }
 
     override suspend fun signUp(instance: String, username: String, name: String?, email: String, password: String) = withContext(Dispatchers.IO) {
         val origin = AccountSessionRegistry.normalizeOrigin(instance)
         val session = sessions.service(origin).accountRegister(username, name?.takeIf(String::isNotBlank), email, password)
         recoverPasswordCustody(origin, session.id, password)
-        completeSession(origin, session.id, session.username ?: session.name, session.inboxEnabled)
+        completeSession(origin, session)
     }
 
     override suspend fun resume(instance: String) = withContext(Dispatchers.IO) {
@@ -90,7 +107,7 @@ class NativeAccountService(
         val cookie = persisted.optString("cookie").takeIf(String::isNotBlank) ?: return@withContext
         sessions.restore(origin, cookie)
         val session = sessions.service(origin).accountSession()
-        completeSession(origin, session.id, session.username ?: session.name, session.inboxEnabled)
+        completeSession(origin, session)
     }
 
     override suspend fun signOut() = withContext(Dispatchers.IO) {
@@ -99,6 +116,29 @@ class NativeAccountService(
         sessions.clear(account.instance)
         sessionStore(account.instance).clear()
         mutable.value = ServiceState.Loading
+    }
+
+    override suspend fun resendVerification() = withContext(Dispatchers.IO) {
+        sessions.service(requireAccount().instance).accountResendVerification()
+    }
+    override suspend fun verifyEmail(hash: String) = withContext(Dispatchers.IO) {
+        sessions.service(requireAccount().instance).accountVerifyEmail(hash)
+    }
+    override suspend fun requestPasswordReset(instance: String, email: String) = withContext(Dispatchers.IO) {
+        sessions.service(AccountSessionRegistry.normalizeOrigin(instance)).accountRequestPasswordReset(email)
+    }
+    override suspend fun resetPassword(instance: String, email: String, token: String, password: String) = withContext(Dispatchers.IO) {
+        sessions.service(AccountSessionRegistry.normalizeOrigin(instance)).accountResetPassword(email, token, password)
+    }
+    override suspend fun setInboxEnabled(enabled: Boolean) = withContext(Dispatchers.IO) {
+        val account = requireAccount()
+        sessions.service(account.instance).accountSetInboxEnabled(enabled)
+        mutable.value = ServiceState.Ready(account.copy(inboxEnabled = enabled))
+    }
+    override suspend fun setNotificationChannel(channel: String) = withContext(Dispatchers.IO) {
+        val account = requireAccount()
+        sessions.service(account.instance).accountSetNotificationChannel(channel)
+        mutable.value = ServiceState.Ready(account.copy(notificationChannel = channel))
     }
 
     override suspend fun generateKey(): String = withContext(Dispatchers.IO) {
@@ -116,7 +156,19 @@ class NativeAccountService(
 
     override suspend fun exportKey(): String = withContext(Dispatchers.IO) {
         val account = requireAccount()
-        sessions.service(account.instance).accountExportSelfKey(loadPrivate(account))
+        val privateKey = loadPrivate(account)
+        try {
+            sessions.service(account.instance).accountExportSelfKey(privateKey)
+        } finally {
+            privateKey.fill(0)
+        }
+    }
+
+    override suspend fun exportKeyTo(destination: Uri) = withContext(Dispatchers.IO) {
+        val exported = exportKey()
+        context.contentResolver.openOutputStream(destination, "wt")?.use { output ->
+            output.write(exported.toByteArray(Charsets.US_ASCII))
+        } ?: error("Could not open the selected key export document")
     }
 
     override suspend fun importKey(value: String): Unit = withContext(Dispatchers.IO) {
@@ -166,11 +218,11 @@ class NativeAccountService(
         }
     }
 
-    private fun completeSession(origin: String, id: ULong, username: String, inboxEnabled: Boolean) {
+    private fun completeSession(origin: String, session: io.filebeam.rust.AccountSession) {
         val cookie = sessions.service(origin).accountCookieContext()
         sessions.authenticated(origin, cookie)
-        sessionStore(origin).save(JSONObject().put("cookie", cookie).put("user", id.toString()).put("username", username))
-        mutable.value = ServiceState.Ready(AccountSummary(id, username, origin, inboxEnabled))
+        sessionStore(origin).save(JSONObject().put("cookie", cookie).put("user", session.id.toString()).put("username", session.username ?: session.name))
+        mutable.value = ServiceState.Ready(AccountSummary(session.id, session.username ?: session.name, origin, session.inboxEnabled, session.emailVerifiedAt, session.profileUrl, session.notificationChannel))
     }
     private fun recoverPasswordCustody(origin: String, userId: ULong, password: String) {
         val service = sessions.service(origin)

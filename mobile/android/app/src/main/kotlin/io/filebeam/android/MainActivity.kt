@@ -21,6 +21,7 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
     private val model: FilebeamViewModel by viewModels()
     private var pendingStart: (() -> Unit)? = null
+    private var pendingDirectoryPrompt: ULong? = null
     private val notifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
         pendingStart?.invoke()
         pendingStart = null
@@ -30,15 +31,26 @@ class MainActivity : ComponentActivity() {
             try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
             catch (_: SecurityException) { /* Transient providers are materialized while access is held. */ }
         }
-        if (uris.isNotEmpty()) model.selectFiles(uris)
+        if (uris.isNotEmpty()) model.appendFiles(uris)
     }
     private val tree = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        pendingDirectoryPrompt?.let { promptId ->
+            pendingDirectoryPrompt = null
+            if (uri != null) {
+                try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
+                catch (_: SecurityException) { /* The core will report unavailable provider access. */ }
+                model.coordinator.respond(promptId, uri.toString())
+            } else model.coordinator.pause()
+            return@registerForActivityResult
+        }
         uri?.let {
             try { contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
             catch (_: SecurityException) { /* Providers may offer only a transient read grant. */ }
             lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                runCatching { model.coordinator.storage.flattenDocumentTree(it).map { selection -> selection.uri } }
-                    .onSuccess { sources -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { model.selectFiles(sources) } }
+                runCatching { model.coordinator.storage.flattenDocumentTree(it) }
+                    .onSuccess { sources -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        model.appendFiles(sources.map { source -> source.uri }, sources.associate { source -> source.uri.toString() to source.relativePath })
+                    } }
                     .onFailure { error -> model.coordinator.message(error.message ?: getString(R.string.source_unavailable)) }
             }
         }
@@ -59,6 +71,7 @@ class MainActivity : ComponentActivity() {
                 ::startWithNotificationPermission,
                 pickFiles = { files.launch(arrayOf("*/*")) },
                 pickTree = { tree.launch(null) },
+                pickDirectoryForPrompt = { id -> pendingDirectoryPrompt = id; tree.launch(null) },
                 saveFile = { source -> model.exportSource = source; save.launch(java.io.File(source).name) },
             )
         }
@@ -86,7 +99,11 @@ class MainActivity : ComponentActivity() {
                     IntentCompat.getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)?.let(::addAll)
                     intent.clipData?.let { clip -> repeat(clip.itemCount) { clip.getItemAt(it).uri?.let(::add) } }
                 }.filter { it.scheme == "content" }.distinct()
-                if (uris.isNotEmpty()) model.selectFiles(uris)
+                uris.forEach { uri ->
+                    try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+                    catch (_: SecurityException) { /* The coordinator snapshots transient grants while available. */ }
+                }
+                if (uris.isNotEmpty()) model.appendFiles(uris)
                 else intent.getStringExtra(Intent.EXTRA_TEXT)?.let(model::receiveLink)
             }
         }

@@ -1,5 +1,6 @@
 use crate::{
-    ErrorCategory, JobState, PendingPrompt, PromptType, Result, TransferSnapshot, operation,
+    DirectoryChoice, DirectoryPrompt, ErrorCategory, JobState, PendingPrompt, PromptType, Result,
+    SecretRetryKind, TransferSnapshot, operation,
 };
 use filebeam_client_core as core;
 use std::sync::{
@@ -63,6 +64,11 @@ impl TransferJob {
                     core::PromptType::Directory => PromptType::Directory,
                     core::PromptType::ShareReady => PromptType::ShareReady,
                 },
+                directory: prompt.directory.map(|directory| DirectoryPrompt {
+                    files: directory.files,
+                    bytes: directory.bytes,
+                    maximum_files: directory.maximum_files,
+                }),
             }),
             share_url: state.share_url,
             results: state.results,
@@ -78,6 +84,11 @@ impl TransferJob {
                 core::JobErrorKind::Internal => ErrorCategory::Internal,
             }),
             peer_warning: state.peer_warning,
+            secret_retry: state.secret_retry.map(|retry| match retry {
+                core::SecretRetryKind::ShareKey => SecretRetryKind::ShareKey,
+                core::SecretRetryKind::Password => SecretRetryKind::Password,
+                core::SecretRetryKind::Generic => SecretRetryKind::Generic,
+            }),
         }
     }
     pub fn respond(&self, prompt_id: u64, value: String) -> Result<()> {
@@ -85,6 +96,13 @@ impl TransferJob {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .respond(prompt_id, value)
+            .map_err(operation)
+    }
+    pub fn respond_directory(&self, prompt_id: u64, choice: DirectoryChoice) -> Result<()> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .respond_directory(prompt_id, matches!(choice, DirectoryChoice::Zip))
             .map_err(operation)
     }
     pub fn pause(&self) {

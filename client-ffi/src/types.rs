@@ -68,6 +68,21 @@ pub struct InstanceInfo {
     pub retention_hours: u64,
     pub webrtc_maximum_transfer_bytes: Option<u64>,
     pub webrtc_maximum_file_count: Option<u64>,
+    pub retention_options_hours: Vec<u64>,
+    pub drivers: Vec<DriverLimit>,
+}
+
+#[derive(Clone, uniffi::Record)]
+pub struct DriverLimit {
+    pub driver: String,
+    pub maximum_transfer_bytes: Option<u64>,
+    pub maximum_file_count: Option<u64>,
+}
+
+#[derive(Clone, uniffi::Record)]
+pub struct ShareLinkPresentation {
+    pub link: String,
+    pub separate_key: String,
 }
 
 #[derive(Clone, uniffi::Record)]
@@ -77,6 +92,25 @@ pub struct SavedTransfer {
     pub state: String,
     pub done: u64,
     pub total: u64,
+}
+
+#[derive(Clone, uniffi::Record)]
+pub struct SavedTransferDetails {
+    pub id: String,
+    pub direction: String,
+    pub kind: String,
+    pub transport: String,
+    pub state: String,
+    pub done: u64,
+    pub total: u64,
+    pub verified_privately: bool,
+    pub exported: bool,
+    pub expires_at: Option<String>,
+    pub can_resume: bool,
+    pub can_retry_save: bool,
+    pub can_end_live: bool,
+    pub can_revoke_remote: bool,
+    pub can_remove_local: bool,
 }
 
 #[derive(Clone, Copy, uniffi::Enum)]
@@ -114,6 +148,27 @@ pub struct PendingPrompt {
     pub id: u64,
     pub kind: PromptType,
     pub peer: Option<String>,
+    pub directory: Option<DirectoryPrompt>,
+}
+
+#[derive(Clone, uniffi::Record)]
+pub struct DirectoryPrompt {
+    pub files: u64,
+    pub bytes: u64,
+    pub maximum_files: Option<u64>,
+}
+
+#[derive(Clone, Copy, uniffi::Enum)]
+pub enum DirectoryChoice {
+    Zip,
+    IndividualFiles,
+}
+
+#[derive(Clone, Copy, uniffi::Enum)]
+pub enum SecretRetryKind {
+    ShareKey,
+    Password,
+    Generic,
 }
 
 #[derive(Clone, uniffi::Record)]
@@ -134,4 +189,5 @@ pub struct TransferSnapshot {
     pub error: Option<String>,
     pub error_category: Option<ErrorCategory>,
     pub peer_warning: Option<String>,
+    pub secret_retry: Option<SecretRetryKind>,
 }

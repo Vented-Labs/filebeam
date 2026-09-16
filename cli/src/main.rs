@@ -5,6 +5,7 @@ mod input;
 mod output;
 mod presentation;
 mod protocol;
+mod services;
 mod terminal;
 mod tui;
 mod update;
@@ -104,6 +105,94 @@ enum Command {
     Resume { id: String },
     /// Discard a saved transfer and its local resume state.
     Cancel { id: String },
+    /// Create or read encrypted hosted notes.
+    Note {
+        #[command(subcommand)]
+        command: NoteCommand,
+    },
+    /// Manage the account session for this instance origin.
+    Account {
+        #[command(subcommand)]
+        command: AccountCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum NoteCommand {
+    /// Create an encrypted hosted note from a file or standard input.
+    Create {
+        #[arg(short, long)]
+        input: Option<PathBuf>,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long, default_value = "plain")]
+        language: String,
+        #[arg(long)]
+        password: bool,
+        #[arg(long)]
+        password_file: Option<PathBuf>,
+        #[arg(long)]
+        password_stdin: bool,
+        #[arg(long)]
+        burn_on_read: bool,
+        #[arg(long)]
+        retention_hours: Option<u64>,
+        /// Print the link and its key separately.
+        #[arg(long)]
+        separate_key: bool,
+    },
+    /// Decrypt and print a hosted note. Burn notes are consumed only after successful decrypt.
+    Open {
+        link: String,
+        #[arg(long)]
+        password: bool,
+        #[arg(long)]
+        password_file: Option<PathBuf>,
+        #[arg(long)]
+        password_stdin: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum AccountCommand {
+    /// Sign in and store the same-origin session in encrypted local state.
+    Login {
+        email: String,
+        #[arg(long)]
+        password_file: Option<PathBuf>,
+        #[arg(long)]
+        password_stdin: bool,
+    },
+    /// Register a new account and store its same-origin session.
+    Register {
+        username: String,
+        email: String,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long)]
+        password_file: Option<PathBuf>,
+        #[arg(long)]
+        password_stdin: bool,
+    },
+    /// End the server session and remove its local encrypted cookie state.
+    Logout,
+    /// Show the authenticated profile for this instance origin.
+    Profile,
+    /// Send another verification email for the authenticated account.
+    ResendVerification,
+    /// Verify the authenticated account with a verification hash.
+    Verify { hash: String },
+    /// Request a password-recovery email.
+    RecoveryRequest { email: String },
+    /// Set a new password using a recovery token.
+    RecoveryReset {
+        email: String,
+        token: String,
+        #[arg(long)]
+        password_file: Option<PathBuf>,
+        #[arg(long)]
+        password_stdin: bool,
+    },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -244,6 +333,139 @@ fn main() -> Result<()> {
         Some(Command::Cancel { id }) => {
             protocol::discard_transfer(&config.home.join("transfers"), &id)?
         }
+        Some(Command::Note { command }) => {
+            let values = match command {
+                NoteCommand::Create {
+                    input,
+                    title,
+                    language,
+                    password,
+                    password_file,
+                    password_stdin,
+                    burn_on_read,
+                    retention_hours,
+                    separate_key,
+                } => {
+                    let mut text = String::new();
+                    if let Some(path) = input {
+                        text = std::fs::read_to_string(&path)
+                            .with_context(|| format!("read note input {}", path.display()))?;
+                    } else {
+                        std::io::Read::read_to_string(&mut std::io::stdin(), &mut text)
+                            .context("read note from standard input")?;
+                    }
+                    services::note_create(
+                        &config,
+                        &instance,
+                        services::NoteRequest {
+                            text,
+                            title,
+                            language,
+                            password_file: password_file.as_deref(),
+                            password_stdin,
+                            password,
+                            burn_on_read,
+                            retention_hours,
+                            separate_key,
+                        },
+                    )?
+                }
+                NoteCommand::Open {
+                    link,
+                    password,
+                    password_file,
+                    password_stdin,
+                } => services::note_open(
+                    &config,
+                    &instance,
+                    &link,
+                    password_file.as_deref(),
+                    password_stdin,
+                    password,
+                )?,
+            };
+            for value in values {
+                output::result(&value, cli.plain)?;
+            }
+        }
+        Some(Command::Account { command }) => match command {
+            AccountCommand::Login {
+                email,
+                password_file,
+                password_stdin,
+            } => {
+                let password =
+                    services::secret(password_file.as_deref(), password_stdin, "Account password")?;
+                let client = services::client(&config, &instance)?;
+                let session = client.account().login(&email, &password, true)?;
+                services::save_session(&config, &instance, &client)?;
+                output::result(&session.email, cli.plain)?;
+            }
+            AccountCommand::Register {
+                username,
+                email,
+                name,
+                password_file,
+                password_stdin,
+            } => {
+                let password =
+                    services::secret(password_file.as_deref(), password_stdin, "Account password")?;
+                let client = services::client(&config, &instance)?;
+                let session =
+                    client
+                        .account()
+                        .register(&username, name.as_deref(), &email, &password)?;
+                services::save_session(&config, &instance, &client)?;
+                output::result(&session.email, cli.plain)?;
+            }
+            AccountCommand::Logout => {
+                let client = services::client(&config, &instance)?;
+                client.account().logout()?;
+                services::clear_session(&config, &instance)?;
+            }
+            AccountCommand::Profile => {
+                let session = services::client(&config, &instance)?.account().session()?;
+                output::result(
+                    &format!(
+                        "{}\t{}\t{}",
+                        session.email,
+                        session.username.unwrap_or_default(),
+                        session.inbox_enabled
+                    ),
+                    cli.plain,
+                )?;
+            }
+            AccountCommand::ResendVerification => {
+                services::client(&config, &instance)?
+                    .account()
+                    .resend_verification()?;
+            }
+            AccountCommand::Verify { hash } => {
+                services::client(&config, &instance)?
+                    .account()
+                    .verify_email(&hash)?;
+            }
+            AccountCommand::RecoveryRequest { email } => {
+                services::client(&config, &instance)?
+                    .account()
+                    .request_password_reset(&email)?;
+            }
+            AccountCommand::RecoveryReset {
+                email,
+                token,
+                password_file,
+                password_stdin,
+            } => {
+                let password = services::secret(
+                    password_file.as_deref(),
+                    password_stdin,
+                    "New account password",
+                )?;
+                services::client(&config, &instance)?
+                    .account()
+                    .reset_password(&email, &token, &password)?;
+            }
+        },
         None => {
             if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() || cli.plain {
                 println!("beam {}\n{}", env!("BEAM_VERSION"), instance);
@@ -257,7 +479,7 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Command, Transport, configured_instance};
+    use super::{Cli, Command, NoteCommand, Transport, configured_instance};
     use clap::Parser;
 
     #[test]
@@ -313,5 +535,30 @@ mod tests {
         assert!(options.turbo);
         assert_eq!(options.transport, crate::protocol::Transport::Http);
         assert!(Transport::Webrtc.upload_options(true, false, None).is_err());
+    }
+
+    #[test]
+    fn note_commands_keep_content_and_secrets_out_of_arguments() {
+        let cli = Cli::try_parse_from([
+            "beam",
+            "note",
+            "create",
+            "--input",
+            "note.md",
+            "--password-file",
+            "secret",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Command::Note {
+                command: NoteCommand::Create {
+                    input: Some(_),
+                    password_file: Some(_),
+                    ..
+                }
+            })
+        ));
+        assert!(Cli::try_parse_from(["beam", "note", "create", "plaintext"]).is_err());
     }
 }

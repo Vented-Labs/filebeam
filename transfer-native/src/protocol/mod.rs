@@ -62,6 +62,27 @@ pub struct SavedTransfer {
     pub total: u64,
 }
 
+/// Authenticated checkpoint presentation data. Tokens and encrypted keys are
+/// inspected only to determine capabilities and never leave this module.
+#[derive(Clone, Debug)]
+pub struct SavedTransferDetails {
+    pub id: String,
+    pub direction: String,
+    pub kind: String,
+    pub transport: String,
+    pub state: String,
+    pub done: u64,
+    pub total: u64,
+    pub verified_privately: bool,
+    pub exported: bool,
+    pub expires_at: Option<String>,
+    pub can_resume: bool,
+    pub can_retry_save: bool,
+    pub can_end_live: bool,
+    pub can_revoke_remote: bool,
+    pub can_remove_local: bool,
+}
+
 #[derive(Deserialize)]
 struct SavedHeader {
     version: u8,
@@ -137,6 +158,72 @@ pub fn saved_transfers_with_secret_store(
     }
     transfers.sort_by(|a, b| a.id.cmp(&b.id));
     Ok(transfers)
+}
+
+pub fn saved_transfer_details_with_secret_store(
+    home: &Path,
+    id: &str,
+    secret_store: Arc<dyn crate::checkpoint::SecretStore>,
+) -> Result<SavedTransferDetails> {
+    let id = Uuid::parse_str(id)
+        .context("invalid saved transfer id")?
+        .to_string();
+    let store = crate::checkpoint::Store::open_with_secret_store(home, &id, secret_store)?;
+    let value = store
+        .load::<serde_json::Value>()?
+        .context("saved transfer checkpoint is empty")?;
+    let header: SavedHeader =
+        serde_json::from_value(value.clone()).context("invalid saved transfer checkpoint")?;
+    let summary = header.summary(&id)?;
+    let object = value
+        .as_object()
+        .context("invalid saved transfer checkpoint")?;
+    let text = |name: &str| object.get(name).and_then(serde_json::Value::as_str);
+    let has_token = |name: &str| text(name).is_some_and(|value| !value.is_empty());
+    let transport = text("driver").unwrap_or("http").to_owned();
+    let is_upload = summary.direction == "upload";
+    let published = object
+        .get("items")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|items| {
+            !items.is_empty()
+                && items.iter().all(|item| {
+                    item.get("published").and_then(serde_json::Value::as_bool) == Some(true)
+                })
+        });
+    let verified = object
+        .get("items")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|items| {
+            !items.is_empty()
+                && items.iter().all(|item| {
+                    item.get("verified")
+                        .and_then(serde_json::Value::as_array)
+                        .is_some_and(|bits| bits.iter().all(|bit| bit.as_bool() == Some(true)))
+                })
+        });
+    let ended = summary.state == "ended";
+    Ok(SavedTransferDetails {
+        id: summary.id,
+        direction: summary.direction,
+        kind: "files".into(),
+        transport: transport.clone(),
+        state: summary.state.clone(),
+        done: summary.done,
+        total: summary.total,
+        verified_privately: !is_upload && verified && !published,
+        exported: !is_upload && published,
+        // File checkpoints do not persist server expiry. Do not fabricate one.
+        expires_at: None,
+        can_resume: matches!(
+            summary.state.as_str(),
+            "paused" | "running" | "preparing" | "sending" | "receiving"
+        ),
+        can_retry_save: !is_upload && verified && !published,
+        can_end_live: is_upload && transport == "webrtc" && !ended && has_token("upload_token"),
+        can_revoke_remote: is_upload && !ended && has_token("delete_token"),
+        can_remove_local: true,
+    })
 }
 
 pub fn discard_transfer(home: &Path, id: &str) -> Result<()> {

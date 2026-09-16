@@ -45,8 +45,11 @@ pub struct AccountSession {
     pub name: String,
     pub username: Option<String>,
     pub email: String,
+    pub email_verified_at: Option<String>,
+    pub profile_url: Option<String>,
     pub inbox_enabled: bool,
     pub username_routing_enabled: bool,
+    pub notification_channel: String,
 }
 
 #[derive(Clone, uniffi::Record)]
@@ -399,6 +402,31 @@ impl NativeServices {
             .map_err(operation)
     }
 
+    /// Explicit acknowledgement only; listing an inbox never changes read state.
+    pub fn account_mark_inbox_notifications_read(&self) -> Result<()> {
+        self.inner.account().mark_inbox_notifications_read().map_err(operation)
+    }
+
+    pub fn account_set_notification_channel(&self, channel: String) -> Result<()> {
+        self.inner.account().set_notification_channel(&channel).map_err(operation)
+    }
+
+    pub fn account_resend_verification(&self) -> Result<()> {
+        self.inner.account().resend_verification().map_err(operation)
+    }
+
+    pub fn account_verify_email(&self, hash: String) -> Result<()> {
+        self.inner.account().verify_email(&hash).map_err(operation)
+    }
+
+    pub fn account_request_password_reset(&self, email: String) -> Result<()> {
+        self.inner.account().request_password_reset(&email).map_err(operation)
+    }
+
+    pub fn account_reset_password(&self, email: String, token: String, password: String) -> Result<()> {
+        self.inner.account().reset_password(&email, &token, &password).map_err(operation)
+    }
+
     /// Exports a self-custody key without converting it to a printable diagnostic.
     pub fn account_export_self_key(&self, private_key: Vec<u8>) -> Result<String> {
         core::export_self_key(&private_key).map_err(operation)
@@ -530,8 +558,11 @@ fn account_session(session: core::AccountSession) -> AccountSession {
         name: session.name,
         username: session.username,
         email: session.email,
+        email_verified_at: session.email_verified_at,
+        profile_url: session.profile_url,
         inbox_enabled: session.inbox_enabled,
         username_routing_enabled: session.username_routing_enabled,
+        notification_channel: session.notification_channel,
     }
 }
 

@@ -105,11 +105,17 @@ Route::prefix('native/v1')->middleware([EncryptCookies::class, AddQueuedCookiesT
     Route::get('/recipients/{username}', [NativeAccountController::class, 'recipient'])->where('username', '[a-z0-9_]{3,24}')->middleware('throttle:transfer-reading');
     Route::post('/session', [AuthenticatedSessionController::class, 'store'])->middleware('guest');
     Route::post('/register', [RegisteredUserController::class, 'store'])->middleware(['guest', 'throttle:10,1']);
+    Route::post('/password/recovery', [NativeAccountController::class, 'requestPasswordReset'])->middleware(['guest', 'throttle:6,1']);
+    Route::post('/password/reset', [NativeAccountController::class, 'resetPassword'])->middleware('guest');
     Route::delete('/session', [AuthenticatedSessionController::class, 'destroy'])->middleware('auth');
     Route::middleware('auth')->group(function (): void {
         Route::get('/session', [NativeAccountController::class, 'session']);
         Route::get('/inbox', [NativeAccountController::class, 'inbox']);
         Route::patch('/inbox', [InboxController::class, 'update']);
+        Route::post('/inbox/notifications/read', [NativeAccountController::class, 'markInboxNotificationsRead']);
+        Route::patch('/account/notifications', [NativeAccountController::class, 'notificationPreference']);
+        Route::post('/account/email/verification-notification', [NativeAccountController::class, 'resendVerification'])->middleware('throttle:6,1');
+        Route::post('/account/email/verify', [NativeAccountController::class, 'verifyEmail'])->middleware('throttle:6,1');
         Route::get('/inbox/{transfer}/metadata', [InboxController::class, 'metadata'])->middleware('throttle:transfer-reading');
         Route::get('/inbox/{transfer}/items/{item}/chunks/{position}', [InboxController::class, 'chunk'])
             ->whereNumber('position')
