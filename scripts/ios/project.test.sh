@@ -37,6 +37,7 @@ done
 python3 - "$project" <<'PY'
 import collections
 import pathlib
+import plistlib
 import re
 import sys
 
@@ -48,4 +49,10 @@ for block in re.findall(r'children = \((.*?)\);', groups, re.S):
 duplicates = [reference for reference, count in collections.Counter(children).items() if count > 1]
 if duplicates:
     raise SystemExit('project references belong to multiple groups: ' + ', '.join(duplicates))
+config = pathlib.Path(sys.argv[1]).parents[1] / 'Config'
+for name in ('Filebeam-Info.plist', 'ShareExtension-Info.plist'):
+    info = plistlib.loads((config / name).read_bytes())
+    for key in ('CFBundleDisplayName', 'CFBundleExecutable', 'CFBundleIdentifier', 'CFBundleVersion', 'CFBundleShortVersionString'):
+        if not isinstance(info.get(key), str) or not info[key].strip():
+            raise SystemExit(f'{name} is missing required bundle metadata: {key}')
 PY
