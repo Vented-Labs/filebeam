@@ -18,6 +18,7 @@ final class NavigationUITests: XCTestCase {
         XCTAssertTrue(field.waitForExistence(timeout: 5))
         field.tap()
         field.typeText("example-transfer-id")
+        app.buttons["receive-input-done"].tap()
         app.tabBars.buttons["Settings"].tap()
         app.tabBars.buttons["Receive"].tap()
         XCTAssertEqual(field.value as? String, "example-transfer-id")

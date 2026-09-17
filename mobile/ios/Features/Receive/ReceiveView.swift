@@ -3,20 +3,28 @@ import FilebeamDomain
 
 struct ReceiveView: View {
     @Bindable var model: AppModel
+    @FocusState private var inputFocused: Bool
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     Text("Receive a transfer").font(.title2.bold())
                     Text("Paste the complete link, including its key. A separately shared key or password can be entered when requested.").foregroundStyle(.secondary)
-                    TextField("Transfer link or ID", text: $model.receiveInput, axis: .vertical).textInputAutocapitalization(.never).autocorrectionDisabled().textContentType(.URL).accessibilityIdentifier("receive-input").onChange(of: model.receiveInput) { _, _ in model.receiveError = nil }
+                    TextField("Transfer link or ID", text: $model.receiveInput, axis: .vertical).textInputAutocapitalization(.never).autocorrectionDisabled().textContentType(.URL).accessibilityIdentifier("receive-input").focused($inputFocused).onChange(of: model.receiveInput) { _, _ in model.receiveError = nil }
                     PasteButton(payloadType: String.self) { strings in if let string = strings.first { model.receiveInput = string } }.buttonStyle(.bordered)
                     if let error = model.receiveError { InlineNotice(text: error) }
                     if let job = model.receiveJob { ReceiveProgress(snapshot: job) }
                     PrimaryActionButton(title: "Download and verify", disabled: model.receiveInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) { Task { await model.inspectAndReceive() } }
                 }.frame(maxWidth: 640).padding()
             }.navigationTitle("Receive")
+            .toolbar {
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { inputFocused = false }.accessibilityIdentifier("receive-input-done")
+                }
+            }
         }
+        .onChange(of: model.selectedTab) { _, tab in if tab != .receive { inputFocused = false } }
         .sheet(isPresented: Binding(get: { model.pendingNoteInspection != nil }, set: { if !$0 { model.pendingNoteInspection = nil; model.pendingNoteInput = nil; model.pendingNoteInstance = nil } })) {
             if let inspection = model.pendingNoteInspection { NoteReceiveSheet(model: model, inspection: inspection) }
         }
