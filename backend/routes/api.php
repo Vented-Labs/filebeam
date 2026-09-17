@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\V1\TurboTransferController;
 use App\Http\Controllers\Api\V1\WebRtcTransferController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Auth\RegisteredUserController;
+use App\Http\Controllers\FileReportController;
 use App\Http\Controllers\InboxController;
 use App\Http\Controllers\NativeAccountController;
 use App\Http\Middleware\EnsureAnonymousTransferUploadsAreEnabled;
@@ -102,17 +103,23 @@ Route::prefix('v1')->group(function (): void {
 // Native clients retain Laravel's cookie session and login throttles. These are
 // JSON representations of existing account capabilities, not bearer-token auth.
 Route::prefix('native/v1')->middleware([EncryptCookies::class, AddQueuedCookiesToResponse::class, StartSession::class, PreventRequestForgery::class, AuthenticateSession::class])->group(function (): void {
+    Route::get('/policy', [NativeAccountController::class, 'policy']);
     Route::get('/recipients/{username}', [NativeAccountController::class, 'recipient'])->where('username', '[a-z0-9_]{3,24}')->middleware('throttle:transfer-reading');
     Route::post('/session', [AuthenticatedSessionController::class, 'store'])->middleware('guest');
     Route::post('/register', [RegisteredUserController::class, 'store'])->middleware(['guest', 'throttle:10,1']);
+    Route::get('/invitations/{token}', [NativeAccountController::class, 'invitation'])->middleware(['guest', 'throttle:10,1']);
+    Route::post('/invitations/{token}', [NativeAccountController::class, 'acceptInvitation'])->middleware(['guest', 'throttle:10,1']);
     Route::post('/password/recovery', [NativeAccountController::class, 'requestPasswordReset'])->middleware(['guest', 'throttle:6,1']);
     Route::post('/password/reset', [NativeAccountController::class, 'resetPassword'])->middleware(['guest', 'throttle:6,1']);
+    Route::post('/reports', [FileReportController::class, 'store'])->middleware('throttle:file-reports');
     Route::delete('/session', [AuthenticatedSessionController::class, 'destroy'])->middleware('auth');
     Route::middleware('auth')->group(function (): void {
         Route::get('/session', [NativeAccountController::class, 'session']);
         Route::get('/inbox', [NativeAccountController::class, 'inbox']);
+        Route::get('/inbox/unread-count', [NativeAccountController::class, 'inboxUnreadCount']);
         Route::patch('/inbox', [InboxController::class, 'update']);
         Route::post('/inbox/notifications/read', [NativeAccountController::class, 'markInboxNotificationsRead']);
+        Route::delete('/inbox/{transfer}', [InboxController::class, 'destroy']);
         Route::patch('/account/notifications', [NativeAccountController::class, 'notificationPreference']);
         Route::post('/account/email/verification-notification', [NativeAccountController::class, 'resendVerification'])->middleware('throttle:6,1');
         Route::post('/account/email/verify', [NativeAccountController::class, 'verifyEmail'])->middleware('throttle:6,1');
@@ -123,5 +130,6 @@ Route::prefix('native/v1')->middleware([EncryptCookies::class, AddQueuedCookiesT
             ->middleware('throttle:transfer-reading');
         Route::get('/account/keys', [NativeAccountController::class, 'keys']);
         Route::post('/account/keys', [AccountKeyController::class, 'store'])->middleware('throttle:account-key-writing');
+        Route::delete('/account', [NativeAccountController::class, 'destroyAccount']);
     });
 });

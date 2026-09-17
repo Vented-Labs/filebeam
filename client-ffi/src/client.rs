@@ -10,8 +10,8 @@ use std::{path::PathBuf, sync::Arc};
 #[derive(uniffi::Object)]
 pub struct TransferClient {
     pub(super) settings: TransferSettings,
-    scheduler: core::Scheduler,
-    allow_http: bool,
+    pub(crate) scheduler: core::Scheduler,
+    pub(crate) allow_http: bool,
 }
 
 #[uniffi::export]
@@ -75,6 +75,19 @@ impl TransferClient {
         let mut client = Self::new_with_runtime(config, runtime)?;
         crate::secret_store::install(&mut client.settings, secret_store);
         crate::source::install(&mut client.settings, source);
+        Ok(client)
+    }
+
+    /// Shares the process scheduler while keeping checkpoint keys in host custody.
+    /// Path uploads do not need a source callback.
+    #[uniffi::constructor]
+    pub fn new_with_runtime_secret_store(
+        config: ClientConfig,
+        runtime: Arc<NativeRuntime>,
+        secret_store: Arc<dyn SecretStoreCallback>,
+    ) -> Result<Self> {
+        let mut client = Self::new_with_runtime(config, runtime)?;
+        crate::secret_store::install(&mut client.settings, secret_store);
         Ok(client)
     }
 
@@ -366,6 +379,11 @@ impl TransferClient {
                     })
                     .collect()
             })
+    }
+
+    /// Creates the app-relaunch-safe URLSession execution surface.
+    pub fn background_transfer(&self) -> Arc<crate::BackgroundTransfer> {
+        Arc::new(crate::BackgroundTransfer::from_client(self))
     }
 
     /// Authenticated checkpoint details without keys, cookies, or operation tokens.

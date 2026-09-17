@@ -76,6 +76,8 @@ pub(super) struct UploadJob {
     pub total: u64,
     transfer_id: Option<String>,
     upload_token: Option<String>,
+    #[serde(default)]
+    monitor_token: Option<String>,
     share_url: Option<String>,
     delete_token: Option<String>,
     share_key: Vec<u8>,
@@ -101,6 +103,37 @@ pub(super) struct UploadJob {
     recipient: Option<Recipient>,
     items: Vec<Item>,
     chunks: Vec<Chunk>,
+}
+
+/// The only checkpoint data activity polling may use. Credentials remain
+/// module-private and are never included in activity results.
+pub(super) struct UploadActivity {
+    pub instance: String,
+    pub transfer_id: String,
+    pub upload_token: String,
+    pub monitor_token: Option<String>,
+    pub driver: String,
+    pub turbo: bool,
+}
+
+pub(super) fn activity(store: &Store) -> Result<Option<UploadActivity>> {
+    let Some(job) = store.load::<UploadJob>()? else {
+        return Ok(None);
+    };
+    if job.direction != "upload" {
+        bail!("saved transfer is not an upload");
+    }
+    let (Some(transfer_id), Some(upload_token)) = (job.transfer_id, job.upload_token) else {
+        return Ok(None);
+    };
+    Ok(Some(UploadActivity {
+        instance: job.instance,
+        transfer_id,
+        upload_token,
+        monitor_token: job.monitor_token,
+        driver: job.driver,
+        turbo: job.turbo,
+    }))
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -320,6 +353,8 @@ struct Created {
     upload_transport: Option<UploadTransport>,
     items: Vec<CreatedItem>,
     upload_token: String,
+    #[serde(default)]
+    monitor_token: Option<String>,
     delete_token: String,
     #[serde(default)]
     driver: String,
@@ -349,6 +384,11 @@ struct PublishedChunk {
     checksum: String,
 }
 
+enum UploadExecution {
+    Foreground(&'static str),
+    BackgroundHttp,
+}
+
 pub(super) fn run(
     instance: &str,
     paths: &[PathBuf],
@@ -364,8 +404,63 @@ pub(super) fn run(
         mode,
         control,
         Arc::new(store),
-        "http",
         options,
+        UploadExecution::Foreground("http"),
+    ))
+}
+
+/// Reserve and fully spool an HTTP upload for an OS-owned background client.
+/// No request body is sent here: every descriptor returned afterwards points at
+/// immutable ciphertext that has already been checkpointed.
+pub(super) fn run_background(
+    instance: &str,
+    paths: &[PathBuf],
+    mode: DirectoryMode,
+    options: super::UploadOptions,
+    control: &Control,
+) -> Result<String> {
+    if options.transport != super::Transport::Http {
+        bail!("background execution supports HTTP file uploads only");
+    }
+    let id = Uuid::new_v4().to_string();
+    let store = control.create_checkpoint_store(&id)?;
+    crate::runtime::shared_tokio_runtime().block_on(run_new(
+        instance,
+        Inputs::Paths(paths),
+        mode,
+        control,
+        Arc::new(store),
+        options,
+        UploadExecution::BackgroundHttp,
+    ))
+}
+
+/// Source snapshots follow the same reservation and ciphertext preparation as
+/// path uploads, while retaining the caller-provided display names.
+pub(super) fn run_background_sources(
+    instance: &str,
+    sources: &[UploadSource],
+    mode: DirectoryMode,
+    options: super::UploadOptions,
+    control: &Control,
+) -> Result<String> {
+    if options.transport != super::Transport::Http {
+        bail!("background execution supports HTTP file uploads only");
+    }
+    if sources.is_empty() {
+        bail!("Select at least one source");
+    }
+    ensure_unique_source_names(sources)?;
+    let id = Uuid::new_v4().to_string();
+    let store = control.create_checkpoint_store(&id)?;
+    crate::runtime::shared_tokio_runtime().block_on(run_new(
+        instance,
+        Inputs::Sources(sources),
+        mode,
+        control,
+        Arc::new(store),
+        options,
+        UploadExecution::BackgroundHttp,
     ))
 }
 
@@ -387,8 +482,8 @@ pub(super) fn run_webrtc(
         mode,
         control,
         Arc::new(store),
-        "webrtc",
         options,
+        UploadExecution::Foreground("webrtc"),
     ))
 }
 
@@ -402,20 +497,35 @@ pub(super) fn run_sources(
     if sources.is_empty() {
         bail!("Select at least one source");
     }
+    ensure_unique_source_names(sources)?;
     let id = Uuid::new_v4().to_string();
     let store = control.create_checkpoint_store(&id)?;
+    let execution = UploadExecution::Foreground(match options.transport {
+        super::Transport::Http => "http",
+        super::Transport::WebRtc => "webrtc",
+    });
     crate::runtime::shared_tokio_runtime().block_on(run_new(
         instance,
         Inputs::Sources(sources),
         mode,
         control,
         Arc::new(store),
-        match options.transport {
-            super::Transport::Http => "http",
-            super::Transport::WebRtc => "webrtc",
-        },
         options,
+        execution,
     ))
+}
+
+fn ensure_unique_source_names(sources: &[UploadSource]) -> Result<()> {
+    let mut names = HashSet::new();
+    for source in sources {
+        if !names.insert(&source.name) {
+            bail!(
+                "Two selected sources have the same original name: {}",
+                source.name
+            );
+        }
+    }
+    Ok(())
 }
 
 pub(super) fn resume(store: Store, control: &Control) -> Result<Vec<String>> {
@@ -428,15 +538,137 @@ pub(super) fn resume(store: Store, control: &Control) -> Result<Vec<String>> {
     })
 }
 
+pub(super) fn background_work(store: &Store) -> Result<Vec<super::background::BackgroundWork>> {
+    let job = store
+        .load::<UploadJob>()?
+        .context("saved upload checkpoint is empty")?;
+    validate_job(&job)?;
+    if job.state != "awaiting-execution" || job.driver != "http" {
+        bail!("saved upload is not eligible for external HTTP execution");
+    }
+    let transfer = job.transfer_id.context("upload was not reserved")?;
+    let token = job.upload_token.context("upload token is unavailable")?;
+    let mut work = Vec::new();
+    for chunk in job.chunks.iter().filter(|chunk| !chunk.complete) {
+        // The artifact was checksummed when it was atomically persisted. Do not
+        // reread every chunk on every relaunch/poll; completion revalidates it
+        // before a server acknowledgement can advance durable state.
+        if !fs::symlink_metadata(&chunk.artifact)
+            .map(|metadata| metadata.file_type().is_file())
+            .unwrap_or(false)
+        {
+            bail!("immutable upload artifact is unavailable");
+        }
+        work.push(super::background::BackgroundWork {
+            operation_id: format!("{}:{}:{}", job.id, chunk.item_id, chunk.position),
+            transfer_id: job.id.clone(),
+            method: "PUT".into(),
+            url: format!(
+                "{}/api/v1/transfers/{transfer}/items/{}/chunks/{}",
+                job.instance, chunk.item_id, chunk.position
+            ),
+            headers: vec![super::background::BackgroundHeader {
+                name: "X-Filebeam-Upload-Token".into(),
+                value: token.clone(),
+            }],
+            body_path: chunk.artifact.display().to_string(),
+            // Direct v1 upload accepts a created response without parsing its
+            // body; nevertheless bound URLSession's retained response file.
+            expected_response_bytes: 2 * 1024 * 1024,
+        });
+    }
+    Ok(work)
+}
+
+pub(super) fn ingest_background_completion(
+    store: &Store,
+    operation_id: &str,
+    status: u16,
+) -> Result<()> {
+    let mut job = store
+        .load::<UploadJob>()?
+        .context("saved upload checkpoint is empty")?;
+    validate_job(&job)?;
+    if job.state != "awaiting-execution" || job.driver != "http" {
+        bail!("saved upload is not eligible for external HTTP execution");
+    }
+    let job_id = job.id.clone();
+    let chunk = job
+        .chunks
+        .iter_mut()
+        .find(|chunk| operation_id == format!("{job_id}:{}:{}", chunk.item_id, chunk.position))
+        .context("background completion does not match a pending upload operation")?;
+    if chunk.complete {
+        return Ok(()); // URLSession may redeliver a persisted completion.
+    }
+    if status != StatusCode::CREATED.as_u16() {
+        bail!("background upload did not receive HTTP 201");
+    }
+    let metadata =
+        fs::symlink_metadata(&chunk.artifact).context("inspect immutable upload artifact")?;
+    if !metadata.file_type().is_file() {
+        bail!("immutable upload artifact is not a regular file");
+    }
+    let bytes = fs::read(&chunk.artifact).context("read immutable upload artifact")?;
+    if bytes.len() as u64 != chunk.ciphertext_bytes
+        || hex::encode(Sha256::digest(&bytes)) != chunk.checksum
+    {
+        bail!("immutable upload artifact was modified");
+    }
+    chunk.complete = true;
+    let artifact = chunk.artifact.clone();
+    job.done = job
+        .chunks
+        .iter()
+        .filter(|chunk| chunk.complete)
+        .map(|chunk| chunk.plaintext_bytes)
+        .sum();
+    store.save(&job)?;
+    // The checkpoint completion bit is durable before removing retry input.
+    let _ = fs::remove_file(artifact);
+    Ok(())
+}
+
+/// Resolve an ambiguous URLSession completion against the server's authenticated
+/// upload-status ledger. Only an exact ciphertext length/checksum pair is
+/// adopted; a timeout or unrelated 201 never advances this checkpoint.
+pub(super) fn reconcile_background(store: Store, control: &Control) -> Result<()> {
+    crate::runtime::shared_tokio_runtime().block_on(async move {
+        let mut job = store
+            .load::<UploadJob>()?
+            .context("saved upload checkpoint is empty")?;
+        validate_job(&job)?;
+        if job.state != "awaiting-execution" || job.driver != "http" || !job.upload_status {
+            bail!("saved upload cannot reconcile external completion status");
+        }
+        let transfer = job.transfer_id.clone().context("upload was not reserved")?;
+        let token = job
+            .upload_token
+            .clone()
+            .context("upload token is unavailable")?;
+        let client = client(control, &super::UploadAuthentication::Anonymous)?;
+        reconcile(&mut job, &client, &transfer, &token, control).await?;
+        store.save(&job)?;
+        for chunk in job.chunks.iter().filter(|chunk| chunk.complete) {
+            let _ = fs::remove_file(&chunk.artifact);
+        }
+        Ok(())
+    })
+}
+
 async fn run_new(
     instance: &str,
     inputs: Inputs<'_>,
     mode: DirectoryMode,
     control: &Control,
     store: Arc<Store>,
-    driver: &str,
     options: super::UploadOptions,
+    execution: UploadExecution,
 ) -> Result<String> {
+    let (driver, background) = match execution {
+        UploadExecution::Foreground(driver) => (driver, false),
+        UploadExecution::BackgroundHttp => ("http", true),
+    };
     control.phase(Phase::Connecting)?;
     if options.recipient.is_some() && (driver != "http" || options.password) {
         bail!("inbox delivery requires HTTP without password protection");
@@ -521,6 +753,7 @@ async fn run_new(
         total,
         transfer_id: None,
         upload_token: None,
+        monitor_token: None,
         share_url: None,
         delete_token: None,
         share_key: generate_transfer_key()?.to_vec(),
@@ -603,6 +836,7 @@ async fn run_new(
     }
     job.transfer_id = Some(created.id.clone());
     job.upload_token = Some(created.upload_token);
+    job.monitor_token = created.monitor_token;
     job.delete_token = Some(created.delete_token);
     job.share_url = Some(created.share_url);
     job.transport = created.upload_transport;
@@ -645,7 +879,50 @@ async fn run_new(
     control.set_checkpoint_id(job.id.clone());
     // Keep the prepared ZIP owner alive while the producer reads it.
     let _prepared = prepared;
+    if background {
+        prepare_background_job(&mut job, &store, control).await?;
+        return Ok(job.id.clone());
+    }
     continue_job(job, store, control).await
+}
+
+async fn prepare_background_job(
+    job: &mut UploadJob,
+    store: &Store,
+    control: &Control,
+) -> Result<()> {
+    unlock_job(job, control)?;
+    let transfer = job
+        .transfer_id
+        .clone()
+        .context("background upload was not reserved")?;
+    let token = job
+        .upload_token
+        .clone()
+        .context("background upload token is unavailable")?;
+    if job.turbo && !job.descriptor_published {
+        if job.encrypted_descriptor.is_none() {
+            job.encrypted_descriptor = Some(turbo_descriptor(job, &transfer, control)?);
+            store.save(job)?;
+        }
+        let client = client(control, &super::UploadAuthentication::Anonymous)?;
+        publish_turbo_descriptor(job, &client, &transfer, &token, control).await?;
+        store.save(job)?;
+        control.emit(TransferEvent::ShareReady(crate::control::ShareReady {
+            share_url: receipt(job)?,
+        }));
+    }
+    validate_sources(job, control)?;
+    prepare_live_ciphertext(job, store, control).await?;
+    validate_sources(job, control)?;
+    for item in &mut job.items {
+        item.digest = item.source.digest.clone();
+        item.bytes = item.source.bytes;
+        item.chunk_count = chunk_count(item.source.bytes, job.chunk_bytes)?;
+    }
+    job.state = "awaiting-execution".into();
+    store.save(job)?;
+    Ok(())
 }
 
 async fn continue_job(mut job: UploadJob, store: Arc<Store>, control: &Control) -> Result<String> {
@@ -2125,7 +2402,13 @@ fn validate_job(job: &UploadJob) -> Result<()> {
         || job.direction != "upload"
         || !matches!(
             job.state.as_str(),
-            "preparing" | "sending" | "finalizing" | "serving" | "ended" | "complete"
+            "preparing"
+                | "awaiting-execution"
+                | "sending"
+                | "finalizing"
+                | "serving"
+                | "ended"
+                | "complete"
         )
         || job.chunk_bytes == 0
         || job.chunk_bytes > 24_999_984
@@ -2388,6 +2671,110 @@ async fn turbo_heartbeat(
 fn aad(transfer: &str, item: &str, position: u64) -> String {
     format!("filebeam:v1:{transfer}:{item}:{position}")
 }
+
+#[cfg(test)]
+mod background_tests {
+    use super::*;
+
+    fn awaiting_job(store: &Store, artifact: PathBuf) -> UploadJob {
+        let id = store
+            .path()
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let checksum = hex::encode(Sha256::digest([7_u8; 17]));
+        UploadJob {
+            version: 1,
+            id,
+            direction: "upload".into(),
+            state: "awaiting-execution".into(),
+            instance: "https://files.example".into(),
+            done: 0,
+            total: 1,
+            transfer_id: Some("transfer".into()),
+            upload_token: Some("token".into()),
+            monitor_token: None,
+            share_url: Some("/transfer".into()),
+            delete_token: Some("delete".into()),
+            share_key: vec![1; 32],
+            password_salt: None,
+            master_key: Vec::new(),
+            chunk_bytes: 1,
+            server_concurrency: 1,
+            upload_status: false,
+            turbo: false,
+            descriptor_published: false,
+            encrypted_descriptor: None,
+            transport: None,
+            driver: "http".into(),
+            join_token: None,
+            exact_manifest: None,
+            receipt: None,
+            recipient: None,
+            items: vec![Item {
+                id: "item".into(),
+                position: 0,
+                name: "file".into(),
+                source: Source {
+                    spec: SourceSpec::Path {
+                        path: PathBuf::from("/tmp/source"),
+                        offset: 0,
+                        length: 1,
+                    },
+                    bytes: 1,
+                    modified_ns: 0,
+                    digest: "0".repeat(64),
+                    chunk_digests: vec!["0".repeat(64)],
+                },
+                nonce_prefix: encode(&[0; 16]),
+                digest: "0".repeat(64),
+                bytes: 1,
+                chunk_count: 1,
+            }],
+            chunks: vec![Chunk {
+                item: 0,
+                item_id: "item".into(),
+                position: 0,
+                plaintext_bytes: 1,
+                ciphertext_bytes: 17,
+                checksum,
+                artifact,
+                complete: false,
+                stage: None,
+            }],
+        }
+    }
+
+    #[test]
+    fn background_completion_is_bound_to_immutable_artifact_and_is_idempotent() {
+        let root = tempfile::tempdir().unwrap();
+        let id = Uuid::new_v4().to_string();
+        let store = Store::create(root.path(), &id).unwrap();
+        let artifact = store.persist_immutable("chunk-0-0", &[7; 17]).unwrap();
+        store.save(&awaiting_job(&store, artifact.clone())).unwrap();
+        let work = background_work(&store).unwrap();
+        assert_eq!(work.len(), 1);
+        assert!(ingest_background_completion(&store, "wrong", 201).is_err());
+        assert!(ingest_background_completion(&store, &work[0].operation_id, 200).is_err());
+        ingest_background_completion(&store, &work[0].operation_id, 201).unwrap();
+        ingest_background_completion(&store, &work[0].operation_id, 201).unwrap();
+        assert!(!artifact.exists());
+    }
+
+    #[test]
+    fn background_completion_rejects_tampered_ciphertext() {
+        let root = tempfile::tempdir().unwrap();
+        let id = Uuid::new_v4().to_string();
+        let store = Store::create(root.path(), &id).unwrap();
+        let artifact = store.persist_immutable("chunk-0-0", &[7; 17]).unwrap();
+        store.save(&awaiting_job(&store, artifact.clone())).unwrap();
+        let work = background_work(&store).unwrap();
+        std::fs::remove_file(&artifact).unwrap();
+        std::fs::write(&artifact, [8; 17]).unwrap();
+        assert!(ingest_background_completion(&store, &work[0].operation_id, 201).is_err());
+    }
+}
 fn http_driver() -> String {
     "http".into()
 }
@@ -2524,6 +2911,7 @@ mod tests {
             total: 5,
             transfer_id: None,
             upload_token: None,
+            monitor_token: None,
             share_url: None,
             delete_token: None,
             share_key: vec![0; 32],
@@ -2569,6 +2957,7 @@ mod tests {
             total: 0,
             transfer_id: Some("01ARZ3NDEKTSV4RRFFQ69G5FAV".into()),
             upload_token: Some("token".into()),
+            monitor_token: None,
             share_url: Some("/transfers/01ARZ3NDEKTSV4RRFFQ69G5FAV".into()),
             delete_token: Some("delete".into()),
             share_key: vec![7; 32],
@@ -2749,6 +3138,58 @@ mod tests {
         assert_eq!(
             filebeam_encryption::open_recipient_envelope(&pair[..32], &envelope, aad).unwrap(),
             transfer_key
+        );
+    }
+
+    #[test]
+    fn source_snapshot_rejects_duplicate_original_names() {
+        let sources = [
+            UploadSource {
+                name: "report.txt".into(),
+                spec: SourceSpec::Path {
+                    path: "/one/report.txt".into(),
+                    offset: 0,
+                    length: 1,
+                },
+            },
+            UploadSource {
+                name: "report.txt".into(),
+                spec: SourceSpec::Path {
+                    path: "/two/report.txt".into(),
+                    offset: 0,
+                    length: 1,
+                },
+            },
+        ];
+        assert!(ensure_unique_source_names(&sources).is_err());
+    }
+
+    #[test]
+    fn source_snapshot_zip_preserves_unicode_tree_names() {
+        let directory = tempfile::tempdir().unwrap();
+        let file = directory.path().join("source");
+        fs::write(&file, b"contents").unwrap();
+        let sources = [UploadSource {
+            name: "fotos/ni\u{00f1}o/archivo.txt".into(),
+            spec: SourceSpec::Path {
+                path: file,
+                offset: 0,
+                length: 8,
+            },
+        }];
+        let prepared = uploads::Prepared::from_sources(
+            &sources,
+            DirectoryMode::Zip,
+            None,
+            &Control::test_factory(),
+        )
+        .unwrap();
+        let archive =
+            zip::ZipArchive::new(std::fs::File::open(&prepared.files[0].path).unwrap()).unwrap();
+        assert!(
+            archive
+                .file_names()
+                .any(|name| name == "fotos/ni\u{00f1}o/archivo.txt")
         );
     }
 }

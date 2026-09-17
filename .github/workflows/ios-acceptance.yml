@@ -1,0 +1,61 @@
+name: iOS acceptance
+on:
+  schedule: [{ cron: '31 3 * * *' }]
+  workflow_dispatch:
+    inputs:
+      ref: { description: Git ref to build and test, required: true, default: master, type: string }
+      backend_url: { description: HTTPS backend URL used by the peer fixture suite, required: false, type: string }
+      peer_fixtures: { description: Repository path containing peer fixtures, required: false, type: string }
+permissions: { contents: read }
+concurrency:
+  group: ios-acceptance-${{ inputs.ref || github.ref }}
+  cancel-in-progress: false
+jobs:
+  native-backend:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 45
+    env:
+      IOS_ACCEPTANCE_EVIDENCE_DIR: test-results/ios/acceptance
+    steps:
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+        with: { persist-credentials: false, ref: '${{ inputs.ref || github.ref }}' }
+      - uses: ./.github/actions/setup-php
+      - uses: ./.github/actions/setup-rust
+      - uses: useblacksmith/setup-docker-builder@19215110ab936351210feebdfa5b440b4493e184 # v2
+        with:
+          cache-key: backend/docker/frankenphp/Dockerfile
+      - name: Build the disposable PHP peer image
+        run: docker buildx build --load --tag filebeam-sail-php85/app:latest backend/docker/frankenphp
+      - name: Run disposable native HTTP acceptance
+        run: |
+          set -euo pipefail
+          mkdir -p "$IOS_ACCEPTANCE_EVIDENCE_DIR"
+          backend_url=$(bash scripts/ios/peer-backend.sh start)
+          trap 'bash scripts/ios/peer-backend.sh stop' EXIT
+          FILEBEAM_ACCEPTANCE_INSTANCE="$backend_url" bash scripts/ios/peer-native.sh > "$IOS_ACCEPTANCE_EVIDENCE_DIR/native-background.log" 2>&1
+          printf 'native_http_instance=%s\n' "$backend_url" > "$IOS_ACCEPTANCE_EVIDENCE_DIR/instance.txt"
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with: { name: ios-native-acceptance, path: test-results/ios/acceptance/, if-no-files-found: ignore, retention-days: 14 }
+  apple-ui:
+    needs: native-backend
+    runs-on: blacksmith-6vcpu-macos-15
+    environment: ios-acceptance
+    timeout-minutes: 45
+    env:
+      IOS_XCODE_VERSION: '26.3'
+      IOS_ACCEPTANCE_HTTPS_LINK_FIXTURE: ${{ secrets.IOS_ACCEPTANCE_HTTPS_LINK_FIXTURE }}
+      IOS_TEST_ONLY: FilebeamUITests/PeerAcceptanceTests
+    steps:
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+        with: { persist-credentials: false, ref: '${{ inputs.ref || github.ref }}' }
+      - name: Run HTTPS XCUITest acceptance suite
+        run: |
+          set -euo pipefail
+          [[ "$IOS_ACCEPTANCE_HTTPS_LINK_FIXTURE" == https://* ]]
+          bash scripts/ios/test.sh
+          xcrun xcresulttool get test-results tests --path test-results/ios/Filebeam.xcresult > test-results/ios/peer-tests.json
+          python3 scripts/ios/require-peer-test.py test-results/ios/peer-tests.json
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with: { name: ios-apple-acceptance, path: test-results/ios/, if-no-files-found: ignore, retention-days: 14 }

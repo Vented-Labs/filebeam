@@ -51,6 +51,23 @@ if ($usernameDomain !== null && (! is_string($usernameDomain) || filter_var($use
     throw new InvalidArgumentException('FILEBEAM_USERNAME_DOMAIN must be an exact hostname.');
 }
 
+$appleAppIdsValue = env('FILEBEAM_IOS_APP_IDS', '');
+
+if (! is_string($appleAppIdsValue)) {
+    throw new InvalidArgumentException('FILEBEAM_IOS_APP_IDS must be a comma-separated or JSON app identifier list.');
+}
+
+$appleAppIdsValue = trim($appleAppIdsValue);
+$appleAppIds = match (true) {
+    $appleAppIdsValue === '' => [],
+    str_starts_with($appleAppIdsValue, '[') => json_decode($appleAppIdsValue, true, 512, JSON_THROW_ON_ERROR),
+    default => array_map('trim', explode(',', $appleAppIdsValue)),
+};
+
+if (! is_array($appleAppIds) || ! array_is_list($appleAppIds) || array_filter($appleAppIds, 'is_string') !== $appleAppIds || array_filter($appleAppIds, static fn (string $appId): bool => preg_match('/^[A-Z0-9]{10}\.[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/', $appId) === 1) !== $appleAppIds || count(array_unique($appleAppIds)) !== count($appleAppIds)) {
+    throw new InvalidArgumentException('FILEBEAM_IOS_APP_IDS must contain unique TEAM.bundle identifiers with a 10-character uppercase alphanumeric Team ID and case-sensitive dotted bundle ID.');
+}
+
 $transportDriversValue = env('FILEBEAM_ENABLED_TRANSFER_DRIVERS');
 
 if ($transportDriversValue !== null && ! is_string($transportDriversValue)) {
@@ -160,6 +177,9 @@ foreach (['FILEBEAM_CLI_INSTALLER_URL' => $cliInstallerUrl, 'FILEBEAM_CLI_WINDOW
 
 return [
     'username_domain' => $usernameDomain,
+    'apple' => [
+        'app_ids' => $appleAppIds,
+    ],
     'branding' => $branding,
 
     'cli' => [

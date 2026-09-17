@@ -6,6 +6,7 @@ transfer-wasm/target*/
 cli/target*/
 client-core/target*/
 client-ffi/target*/
+target-shared/
 mobile/android/.gradle/
 mobile/android/.kotlin/
 mobile/android/.cxx/
@@ -18,6 +19,14 @@ mobile/android/**/signing.properties
 mobile/android/**/*.keystore
 mobile/android/**/*.jks
 mobile/android/**/*.p12
+mobile/ios/Filebeam.xcodeproj/
+mobile/ios/build/
+mobile/ios/.swiftpm/
+mobile/ios/Packages/FilebeamCore/Artifacts/
+mobile/ios/Packages/FilebeamCore/Generated/
+mobile/ios/Packages/*/.build/
+mobile/ios/Platform/**/.build/
+.ios-tools/
 .android-cache/
 encryption/pkg/
 transfer-wasm/pkg/

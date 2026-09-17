@@ -110,6 +110,21 @@ pub struct Recipient {
     pub version: u32,
     pub fingerprint: String,
 }
+#[derive(Clone, Debug, Deserialize)]
+pub struct InboxUnreadCount {
+    #[serde(rename = "unreadCount")]
+    pub count: u64,
+}
+#[derive(Clone, Debug, Deserialize)]
+pub struct Invitation {
+    pub email: Option<String>,
+    #[serde(rename = "expiresAt")]
+    pub expires_at: Option<String>,
+}
+#[derive(Clone, Debug, Deserialize)]
+pub struct AccountDeletion {
+    pub status: String,
+}
 #[derive(Deserialize)]
 struct Api<T> {
     data: T,
@@ -208,6 +223,12 @@ impl AccountService {
     pub fn inbox(&self) -> Result<Vec<InboxTransfer>> {
         self.get("api/native/v1/inbox")
     }
+    pub fn inbox_unread_count(&self) -> Result<InboxUnreadCount> {
+        self.get("api/native/v1/inbox/unread-count")
+    }
+    pub fn delete_inbox_item(&self, id: &str) -> Result<()> {
+        self.delete_no_content(&format!("api/native/v1/inbox/{id}"), 202)
+    }
     pub fn inbox_metadata(&self, id: &str) -> Result<InboxMetadata> {
         self.get(&format!("api/native/v1/inbox/{id}/metadata"))
     }
@@ -277,6 +298,62 @@ impl AccountService {
     }
     pub fn recipient(&self, username: &str) -> Result<Recipient> {
         self.get(&format!("api/native/v1/recipients/{username}"))
+    }
+    pub fn policy(&self) -> Result<serde_json::Value> {
+        self.get("api/native/v1/policy")
+    }
+    pub fn invitation(&self, token: &str) -> Result<Invitation> {
+        self.get(&format!("api/native/v1/invitations/{token}"))
+    }
+    pub fn accept_invitation(
+        &self,
+        token: &str,
+        username: &str,
+        name: Option<&str>,
+        email: &str,
+        password: &str,
+    ) -> Result<AccountSession> {
+        self.post(
+            &format!("api/native/v1/invitations/{token}"),
+            serde_json::json!({
+                "username": username, "name": name, "email": email,
+                "password": password, "password_confirmation": password,
+            }),
+            201,
+        )
+    }
+    pub fn report(
+        &self,
+        transfer_id: &str,
+        category: &str,
+        description: &str,
+        email: Option<&str>,
+    ) -> Result<()> {
+        let response = self.http.post(url(&self.instance, "api/native/v1/reports")?)
+            .header("Sec-Fetch-Site", "same-origin")
+            .json(&serde_json::json!({"transfer_id": transfer_id, "category": category, "description": description, "email": email}))
+            .send().context("submit native report")?;
+        if response.status().as_u16() != 202 {
+            bail!("native report returned {}", response.status());
+        }
+        Ok(())
+    }
+    pub fn delete_account(
+        &self,
+        current_password: &str,
+        confirmation: &str,
+    ) -> Result<AccountDeletion> {
+        let response = self.http.delete(url(&self.instance, "api/native/v1/account")?)
+            .header("Sec-Fetch-Site", "same-origin")
+            .json(&serde_json::json!({"current_password": current_password, "confirmation": confirmation}))
+            .send().context("delete native account")?;
+        if response.status().as_u16() != 202 {
+            bail!("native account deletion returned {}", response.status());
+        }
+        response
+            .json::<Api<AccountDeletion>>()
+            .context("decode native account deletion")
+            .map(|value| value.data)
     }
     pub fn upload_key(&self, key: &AccountKeyUpload) -> Result<AccountKeyBundle> {
         let response = self
@@ -361,6 +438,39 @@ impl AccountService {
             .send()
             .context("native account update")?;
         if response.status().as_u16() != 204 {
+            bail!("native account update returned {}", response.status());
+        }
+        Ok(())
+    }
+    fn post<T: for<'a> Deserialize<'a>>(
+        &self,
+        path: &str,
+        body: serde_json::Value,
+        expected: u16,
+    ) -> Result<T> {
+        let response = self
+            .http
+            .post(url(&self.instance, path)?)
+            .header("Sec-Fetch-Site", "same-origin")
+            .json(&body)
+            .send()
+            .context("native account update")?;
+        if response.status().as_u16() != expected {
+            bail!("native account update returned {}", response.status());
+        }
+        response
+            .json::<Api<T>>()
+            .context("decode native account response")
+            .map(|value| value.data)
+    }
+    fn delete_no_content(&self, path: &str, expected: u16) -> Result<()> {
+        let response = self
+            .http
+            .delete(url(&self.instance, path)?)
+            .header("Sec-Fetch-Site", "same-origin")
+            .send()
+            .context("native account update")?;
+        if response.status().as_u16() != expected {
             bail!("native account update returned {}", response.status());
         }
         Ok(())
