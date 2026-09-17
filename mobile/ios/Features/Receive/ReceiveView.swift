@@ -9,7 +9,7 @@ struct ReceiveView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     Text("Receive a transfer").font(.title2.bold())
                     Text("Paste the complete link, including its key. A separately shared key or password can be entered when requested.").foregroundStyle(.secondary)
-                    TextField("Transfer link or ID", text: $model.receiveInput, axis: .vertical).textInputAutocapitalization(.never).autocorrectionDisabled().textContentType(.URL).onChange(of: model.receiveInput) { _, _ in model.receiveError = nil }
+                    TextField("Transfer link or ID", text: $model.receiveInput, axis: .vertical).textInputAutocapitalization(.never).autocorrectionDisabled().textContentType(.URL).accessibilityIdentifier("receive-input").onChange(of: model.receiveInput) { _, _ in model.receiveError = nil }
                     PasteButton(payloadType: String.self) { strings in if let string = strings.first { model.receiveInput = string } }.buttonStyle(.bordered)
                     if let error = model.receiveError { InlineNotice(text: error) }
                     if let job = model.receiveJob { ReceiveProgress(snapshot: job) }

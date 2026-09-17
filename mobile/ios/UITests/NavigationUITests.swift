@@ -14,7 +14,7 @@ final class NavigationUITests: XCTestCase {
         let app = XCUIApplication()
         app.launch()
         app.tabBars.buttons["Receive"].tap()
-        let field = app.textFields["Transfer link or ID"]
+        let field = app.descendants(matching: .any).matching(identifier: "receive-input").firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 5))
         field.tap()
         field.typeText("example-transfer-id")

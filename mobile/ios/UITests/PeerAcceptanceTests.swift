@@ -8,7 +8,7 @@ final class PeerAcceptanceTests: XCTestCase {
         let app = XCUIApplication()
         app.launch()
         app.tabBars.buttons["Receive"].tap()
-        let field = app.textFields["Transfer link or ID"]
+        let field = app.descendants(matching: .any).matching(identifier: "receive-input").firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 10))
         field.tap()
         field.typeText(link)
@@ -24,7 +24,7 @@ final class PeerAcceptanceTests: XCTestCase {
         let app = XCUIApplication()
         app.launch()
         app.tabBars.buttons["Receive"].tap()
-        let field = app.textFields["Transfer link or ID"]
+        let field = app.descendants(matching: .any).matching(identifier: "receive-input").firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 10))
         field.tap(); field.typeText("draft-retention-check")
         app.tabBars.buttons["Settings"].tap(); app.tabBars.buttons["Receive"].tap()
