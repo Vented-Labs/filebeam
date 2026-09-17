@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.unit.dp
 
 @Composable
 fun ProductionGroupCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {

@@ -217,5 +217,7 @@ private fun Destination.routeDestination() = when (this) {
     Destination.Transfers -> DestinationRoute.Transfers
     Destination.Inbox -> DestinationRoute.Inbox
     Destination.Settings -> DestinationRoute.Settings
+    Destination.StorageUsage -> DestinationRoute.StorageUsage
+    Destination.ReviewTransfers -> DestinationRoute.ReviewTransfers
     Destination.Account -> DestinationRoute.Account
 }
