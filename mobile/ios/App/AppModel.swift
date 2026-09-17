@@ -198,7 +198,7 @@ final class AppModel {
                 let text = [draft.text, draft.links.isEmpty ? nil : draft.links.joined(separator: "\n")].compactMap { $0 }.joined(separator: draft.text?.isEmpty == false ? "\n\n" : "")
                 if !text.isEmpty { enqueueExternal(.sharedText(text: text, links: draft.links)) }
             }
-            for draft in drafts { inbox.acknowledge(draft.id) }
+            for draft in drafts { try inbox.acknowledge(draft.id) }
         } catch { operationError = message(error) }
     }
 
@@ -396,7 +396,7 @@ final class AppModel {
             case .resume: guard let id = snapshot.checkpointID.map({ TransferID($0) }) else { throw FilebeamDomainError.invalidInput("This transfer has no resumable checkpoint.") }; accept(try await service.resume(transferID: id))
             case .discardLocal: guard let id = snapshot.checkpointID.map({ TransferID($0) }) else { throw FilebeamDomainError.invalidInput("This transfer has no local recovery state.") }; try await service.discardLocal(transferID: id)
             case .revokeRemote: guard let id = snapshot.checkpointID.map({ TransferID($0) }) else { throw FilebeamDomainError.invalidInput("This transfer has no remote recovery reference.") }; accept(try await service.revokeRemote(transferID: id))
-            case .endLive: guard let id = snapshot.transferID ?? snapshot.checkpointID.map(TransferID.init) else { throw FilebeamDomainError.invalidInput("Live transfer identity is unavailable.") }; accept(try await service.endLive(transferID: id))
+            case .endLive: guard let id = snapshot.transferID ?? snapshot.checkpointID.map({ TransferID($0) }) else { throw FilebeamDomainError.invalidInput("Live transfer identity is unavailable.") }; accept(try await service.endLive(transferID: id))
             case .receipt: guard let id = snapshot.transferID else { throw FilebeamDomainError.invalidInput("Share receipt is unavailable.") }; receipt = try await service.receipt(transferID: id, includeKey: shareKeyChoices[snapshot.id] ?? false)
             case .downloadCommand: guard let link = snapshot.shareURL else { throw FilebeamDomainError.invalidInput("A share link is unavailable.") }; downloadCommand = try await service.downloadCommand(link: link)
             }

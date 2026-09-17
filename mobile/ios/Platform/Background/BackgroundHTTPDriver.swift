@@ -42,7 +42,7 @@ public final class BackgroundHTTPDriver: NSObject, @unchecked Sendable {
     public func enqueue(checkpointID: String, direction: BackgroundDirection) async throws {
         let enqueueKey = "\(direction.rawValue):\(checkpointID)"
         guard stateQueue.sync(execute: { enqueuing.insert(enqueueKey).inserted }) else { return }
-        defer { stateQueue.sync { enqueuing.remove(enqueueKey) } }
+        defer { _ = stateQueue.sync { enqueuing.remove(enqueueKey) } }
         try await reconcileOrThrow(replayStaged: false)
         guard let journal = stateQueue.sync(execute: { self.journal }) else { throw BackgroundHTTPDriverError.unavailable }
         let work = try await descriptors(checkpointID: checkpointID, direction: direction)
@@ -110,7 +110,7 @@ public final class BackgroundHTTPDriver: NSObject, @unchecked Sendable {
                         try stateQueue.sync { try journal.bind(.init(descriptor: descriptor, taskIdentifier: task.taskIdentifier, expectedResponseBytes: value.expectedResponseBytes, spoolName: nil, responseStatus: nil, responseHeaders: [:], state: .scheduled, networkDone: 0)) }
                     }
                 }
-            try stateQueue.sync { try journal.reconcilePending(checkpointID: scope.checkpointID, direction: scope.direction, pendingOperationIDs: Set(byOperation.keys)) }
+            _ = try stateQueue.sync { try journal.reconcilePending(checkpointID: scope.checkpointID, direction: scope.direction, pendingOperationIDs: Set(byOperation.keys)) }
         }
         try stateQueue.sync { try journal.reconcile(managed.map { .init(taskIdentifier: $0.0.taskIdentifier, descriptor: $0.1) }) }
         for (task, _) in managed where task.state == .suspended && stateQueue.sync(execute: { journal.entry(forTaskIdentifier: task.taskIdentifier) != nil }) { task.resume() }
