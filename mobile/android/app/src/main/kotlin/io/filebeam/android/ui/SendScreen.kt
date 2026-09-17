@@ -29,15 +29,10 @@ fun SendScreen(model: FilebeamViewModel, busy: Boolean, pick: () -> Unit, pickTr
     val discovery = model.activeSendDiscovery
     val policy = (discovery as? SendDiscoveryState.Ready)?.policy
     val header: @Composable () -> Unit = {
-        Text(
-            stringResource(if (notesSelected) R.string.send_note_title else R.string.send_title),
-            style = MaterialTheme.typography.headlineMedium,
-        )
-        Text(
-            stringResource(if (notesSelected) R.string.send_note_description else R.string.send_description),
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Column(verticalArrangement = Arrangement.spacedBy(FilebeamSpace.XSmall)) {
+            Text(stringResource(if (notesSelected) R.string.send_note_title else R.string.send_title), style = MaterialTheme.typography.headlineMedium)
+            Text(stringResource(if (notesSelected) R.string.send_note_description else R.string.send_description), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         // Composer navigation is safe while work runs; changing it does not control the job.
         SendModeTabs(notesSelected, enabled = true) { model.showSend(if (it) SendContent.NOTES else SendContent.FILES) }
         TransportCards(
@@ -53,7 +48,7 @@ fun SendScreen(model: FilebeamViewModel, busy: Boolean, pick: () -> Unit, pickTr
     if (notesSelected) {
         NotesComposer(model, instance, busy, header)
     } else Column(Modifier.fillMaxSize().imePadding()) {
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = FilebeamSpace.Gutter), verticalArrangement = Arrangement.spacedBy(FilebeamSpace.Large)) {
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = FilebeamSpace.Gutter), verticalArrangement = Arrangement.spacedBy(FilebeamSpace.Small)) {
             header()
             FileComposer(model, busy, policy, pick, pickTree)
         }

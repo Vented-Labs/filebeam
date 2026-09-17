@@ -1,6 +1,7 @@
 package io.filebeam.android.ui.design
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -57,7 +58,7 @@ fun OptionRow(
 
 @Composable
 fun ActionDock(label: String, enabled: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, icon: ApprovedIcon = ApprovedIcon.Upload) {
-    Button(onClick = onClick, enabled = enabled, modifier = modifier.fillMaxWidth().imePadding().heightIn(min = FilebeamSpace.PrimaryActionHeight)) {
+    Button(onClick = onClick, enabled = enabled, shape = RoundedCornerShape(18.dp), modifier = modifier.fillMaxWidth().imePadding().heightIn(min = FilebeamSpace.PrimaryActionHeight)) {
         ApprovedIcon(icon, null)
         Text(label, Modifier.padding(start = FilebeamSpace.Small))
     }

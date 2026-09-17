@@ -84,19 +84,19 @@ fun TransportCards(selected: Transport, enabled: (Transport) -> Boolean, onSelec
 private fun TransportCard(modifier: Modifier, transport: Transport, title: String, detail: String, selected: Boolean, enabled: Boolean, onSelect: (Transport) -> Unit) {
     val colors = MaterialTheme.colorScheme
     Surface(
-        modifier = modifier.heightIn(min = 112.dp).clickable(enabled = enabled, role = Role.RadioButton) { onSelect(transport) }
+        modifier = modifier.heightIn(min = 72.dp).clickable(enabled = enabled, role = Role.RadioButton) { onSelect(transport) }
             .semantics { this.selected = selected; stateDescription = if (selected) "Selected" else "Not selected" },
         shape = MaterialTheme.shapes.large,
         color = if (selected) colors.primaryContainer else colors.surfaceContainerLow,
         border = BorderStroke(1.dp, if (selected) colors.primary else colors.outlineVariant),
     ) {
-        Column(Modifier.padding(FilebeamSpace.Medium), verticalArrangement = Arrangement.spacedBy(FilebeamSpace.XSmall)) {
+        Column(Modifier.padding(FilebeamSpace.Small), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 ApprovedIcon(if (transport == Transport.HTTP) ApprovedIcon.Storage else ApprovedIcon.Upload, null)
-                Text(title, Modifier.padding(start = FilebeamSpace.XSmall).weight(1f), style = MaterialTheme.typography.titleLarge)
+                Text(title, Modifier.padding(start = FilebeamSpace.XSmall).weight(1f), style = MaterialTheme.typography.titleMedium)
                 if (selected) Text("✓", style = MaterialTheme.typography.titleMedium)
             }
-            Text(detail, style = MaterialTheme.typography.bodyMedium, color = if (selected) colors.onPrimaryContainer else colors.onSurfaceVariant)
+            Text(detail, style = MaterialTheme.typography.bodySmall, color = if (selected) colors.onPrimaryContainer else colors.onSurfaceVariant)
         }
     }
 }
@@ -153,22 +153,22 @@ private fun EmptyFiles(busy: Boolean, pick: () -> Unit, pickTree: () -> Unit) = 
 @Composable
 private fun SelectedFiles(sources: List<SelectedSource>, busy: Boolean, remove: (android.net.Uri) -> Unit, pick: () -> Unit, pickTree: () -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text(stringResource(R.string.your_files, sources.size), Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+        Text(stringResource(R.string.your_files, sources.size), Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
         OutlinedButton(enabled = !busy, onClick = pick) { Text(stringResource(R.string.add_more)) }
     }
     ProductionGroupCard {
         sources.forEach { source -> SelectedFileRow(source, !busy) { remove(source.uri) } }
     }
-    OutlinedButton(enabled = !busy, onClick = pickTree, modifier = Modifier.fillMaxWidth()) { ApprovedIcon(ApprovedIcon.Folder, null); Text(stringResource(R.string.choose_folder), Modifier.padding(start = FilebeamSpace.XSmall)) }
+    OutlinedButton(enabled = !busy, onClick = pickTree, modifier = Modifier.fillMaxWidth().heightIn(min = FilebeamSpace.MinimumTouchTarget)) { ApprovedIcon(ApprovedIcon.Folder, null); Text(stringResource(R.string.choose_folder), Modifier.padding(start = FilebeamSpace.XSmall)) }
 }
 
 @Composable
 private fun SelectedFileRow(source: SelectedSource, enabled: Boolean, remove: () -> Unit) {
     val removeLabel = stringResource(R.string.remove_file, source.displayName)
-    Row(Modifier.fillMaxWidth().padding(FilebeamSpace.Medium), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = FilebeamSpace.Medium, vertical = FilebeamSpace.Small), verticalAlignment = Alignment.CenterVertically) {
         ApprovedIcon(ApprovedIcon.File, null)
         Column(Modifier.padding(start = FilebeamSpace.Small).weight(1f)) {
-            Text(source.displayName, style = MaterialTheme.typography.titleMedium)
+            Text(source.displayName, style = MaterialTheme.typography.bodyLarge)
             Text(source.error ?: source.sizeBytes?.let(::formatFileSize) ?: stringResource(R.string.size_unavailable), color = if (source.error == null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             source.relativePath?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall) }
         }

@@ -12,7 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
@@ -101,11 +101,16 @@ fun FilebeamScreen(
 private fun FilebeamTopBar(model: FilebeamViewModel) {
     val account = model.accounts.state.collectAsStateWithLifecycle().value
     val nested = model.navigation.backStack.isNotEmpty()
-    CenterAlignedTopAppBar(
-        title = { Text(if (nested) routeTitle(model.navigation.current) else stringResource(R.string.app_name), maxLines = 1) },
+    TopAppBar(
+        title = {
+            if (nested) Text(routeTitle(model.navigation.current), maxLines = 1)
+            else Row(verticalAlignment = Alignment.CenterVertically) {
+                FilebeamMark(null, Modifier.padding(end = 8.dp))
+                Text(stringResource(R.string.app_name), style = MaterialTheme.typography.titleLarge, maxLines = 1)
+            }
+        },
         navigationIcon = {
             if (nested) IconButton(onClick = model::back) { Icon(Icons.Filled.ArrowBack, stringResource(R.string.back)) }
-            else FilebeamMark(stringResource(R.string.app_name), Modifier.padding(start = 16.dp))
         },
         actions = {
             if (!nested) {
@@ -162,7 +167,15 @@ private fun DestinationContent(
 private fun DestinationNavigation(selected: DestinationRoute, navigate: (Destination) -> Unit, rail: Boolean) {
     val fontScale = LocalDensity.current.fontScale
     if (rail) NavigationRail { Destination.primary.forEach { DestinationRailItem(it, selected, navigate) } }
-    else NavigationBar(Modifier.heightIn(min = compactNavigationHeight(fontScale))) { Destination.primary.forEach { DestinationBarItem(it, selected, navigate) } }
+    else BoxWithConstraints {
+        val twoByTwo = fontScale > 1.3f && maxWidth < 480.dp
+        NavigationBar(Modifier.heightIn(min = compactNavigationHeight(fontScale, twoByTwo))) {
+            if (twoByTwo) Column {
+                Row(Modifier.weight(1f)) { Destination.primary.take(2).forEach { DestinationBarItem(it, selected, navigate) } }
+                Row(Modifier.weight(1f)) { Destination.primary.drop(2).forEach { DestinationBarItem(it, selected, navigate) } }
+            } else Destination.primary.forEach { DestinationBarItem(it, selected, navigate) }
+        }
+    }
 }
 
 @Composable
@@ -188,7 +201,11 @@ private fun Destination.icon() = when (this) {
 }
 
 /** Labels remain visible at accessibility sizes; the bar grows to accommodate their second line. */
-internal fun compactNavigationHeight(fontScale: Float) = if (fontScale > 1.3f) 112.dp else 80.dp
+internal fun compactNavigationHeight(fontScale: Float, twoByTwo: Boolean = false) = when {
+    twoByTwo -> 144.dp
+    fontScale > 1.3f -> 112.dp
+    else -> 80.dp
+}
 
 private fun Destination.routeDestination() = when (this) {
     Destination.Send, Destination.Notes, Destination.Turbo -> DestinationRoute.Send
