@@ -56,7 +56,8 @@ class FixtureAccessibilityTest {
     @Test fun notesFixtureUsesTheProductionComposer() {
         compose.activityRule.scenario.onActivity { it.showFixture("notes") }
         compose.waitForIdle()
-        compose.onNodeWithText(compose.activity.getString(R.string.note_body)).performTextInput("fixture note")
+        compose.onAllNodesWithText(compose.activity.getString(R.string.note_body))[1]
+            .performTextInput("fixture note")
         compose.onNodeWithText(compose.activity.getString(R.string.encrypt_and_share)).assertIsDisplayed()
     }
 

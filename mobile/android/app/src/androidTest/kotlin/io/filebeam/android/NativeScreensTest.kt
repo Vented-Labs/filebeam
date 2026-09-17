@@ -3,6 +3,7 @@ package io.filebeam.android
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
@@ -19,7 +20,7 @@ class NativeScreensTest {
         compose.onNodeWithText(compose.activity.getString(R.string.send_title)).assertIsDisplayed()
         compose.onNodeWithText(compose.activity.getString(R.string.receive)).performClick()
         compose.onNodeWithText(compose.activity.getString(R.string.transfer_link)).assertIsDisplayed()
-        compose.onNodeWithText(compose.activity.getString(R.string.settings)).performClick()
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.settings)).performClick()
         compose.onNodeWithText(compose.activity.getString(R.string.check_instance)).assertIsDisplayed()
     }
 
