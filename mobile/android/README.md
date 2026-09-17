@@ -60,7 +60,7 @@ emulator harness:
 
 ```sh
 docker build -t filebeam-android-tooling:rust-1.98.0-sdk37 docker/android
-docker build -f docker/android/Emulator.Dockerfile -t filebeam-android-emulator:api35-16k docker/android
+docker build --target emulator -t filebeam-android-emulator:api35-16k docker/android
 bash scripts/android/device-test.sh
 ```
 

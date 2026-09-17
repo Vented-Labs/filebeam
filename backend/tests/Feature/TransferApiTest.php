@@ -7,6 +7,7 @@ use App\Enums\TransferKind;
 use App\Enums\TransferStatus;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Jobs\DeleteTransfer;
+use App\Models\AccountKeyBundle;
 use App\Models\Filestore;
 use App\Models\InstanceSetting;
 use App\Models\Plan;
@@ -193,7 +194,7 @@ test('recipient inbox delivery is intentionally unavailable for notes', function
         'normalized_username' => 'note_receiver',
         'inbox_enabled' => true,
     ]);
-    $bundle = \App\Models\AccountKeyBundle::factory()->for($recipient)->create();
+    $bundle = AccountKeyBundle::factory()->for($recipient)->create();
 
     $this->postJson('/api/v1/transfers', [
         'kind' => 'note',

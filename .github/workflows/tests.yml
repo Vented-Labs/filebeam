@@ -139,7 +139,7 @@ jobs:
       - name: Check native Android build
         run: bash scripts/android/check.sh
       - name: Build 16 KiB emulator
-        run: docker buildx build --load --file docker/android/Emulator.Dockerfile --tag filebeam-android-emulator:api35-16k docker/android
+        run: docker buildx build --load --target emulator --tag filebeam-android-emulator:api35-16k docker/android
       - name: Exercise native bindings on Android
         run: bash scripts/android/device-test.sh
       - name: Upload development APK and test reports

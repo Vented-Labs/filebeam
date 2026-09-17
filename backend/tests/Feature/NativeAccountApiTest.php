@@ -7,14 +7,15 @@ use App\Models\InstanceSetting;
 use App\Models\Plan;
 use App\Models\Transfer;
 use App\Models\User;
+use App\Notifications\InboxTransferCompleted;
 use Database\Seeders\FilestoreSeeder;
+use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password;
-use Illuminate\Support\Str;
 use Illuminate\Support\Facades\URL;
-use Illuminate\Auth\Notifications\VerifyEmail;
+use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\Cookie;
 
 beforeEach(function (): void {
@@ -144,7 +145,7 @@ test('native account endpoints keep key envelopes and inbox data private', funct
 
 test('native inbox listing never acknowledges notifications without an explicit action', function (): void {
     $user = User::factory()->create();
-    $notification = $user->notifications()->create(['id' => (string) Str::uuid(), 'type' => \App\Notifications\InboxTransferCompleted::class, 'data' => []]);
+    $notification = $user->notifications()->create(['id' => (string) Str::uuid(), 'type' => InboxTransferCompleted::class, 'data' => []]);
 
     $this->actingAs($user)->getJson('/api/native/v1/inbox')->assertOk();
     expect($notification->fresh()->read_at)->toBeNull();

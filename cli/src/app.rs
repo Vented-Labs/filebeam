@@ -91,7 +91,8 @@ impl Job {
                 checkpoint_secret_store: None,
                 source_resolver: None,
             },
-            move |worker| match request {
+            move |worker| {
+                match request {
                 Request::Upload(paths, mode, options) => {
                     protocol::upload(&instance, &paths, mode, options, worker)
                         .map(|link| vec![link])
@@ -127,7 +128,8 @@ impl Job {
                     .phase(Phase::Updating)
                     .and_then(|_| update::check(&config))
                     .map(|value| vec![value]),
-                Request::Resume { id, .. } => protocol::resume(&id, worker),
+                    Request::Resume { id, .. } => protocol::resume(&id, worker),
+                }
             },
         ))
     }

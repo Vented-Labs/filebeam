@@ -1,5 +1,5 @@
 FROM eclipse-temurin:21-jdk-jammy AS java
-FROM rust:1.98.0-bookworm
+FROM rust:1.98.0-bookworm AS tooling
 
 COPY --from=java /opt/java/openjdk /opt/java/openjdk
 ENV JAVA_HOME=/opt/java/openjdk \
@@ -33,3 +33,17 @@ RUN curl --fail --location --retry 3 https://services.gradle.org/distributions/g
 RUN chmod -R a+rX "$ANDROID_HOME"
 
 WORKDIR /workspace/mobile/android
+
+FROM tooling AS emulator
+ARG SYSTEM_IMAGE="system-images;android-35;google_apis_ps16k;x86_64"
+ENV FILEBEAM_TEST_SYSTEM_IMAGE="${SYSTEM_IMAGE}"
+RUN apt-get update && apt-get install --yes --no-install-recommends \
+        libasound2 libdbus-1-3 libnss3 libpulse0 libx11-6 libxcb1 libxcomposite1 \
+        libxcursor1 libxi6 libxrandr2 libxtst6 \
+    && rm -rf /var/lib/apt/lists/* \
+    && sdkmanager emulator "$SYSTEM_IMAGE" \
+    && chmod -R a+rX "$ANDROID_HOME"
+ENV PATH="${ANDROID_HOME}/emulator:${PATH}"
+
+# Keep the default build as the lightweight tooling image for local development.
+FROM tooling AS default

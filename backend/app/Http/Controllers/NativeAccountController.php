@@ -15,10 +15,11 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password;
-use Illuminate\Support\Str;
 use Illuminate\Support\Facades\URL;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password as PasswordRule;
 use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class NativeAccountController extends Controller
 {
@@ -88,14 +89,18 @@ class NativeAccountController extends Controller
         }
         try {
             $route = app('router')->getRoutes()->match($signed);
-        } catch (\Symfony\Component\HttpKernel\Exception\NotFoundHttpException) {
+        } catch (NotFoundHttpException) {
             throw ValidationException::withMessages(['link' => 'Invalid verification link.']);
         }
         $user = $request->user();
         assert($user instanceof User);
+        $routeId = $route->parameter('id');
+        $routeHash = $route->parameter('hash');
         if ($route->getName() !== 'verification.verify'
-            || ! hash_equals((string) $user->getKey(), (string) $route->parameter('id'))
-            || ! hash_equals(sha1($user->getEmailForVerification()), (string) $route->parameter('hash'))) {
+            || ! is_string($routeId)
+            || ! is_string($routeHash)
+            || ! hash_equals((string) $user->getKey(), $routeId)
+            || ! hash_equals(sha1($user->getEmailForVerification()), $routeHash)) {
             throw ValidationException::withMessages(['link' => 'Invalid verification link.']);
         }
         if ($user->markEmailAsVerified()) {

@@ -41,7 +41,7 @@ pub fn validate_manifest(
     chunk_bytes: u64,
     server_items: &[ManifestServerItem],
 ) -> Result<(), String> {
-    if driver == "webrtc" && !manifest.join_token.as_ref().is_some_and(valid_capability) {
+    if driver == "webrtc" && !manifest.join_token.as_deref().is_some_and(valid_capability) {
         return Err("live manifest has an invalid join token".into());
     }
     if manifest.version != 1
@@ -95,7 +95,7 @@ pub fn validate_manifest(
     Ok(())
 }
 
-fn valid_capability(value: &String) -> bool {
+fn valid_capability(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_alphanumeric())
 }
 

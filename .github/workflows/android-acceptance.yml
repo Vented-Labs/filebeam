@@ -48,14 +48,14 @@ jobs:
             .android-cache/gradle/wrapper
             client-ffi/target
             client-core/target
-          key: android-acceptance-${{ runner.os }}-rust1.98.0-${{ inputs.system_image }}-${{ hashFiles('docker/android/Dockerfile', 'docker/android/Emulator.Dockerfile', 'client-ffi/Cargo.lock', 'client-core/Cargo.lock', 'mobile/android/gradle/libs.versions.toml') }}-${{ github.sha }}
-          restore-keys: android-acceptance-${{ runner.os }}-rust1.98.0-${{ inputs.system_image }}-${{ hashFiles('docker/android/Dockerfile', 'docker/android/Emulator.Dockerfile', 'client-ffi/Cargo.lock', 'client-core/Cargo.lock', 'mobile/android/gradle/libs.versions.toml') }}-
+          key: android-acceptance-${{ runner.os }}-rust1.98.0-${{ inputs.system_image }}-${{ hashFiles('docker/android/Dockerfile', 'client-ffi/Cargo.lock', 'client-core/Cargo.lock', 'mobile/android/gradle/libs.versions.toml') }}-${{ github.sha }}
+          restore-keys: android-acceptance-${{ runner.os }}-rust1.98.0-${{ inputs.system_image }}-${{ hashFiles('docker/android/Dockerfile', 'client-ffi/Cargo.lock', 'client-core/Cargo.lock', 'mobile/android/gradle/libs.versions.toml') }}-
       - name: Build pinned Android tooling
         run: docker buildx build --load --tag filebeam-android-tooling:rust-1.98.0-sdk37 docker/android
       - name: Build selected emulator image
         env:
           SYSTEM_IMAGE: ${{ inputs.system_image == 'api26-4k' && 'system-images;android-26;google_apis;x86_64' || 'system-images;android-35;google_apis_ps16k;x86_64' }}
-        run: docker buildx build --load --file docker/android/Emulator.Dockerfile --build-arg "SYSTEM_IMAGE=$SYSTEM_IMAGE" --tag filebeam-android-emulator:acceptance docker/android
+        run: docker buildx build --load --target emulator --build-arg "SYSTEM_IMAGE=$SYSTEM_IMAGE" --tag filebeam-android-emulator:acceptance docker/android
       - name: Build Android and native checks
         run: bash scripts/android/check.sh
       - name: Exercise native bindings on selected emulator
