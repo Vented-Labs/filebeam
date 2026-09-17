@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material.icons.Icons
@@ -36,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.filebeam.android.R
@@ -154,23 +156,23 @@ private fun DestinationContent(
 
 @Composable
 private fun DestinationNavigation(selected: DestinationRoute, navigate: (Destination) -> Unit, rail: Boolean) {
-    val showCompactLabels = shouldShowCompactNavigationLabels(LocalDensity.current.fontScale)
+    val fontScale = LocalDensity.current.fontScale
     if (rail) NavigationRail { Destination.primary.forEach { DestinationRailItem(it, selected, navigate) } }
-    else NavigationBar { Destination.primary.forEach { DestinationBarItem(it, selected, navigate, showCompactLabels) } }
+    else NavigationBar(Modifier.heightIn(min = compactNavigationHeight(fontScale))) { Destination.primary.forEach { DestinationBarItem(it, selected, navigate) } }
 }
 
 @Composable
 private fun ColumnScope.DestinationRailItem(destination: Destination, selected: DestinationRoute, navigate: (Destination) -> Unit) {
     val icon: @Composable () -> Unit = { ApprovedIcon(destination.icon(), null) }
-    val label: @Composable () -> Unit = { Text(stringResource(destination.label)) }
+    val label: @Composable () -> Unit = { Text(stringResource(destination.label), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 2) }
     NavigationRailItem(selected = destination.routeDestination() == selected, onClick = { navigate(destination) }, icon = icon, label = label)
 }
 
 @Composable
-private fun RowScope.DestinationBarItem(destination: Destination, selected: DestinationRoute, navigate: (Destination) -> Unit, showLabels: Boolean) {
+private fun RowScope.DestinationBarItem(destination: Destination, selected: DestinationRoute, navigate: (Destination) -> Unit) {
     val icon: @Composable () -> Unit = { ApprovedIcon(destination.icon(), null) }
-    val label: @Composable () -> Unit = { Text(stringResource(destination.label)) }
-    NavigationBarItem(selected = destination.routeDestination() == selected, onClick = { navigate(destination) }, icon = icon, label = label, alwaysShowLabel = showLabels)
+    val label: @Composable () -> Unit = { Text(stringResource(destination.label), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center, maxLines = 2) }
+    NavigationBarItem(selected = destination.routeDestination() == selected, onClick = { navigate(destination) }, icon = icon, label = label, alwaysShowLabel = true)
 }
 
 private fun Destination.icon() = when (this) {
@@ -181,8 +183,8 @@ private fun Destination.icon() = when (this) {
     else -> ApprovedIcon.Settings
 }
 
-/** Four destinations cannot retain readable labels at accessibility font scales on compact widths. */
-internal fun shouldShowCompactNavigationLabels(fontScale: Float): Boolean = fontScale <= 1.3f
+/** Labels remain visible at accessibility sizes; the bar grows to accommodate their second line. */
+internal fun compactNavigationHeight(fontScale: Float) = if (fontScale > 1.3f) 112.dp else 80.dp
 
 private fun Destination.routeDestination() = when (this) {
     Destination.Send, Destination.Notes, Destination.Turbo -> DestinationRoute.Send

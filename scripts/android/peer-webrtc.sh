@@ -50,7 +50,9 @@ chmod 700 "$results" "$results/logs"
 
 printf '%s\n' 'Building browser assets and the native CLI...'
 (cd "$root" && npm run build) >"$results/logs/browser-build.log" 2>&1
-cargo build --manifest-path "$root/cli/Cargo.toml" --release >"$results/logs/cli-build.log" 2>&1
+docker run --rm --mount "type=bind,src=$root,dst=/work" --workdir /work/cli \
+    --env CARGO_TARGET_DIR=/work/cli/target filebeam-beam-tooling:rust-1.98.0 \
+    cargo build --release >"$results/logs/cli-build.log" 2>&1
 
 for volume in "$vendor" "$runtime" "$storage" "$cache"; do
     docker volume create "$volume" >/dev/null

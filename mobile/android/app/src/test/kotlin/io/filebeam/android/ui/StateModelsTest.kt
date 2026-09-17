@@ -90,9 +90,9 @@ class StateModelsTest {
         assertEquals("0 B", formatFileSize(0))
     }
 
-    @Test fun compactNavigationHidesLabelsBeforeAccessibilityTextWouldWrap() {
-        assertTrue(shouldShowCompactNavigationLabels(1f))
-        assertFalse(shouldShowCompactNavigationLabels(2f))
+    @Test fun compactNavigationGrowsForAccessibleTwoLineLabels() {
+        assertEquals(80, compactNavigationHeight(1f).value.toInt())
+        assertEquals(112, compactNavigationHeight(2f).value.toInt())
     }
 }
 

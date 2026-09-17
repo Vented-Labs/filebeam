@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -58,7 +57,7 @@ fun OptionRow(
 
 @Composable
 fun ActionDock(label: String, enabled: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, icon: ApprovedIcon = ApprovedIcon.Upload) {
-    Button(onClick = onClick, enabled = enabled, modifier = modifier.fillMaxWidth().navigationBarsPadding().imePadding().heightIn(min = FilebeamSpace.PrimaryActionHeight)) {
+    Button(onClick = onClick, enabled = enabled, modifier = modifier.fillMaxWidth().imePadding().heightIn(min = FilebeamSpace.PrimaryActionHeight)) {
         ApprovedIcon(icon, null)
         Text(label, Modifier.padding(start = FilebeamSpace.Small))
     }
