@@ -1,0 +1,3 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@string/retry,@string/turbo_transfer,@string/select_files,@string/select_folder,@plurals/files_selected,@string/http_transport,@string/webrtc_transport,@string/live_description,@string/archive,@string/retention_hours,@string/recipient_username,@string/start_upload,@string/receive_authoritative_preview,@string/native_services,@string/dynamic_color,@string/native_description,@string/transfer_detail_capability_pending,@string/share_link,@string/save_file,@string/account_key,@string/fbsk1_key,@string/account_key_caution,@string/note_title,@string/note_consumed,@string/burn_on_read,@string/create_note,@string/note_link" />

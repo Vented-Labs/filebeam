@@ -45,7 +45,7 @@ fun TransfersScreen(model: FilebeamViewModel, state: TransferUiState, start: (()
     var history by remember { mutableStateOf(false) }
     var expandedId by remember { mutableStateOf<String?>(null) }
     var confirmation by remember { mutableStateOf<TransferConfirmation?>(null) }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(FilebeamSpace.Medium), verticalArrangement = Arrangement.spacedBy(FilebeamSpace.Medium)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = FilebeamSpace.Gutter, vertical = FilebeamSpace.Medium), verticalArrangement = Arrangement.spacedBy(FilebeamSpace.Medium)) {
         Text(stringResource(R.string.transfers), style = MaterialTheme.typography.headlineMedium)
         Row(horizontalArrangement = Arrangement.spacedBy(FilebeamSpace.XSmall)) {
             FilterChip(!history, { history = false }, label = { Text(stringResource(R.string.active_transfers)) })

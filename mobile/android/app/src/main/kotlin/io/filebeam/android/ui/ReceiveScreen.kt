@@ -1,7 +1,5 @@
 package io.filebeam.android.ui
 
-import android.view.WindowManager
-import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -15,7 +13,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -39,12 +36,21 @@ fun ReceiveScreen(model: FilebeamViewModel, busy: Boolean, receive: () -> Unit) 
     var inspection by remember { mutableStateOf<Result<LinkInspection>?>(null) }
     var note by remember { mutableStateOf<NoteContent?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var noteLink by remember { mutableStateOf<String?>(null) }
+    var noteKey by remember { mutableStateOf<String?>(null) }
     var notePassword by remember { mutableStateOf<String?>(null) }
+    var requestGeneration by remember { mutableStateOf(0) }
+    val unknownError = stringResource(R.string.unknown_error)
     LaunchedEffect(model.link) {
+        requestGeneration++
         inspection = null
+        noteLink = null
+        noteKey = null
+        notePassword = null
+        error = null
         if (model.link.isNotBlank()) model.inspectReceiveLink { inspection = it }
     }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(FilebeamSpace.Medium), verticalArrangement = Arrangement.spacedBy(FilebeamSpace.Medium)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = FilebeamSpace.Gutter, vertical = FilebeamSpace.Medium), verticalArrangement = Arrangement.spacedBy(FilebeamSpace.Medium)) {
         Text(stringResource(R.string.receive_title), style = MaterialTheme.typography.headlineMedium)
         Text(stringResource(R.string.receive_description), style = MaterialTheme.typography.bodyLarge)
         ProductionGroupCard(Modifier.fillMaxWidth()) {
@@ -69,11 +75,10 @@ fun ReceiveScreen(model: FilebeamViewModel, busy: Boolean, receive: () -> Unit) 
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                     if (link.kind == "note") {
                         ActionDock(stringResource(R.string.open_note), !busy, {
-                            model.openReceivedNote(notePassword) { result ->
-                                notePassword = null
-                                result.onSuccess { note = it }
-                                    .onFailure { error = it.message ?: "Unable to open note"; notePassword = "" }
-                            }
+                            error = null
+                            if (!model.noteLinkHasKey(link)) noteKey = ""
+                            else if (link.passwordRequired) notePassword = ""
+                            else claimNote(model, model.link, null, requestGeneration, { requestGeneration }, { note = it }, { error = it })
                         }, icon = ApprovedIcon.File)
                     } else ActionDock(stringResource(R.string.start_download), !busy, receive, icon = ApprovedIcon.Download)
                 },
@@ -82,13 +87,33 @@ fun ReceiveScreen(model: FilebeamViewModel, busy: Boolean, receive: () -> Unit) 
         }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
+    noteKey?.let { key -> AlertDialog(
+        onDismissRequest = { noteKey = null }, title = { Text(stringResource(R.string.decryption_key)) },
+        text = {
+            SecureWindowEffect()
+            OutlinedTextField(key, { noteKey = it }, singleLine = true, visualTransformation = PasswordVisualTransformation(), label = { Text(stringResource(R.string.decryption_key)) })
+            OutlinedButton(onClick = { clipboard.getText()?.text?.let { noteKey = it } }) { Text(stringResource(R.string.paste_link)) }
+        },
+        confirmButton = { OutlinedButton(enabled = key.isNotBlank(), onClick = {
+            val inspected = inspection?.getOrNull() ?: return@OutlinedButton
+            model.combineReceivedNoteKey(inspected, key).onSuccess { combined ->
+                noteKey = null
+                noteLink = combined
+                if (inspected.passwordRequired) notePassword = "" else claimNote(model, combined, null, requestGeneration, { requestGeneration }, { note = it }, { error = it })
+            }.onFailure { error = it.message ?: unknownError }
+        }) { Text(stringResource(R.string.continue_action)) } },
+        dismissButton = { OutlinedButton(onClick = { noteKey = null }) { Text(stringResource(R.string.cancel)) } },
+    ) }
     notePassword?.let { password -> AlertDialog(
         onDismissRequest = { notePassword = null }, title = { Text(stringResource(R.string.password)) },
-        text = { OutlinedTextField(password, { notePassword = it }, singleLine = true, visualTransformation = PasswordVisualTransformation(), label = { Text(stringResource(R.string.password)) }) },
+        text = { SecureWindowEffect(); OutlinedTextField(password, { notePassword = it }, singleLine = true, visualTransformation = PasswordVisualTransformation(), label = { Text(stringResource(R.string.password)) }) },
         confirmButton = { OutlinedButton(enabled = password.isNotBlank(), onClick = {
-            model.openReceivedNote(password) { result ->
-                notePassword = null
-                result.onSuccess { note = it }.onFailure { error = it.message ?: "Unable to open note"; notePassword = "" }
+            val target = noteLink ?: model.link
+            val generation = requestGeneration
+            model.openReceivedNote(target, password) { result ->
+                if (generation != requestGeneration) return@openReceivedNote
+                result.onSuccess { notePassword = null; note = it }
+                    .onFailure { error = it.message ?: "Unable to open note"; notePassword = "" }
             }
         }) { Text(stringResource(R.string.open_note)) } },
         dismissButton = { OutlinedButton(onClick = { notePassword = null }) { Text(stringResource(R.string.cancel)) } },
@@ -98,15 +123,18 @@ fun ReceiveScreen(model: FilebeamViewModel, busy: Boolean, receive: () -> Unit) 
 
 @Composable
 private fun SecureNoteViewer(content: NoteContent, close: () -> Unit) {
-    val activity = LocalActivity.current
-    DisposableEffect(activity) {
-        activity?.window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-        onDispose { activity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) }
-    }
+    SecureWindowEffect()
     AlertDialog(
         onDismissRequest = close,
         title = { Text(content.title ?: stringResource(R.string.open_note)) },
         text = { Text(content.text) },
         confirmButton = { OutlinedButton(onClick = close) { Text(stringResource(R.string.close)) } },
     )
+}
+
+private fun claimNote(model: FilebeamViewModel, link: String, password: String?, generation: Int, currentGeneration: () -> Int, opened: (NoteContent) -> Unit, failed: (String) -> Unit) {
+    model.openReceivedNote(link, password) { result ->
+        if (generation != currentGeneration()) return@openReceivedNote
+        result.onSuccess(opened).onFailure { failed(it.message ?: "Unable to open note") }
+    }
 }

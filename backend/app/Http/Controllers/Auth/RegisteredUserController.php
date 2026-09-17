@@ -64,8 +64,11 @@ class RegisteredUserController extends Controller
                 'name' => $user->name,
                 'username' => $user->username,
                 'email' => $user->email,
+                'emailVerifiedAt' => null,
+                'profileUrl' => null,
                 'inboxEnabled' => $user->inbox_enabled,
                 'usernameRoutingEnabled' => app(InstanceSettings::class)->boolean('username_routing'),
+                'notificationChannel' => $user->notification_channel ?? 'mail',
             ]], 201);
         }
 

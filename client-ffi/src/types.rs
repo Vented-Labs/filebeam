@@ -71,6 +71,7 @@ pub struct InstanceInfo {
     pub retention_options_hours: Vec<u64>,
     pub drivers: Vec<DriverLimit>,
     pub default_driver: String,
+    pub chunk_bytes: u64,
 }
 
 #[derive(Clone, uniffi::Record)]

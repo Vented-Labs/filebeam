@@ -147,6 +147,7 @@ pub struct TransferView {
     last_sample: Instant,
     last_movement: Instant,
     sampled_bytes: u64,
+    generation: u64,
 }
 
 impl TransferView {
@@ -166,12 +167,20 @@ impl TransferView {
             last_sample: now,
             last_movement: now,
             sampled_bytes: 0,
+            generation: 0,
         }
     }
 
     pub fn tick(&mut self, progress: Progress, reduced_motion: bool, now: Instant) {
         if self.finished {
             return;
+        }
+        let generation_changed = progress.generation != self.generation;
+        if generation_changed {
+            self.generation = progress.generation;
+            self.sampled_bytes = progress.wire_bytes;
+            self.last_sample = now;
+            self.rate = 0.0;
         }
         if progress.wire_bytes > self.progress.wire_bytes {
             self.last_movement = now;
@@ -187,6 +196,13 @@ impl TransferView {
             .map(|total| self.progress.done as f64 / total as f64)
             .unwrap_or(0.0)
             .min(0.995);
+        // A checkpoint retry may legitimately restart lower. Within one phase
+        // generation, a lower snapshot is stale/uncommitted display progress.
+        let target = if generation_changed {
+            target
+        } else {
+            target.max(self.ratio)
+        };
         self.ratio = if reduced_motion {
             target
         } else {
@@ -329,5 +345,23 @@ mod tests {
         assert_eq!(Phase::Retrying.label(), "Retrying transfer");
         assert_eq!(Phase::Reconnecting.label(), "Reconnecting");
         assert_eq!(Phase::Storing.label(), "Saving encrypted transfer state");
+    }
+
+    #[test]
+    fn progress_is_monotonic_within_a_phase_and_resets_on_a_new_generation() {
+        let mut view = TransferView::new(Direction::Upload);
+        let start = view.started;
+        let progress = |done, generation| Progress {
+            phase: Phase::Sending,
+            total: Some(100),
+            done,
+            generation,
+            ..Progress::default()
+        };
+        view.tick(progress(80, 1), true, start + Duration::from_secs(1));
+        view.tick(progress(20, 1), true, start + Duration::from_secs(2));
+        assert_eq!(view.ratio, 0.8);
+        view.tick(progress(20, 2), true, start + Duration::from_secs(3));
+        assert_eq!(view.ratio, 0.2);
     }
 }

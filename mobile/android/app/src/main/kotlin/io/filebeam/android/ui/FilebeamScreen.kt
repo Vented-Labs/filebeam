@@ -10,9 +10,12 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -23,6 +26,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -30,6 +34,7 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -71,12 +76,12 @@ fun FilebeamScreen(
                     if (wide) DestinationNavigation(model.navigation.current, model::navigate, rail = true)
                     Scaffold(
                         modifier = Modifier.weight(1f),
-                        contentWindowInsets = WindowInsets.safeDrawing,
+                        contentWindowInsets = WindowInsets(0, 0, 0, 0),
                         snackbarHost = { SnackbarHost(snackbar) },
                         topBar = { FilebeamTopBar(model) },
                         bottomBar = { if (!wide) DestinationNavigation(model.navigation.current, model::navigate, rail = false) },
                     ) { padding ->
-                        // Destinations own their scroll and IME behavior; this root applies system insets once.
+                        // Destinations own their scroll and IME behavior; bars already consumed system insets.
                         Box(Modifier.fillMaxSize().padding(padding)) {
                             DestinationContent(model, state, config.instance, start, pickFiles, pickTree, saveFile, exportAccountKey, importAccountKey)
                         }
@@ -91,23 +96,38 @@ fun FilebeamScreen(
 @Composable
 private fun FilebeamTopBar(model: FilebeamViewModel) {
     val account = model.accounts.state.collectAsStateWithLifecycle().value
-    Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-        if (model.navigation.backStack.isNotEmpty()) {
-            IconButton(onClick = model::back) { Text("Back") }
-        } else {
-            FilebeamMark(stringResource(R.string.app_name))
-            Text(stringResource(R.string.app_name), style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 8.dp))
-        }
-        Box(Modifier.weight(1f))
-        IconButton(onClick = { model.navigate(Destination.Settings) }) {
-            ApprovedIcon(ApprovedIcon.Settings, stringResource(R.string.settings))
-        }
-        IconButton(onClick = { model.navigate(Destination.Account) }) {
-            val identity = (account as? ServiceState.Ready)?.value?.username
-            Text(identity?.take(1)?.uppercase() ?: "Sign in")
-        }
+    val nested = model.navigation.backStack.isNotEmpty()
+    CenterAlignedTopAppBar(
+        title = { Text(if (nested) routeTitle(model.navigation.current) else stringResource(R.string.app_name), maxLines = 1) },
+        navigationIcon = {
+            if (nested) IconButton(onClick = model::back) { Icon(Icons.Filled.ArrowBack, stringResource(R.string.back)) }
+            else FilebeamMark(stringResource(R.string.app_name), Modifier.padding(start = 16.dp))
+        },
+        actions = {
+            IconButton(onClick = { model.navigate(Destination.Settings) }) { ApprovedIcon(ApprovedIcon.Settings, stringResource(R.string.settings)) }
+            IconButton(onClick = { model.navigate(Destination.Account) }) { AccountAvatar((account as? ServiceState.Ready)?.value?.username, stringResource(R.string.account)) }
+        },
+        windowInsets = TopAppBarDefaults.windowInsets,
+    )
+}
+
+@Composable
+private fun AccountAvatar(username: String?, description: String) {
+    androidx.compose.material3.Surface(shape = MaterialTheme.shapes.extraLarge, color = MaterialTheme.colorScheme.secondaryContainer) {
+        if (username == null) Icon(Icons.Filled.AccountCircle, description, Modifier.padding(8.dp), MaterialTheme.colorScheme.onSecondaryContainer)
+        else Text(username.first().uppercase(), modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.onSecondaryContainer, style = MaterialTheme.typography.labelLarge)
     }
 }
+
+@Composable
+private fun routeTitle(route: DestinationRoute): String = stringResource(when (route) {
+    DestinationRoute.Send -> R.string.send
+    DestinationRoute.Receive, DestinationRoute.NoteViewer -> R.string.receive
+    DestinationRoute.Transfers, DestinationRoute.TransferDetail -> R.string.transfers
+    DestinationRoute.Inbox -> R.string.inbox
+    DestinationRoute.Settings -> R.string.settings
+    DestinationRoute.Account -> R.string.account
+})
 
 @Composable
 private fun DestinationContent(
@@ -134,8 +154,9 @@ private fun DestinationContent(
 
 @Composable
 private fun DestinationNavigation(selected: DestinationRoute, navigate: (Destination) -> Unit, rail: Boolean) {
+    val showCompactLabels = shouldShowCompactNavigationLabels(LocalDensity.current.fontScale)
     if (rail) NavigationRail { Destination.primary.forEach { DestinationRailItem(it, selected, navigate) } }
-    else NavigationBar { Destination.primary.forEach { DestinationBarItem(it, selected, navigate) } }
+    else NavigationBar { Destination.primary.forEach { DestinationBarItem(it, selected, navigate, showCompactLabels) } }
 }
 
 @Composable
@@ -146,10 +167,10 @@ private fun ColumnScope.DestinationRailItem(destination: Destination, selected: 
 }
 
 @Composable
-private fun RowScope.DestinationBarItem(destination: Destination, selected: DestinationRoute, navigate: (Destination) -> Unit) {
+private fun RowScope.DestinationBarItem(destination: Destination, selected: DestinationRoute, navigate: (Destination) -> Unit, showLabels: Boolean) {
     val icon: @Composable () -> Unit = { ApprovedIcon(destination.icon(), null) }
     val label: @Composable () -> Unit = { Text(stringResource(destination.label)) }
-    NavigationBarItem(selected = destination.routeDestination() == selected, onClick = { navigate(destination) }, icon = icon, label = label)
+    NavigationBarItem(selected = destination.routeDestination() == selected, onClick = { navigate(destination) }, icon = icon, label = label, alwaysShowLabel = showLabels)
 }
 
 private fun Destination.icon() = when (this) {
@@ -159,6 +180,9 @@ private fun Destination.icon() = when (this) {
     Destination.Inbox -> ApprovedIcon.Folder
     else -> ApprovedIcon.Settings
 }
+
+/** Four destinations cannot retain readable labels at accessibility font scales on compact widths. */
+internal fun shouldShowCompactNavigationLabels(fontScale: Float): Boolean = fontScale <= 1.3f
 
 private fun Destination.routeDestination() = when (this) {
     Destination.Send, Destination.Notes, Destination.Turbo -> DestinationRoute.Send

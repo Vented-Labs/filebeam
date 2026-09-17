@@ -118,6 +118,32 @@ impl TransferClient {
             .get("webrtc")
             .cloned()
             .unwrap_or_default();
+        let drivers = info
+            .enabled_drivers
+            .iter()
+            .map(|driver| {
+                let limits = info.transport_limits.get(driver);
+                DriverLimit {
+                    driver: driver.clone(),
+                    maximum_transfer_bytes: limits
+                        .and_then(|limits| limits.maximum_transfer_bytes)
+                        .or_else(|| {
+                            (driver == "http")
+                                .then_some(info.maximum_transfer_bytes)
+                                .flatten()
+                        }),
+                    maximum_file_count: limits
+                        .and_then(|limits| limits.maximum_file_count)
+                        .or_else(|| {
+                            (driver == "http")
+                                .then_some(info.maximum_file_count)
+                                .flatten()
+                        })
+                        .map(|value| value as u64),
+                    maximum_note_bytes: limits.and_then(|limits| limits.maximum_note_bytes),
+                }
+            })
+            .collect();
         Ok(InstanceInfo {
             name: info.name,
             anonymous_uploads: info.anonymous_uploads_enabled,
@@ -128,17 +154,9 @@ impl TransferClient {
             webrtc_maximum_transfer_bytes: live.maximum_transfer_bytes,
             webrtc_maximum_file_count: live.maximum_file_count.map(|n| n as u64),
             retention_options_hours: info.file_retention_options,
-            drivers: info
-                .transport_limits
-                .into_iter()
-                .map(|(driver, limits)| DriverLimit {
-                    driver,
-                    maximum_transfer_bytes: limits.maximum_transfer_bytes,
-                    maximum_file_count: limits.maximum_file_count.map(|value| value as u64),
-                    maximum_note_bytes: limits.maximum_note_bytes,
-                })
-                .collect(),
+            drivers,
             default_driver: info.default_driver,
+            chunk_bytes: info.chunk_bytes,
         })
     }
 

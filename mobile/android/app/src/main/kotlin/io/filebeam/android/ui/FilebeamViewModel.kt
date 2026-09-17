@@ -17,6 +17,9 @@ import io.filebeam.android.platform.services.ServiceState
 import io.filebeam.android.platform.security.DraftLoadResult
 import io.filebeam.android.platform.security.EncryptedDraftStore
 import io.filebeam.rust.Transport
+import io.filebeam.rust.LinkInspection
+import io.filebeam.rust.presentShareLink
+import io.filebeam.rust.splitShareLink
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.collect
@@ -140,8 +143,12 @@ class FilebeamViewModel(application: Application) : AndroidViewModel(application
     /** Receive input is deliberate: clipboard access is initiated only by the Paste button. */
     fun updateReceiveLink(value: String) { link = value; receiveIngress = parseReceiveIngress(value) }
     fun inspectReceiveLink(complete: (Result<io.filebeam.rust.LinkInspection>) -> Unit) = coordinator.inspectLink(link, complete)
-    fun openReceivedNote(password: String? = null, complete: (Result<io.filebeam.android.platform.services.NoteContent>) -> Unit) = viewModelScope.launch {
-        complete(runCatching { notes.claim(link, password) })
+    fun noteLinkHasKey(inspection: LinkInspection): Boolean = runCatching { splitShareLink(inspection.instance, link) }.isSuccess
+    fun combineReceivedNoteKey(inspection: LinkInspection, key: String): Result<String> = runCatching {
+        presentShareLink(inspection.instance, link.substringBefore('#'), key, true).link
+    }
+    fun openReceivedNote(noteLink: String, password: String? = null, complete: (Result<io.filebeam.android.platform.services.NoteContent>) -> Unit) = viewModelScope.launch {
+        complete(runCatching { notes.claim(noteLink, password) })
     }
     fun startReceivedDownload() = download()
     fun retrySavedExport(id: String, complete: (Result<String>) -> Unit) = coordinator.retrySafExport(id, complete)
@@ -290,9 +297,10 @@ class FilebeamViewModel(application: Application) : AndroidViewModel(application
             coordinator.message("Validate the recipient before sending")
             return
         }
-        coordinator.upload(UploadRequest(sendDraft.sources.map(SelectedSource::uri), transport, archive, turboTransfer, passwordProtected,
+        val driver = sendDraft.driver ?: policy.defaultDriver
+        coordinator.upload(UploadRequest(sendDraft.sources.map(SelectedSource::uri), transportForDriver(driver), archive, turboTransfer, passwordProtected,
             retentionHours(retentionHours).getOrNull(), recipients = recipient.username.takeIf(String::isNotBlank)?.let(::listOf) ?: emptyList(), recipient = recipient.identity,
-            includeKeyInLink = sendDraft.includeKeyInLink))
+            includeKeyInLink = sendDraft.includeKeyInLink, driver = driver))
         navigate(Destination.Transfers)
     }
 
@@ -364,9 +372,14 @@ private fun FilebeamViewModel.sendDiscoveryKey(): SendDiscoveryKey? {
 private fun FilebeamViewModel.hasSessionFor(key: SendDiscoveryKey) = key.accountId != null
 private fun SendDraft.isFresh() = sources.isEmpty() && transport == Transport.HTTP && !archive && !turbo && !passwordProtected && retentionHours.isBlank() && recipient.username.isBlank() && includeKeyInLink
 private fun NoteDraft.isFresh() = title.isBlank() && body.isBlank() && !passwordEnabled && retentionHours.isBlank() && language == "plain" && !burnAfterRead && !live && includeKeyInLink
+internal fun transportForDriver(driver: String) = when (driver) {
+    "http" -> Transport.HTTP
+    "webrtc" -> Transport.WEB_RTC
+    else -> throw IllegalArgumentException("Selected driver is unsupported")
+}
 private fun io.filebeam.rust.InstanceInfo.toSendPolicy(key: SendDiscoveryKey) = SendInstancePolicy(
     key, anonymousUploads, enabledTransports.mapNotNull { value -> when (value.lowercase()) { "http" -> Transport.HTTP; "webrtc" -> Transport.WEB_RTC; else -> null } }.toSet(), retentionHours,
-    retentionOptionsHours.toSet(), defaultDriver, drivers.associate { driver -> driver.driver to SendDriverPolicy(driver.driver, driver.maximumTransferBytes, driver.maximumFileCount, driver.maximumNoteBytes) },
+    retentionOptionsHours.toSet(), defaultDriver, chunkBytes, drivers.associate { driver -> driver.driver to SendDriverPolicy(driver.driver, driver.maximumTransferBytes, driver.maximumFileCount, driver.maximumNoteBytes) },
 )
 
 private fun RecipientDraft.unvalidated(transport: Transport, turbo: Boolean, password: Boolean) =

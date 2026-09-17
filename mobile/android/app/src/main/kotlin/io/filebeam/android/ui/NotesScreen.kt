@@ -59,35 +59,36 @@ fun NotesComposer(model: FilebeamViewModel, instance: String, busy: Boolean, hea
 
     fun submit(secret: String?) {
         scope.launch {
-            retentionHours(draft.retentionHours).fold(
-                onSuccess = { retention ->
-                    runCatching {
-                        model.notes.create(NoteRequest(
-                            instance = instance,
-                            text = draft.body,
-                            title = draft.title,
-                            language = draft.language,
-                            password = secret?.takeIf(String::isNotBlank),
-                            retentionHours = retention,
-                            burnAfterRead = draft.burnAfterRead,
-                            live = draft.live,
-                            includeKeyInLink = draft.includeKeyInLink,
-                        ))
-                    }.onSuccess {
-                        createdLink = it.link
-                        separateKey = it.separateKey
-                        createdLive = draft.live
-                        password = "" // Passwords are never retained in the durable note draft.
-                        model.updateNote { NoteDraft() }
-                    }.onFailure { feedback = it.message ?: unknownError }
-                },
-                onFailure = { feedback = it.message },
-            )
+            try {
+                retentionHours(draft.retentionHours).fold(
+                    onSuccess = { retention ->
+                        runCatching {
+                            model.notes.create(NoteRequest(
+                                instance = instance,
+                                text = draft.body,
+                                title = draft.title,
+                                language = draft.language,
+                                password = secret?.takeIf(String::isNotBlank),
+                                retentionHours = retention,
+                                burnAfterRead = draft.burnAfterRead,
+                                live = draft.live,
+                                includeKeyInLink = draft.includeKeyInLink,
+                            ))
+                        }.onSuccess {
+                            createdLink = it.link
+                            separateKey = it.separateKey
+                            createdLive = draft.live
+                            model.updateNote { NoteDraft() }
+                        }.onFailure { feedback = it.message ?: unknownError }
+                    },
+                    onFailure = { feedback = it.message },
+                )
+            } finally { password = "" }
         }
     }
 
     Column(Modifier.fillMaxSize().imePadding()) {
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(FilebeamSpace.Medium)) {
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = FilebeamSpace.Gutter), verticalArrangement = Arrangement.spacedBy(FilebeamSpace.Medium)) {
             header()
         NoteEditor(
             title = draft.title,
@@ -129,7 +130,7 @@ fun NotesComposer(model: FilebeamViewModel, instance: String, busy: Boolean, hea
             stringResource(R.string.encrypt_and_share),
             enabled = !busy && draft.body.isNotBlank() && retentionHours(draft.retentionHours).isSuccess && model.canSubmitNote(),
             onClick = { if (draft.passwordEnabled) askPassword = true else submit(null) },
-            modifier = Modifier.padding(vertical = FilebeamSpace.Small),
+            modifier = Modifier.padding(horizontal = FilebeamSpace.Gutter, vertical = FilebeamSpace.Small),
         )
     }
     if (optionsOpen) {
@@ -144,7 +145,7 @@ fun NotesComposer(model: FilebeamViewModel, instance: String, busy: Boolean, hea
     if (askPassword) AlertDialog(
         onDismissRequest = { password = ""; askPassword = false },
         title = { Text(stringResource(R.string.note_password_title)) },
-        text = { OutlinedTextField(password, { password = it }, label = { Text(stringResource(R.string.optional_password)) }, visualTransformation = PasswordVisualTransformation()) },
+        text = { SecureWindowEffect(); OutlinedTextField(password, { password = it }, label = { Text(stringResource(R.string.optional_password)) }, visualTransformation = PasswordVisualTransformation()) },
         confirmButton = { Button(onClick = { askPassword = false; submit(password) }) { Text(stringResource(R.string.continue_action)) } },
         dismissButton = { Button(onClick = { password = ""; askPassword = false }) { Text(stringResource(R.string.cancel)) } },
     )

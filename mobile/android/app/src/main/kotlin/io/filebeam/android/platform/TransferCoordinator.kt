@@ -80,6 +80,9 @@ data class TransferReceipt(val id: String, val state: ReceiptState, val result: 
     }
 }
 
+/** Opaque lifecycle identity. Presentation links, including keyless links, are never lifecycle keys. */
+data class LiveNoteHandle(val id: String, internal val job: TransferJob)
+
 /** Durable upload intent. Password text is intentionally not an option: native prompts hold it only in RAM. */
 data class UploadRequest(
     val uris: List<Uri>,
@@ -92,6 +95,7 @@ data class UploadRequest(
     val recipients: List<String> = emptyList(),
     val recipient: ValidatedRecipient? = null,
     val includeKeyInLink: Boolean = true,
+    val driver: String,
 )
 
 /** Process-scoped owner. Activities collect state; Android jobs/services execute work. */
@@ -117,6 +121,7 @@ class TransferCoordinator(
     private var controlIntent: Pair<String, String>? = null
     private val noteSubmission = Mutex()
     private var inboxCredentials: InboxCredentials? = null
+    @Volatile private var activeLiveNoteId: String? = null
 
     private data class InboxCredentials(val transferId: String, val key: ByteArray, val cookie: String)
 
@@ -139,7 +144,7 @@ class TransferCoordinator(
     }
     private fun platformClient() = client(nativeClientRelayOnly ?: false)
 
-    fun upload(uris: List<Uri>, transport: Transport, archive: Boolean) = upload(UploadRequest(uris, transport, archive))
+    fun upload(uris: List<Uri>, transport: Transport, archive: Boolean) = upload(UploadRequest(uris, transport, archive, driver = if (transport == Transport.WEB_RTC) "webrtc" else "http"))
 
     fun upload(request: UploadRequest) = submit { config ->
         require(request.uris.isNotEmpty()) { "Select at least one source" }
@@ -162,6 +167,7 @@ class TransferCoordinator(
             .put("passwordProtected", request.passwordProtected).putOpt("retentionHours", request.retentionHours?.toString())
             .putOpt("account", request.account).put("recipients", JSONArray(request.recipients))
             .put("includeKey", request.includeKeyInLink)
+            .put("driver", request.driver)
             .putOpt("recipient", request.recipient?.let { recipient -> JSONObject().put("username", recipient.username).put("origin", recipient.origin)
                 .put("id", recipient.id.toString()).put("bundle", recipient.accountKeyBundleId.toString()).put("publicKey", recipient.publicKey) })
             .put("instance", config.instance).put("relay", config.relayOnly)
@@ -185,30 +191,57 @@ class TransferCoordinator(
 
     /** Starts immediately so password and peer-consent prompts remain RAM-only;
      * the foreground service only observes this process-owned live sender. */
-    fun startLiveNote(instance: String, request: NativeNoteRequest): TransferJob {
+    @Synchronized fun startLiveNote(instance: String, request: NativeNoteRequest): LiveNoteHandle {
         check(!mutable.value.busy && active == null) { context.getString(R.string.work_already_running) }
         val job = accountSessions.service(instance).startLiveNote(request)
+        val id = UUID.randomUUID().toString()
         active = job
-        mutable.update { it.copy(busy = true, phase = "preparing", snapshot = null, message = null) }
+        activeLiveNoteId = id
+        mutable.update { it.copy(busy = true, phase = "preparing", snapshot = null, message = null,
+            current = CurrentTransfer(id, TransferKind.NOTE_LIVE, Transport.WEB_RTC, TransferActions(pause = true))) }
         scope.launch {
-            val config = settings.values.first()
-            withContext(Dispatchers.IO) {
-                pending.save(JSONObject().put("kind", "note-live").put("id", UUID.randomUUID().toString())
-                    .put("instance", instance).put("relay", config.relayOnly))
+            try {
+                val config = settings.values.first()
+                withContext(Dispatchers.IO) {
+                    pending.save(JSONObject().put("kind", "note-live").put("id", id)
+                        .put("instance", instance).put("relay", config.relayOnly))
+                }
+                TransferScheduler.start(context, true)
+                // Do not wait for a composable or service callback to begin polling this native job.
+                execute()
+            } catch (error: Exception) {
+                job.destroy()
+                if (active === job) active = null
+                activeLiveNoteId = null
+                mutable.update { it.copy(busy = false, current = null, phase = "failed", message = error.message) }
             }
-            TransferScheduler.start(context, true)
         }
-        return job
+        return LiveNoteHandle(id, job)
+    }
+
+    /** Signals the retained job; `execute()` remains responsible for terminal acknowledgement and cleanup. */
+    fun endLiveNote(id: String) {
+        if (id != activeLiveNoteId) { message("This live note is no longer active"); return }
+        active?.endLive()
+        mutable.update { it.copy(phase = "ending-live") }
     }
 
     /** HTTP notes share the same single-job arbitration as live notes and transfers. */
     suspend fun createHttpNote(block: suspend () -> io.filebeam.rust.CreatedNote): io.filebeam.rust.CreatedNote = noteSubmission.withLock {
-        check(!mutable.value.busy && active == null) { context.getString(R.string.work_already_running) }
-        mutable.update { it.copy(busy = true, phase = "creating-note", message = null) }
+        val id = UUID.randomUUID().toString()
+        synchronized(this@TransferCoordinator) {
+            check(!mutable.value.busy && active == null) { context.getString(R.string.work_already_running) }
+            mutable.update { it.copy(busy = true, phase = "creating-note", message = null,
+                current = CurrentTransfer(id, TransferKind.CONTROL, Transport.HTTP, TransferActions())) }
+        }
         try {
-            block()
+            block().also { note ->
+                val receipt = TransferReceipt(note.id, ReceiptState.APP_PRIVATE_PUBLISHED, null, null)
+                saveReceipt(receipt)
+                mutable.update { it.copy(phase = "complete", receipt = receipt) }
+            }
         } finally {
-            mutable.update { it.copy(busy = false) }
+            mutable.update { it.copy(busy = false, current = null) }
         }
     }
 
@@ -217,8 +250,10 @@ class TransferCoordinator(
     }
 
     private fun submit(clearSnapshot: Boolean = true, command: suspend (AppSettings) -> JSONObject) {
-        if (mutable.value.busy) { message(context.getString(R.string.work_already_running)); return }
-        mutable.update { it.copy(busy = true, snapshot = if (clearSnapshot) null else it.snapshot, preparedBytes = 0, phase = "preparing", message = null, sharePresentation = null) }
+        synchronized(this) {
+            if (mutable.value.busy) { message(context.getString(R.string.work_already_running)); return }
+            mutable.update { it.copy(busy = true, snapshot = if (clearSnapshot) null else it.snapshot, preparedBytes = 0, phase = "preparing", message = null, sharePresentation = null) }
+        }
         scope.launch {
             try {
                 val config = settings.values.first()
@@ -295,12 +330,13 @@ class TransferCoordinator(
                             (0 until values.length()).map { Uri.parse(values.getString(it)) }
                         }
                         val info = api.discover(request.getString("instance"))
-                        val live = request.optBoolean("live")
+                        val driver = request.getString("driver")
+                        val live = driver == "webrtc"
+                        check(driver in info.enabledTransports && driver in setOf("http", "webrtc")) { "This selected driver is disabled or unsupported by the instance" }
                         check(!request.optBoolean("turbo") || !live) { "Turbo Transfer requires HTTP" }
                         val origin = AccountSessionRegistry.normalizeOrigin(request.getString("instance"))
                         val cookie = accountSessions.cookie(origin)
                         check(info.anonymousUploads || cookie != null) { "This instance requires an account to send files" }
-                        check((if (live) "webrtc" else "http") in info.enabledTransports) { "This transport is disabled by the instance" }
                         val limit = if (live) info.webrtcMaximumFileCount else info.maximumFileCount
                         val count = if (request.optBoolean("archive")) 1uL else uris.size.toULong()
                         check(limit == null || count <= limit) { "The selection exceeds this instance's file-count limit" }
@@ -403,6 +439,7 @@ class TransferCoordinator(
             active?.destroy()
             active = null
             activeCheckpoint = null
+            activeLiveNoteId = null
             mutable.update { it.copy(busy = false, current = null) }
             refresh()
         }
@@ -601,7 +638,11 @@ internal fun currentPresentation(request: JSONObject, state: JobState): CurrentT
         "upload" -> TransferKind.UPLOAD; "download" -> TransferKind.DOWNLOAD; "inbox-download" -> TransferKind.INBOX_DOWNLOAD
         "note-live" -> TransferKind.NOTE_LIVE; "export" -> TransferKind.EXPORT; else -> TransferKind.CONTROL
     }
-    val transport = if (kind == TransferKind.UPLOAD) if (request.optBoolean("live")) Transport.WEB_RTC else Transport.HTTP else null
+    val transport = when (kind) {
+        TransferKind.UPLOAD -> if (request.optBoolean("live")) Transport.WEB_RTC else Transport.HTTP
+        TransferKind.NOTE_LIVE -> Transport.WEB_RTC
+        else -> null
+    }
     return CurrentTransfer(request.getString("id"), kind, transport, TransferActions(
         pause = state in listOf(JobState.RUNNING, JobState.PAUSING),
         // Remote-token actions are exposed only by savedDetails(), whose FFI contract verifies token availability.

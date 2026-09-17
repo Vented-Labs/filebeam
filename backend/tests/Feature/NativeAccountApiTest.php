@@ -125,7 +125,9 @@ test('native registration follows the web registration gate and creates a sessio
         'email' => 'native-register@example.test',
         'password' => 'a-long-secure-password',
         'password_confirmation' => 'a-long-secure-password',
-    ], ['Sec-Fetch-Site' => 'same-origin'])->assertCreated()->assertJsonPath('data.username', 'native_user');
+    ], ['Sec-Fetch-Site' => 'same-origin'])->assertCreated()
+        ->assertJsonPath('data.username', 'native_user')
+        ->assertJsonPath('data.notificationChannel', 'mail');
 
 });
 

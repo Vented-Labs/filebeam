@@ -32,7 +32,7 @@ class FilebeamApplication : Application() {
     val accountSessions by lazy { AccountSessionRegistry(BuildConfig.DEBUG, nativeRuntime) }
     val accounts: AccountService by lazy { NativeAccountService(this, accountSessions) }
     val transfers by lazy { TransferCoordinator(this, settings, accountSessions, nativeRuntime, accounts) }
-    val notes: NotesService by lazy { NativeNotesService(accountSessions, { instance, request -> transfers.startLiveNote(instance, request) }, transfers::createHttpNote) }
+    val notes: NotesService by lazy { NativeNotesService(accountSessions, { instance, request -> transfers.startLiveNote(instance, request) }, transfers::endLiveNote, transfers::createHttpNote) }
     val turbo: TurboService by lazy { NativeTurboService(accountSessions) }
     val inbox: InboxService by lazy { NativeInboxService(accountSessions, accounts, transfers) }
 }

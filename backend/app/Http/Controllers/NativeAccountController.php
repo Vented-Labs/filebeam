@@ -33,7 +33,7 @@ class NativeAccountController extends Controller
             'profileUrl' => is_string($user->username) ? $urls->profile($user->username) : null,
             'inboxEnabled' => $user->inbox_enabled,
             'usernameRoutingEnabled' => app(InstanceSettings::class)->boolean('username_routing'),
-            'notificationChannel' => $user->notification_channel,
+            'notificationChannel' => $user->notification_channel ?? 'mail',
         ]], 200, ['Cache-Control' => 'no-store, private']);
     }
 

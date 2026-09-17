@@ -76,6 +76,7 @@
     <string name="saved_file">File saved</string>
     <string name="continue_action">Continue</string>
     <string name="cancel">Cancel</string>
+    <string name="back">Back</string>
     <string name="decryption_key">Decryption key</string>
     <string name="password">Transfer password</string>
     <string name="peer_consent_title">WebRTC connection</string>

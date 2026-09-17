@@ -3,6 +3,8 @@ package io.filebeam.android.platform.services
 import io.filebeam.rust.NoteRequest as NativeNoteRequest
 import io.filebeam.rust.splitShareLink
 import io.filebeam.rust.NoteTransport
+import io.filebeam.rust.JobState
+import io.filebeam.android.platform.LiveNoteHandle
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -45,11 +47,12 @@ interface TurboService {
 
 class NativeNotesService(
     private val sessions: AccountSessionRegistry,
-    private val startLive: (String, NativeNoteRequest) -> io.filebeam.rust.TransferJob,
+    private val startLive: (String, NativeNoteRequest) -> LiveNoteHandle,
+    private val endLive: (String) -> Unit,
     private val createHttp: suspend (suspend () -> io.filebeam.rust.CreatedNote) -> io.filebeam.rust.CreatedNote,
 ) : NotesService {
     private val mutable = MutableStateFlow<ServiceState<List<NoteSummary>>>(ServiceState.Loading)
-    private val liveJobs = mutableMapOf<String, io.filebeam.rust.TransferJob>()
+    private val liveJobs = mutableMapOf<String, String>()
     override val state = mutable.asStateFlow()
     override suspend fun create(request: NoteRequest): NoteSummary = withContext(Dispatchers.IO) {
         val native = NativeNoteRequest(
@@ -62,15 +65,19 @@ class NativeNotesService(
             transport = if (request.live) NoteTransport.WEB_RTC else NoteTransport.HTTP,
         )
         val created = if (request.live) {
-            val job = startLive(request.instance, native)
+            val handle = startLive(request.instance, native)
             var created: io.filebeam.rust.CreatedNote? = null
             while (created == null) {
-                val snapshot = job.snapshot()
+                val snapshot = handle.job.snapshot()
                 snapshot.shareUrl?.let { ready ->
-                    liveJobs[ready] = job
-                    created = io.filebeam.rust.CreatedNote(transferId(ready), ready, "")
+                    val transferId = noteTransferId(ready)
+                    liveJobs[transferId] = handle.id
+                    created = io.filebeam.rust.CreatedNote(transferId, ready, "")
                 }
                 snapshot.error?.let { error(it) }
+                if (snapshot.state !in listOf(JobState.RUNNING, JobState.PAUSING)) {
+                    error("Live note stopped before its link was published")
+                }
                 delay(100)
             }
             requireNotNull(created)
@@ -86,7 +93,7 @@ class NativeNotesService(
         mutable.value = ServiceState.Ready(listOf(NoteSummary(opened.id, opened.title ?: "Encrypted note", null)))
         NoteContent(opened.id, opened.text, opened.title, opened.language, opened.consumed)
     }
-    override fun endLive(link: String) { liveJobs.remove(link)?.endLive() }
+    override fun endLive(link: String) { liveJobs.remove(noteTransferId(link))?.let(endLive) }
 }
 
 class NativeTurboService(private val sessions: AccountSessionRegistry) : TurboService {
@@ -98,7 +105,7 @@ class NativeTurboService(private val sessions: AccountSessionRegistry) : TurboSe
     }
 }
 
-private fun transferId(link: String): String = link.substringBefore('#').substringAfterLast('/').also {
+internal fun noteTransferId(link: String): String = link.substringBefore('#').substringAfterLast('/').also {
     require(it.isNotBlank()) { "Enter a note transfer link" }
 }
 private fun originForLink(link: String): String = java.net.URI(link.substringBefore('#')).let { uri ->

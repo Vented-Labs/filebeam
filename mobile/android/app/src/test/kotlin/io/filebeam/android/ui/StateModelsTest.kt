@@ -49,10 +49,14 @@ class StateModelsTest {
         assertTrue(notes.includeKeyInLink)
     }
 
-    @Test fun unknownOrZipSourceNeverClaimsItFitsEncryptedByteLimits() {
+    @Test fun knownIndividualSizesUseNativeAeadEstimateWhileZipStaysUnknown() {
         val policy = policy(maximumBytes = 100u)
-        assertEquals(SendLimitStatus.UnknownSize, fileLimitStatus(policy, null, false, listOf(10)))
+        assertEquals(SendLimitStatus.WithinKnownLimits, fileLimitStatus(policy, null, false, listOf(10)))
         assertEquals(SendLimitStatus.UnknownSize, fileLimitStatus(policy, null, true, listOf(10)))
+    }
+
+    @Test fun unavailableSelectedDriverIsNeverReplacedWithTheDefault() {
+        assertTrue(fileLimitStatus(policy(), "webrtc", false, listOf(1)) is SendLimitStatus.Exceeds)
     }
 
     @Test fun policyRejectsKnownDriverCountAndNoteByteConflicts() {
@@ -85,9 +89,14 @@ class StateModelsTest {
         assertEquals("1.0 KB", formatFileSize(1024))
         assertEquals("0 B", formatFileSize(0))
     }
+
+    @Test fun compactNavigationHidesLabelsBeforeAccessibilityTextWouldWrap() {
+        assertTrue(shouldShowCompactNavigationLabels(1f))
+        assertFalse(shouldShowCompactNavigationLabels(2f))
+    }
 }
 
 private fun policy(maximumBytes: ULong? = null, maximumFiles: ULong? = null, maximumNoteBytes: ULong? = null) = SendInstancePolicy(
-    SendDiscoveryKey("https://example.test", null), true, setOf(Transport.HTTP), 24u, setOf(24u), "http",
+    SendDiscoveryKey("https://example.test", null), true, setOf(Transport.HTTP), 24u, setOf(24u), "http", 10u,
     mapOf("http" to SendDriverPolicy("http", maximumBytes, maximumFiles, maximumNoteBytes)),
 )

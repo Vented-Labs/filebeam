@@ -271,8 +271,8 @@ pub struct Info {
     pub anonymous_uploads_enabled: bool,
     #[serde(default)]
     pub enabled_drivers: Vec<String>,
-    #[serde(default = "http_driver")]
     pub default_driver: String,
+    pub chunk_bytes: u64,
     pub maximum_transfer_bytes: Option<u64>,
     pub maximum_file_count: Option<usize>,
     #[serde(default)]
@@ -288,6 +288,7 @@ impl Info {
             anonymous_uploads_enabled: true,
             enabled_drivers: vec!["http".into()],
             default_driver: "http".into(),
+            chunk_bytes: 1_048_560,
             maximum_transfer_bytes: Some(2 * 1024 * 1024 * 1024),
             maximum_file_count: Some(20),
             transport_limits: HashMap::new(),
@@ -312,7 +313,17 @@ pub fn instance_info(instance: &str) -> Result<Info> {
             response.url()
         );
     }
-    Ok(response.json::<Api<Info>>()?.data)
+    let info = response.json::<Api<Info>>()?.data;
+    if !matches!(info.default_driver.as_str(), "http" | "webrtc")
+        || !info
+            .enabled_drivers
+            .iter()
+            .any(|driver| driver == &info.default_driver)
+        || info.chunk_bytes == 0
+    {
+        bail!("instance advertised an invalid default driver or chunk size");
+    }
+    Ok(info)
 }
 
 /// Public, read-only metadata used to route a received link before unlock.

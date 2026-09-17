@@ -54,6 +54,9 @@ impl Phase {
 #[derive(Clone, Debug, Default)]
 pub struct Progress {
     pub phase: Phase,
+    /// Increments at a real phase boundary so presentations can distinguish a
+    /// retry/reset from a stale or out-of-order progress snapshot.
+    pub generation: u64,
     pub name: String,
     pub index: usize,
     pub files: usize,
@@ -369,7 +372,12 @@ impl Control {
     }
     pub fn phase(&self, phase: Phase) -> Result<()> {
         self.check()?;
-        self.edit(|progress| progress.phase = phase);
+        self.edit(|progress| {
+            if progress.phase != phase {
+                progress.phase = phase;
+                progress.generation = progress.generation.saturating_add(1);
+            }
+        });
         Ok(())
     }
     pub fn totals(&self, bytes: u64, files: usize) {
@@ -426,6 +434,18 @@ mod tests {
         let control = Control::test_factory();
         assert_eq!(control.transfer_home(), PathBuf::from("transfers"));
         assert_eq!(control.memory_budget(), 512 * 1024 * 1024);
+    }
+
+    #[test]
+    fn phase_generation_changes_only_at_real_phase_boundaries() {
+        let control = Control::test_factory();
+        assert_eq!(control.snapshot().generation, 0);
+        control.phase(Phase::Sending).unwrap();
+        assert_eq!(control.snapshot().generation, 1);
+        control.phase(Phase::Sending).unwrap();
+        assert_eq!(control.snapshot().generation, 1);
+        control.phase(Phase::Retrying).unwrap();
+        assert_eq!(control.snapshot().generation, 2);
     }
 
     #[test]

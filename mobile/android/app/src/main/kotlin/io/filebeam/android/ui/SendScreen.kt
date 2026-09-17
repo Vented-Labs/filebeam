@@ -3,6 +3,7 @@ package io.filebeam.android.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -52,10 +53,10 @@ fun SendScreen(model: FilebeamViewModel, busy: Boolean, pick: () -> Unit, pickTr
     if (notesSelected) {
         NotesComposer(model, instance, busy, header)
     } else Column(Modifier.fillMaxSize().imePadding()) {
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(FilebeamSpace.Large)) {
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = FilebeamSpace.Gutter), verticalArrangement = Arrangement.spacedBy(FilebeamSpace.Large)) {
             header()
             FileComposer(model, busy, policy, pick, pickTree)
         }
-        FileSendDock(model, busy, send)
+        FileSendDock(model, busy, send, Modifier.padding(horizontal = FilebeamSpace.Gutter))
     }
 }
