@@ -127,7 +127,7 @@ class API(http.server.BaseHTTPRequestHandler):
         if self.path == "/api/v1/transfers":
             transfer = STATE.new_transfer(json.loads(body)); result = {"id":transfer["id"],
                 "share_url":"/" + transfer["id"], "driver":"http", "chunk_bytes":CHUNK,
-                "items":transfer["items"], "upload_token":"fixture-token"}
+                "items":transfer["items"], "upload_token":"fixture-token", "delete_token":"fixture-delete-token"}
             if transfer["mode"] == "stage": result["upload_transport"] = {"version":1,
                 "part_min_bytes":16384,"part_max_bytes":65536,"request_target_ms":100,
                 "request_budget_ms":100,"part_max_count":1000}
@@ -300,7 +300,9 @@ def main():
             wait_gate(transfer); kill(process); ident=saved_id(env,root,before)
             checkpoint=home/"transfers"/ident
             share=checkpoint/"share-key"; expected=base64.urlsafe_b64decode(link.split("#k=v1.")[1]+"===")
-            assert share.read_bytes()==expected, f"resume checkpoint lost original share key ({len(share.read_bytes())} != {len(expected)})"
+            protected = share.read_bytes()
+            assert protected.startswith(b"FBCK\x01") and len(protected) >= 45, "resume checkpoint is not an authenticated secret record"
+            assert expected not in protected and base64.b64encode(expected) not in protected, "resume checkpoint exposed the share key"
             transfer["gate"].set(); require(run(["resume",ident],env,root),"killed download resume failed")
             assert (root/"kill-out"/source.name).read_bytes()==source.read_bytes()
         def source_changed_before_resume():
