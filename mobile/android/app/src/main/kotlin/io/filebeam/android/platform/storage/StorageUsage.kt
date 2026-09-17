@@ -36,14 +36,14 @@ object StorageUsageScanner {
     private fun StorageUsageBucket.add(bytes: Long) = copy(files = files + 1, bytes = this.bytes + bytes.coerceAtLeast(0))
 
     private fun scanRoot(root: File, classify: (String) -> Bucket): List<Pair<Bucket, File>> {
-        if (!root.isDirectory || Files.isSymbolicLink(root.toPath())) return emptyList()
+        if (!root.isDirectory || runCatching { Files.isSymbolicLink(root.toPath()) }.getOrDefault(true)) return emptyList()
         val files = mutableListOf<Pair<Bucket, File>>()
         val pending = ArrayDeque(listOf(root to ""))
         while (pending.isNotEmpty()) {
             val (directory, relative) = pending.removeFirst()
             // listFiles can return null when a transfer finishes or is removed during this scan.
             directory.listFiles()?.forEach { child ->
-                if (Files.isSymbolicLink(child.toPath())) return@forEach
+                if (runCatching { Files.isSymbolicLink(child.toPath()) }.getOrDefault(true)) return@forEach
                 val childRelative = if (relative.isEmpty()) child.name else "$relative${File.separator}${child.name}"
                 when {
                     child.isDirectory -> pending.add(child to childRelative)

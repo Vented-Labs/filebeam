@@ -28,6 +28,12 @@ class StateModelsTest {
         assertEquals(DestinationRoute.Send, state.back().back().current)
     }
 
+    @Test fun storage_review_back_stack_returns_to_settings_before_the_origin() {
+        val state = NavigationState(DestinationRoute.Settings).push(DestinationRoute.StorageUsage).push(DestinationRoute.ReviewTransfers)
+        assertEquals(DestinationRoute.StorageUsage, state.back().current)
+        assertEquals(DestinationRoute.Settings, state.back().back().current)
+    }
+
     @Test fun selectingPrimaryDestinationClearsNestedBackStack() {
         val state = NavigationState().push(DestinationRoute.Receive).push(DestinationRoute.Settings)
             .selectPrimary(DestinationRoute.Inbox)

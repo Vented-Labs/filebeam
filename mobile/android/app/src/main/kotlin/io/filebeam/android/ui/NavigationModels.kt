@@ -2,7 +2,8 @@ package io.filebeam.android.ui
 
 enum class DestinationRoute(val route: String) {
     Send("send"), Receive("receive"), Transfers("transfers"), Inbox("inbox"),
-    Settings("settings"), Account("account"), TransferDetail("transfer"), NoteViewer("note");
+    Settings("settings"), StorageUsage("storage"), ReviewTransfers("review-transfers"),
+    Account("account"), TransferDetail("transfer"), NoteViewer("note");
 
     companion object {
         val primary = listOf(Send, Receive, Transfers, Inbox)

@@ -2,14 +2,14 @@ package io.filebeam.android.platform.storage
 
 import java.nio.file.Files
 import org.junit.Assert.assertEquals
-import org.junit.Assume.assumeFalse
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 
 class StorageUsageTest {
     @Test fun categorizes_document_snapshots_native_recovery_and_verified_outputs() {
         val root = Files.createTempDirectory("usage").toFile()
         try {
-            root.resolve("documents/job/sources").apply { mkdirs() }.resolve("source").writeBytes(ByteArray(3))
+            root.resolve("documents/job/sources").apply { mkdirs() }.resolve(".source.part").writeBytes(ByteArray(3))
             root.resolve("documents/job/downloads").apply { mkdirs() }.resolve("verified").writeBytes(ByteArray(5))
             root.resolve("transfers/checkpoint").apply { mkdirs() }.resolve("state").writeBytes(ByteArray(7))
 
@@ -26,7 +26,7 @@ class StorageUsageTest {
         try {
             val source = root.resolve("documents/job/sources").apply { mkdirs() }
             val link = source.resolve("outside").toPath()
-            runCatching { Files.createSymbolicLink(link, outside) }.getOrElse { assumeFalse("symlinks are unavailable", true) }
+            assumeTrue("symlinks are unavailable", runCatching { Files.createSymbolicLink(link, outside) }.isSuccess)
 
             val usage = StorageUsageScanner.scan(root.resolve("documents"), root.resolve("transfers"))
             assertEquals(StorageUsageBucket(), usage.snapshots)

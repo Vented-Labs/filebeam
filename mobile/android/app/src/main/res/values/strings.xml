@@ -188,9 +188,21 @@
     <string name="settings_connection">Connection</string>
     <string name="appearance_system">Appearance follows the device. Dynamic colors require Android 12 or later; earlier supported Android releases use the app theme.</string>
     <string name="storage">Storage and data</string>
-    <string name="storage_categories">Encrypted transfer recovery data and saved transfer records are stored locally. Account sessions and account keys are encrypted local state.</string>
+    <string name="storage_categories">Review only app-private transfer snapshots, encrypted recovery data, and verified downloads. Account keys and draft contents are never inspected here.</string>
     <string name="manage_local_transfers">Manage local transfer data</string>
     <string name="local_remote_difference">Removing local transfer data does not revoke a remote upload. Revoke it from the transfer detail while it is still available.</string>
+    <string name="storage_usage">Storage usage</string>
+    <string name="storage_available">%1$s available of %2$s on this device</string>
+    <string name="source_snapshots">Source snapshots</string>
+    <string name="encrypted_recovery">Encrypted recovery</string>
+    <string name="verified_data">Verified data</string>
+    <plurals name="storage_files">
+        <item quantity="one">%1$d file · %2$s</item>
+        <item quantity="other">%1$d files · %2$s</item>
+    </plurals>
+    <string name="review_transfers">Review transfers</string>
+    <string name="review_transfers_detail">Resume interrupted work or copy a transfer ID. This screen does not delete data or revoke shares.</string>
+    <string name="copy_transfer_id">Copy transfer ID</string>
     <string name="about">About</string>
     <string name="version_name">Version %1$s</string>
     <string name="licenses">Filebeam uses open-source components. License notices are included with the installed application.</string>

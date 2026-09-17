@@ -137,6 +137,8 @@ private fun routeTitle(route: DestinationRoute): String = stringResource(when (r
     DestinationRoute.Transfers, DestinationRoute.TransferDetail -> R.string.transfers
     DestinationRoute.Inbox -> R.string.inbox
     DestinationRoute.Settings -> R.string.settings
+    DestinationRoute.StorageUsage -> R.string.storage_usage
+    DestinationRoute.ReviewTransfers -> R.string.review_transfers
     DestinationRoute.Account -> R.string.account
 })
 
@@ -160,6 +162,8 @@ private fun DestinationContent(
     DestinationRoute.Inbox -> InboxDestination(model, instance)
     DestinationRoute.NoteViewer -> ReceiveScreen(model, state.busy) { start(model::startReceivedDownload) }
     DestinationRoute.Settings -> SettingsScreen(model, model::navigate)
+    DestinationRoute.StorageUsage -> StorageUsageScreen { model.navigate(Destination.ReviewTransfers) }
+    DestinationRoute.ReviewTransfers -> ReviewTransfersScreen(model, start)
     DestinationRoute.Account -> AccountDestination(model, instance, exportAccountKey, importAccountKey)
 } }
 

@@ -34,7 +34,7 @@ import org.json.JSONObject
 enum class Destination(val label: Int) {
     Send(R.string.send), Receive(R.string.receive), Transfers(R.string.transfers),
     Notes(R.string.notes), Inbox(R.string.inbox), Turbo(R.string.turbo),
-    Account(R.string.account), Settings(R.string.settings);
+    Account(R.string.account), Settings(R.string.settings), StorageUsage(R.string.storage), ReviewTransfers(R.string.review_transfers);
     companion object { val primary = listOf(Send, Receive, Transfers, Inbox) }
 }
 
@@ -391,5 +391,5 @@ private fun recipientStatus(name: String, transport: Transport, turbo: Boolean, 
     transport != Transport.HTTP || turbo || password -> RecipientStatus.CONFLICT
     else -> RecipientStatus.UNVALIDATED
 }
-private fun Destination.route() = when (this) { Destination.Send, Destination.Notes, Destination.Turbo -> DestinationRoute.Send; Destination.Receive -> DestinationRoute.Receive; Destination.Transfers -> DestinationRoute.Transfers; Destination.Inbox -> DestinationRoute.Inbox; Destination.Settings -> DestinationRoute.Settings; Destination.Account -> DestinationRoute.Account }
-private fun DestinationRoute.destination() = when (this) { DestinationRoute.Send -> Destination.Send; DestinationRoute.Receive, DestinationRoute.NoteViewer -> Destination.Receive; DestinationRoute.Transfers, DestinationRoute.TransferDetail -> Destination.Transfers; DestinationRoute.Inbox -> Destination.Inbox; DestinationRoute.Settings -> Destination.Settings; DestinationRoute.Account -> Destination.Account }
+private fun Destination.route() = when (this) { Destination.Send, Destination.Notes, Destination.Turbo -> DestinationRoute.Send; Destination.Receive -> DestinationRoute.Receive; Destination.Transfers -> DestinationRoute.Transfers; Destination.Inbox -> DestinationRoute.Inbox; Destination.Settings -> DestinationRoute.Settings; Destination.StorageUsage -> DestinationRoute.StorageUsage; Destination.ReviewTransfers -> DestinationRoute.ReviewTransfers; Destination.Account -> DestinationRoute.Account }
+private fun DestinationRoute.destination() = when (this) { DestinationRoute.Send -> Destination.Send; DestinationRoute.Receive, DestinationRoute.NoteViewer -> Destination.Receive; DestinationRoute.Transfers, DestinationRoute.TransferDetail -> Destination.Transfers; DestinationRoute.Inbox -> Destination.Inbox; DestinationRoute.Settings -> Destination.Settings; DestinationRoute.StorageUsage -> Destination.StorageUsage; DestinationRoute.ReviewTransfers -> Destination.ReviewTransfers; DestinationRoute.Account -> Destination.Account }

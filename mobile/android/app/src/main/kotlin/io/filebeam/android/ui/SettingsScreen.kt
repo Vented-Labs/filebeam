@@ -43,7 +43,7 @@ fun SettingsScreen(model: FilebeamViewModel, navigate: (Destination) -> Unit) = 
     onCheck = model::checkInstanceInput,
     onCommit = model::commitCheckedInstance,
     onConfirmActiveTransfer = model::confirmInstanceChangeAfterActiveTransfer,
-    onManageTransfers = { navigate(Destination.Transfers) },
+    onManageTransfers = { navigate(Destination.StorageUsage) },
 )
 
 @Composable
@@ -62,7 +62,7 @@ fun SettingsContent(
     val storage by produceState<StoragePresentation>(StoragePresentation.Loading) {
         value = withContext(Dispatchers.IO) {
             runCatching {
-                val fs = StatFs(context.filesDir.absolutePath)
+                val fs = StatFs(context.noBackupFilesDir.absolutePath)
                 StoragePresentation.Ready(fs.availableBytes, fs.totalBytes)
             }.getOrElse { StoragePresentation.Error }
         }
@@ -93,11 +93,11 @@ fun SettingsContent(
             val detail = when (storage) {
                 StoragePresentation.Loading -> stringResource(R.string.loading)
                 is StoragePresentation.Ready -> (storage as StoragePresentation.Ready).let { ready ->
-                    "${android.text.format.Formatter.formatShortFileSize(context, ready.available)} available of ${android.text.format.Formatter.formatShortFileSize(context, ready.total)}"
+                    context.getString(R.string.storage_available, android.text.format.Formatter.formatShortFileSize(context, ready.available), android.text.format.Formatter.formatShortFileSize(context, ready.total))
                 }
                 StoragePresentation.Error -> stringResource(R.string.unknown_error)
             }
-            OptionRow(stringResource(R.string.manage_local_transfers), detail, ApprovedIcon.Storage, onClick = onManageTransfers)
+            OptionRow(stringResource(R.string.storage_usage), detail, ApprovedIcon.Storage, onClick = onManageTransfers)
             Text(stringResource(R.string.local_remote_difference), Modifier.padding(horizontal = FilebeamSpace.Medium, vertical = FilebeamSpace.Small), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         SettingsSection(stringResource(R.string.about)) {
@@ -128,10 +128,13 @@ private sealed interface StoragePresentation {
 
 @Composable private fun LicenseNoticeDialog(dismiss: () -> Unit) {
     val context = LocalContext.current
-    val notices = androidx.compose.runtime.remember {
-        runCatching { listOf("LICENSE", "icons-NOTICE").joinToString("\n\n") { context.assets.open(it).bufferedReader().use { reader -> reader.readText() } } }.getOrElse { "License notices are unavailable in this build." }
+    val notices by produceState<String?>(null) {
+        value = withContext(Dispatchers.IO) {
+            runCatching { listOf("LICENSE", "icons-NOTICE").joinToString("\n\n") { context.assets.open(it).bufferedReader().use { reader -> reader.readText() } } }
+                .getOrElse { "License notices are unavailable in this build." }
+        }
     }
-    AlertDialog(onDismissRequest = dismiss, title = { Text(stringResource(R.string.licenses)) }, text = { Text(notices, style = MaterialTheme.typography.bodySmall) }, confirmButton = { Button(onClick = dismiss) { Text(stringResource(R.string.close)) } })
+    AlertDialog(onDismissRequest = dismiss, title = { Text(stringResource(R.string.licenses)) }, text = { Text(notices ?: stringResource(R.string.loading), style = MaterialTheme.typography.bodySmall) }, confirmButton = { Button(onClick = dismiss) { Text(stringResource(R.string.close)) } })
 }
 
 @Composable
