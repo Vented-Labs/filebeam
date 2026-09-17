@@ -116,7 +116,13 @@ class FilebeamViewModel(application: Application) : AndroidViewModel(application
             }
             // Writes submitted while decrypting were buffered by the conflated channel. Reading and
             // writing are therefore serialized through this one coroutine.
-            for ((send, note) in draftWrites) runCatching { drafts.save(send.toJson().put("note", note.toJson())) }
+            for ((send, note) in draftWrites) {
+                runCatching { drafts.save(send.toJson().put("note", note.toJson())) }.onFailure {
+                    withContext(Dispatchers.Main.immediate) {
+                        draftRestoreError = "A protected draft could not be saved on this device."
+                    }
+                }
+            }
         }
         viewModelScope.launch { settings.collect {
             if (!instanceTransaction.dirty) instanceTransaction = InstanceSettingsTransaction(committed = it)

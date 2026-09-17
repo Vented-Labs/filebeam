@@ -39,6 +39,7 @@ if [[ ${FILEBEAM_ANDROID_DEVICE_CONTAINER:-} != 1 ]]; then
         --env FILEBEAM_ANDROID_INSTRUMENTATION_TIMEOUT="${FILEBEAM_ANDROID_INSTRUMENTATION_TIMEOUT:-3600}" \
         --env FILEBEAM_ANDROID_HTTP_PROBE="${FILEBEAM_ANDROID_HTTP_PROBE:-}" \
         --env FILEBEAM_ANDROID_LIVE_LOGCAT_TAG="${FILEBEAM_ANDROID_LIVE_LOGCAT_TAG:-}" \
+        --env FILEBEAM_ANDROID_PULL_EVIDENCE="${FILEBEAM_ANDROID_PULL_EVIDENCE:-}" \
         --env FILEBEAM_ANDROID_REPORT_DIR="$container_report_dir" \
         --volume "$root:/workspace" --workdir /workspace \
         "${FILEBEAM_ANDROID_EMULATOR_IMAGE:-filebeam-android-emulator:api35-16k}" \
@@ -162,5 +163,10 @@ kill "$rss_pid" 2>/dev/null || true
 wait "$rss_pid" 2>/dev/null || true
 result=$(<"$report_dir/instrumentation.txt")
 printf '%s\n' "$result"
+if [[ ${FILEBEAM_ANDROID_PULL_EVIDENCE:-} == 1 ]]; then
+    adb exec-out run-as io.filebeam.android.debug tar -C files -cf - native-kit-evidence > "$report_dir/evidence.tar"
+    mkdir -p "$report_dir/evidence"
+    tar -xf "$report_dir/evidence.tar" -C "$report_dir/evidence"
+fi
 [[ $instrumentation_status == 0 ]] || exit "$instrumentation_status"
 [[ $result == *'OK ('* ]] || exit 1
