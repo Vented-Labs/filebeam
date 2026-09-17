@@ -488,7 +488,7 @@ async fn run_new(
             .ok_or_else(|| anyhow::anyhow!("selected files are too large"))
     })?;
     let declared = metadata.iter().try_fold(0u64, |n, (_, source)| {
-        n.checked_add(ciphertext_bytes(source.bytes, info.chunk_bytes)?)
+        n.checked_add(estimate_ciphertext_bytes(source.bytes, info.chunk_bytes)?)
             .ok_or_else(|| anyhow::anyhow!("selected files are too large"))
     })?;
     if limits
@@ -570,7 +570,7 @@ async fn run_new(
             .iter()
             .map(|(_, s)| {
                 Ok(CreateItem {
-                    ciphertext_bytes: ciphertext_bytes(s.bytes, info.chunk_bytes)?,
+                    ciphertext_bytes: estimate_ciphertext_bytes(s.bytes, info.chunk_bytes)?,
                     chunk_count: chunk_count(s.bytes, info.chunk_bytes)?,
                 })
             })
@@ -2403,7 +2403,7 @@ fn chunk_count(bytes: u64, chunk: u64) -> Result<u64> {
     }
     Ok(bytes.div_ceil(chunk).max(1))
 }
-fn ciphertext_bytes(bytes: u64, chunk: u64) -> Result<u64> {
+pub(super) fn estimate_ciphertext_bytes(bytes: u64, chunk: u64) -> Result<u64> {
     bytes
         .checked_add(
             chunk_count(bytes, chunk)?
@@ -2452,9 +2452,12 @@ mod tests {
     #[test]
     fn ciphertext_accounting_handles_empty_and_full_chunks() {
         assert_eq!(chunk_count(0, 10).unwrap(), 1);
-        assert_eq!(ciphertext_bytes(0, 10).unwrap(), TAG_BYTES);
+        assert_eq!(estimate_ciphertext_bytes(0, 10).unwrap(), TAG_BYTES);
         assert_eq!(chunk_count(20, 10).unwrap(), 2);
-        assert_eq!(ciphertext_bytes(20, 10).unwrap(), 20 + TAG_BYTES * 2);
+        assert_eq!(
+            estimate_ciphertext_bytes(20, 10).unwrap(),
+            20 + TAG_BYTES * 2
+        );
     }
 
     #[test]

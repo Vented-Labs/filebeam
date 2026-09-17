@@ -22,6 +22,8 @@ data class NavigationState(val current: DestinationRoute = DestinationRoute.Send
     fun push(destination: DestinationRoute): NavigationState =
         if (destination == current) this else copy(current = destination, backStack = backStack + current)
     fun back(): NavigationState = backStack.lastOrNull()?.let { copy(current = it, backStack = backStack.dropLast(1)) } ?: this
+    fun selectPrimary(destination: DestinationRoute): NavigationState =
+        if (destination == current && backStack.isEmpty()) this else NavigationState(destination)
 }
 
 /** Saved route state may contain only opaque IDs, never URLs, secrets, draft text, or keys. */

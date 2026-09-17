@@ -38,6 +38,7 @@ object TransferScheduler {
     const val JOB_ID = 4100
     const val NOTIFICATION_ID = 4101
     private const val CHANNEL = "transfers"
+    const val EXTRA_ROUTE = "io.filebeam.android.transfer_route"
 
     fun start(context: Context, liveSender: Boolean) {
         if (Build.VERSION.SDK_INT >= 34 && !liveSender) {
@@ -56,7 +57,10 @@ object TransferScheduler {
     fun notification(context: Context, state: TransferUiState): Notification {
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(NotificationChannel(CHANNEL, context.getString(R.string.notification_channel), NotificationManager.IMPORTANCE_LOW))
-        val open = PendingIntent.getActivity(context, 0, Intent(context, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val route = notificationRoute(state)
+        val open = PendingIntent.getActivity(context, route?.hashCode() ?: 0,
+            Intent(context, MainActivity::class.java).putExtra(EXTRA_ROUTE, route),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val pause = PendingIntent.getBroadcast(context, 0, Intent(context, TransferActionReceiver::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val snapshot = state.snapshot
         val builder = NotificationCompat.Builder(context, CHANNEL)
@@ -89,6 +93,11 @@ object TransferScheduler {
                 .notify(NOTIFICATION_ID + 1, notification(context, state.copy(busy = false)))
         }
     }
+
+    /** Only opaque identifiers cross the notification boundary; link fragments and prompts stay in encrypted state. */
+    internal fun notificationRoute(state: TransferUiState): String? = state.snapshot?.prompt?.id?.let { "prompt:$it" }
+        ?: state.current?.id?.let { "transfer:$it" }
+        ?: state.receipt?.id?.let { "transfer:$it" }
 }
 
 class TransferActionReceiver : BroadcastReceiver() {

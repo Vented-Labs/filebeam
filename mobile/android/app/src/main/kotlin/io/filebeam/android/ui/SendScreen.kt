@@ -1,59 +1,61 @@
 package io.filebeam.android.ui
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.material3.Button
-import androidx.compose.material3.FilterChip
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.Checkbox
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.unit.dp
-import androidx.compose.material3.OutlinedTextField
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.filebeam.android.R
-import io.filebeam.rust.Transport
+import io.filebeam.android.ui.design.FilebeamSpace
+import io.filebeam.android.ui.send.FileComposer
+import io.filebeam.android.ui.send.FileSendDock
+import io.filebeam.android.ui.send.SendModeTabs
+import io.filebeam.android.ui.send.TransportCards
+import io.filebeam.android.ui.send.SendPolicyStatus
 
+/** The Send destination owns only visual composition; drafts and transfer lifecycle remain model-owned. */
 @Composable
 fun SendScreen(model: FilebeamViewModel, busy: Boolean, pick: () -> Unit, pickTree: () -> Unit, send: () -> Unit) {
-    val archiveLabel = stringResource(R.string.archive)
-    val passwordLabel = stringResource(R.string.optional_password)
-    val turboLabel = stringResource(R.string.turbo_transfer)
-    Text(stringResource(R.string.send_title), style = MaterialTheme.typography.headlineSmall)
-    Text(stringResource(R.string.send_description))
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(enabled = !busy, onClick = pick) { Text(stringResource(R.string.select_files)) }
-        OutlinedButton(enabled = !busy, onClick = pickTree) { Text(stringResource(R.string.select_folder)) }
+    val notesSelected = model.sendContent == SendContent.NOTES
+    val instance = model.settings.collectAsStateWithLifecycle().value.instance
+    val discovery = model.activeSendDiscovery
+    val policy = (discovery as? SendDiscoveryState.Ready)?.policy
+    val header: @Composable () -> Unit = {
+        Text(
+            stringResource(if (notesSelected) R.string.send_note_title else R.string.send_title),
+            style = MaterialTheme.typography.headlineMedium,
+        )
+        Text(
+            stringResource(if (notesSelected) R.string.send_note_description else R.string.send_description),
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        // Composer navigation is safe while work runs; changing it does not control the job.
+        SendModeTabs(notesSelected, enabled = true) { model.showSend(if (it) SendContent.NOTES else SendContent.FILES) }
+        TransportCards(
+            selected = if (notesSelected && model.noteDraft.live) io.filebeam.rust.Transport.WEB_RTC else model.transport,
+            enabled = { transport -> !busy && policy?.enabledTransports?.contains(transport) == true },
+            onSelect = { transport ->
+                if (notesSelected) model.updateNote { it.copy(live = transport == io.filebeam.rust.Transport.WEB_RTC) }
+                else model.transport = transport
+            },
+        )
+        SendPolicyStatus(discovery, if (notesSelected) policy?.let { model.noteDraft.limitStatus(it) } else policy?.let { model.sendDraft.limitStatus(it) })
     }
-    if (model.selectedFiles.isNotEmpty()) Text(pluralStringResource(R.plurals.files_selected, model.selectedFiles.size, model.selectedFiles.size))
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        FilterChip(model.transport == Transport.HTTP, { model.transport = Transport.HTTP }, enabled = !busy, label = { Text(stringResource(R.string.http_transport)) })
-        FilterChip(model.transport == Transport.WEB_RTC, { model.transport = Transport.WEB_RTC }, enabled = !busy, label = { Text(stringResource(R.string.webrtc_transport)) })
+    if (notesSelected) {
+        NotesComposer(model, instance, busy, header)
+    } else Column(Modifier.fillMaxSize().imePadding()) {
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(FilebeamSpace.Large)) {
+            header()
+            FileComposer(model, busy, policy, pick, pickTree)
+        }
+        FileSendDock(model, busy, send)
     }
-    if (model.transport == Transport.WEB_RTC) Text(stringResource(R.string.live_description), style = MaterialTheme.typography.bodyMedium)
-    if (model.transport == Transport.HTTP) Row(verticalAlignment = Alignment.CenterVertically) {
-        Checkbox(model.turboTransfer, { model.turboTransfer = it }, enabled = !busy, modifier = Modifier.semantics { contentDescription = turboLabel })
-        Text(turboLabel)
-    }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Checkbox(model.archive, { model.archive = it }, enabled = !busy, modifier = Modifier.semantics { contentDescription = archiveLabel })
-        Text(archiveLabel)
-    }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Checkbox(model.passwordProtected, { model.passwordProtected = it }, enabled = !busy, modifier = Modifier.semantics { contentDescription = passwordLabel })
-        Text(passwordLabel)
-    }
-    OutlinedTextField(model.retentionHours, { model.retentionHours = it.filter(Char::isDigit) }, enabled = !busy,
-        label = { Text(stringResource(R.string.retention_hours)) }, modifier = Modifier.fillMaxWidth())
-    OutlinedTextField(model.recipientUsername, { model.recipientUsername = it.lowercase().filter { character -> character.isLetterOrDigit() || character == '_' } },
-        enabled = !busy && !model.passwordProtected && model.transport == Transport.HTTP && !model.turboTransfer,
-        label = { Text(stringResource(R.string.recipient_username)) }, modifier = Modifier.fillMaxWidth())
-    Button(enabled = !busy && model.selectedFiles.isNotEmpty(), onClick = send, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.start_upload)) }
 }

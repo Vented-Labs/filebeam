@@ -1,5 +1,7 @@
 package io.filebeam.android.ui
 
+import androidx.core.net.toUri
+
 enum class ReceiveKind { FILE, NOTE, TURBO, WEB_RTC, UNKNOWN }
 data class ReceiveIngress(val raw: String, val kind: ReceiveKind, val isFullUrl: Boolean)
 
@@ -28,7 +30,7 @@ sealed interface NotificationRoute {
 fun parseReceiveIngress(value: String): ReceiveIngress? {
     val trimmed = value.trim()
     if (trimmed.isBlank()) return null
-    val uri = runCatching { android.net.Uri.parse(trimmed) }.getOrNull()
+    val uri = runCatching { trimmed.toUri() }.getOrNull()
     val fullUrl = uri?.scheme in setOf("https", "http", "filebeam")
     val path = uri?.path.orEmpty().lowercase()
     val kind = when {

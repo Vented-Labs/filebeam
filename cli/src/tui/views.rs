@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Block, Paragraph, Sparkline, Widget, Wrap},
 };
 
-use super::state::{Entry, Focus, Mode, State};
+use super::state::{Entry, Focus, Mode, NativeAction, State};
 use crate::{
     app::{Direction, Phase, PromptKind},
     input::Input,
@@ -62,7 +62,15 @@ pub fn render(
         transfers(body, buffer, state, theme)
     };
     footer_view(footer, buffer, state, theme);
-    if state.help {
+    if state.palette {
+        state.hyperlink = None;
+        dim(area, buffer, theme);
+        cursor = palette(area, buffer, state, theme);
+    } else if state.native.is_some() {
+        state.hyperlink = None;
+        dim(area, buffer, theme);
+        cursor = native_form(area, buffer, state, theme);
+    } else if state.help {
         state.hyperlink = None;
         dim(area, buffer, theme);
         help(area, buffer, theme);
@@ -1027,6 +1035,18 @@ fn footer_view(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) {
             ("↑↓", "scroll"),
             ("q", "finish"),
         ]
+    } else if state.palette {
+        vec![
+            ("↑↓", "choose native action"),
+            ("Enter", "open form"),
+            ("Esc", "close"),
+        ]
+    } else if state.native.is_some() {
+        vec![
+            ("Tab", "next field"),
+            ("Enter", "run native action"),
+            ("Esc", "cancel"),
+        ]
     } else if state.searching {
         vec![("Enter", "apply search"), ("Esc", "clear")]
     } else if state.mode == Mode::Receive {
@@ -1044,6 +1064,7 @@ fn footer_view(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) {
             ("Shift+Enter", "Turbo transfer"),
             ("Tab", "focus"),
             ("/", "search"),
+            ("p", "native services"),
             ("?", "help"),
         ]
     };
@@ -1087,6 +1108,10 @@ fn help(area: Rect, buffer: &mut Buffer, theme: Theme) {
         ("Your keyboard, a little more powerful.", ""),
         ("", ""),
         ("1 / 2 / 3", "Send files / receive a link / saved transfers"),
+        (
+            "p",
+            "Native notes, account, inbox, recipient, end and revoke",
+        ),
         ("Tab / Shift+Tab", "Move between panels or form fields"),
         ("↑↓ / j k", "Move through files"),
         ("Space", "Add or remove a file"),
@@ -1112,6 +1137,91 @@ fn help(area: Rect, buffer: &mut Buffer, theme: Theme) {
             ]),
         );
     }
+}
+
+fn palette(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) -> Option<(u16, u16)> {
+    let inner = paint::card(centered(area, 74, 24), buffer, theme, true);
+    paint::line(
+        at(inner, 0, 1),
+        buffer,
+        Line::styled("Native services", theme.strong().fg(theme.accent())),
+    );
+    paint::line(
+        at(inner, 1, 1),
+        buffer,
+        Line::styled(
+            "Typed Filebeam actions. Nothing is passed to a shell or browser.",
+            theme.dim(),
+        ),
+    );
+    let capacity = inner.height.saturating_sub(4) as usize;
+    let start = state
+        .palette_cursor
+        .saturating_sub(capacity.saturating_sub(1));
+    for (row, action) in NativeAction::ALL
+        .iter()
+        .skip(start)
+        .take(capacity)
+        .enumerate()
+    {
+        let selected = start + row == state.palette_cursor;
+        paint::line(
+            at(inner, row as u16 + 3, 1),
+            buffer,
+            Line::styled(
+                format!("{} {}", if selected { ">" } else { " " }, action.label()),
+                if selected {
+                    theme.strong().fg(theme.accent()).bg(theme.selected())
+                } else {
+                    theme.dim()
+                },
+            ),
+        );
+    }
+    None
+}
+
+fn native_form(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) -> Option<(u16, u16)> {
+    let form = state.native.as_ref()?;
+    let height = (form.fields.len() as u16 * 3 + 7).min(area.height.saturating_sub(2));
+    let inner = paint::card(centered(area, 76, height), buffer, theme, true);
+    paint::line(
+        at(inner, 0, 1),
+        buffer,
+        Line::styled(form.action.label(), theme.strong().fg(theme.accent())),
+    );
+    let fields = form.action.fields();
+    let mut cursor = None;
+    for (index, input) in form.fields.iter().enumerate() {
+        let row = 2 + index as u16 * 3;
+        if row + 1 >= inner.height {
+            break;
+        }
+        let (label, masked) = fields[index];
+        paint::line(at(inner, row, 1), buffer, Line::styled(label, theme.dim()));
+        let active = index == form.field;
+        let field_cursor = field(
+            at(inner, row + 1, 1),
+            buffer,
+            input,
+            theme,
+            masked,
+            "",
+            active,
+        );
+        if active {
+            cursor = field_cursor;
+        }
+    }
+    paint::line(
+        at(inner, inner.height.saturating_sub(1), 1),
+        buffer,
+        Line::styled(
+            "Enter runs when on the last field. Passwords are masked and never logged.",
+            theme.dim(),
+        ),
+    );
+    cursor
 }
 
 fn secret(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) -> Option<(u16, u16)> {

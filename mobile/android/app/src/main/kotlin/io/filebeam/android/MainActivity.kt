@@ -14,14 +14,15 @@ import androidx.activity.viewModels
 import androidx.lifecycle.lifecycleScope
 import androidx.core.content.ContextCompat
 import androidx.core.content.IntentCompat
+import androidx.core.net.toUri
 import io.filebeam.android.ui.FilebeamScreen
 import io.filebeam.android.ui.FilebeamViewModel
 import kotlinx.coroutines.launch
+import java.io.InputStream
 
 class MainActivity : ComponentActivity() {
     private val model: FilebeamViewModel by viewModels()
     private var pendingStart: (() -> Unit)? = null
-    private var pendingDirectoryPrompt: ULong? = null
     private val notifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
         pendingStart?.invoke()
         pendingStart = null
@@ -34,15 +35,6 @@ class MainActivity : ComponentActivity() {
         if (uris.isNotEmpty()) model.appendFiles(uris)
     }
     private val tree = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        pendingDirectoryPrompt?.let { promptId ->
-            pendingDirectoryPrompt = null
-            if (uri != null) {
-                try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
-                catch (_: SecurityException) { /* The core will report unavailable provider access. */ }
-                model.coordinator.respond(promptId, uri.toString())
-            } else model.coordinator.pause()
-            return@registerForActivityResult
-        }
         uri?.let {
             try { contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
             catch (_: SecurityException) { /* Providers may offer only a transient read grant. */ }
@@ -60,6 +52,16 @@ class MainActivity : ComponentActivity() {
         if (uri != null && source != null) model.coordinator.export(source, uri)
         model.exportSource = null
     }
+    private val exportAccountKey = registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
+        if (uri != null) lifecycleScope.launch { runCatching { (application as FilebeamApplication).accounts.exportKeyTo(uri) }.onFailure { model.coordinator.message(it.message) } }
+    }
+    private val importAccountKey = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { contentResolver.openInputStream(uri)?.use(InputStream::readAccountKey) ?: error("Could not open the selected key file")
+            }.onSuccess { value -> runCatching { (application as FilebeamApplication).accounts.importKey(value) }.onFailure { model.coordinator.message(it.message) } }
+                .onFailure { model.coordinator.message(it.message) }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -71,8 +73,9 @@ class MainActivity : ComponentActivity() {
                 ::startWithNotificationPermission,
                 pickFiles = { files.launch(arrayOf("*/*")) },
                 pickTree = { tree.launch(null) },
-                pickDirectoryForPrompt = { id -> pendingDirectoryPrompt = id; tree.launch(null) },
                 saveFile = { source -> model.exportSource = source; save.launch(java.io.File(source).name) },
+                exportAccountKey = { exportAccountKey.launch("filebeam-account-key.fbsk1") },
+                importAccountKey = { importAccountKey.launch(arrayOf("text/plain", "application/octet-stream")) },
             )
         }
     }
@@ -92,7 +95,11 @@ class MainActivity : ComponentActivity() {
 
     private fun acceptIntent(intent: Intent) {
         when (intent.action) {
-            Intent.ACTION_VIEW -> intent.dataString?.let(model::receiveLink)
+            Intent.ACTION_VIEW -> intent.dataString?.let { value ->
+                val route = value.toUri().pathSegments.firstOrNull()
+                if (route in setOf("notes", "turbo", "account", "settings", "receive", "transfers", "inbox")) model.navigateLegacy(route)
+                else model.receiveLink(value)
+            }
             Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE -> {
                 val uris = buildList {
                     IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)?.let(::add)
@@ -107,5 +114,19 @@ class MainActivity : ComponentActivity() {
                 else intent.getStringExtra(Intent.EXTRA_TEXT)?.let(model::receiveLink)
             }
         }
+        intent.getStringExtra("route")?.let(model::navigateLegacy)
     }
+}
+
+private fun InputStream.readAccountKey(): String {
+    val maximumBytes = 16 * 1024
+    val bytes = ByteArray(maximumBytes + 1)
+    var length = 0
+    while (length < bytes.size) {
+        val read = read(bytes, length, bytes.size - length)
+        if (read < 0) break
+        length += read
+    }
+    require(length <= maximumBytes) { "Key file is too large" }
+    return bytes.copyOf(length).toString(Charsets.US_ASCII)
 }

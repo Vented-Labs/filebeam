@@ -147,6 +147,7 @@ fn portable_link_manifest_and_transport_limits_reject_cross_transport_confusion(
         DriverLimits {
             maximum_transfer_bytes: Some(8),
             maximum_file_count: None,
+            maximum_note_bytes: None,
         },
     );
     assert_eq!(

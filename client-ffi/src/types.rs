@@ -70,6 +70,7 @@ pub struct InstanceInfo {
     pub webrtc_maximum_file_count: Option<u64>,
     pub retention_options_hours: Vec<u64>,
     pub drivers: Vec<DriverLimit>,
+    pub default_driver: String,
 }
 
 #[derive(Clone, uniffi::Record)]
@@ -77,6 +78,17 @@ pub struct DriverLimit {
     pub driver: String,
     pub maximum_transfer_bytes: Option<u64>,
     pub maximum_file_count: Option<u64>,
+    pub maximum_note_bytes: Option<u64>,
+}
+
+#[derive(Clone, uniffi::Record)]
+pub struct LinkInspection {
+    pub instance: String,
+    pub id: String,
+    pub kind: String,
+    pub driver: String,
+    pub status: String,
+    pub password_required: bool,
 }
 
 #[derive(Clone, uniffi::Record)]
@@ -190,4 +202,11 @@ pub struct TransferSnapshot {
     pub error_category: Option<ErrorCategory>,
     pub peer_warning: Option<String>,
     pub secret_retry: Option<SecretRetryKind>,
+    pub direction: String,
+    pub kind: String,
+    pub transport: String,
+    pub can_pause: bool,
+    pub can_end_live: bool,
+    pub can_revoke_remote: bool,
+    pub expiry_known: bool,
 }

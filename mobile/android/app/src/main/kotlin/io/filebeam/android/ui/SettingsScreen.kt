@@ -1,10 +1,10 @@
 package io.filebeam.android.ui
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -13,49 +13,37 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.filebeam.android.R
-import io.filebeam.android.platform.AppSettings
+import io.filebeam.android.BuildConfig
 
 @Composable
-fun SettingsScreen(config: AppSettings, save: (AppSettings) -> Unit, discover: (String) -> Unit, navigate: (Destination) -> Unit) {
-    var instance by remember(config.instance) { mutableStateOf(config.instance) }
-    var relay by remember(config.relayOnly) { mutableStateOf(config.relayOnly) }
+fun SettingsScreen(model: FilebeamViewModel, navigate: (Destination) -> Unit) {
+    val transaction = model.instanceTransaction
+    androidx.compose.foundation.layout.Column(Modifier.verticalScroll(rememberScrollState()).imePadding()) {
     Text(stringResource(R.string.settings), style = MaterialTheme.typography.headlineSmall)
-    OutlinedTextField(instance, { instance = it }, singleLine = true, label = { Text(stringResource(R.string.instance)) }, modifier = Modifier.fillMaxWidth())
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Switch(relay, { relay = it })
-        Text(stringResource(R.string.relay_only), Modifier.padding(start = 12.dp))
-    }
+    Text(stringResource(R.string.settings_connection), style = MaterialTheme.typography.titleMedium)
+    OutlinedTextField(transaction.draftInstance, { model.updateInstanceInput(instance = it) }, singleLine = true, label = { Text(stringResource(R.string.instance)) }, modifier = Modifier.fillMaxWidth(), enabled = transaction.status !is InstanceTransactionStatus.Checking)
+    Switch(transaction.draftRelayOnly, { model.updateInstanceInput(relayOnly = it) }, enabled = transaction.status !is InstanceTransactionStatus.Checking)
+    Text(stringResource(R.string.relay_only), Modifier.padding(top = 4.dp))
     Text(stringResource(R.string.relay_description), style = MaterialTheme.typography.bodySmall)
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Button(onClick = { save(config.copy(instance = instance, relayOnly = relay)) }) { Text(stringResource(R.string.save_settings)) }
-        TextButton(onClick = { discover(instance) }) { Text(stringResource(R.string.check_instance)) }
-    }
+    Button(enabled = transaction.dirty && transaction.status !is InstanceTransactionStatus.Checking, onClick = model::checkInstanceInput) { Text(stringResource(if (transaction.status is InstanceTransactionStatus.Checking) R.string.checking_instance else R.string.check_instance)) }
+    if (transaction.status is InstanceTransactionStatus.ReadyToCommit) Button(onClick = model::commitCheckedInstance) { Text(stringResource(R.string.save_settings)) }
+    if (transaction.status is InstanceTransactionStatus.ConfirmActiveTransfer) { Text(stringResource(R.string.instance_error_active_transfer), color = MaterialTheme.colorScheme.error); Button(onClick = model::confirmInstanceChangeAfterActiveTransfer) { Text(stringResource(R.string.confirm_instance_change)) } }
+    (transaction.status as? InstanceTransactionStatus.Error)?.let { Text(stringResource(it.message), color = MaterialTheme.colorScheme.error) }
     HorizontalDivider()
     Text(stringResource(R.string.appearance), style = MaterialTheme.typography.titleMedium)
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Switch(config.dynamicColor, { save(config.copy(dynamicColor = it)) })
-        Text(stringResource(R.string.dynamic_color), Modifier.padding(start = 12.dp))
-    }
-    Text(stringResource(R.string.native_description), style = MaterialTheme.typography.bodyMedium)
+    Text(stringResource(R.string.appearance_system), style = MaterialTheme.typography.bodyMedium)
     HorizontalDivider()
-    Text(stringResource(R.string.native_services), style = MaterialTheme.typography.titleMedium)
-    Column {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(onClick = { navigate(Destination.Notes) }) { Text(stringResource(R.string.notes)) }
-            TextButton(onClick = { navigate(Destination.Inbox) }) { Text(stringResource(R.string.inbox)) }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(onClick = { navigate(Destination.Turbo) }) { Text(stringResource(R.string.turbo)) }
-            TextButton(onClick = { navigate(Destination.Account) }) { Text(stringResource(R.string.account)) }
-        }
+    Text(stringResource(R.string.storage), style = MaterialTheme.typography.titleMedium)
+    Text(stringResource(R.string.storage_categories), style = MaterialTheme.typography.bodyMedium)
+    TextButton(onClick = { navigate(Destination.Transfers) }) { Text(stringResource(R.string.manage_local_transfers)) }
+    Text(stringResource(R.string.local_remote_difference), style = MaterialTheme.typography.bodySmall)
+    HorizontalDivider()
+    Text(stringResource(R.string.about), style = MaterialTheme.typography.titleMedium)
+    Text(stringResource(R.string.version_name, BuildConfig.VERSION_NAME))
+    Text(stringResource(R.string.licenses))
     }
 }

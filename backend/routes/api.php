@@ -106,7 +106,7 @@ Route::prefix('native/v1')->middleware([EncryptCookies::class, AddQueuedCookiesT
     Route::post('/session', [AuthenticatedSessionController::class, 'store'])->middleware('guest');
     Route::post('/register', [RegisteredUserController::class, 'store'])->middleware(['guest', 'throttle:10,1']);
     Route::post('/password/recovery', [NativeAccountController::class, 'requestPasswordReset'])->middleware(['guest', 'throttle:6,1']);
-    Route::post('/password/reset', [NativeAccountController::class, 'resetPassword'])->middleware('guest');
+    Route::post('/password/reset', [NativeAccountController::class, 'resetPassword'])->middleware(['guest', 'throttle:6,1']);
     Route::delete('/session', [AuthenticatedSessionController::class, 'destroy'])->middleware('auth');
     Route::middleware('auth')->group(function (): void {
         Route::get('/session', [NativeAccountController::class, 'session']);

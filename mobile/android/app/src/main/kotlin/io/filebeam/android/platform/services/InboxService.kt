@@ -36,7 +36,8 @@ class NativeInboxService(private val sessions: AccountSessionRegistry, private v
         val origin = AccountSessionRegistry.normalizeOrigin(instance)
         check(sessions.cookie(origin) != null) { "Sign in to view your inbox" }
         sessions.service(origin).accountInbox().map { item ->
-            InboxItem(item.id, "${item.itemCount} encrypted files", "authenticated", 0)
+            // Listing identifiers are opaque until an explicit item open/unlock.
+            InboxItem(item.id, "Encrypted delivery", "authenticated", 0)
         }.also { mutable.value = ServiceState.Ready(it) }
     }
 

@@ -9,7 +9,10 @@ use crossterm::{
     event::{self, Event, KeyCode},
     terminal::{disable_raw_mode, enable_raw_mode},
 };
-use filebeam_client_core::services::{NoteCreate, ServiceClient};
+use filebeam_client_core::services::{
+    AccountKeyUpload, NoteCreate, ServiceClient, export_self_key, generate_self_keypair,
+    import_self_key, validate_self_key, wrap_password_key,
+};
 use filebeam_transfer_native::checkpoint::Store;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -21,6 +24,11 @@ use crate::config::Config;
 struct Session {
     origin: String,
     cookies: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct PrivateKey {
+    value: String,
 }
 
 fn session_id(instance: &str) -> String {
@@ -78,6 +86,103 @@ pub fn clear_session(config: &Config, instance: &str) -> Result<()> {
         Store::discard(&root, &id)?;
     }
     Ok(())
+}
+
+pub fn stored_private_key(config: &Config, instance: &str) -> Result<Zeroizing<Vec<u8>>> {
+    let store = session_store(config, instance, false)?
+        .context("no local custody key; run beam account key-setup or key-import")?;
+    let key = store
+        .load_named::<PrivateKey>("private-key")?
+        .context("no local custody key; run beam account key-setup or key-import")?;
+    import_self_key(&key.value)
+}
+
+fn save_private_key(config: &Config, instance: &str, private_key: &[u8]) -> Result<()> {
+    let store = match session_store(config, instance, false)? {
+        Some(store) => store,
+        None => session_store(config, instance, true)?.expect("create requested a store"),
+    };
+    store.save_named(
+        "private-key",
+        &PrivateKey {
+            value: export_self_key(private_key)?,
+        },
+    )
+}
+
+pub fn setup_self_key(config: &Config, instance: &str, replace: bool) -> Result<()> {
+    let client = client(config, instance)?;
+    let session = client.account().session()?;
+    let material = generate_self_keypair()?;
+    client.account().upload_key(&AccountKeyUpload {
+        public_key: material.public_key,
+        fingerprint: material.fingerprint,
+        custody_mode: "self".into(),
+        encrypted_private_key: None,
+        current_password: None,
+        replace,
+    })?;
+    save_private_key(config, instance, &material.private_key)?;
+    ensure!(session.id > 0, "invalid account session");
+    Ok(())
+}
+
+/// Creates a recoverable custody key. The password only wraps the private key;
+/// it is never retained in the local account store.
+pub fn setup_password_key(
+    config: &Config,
+    instance: &str,
+    password: &str,
+    replace: bool,
+) -> Result<()> {
+    let client = client(config, instance)?;
+    let session = client.account().session()?;
+    let material = generate_self_keypair()?;
+    let encrypted_private_key = wrap_password_key(
+        &material.private_key,
+        password.as_bytes(),
+        session.id,
+        &material.public_key,
+    )?;
+    client.account().upload_key(&AccountKeyUpload {
+        public_key: material.public_key,
+        fingerprint: material.fingerprint,
+        custody_mode: "password".into(),
+        encrypted_private_key: Some(encrypted_private_key),
+        current_password: Some(password.into()),
+        replace,
+    })?;
+    Ok(())
+}
+
+pub fn import_self_key_for_account(
+    config: &Config,
+    instance: &str,
+    value: &str,
+    replace: bool,
+) -> Result<()> {
+    let key = import_self_key(value)?;
+    let client = client(config, instance)?;
+    let bundle = client
+        .account()
+        .account_keys()?
+        .into_iter()
+        .find(|key| key.is_active)
+        .context("account has no active key to validate")?;
+    validate_self_key(&key, &bundle.public_key)?;
+    client.account().upload_key(&AccountKeyUpload {
+        public_key: bundle.public_key,
+        fingerprint: bundle.fingerprint,
+        custody_mode: "self".into(),
+        encrypted_private_key: None,
+        current_password: None,
+        replace,
+    })?;
+    save_private_key(config, instance, &key)
+}
+
+pub fn export_stored_key(config: &Config, instance: &str) -> Result<String> {
+    export_self_key(&stored_private_key(config, instance)?)
 }
 
 pub struct NoteRequest<'a> {
@@ -188,6 +293,34 @@ fn private_file(path: &Path) -> Result<String> {
     fs::read_to_string(path).with_context(|| format!("read password file {}", path.display()))
 }
 
+pub fn private_text_file(path: &Path) -> Result<String> {
+    bounded_text(private_file(path)?, "key file")
+}
+
+pub const MAX_NOTE_TEXT_BYTES: usize = 64 * 1024;
+
+pub fn bounded_text(value: String, label: &str) -> Result<String> {
+    ensure!(
+        value.len() <= MAX_NOTE_TEXT_BYTES,
+        "{label} must be at most {} KiB",
+        MAX_NOTE_TEXT_BYTES / 1024
+    );
+    Ok(value)
+}
+
+pub fn read_note_text(input: impl Read, label: &str) -> Result<String> {
+    let mut bytes = Vec::with_capacity(MAX_NOTE_TEXT_BYTES.min(4096));
+    input
+        .take((MAX_NOTE_TEXT_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)
+        .with_context(|| format!("read {label}"))?;
+    ensure!(
+        bytes.len() <= MAX_NOTE_TEXT_BYTES,
+        "note text must be at most 64 KiB"
+    );
+    String::from_utf8(bytes).context("note text must be valid UTF-8")
+}
+
 fn prompt_secret(label: &str) -> Result<String> {
     if !io::stdin().is_terminal() {
         bail!("{label} required; use --password-stdin or --password-file");
@@ -218,4 +351,19 @@ fn prompt_secret(label: &str) -> Result<String> {
     }
     eprintln!();
     Ok(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn note_input_is_utf8_and_bounded_to_64_kib() {
+        assert_eq!(
+            read_note_text(&b"native note"[..], "note").unwrap(),
+            "native note"
+        );
+        assert!(read_note_text(vec![b'x'; MAX_NOTE_TEXT_BYTES + 1].as_slice(), "note").is_err());
+        assert!(read_note_text(&[0xff][..], "note").is_err());
+    }
 }

@@ -7,6 +7,8 @@ use std::collections::HashMap;
 pub struct DriverLimits {
     pub maximum_transfer_bytes: Option<u64>,
     pub maximum_file_count: Option<usize>,
+    #[serde(default)]
+    pub maximum_note_bytes: Option<u64>,
 }
 
 pub fn select_driver_limits(
@@ -20,6 +22,7 @@ pub fn select_driver_limits(
             DriverLimits {
                 maximum_transfer_bytes: legacy_http_bytes,
                 maximum_file_count: legacy_http_count,
+                maximum_note_bytes: None,
             }
         } else {
             DriverLimits::default()

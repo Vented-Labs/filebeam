@@ -16,9 +16,8 @@ class FeatureNavigationTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
 
     @Test fun noteEditorAcceptsContentBeforeCreatingANativeNote() {
-        compose.onNodeWithText(compose.activity.getString(R.string.settings)).performClick()
         compose.onNodeWithText(compose.activity.getString(R.string.notes)).performClick()
         compose.onNodeWithText(compose.activity.getString(R.string.note_body)).performTextInput("private native note")
-        compose.onNodeWithText(compose.activity.getString(R.string.create_note)).assertIsDisplayed().assertIsEnabled()
+        compose.onNodeWithText(compose.activity.getString(R.string.encrypt_and_share)).assertIsDisplayed().assertIsEnabled()
     }
 }

@@ -14,7 +14,22 @@ data class SelectedSource(
 
 enum class RecipientStatus { NONE, UNVALIDATED, VALIDATING, VALIDATED, INVALID, CONFLICT }
 
-data class RecipientDraft(val username: String = "", val status: RecipientStatus = RecipientStatus.NONE, val error: String? = null)
+/** An instance-scoped recipient key returned by account discovery, never free-form input. */
+data class ValidatedRecipient(
+    val username: String,
+    val origin: String,
+    val id: ULong,
+    val accountKeyBundleId: ULong,
+    val publicKey: String,
+    val revision: Long,
+)
+
+data class RecipientDraft(
+    val username: String = "",
+    val status: RecipientStatus = RecipientStatus.NONE,
+    val error: String? = null,
+    val identity: ValidatedRecipient? = null,
+)
 
 data class SendDraft(
     val sources: List<SelectedSource> = emptyList(),
@@ -24,17 +39,28 @@ data class SendDraft(
     val passwordProtected: Boolean = false,
     val retentionHours: String = "",
     val recipient: RecipientDraft = RecipientDraft(),
+    val driver: String? = null,
+    /** Link presentation preference for files; independent from note sharing. */
+    val includeKeyInLink: Boolean = true,
 )
 
 data class NoteDraft(
     val title: String = "",
     val body: String = "",
-    val password: String = "",
+    /** Enables a password prompt at submission; the password itself is process-memory only. */
+    val passwordEnabled: Boolean = false,
     val retentionHours: String = "",
     val language: String = "plain",
     val burnAfterRead: Boolean = false,
     val live: Boolean = false,
+    val driver: String? = null,
+    /** Link presentation preference for notes; independent from file sharing. */
+    val includeKeyInLink: Boolean = true,
 )
+
+enum class SendContent { FILES, NOTES }
+
+internal fun shouldRestoreDraft(launchRevision: Long, currentRevision: Long) = launchRevision == currentRevision
 
 /** Strictly parses a user-entered retention. Empty means unspecified; zero and overflow are errors. */
 fun retentionHours(value: String): Result<ULong?> = when {

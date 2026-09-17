@@ -1,5 +1,7 @@
 package io.filebeam.android.ui
 
+import android.app.UiModeManager
+import android.content.res.Configuration
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
@@ -10,20 +12,46 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 
 @Composable
 fun FilebeamTheme(content: @Composable () -> Unit) {
+    val context = LocalContext.current
     val dark = isSystemInDarkTheme()
-    val colors = when {
-        Build.VERSION.SDK_INT >= 31 -> if (dark) dynamicDarkColorScheme(LocalContext.current) else dynamicLightColorScheme(LocalContext.current)
-        dark -> FilebeamDarkFallback
-        else -> FilebeamLightFallback
+    val configuration = LocalConfiguration.current
+    var refresh by remember { mutableIntStateOf(0) }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { refresh++ }
+    if (Build.VERSION.SDK_INT >= 34) DisposableEffect(context) {
+        val manager = context.getSystemService(UiModeManager::class.java)
+        val listener = UiModeManager.ContrastChangeListener { refresh++ }
+        manager.addContrastChangeListener(context.mainExecutor, listener)
+        onDispose { manager.removeContrastChangeListener(listener) }
     }
+    val colors = resolveFilebeamColorScheme(context, dark, configuration, refresh)
     MaterialTheme(colorScheme = colors, typography = FilebeamTypography, shapes = FilebeamShapes, content = content)
+}
+
+@Composable
+private fun resolveFilebeamColorScheme(
+    context: android.content.Context,
+    dark: Boolean,
+    @Suppress("UNUSED_PARAMETER") configuration: Configuration,
+    @Suppress("UNUSED_PARAMETER") refresh: Int,
+) = when {
+    Build.VERSION.SDK_INT >= 31 -> if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+    dark -> FilebeamDarkFallback
+    else -> FilebeamLightFallback
 }
 
 /** Compatibility bridge for screens being migrated to the mandatory device appearance contract. */

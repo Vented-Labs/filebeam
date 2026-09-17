@@ -1,6 +1,7 @@
 package io.filebeam.android.platform.services
 
 import io.filebeam.rust.NoteRequest as NativeNoteRequest
+import io.filebeam.rust.splitShareLink
 import io.filebeam.rust.NoteTransport
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -16,7 +17,7 @@ sealed interface ServiceState<out T> {
     data class Failed(val message: String) : ServiceState<Nothing>
 }
 
-data class NoteSummary(val id: String, val title: String, val expiresAtMillis: Long?, val link: String? = null)
+data class NoteSummary(val id: String, val title: String, val expiresAtMillis: Long?, val link: String? = null, val separateKey: String? = null)
 data class NoteRequest(
     val instance: String,
     val text: String,
@@ -26,6 +27,7 @@ data class NoteRequest(
     val retentionHours: ULong? = null,
     val live: Boolean = false,
     val burnAfterRead: Boolean,
+    val includeKeyInLink: Boolean = true,
 )
 data class NoteContent(val id: String, val text: String, val title: String?, val language: String, val consumed: Boolean)
 data class TurboAvailability(val available: Boolean, val detail: String? = null)
@@ -44,6 +46,7 @@ interface TurboService {
 class NativeNotesService(
     private val sessions: AccountSessionRegistry,
     private val startLive: (String, NativeNoteRequest) -> io.filebeam.rust.TransferJob,
+    private val createHttp: suspend (suspend () -> io.filebeam.rust.CreatedNote) -> io.filebeam.rust.CreatedNote,
 ) : NotesService {
     private val mutable = MutableStateFlow<ServiceState<List<NoteSummary>>>(ServiceState.Loading)
     private val liveJobs = mutableMapOf<String, io.filebeam.rust.TransferJob>()
@@ -71,8 +74,9 @@ class NativeNotesService(
                 delay(100)
             }
             requireNotNull(created)
-        } else sessions.service(request.instance).createNote(native)
-        NoteSummary(created.id, request.title.ifBlank { "Encrypted note" }, null, created.link).also {
+        } else createHttp { sessions.service(request.instance).createNote(native) }
+        val presentation = if (request.includeKeyInLink) null else splitShareLink(request.instance, created.link)
+        NoteSummary(created.id, request.title.ifBlank { "Encrypted note" }, null, presentation?.link ?: created.link, presentation?.separateKey).also {
             mutable.value = ServiceState.Ready(listOf(it))
         }
     }

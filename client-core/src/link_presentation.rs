@@ -10,6 +10,23 @@ pub struct ShareLinkPresentation {
     pub separate_key: String,
 }
 
+/// Splits a canonical existing native share link without requiring the caller
+/// to separately retain raw key material. The encrypted manifest continues to
+/// carry any WebRTC join capability; only the portable `k` fragment is split.
+pub fn split_share_link(instance: &str, link: &str) -> Result<ShareLinkPresentation> {
+    let parsed = filebeam_transfer_native::protocol::parse_link_for_instance(link, instance)?;
+    let separate_key = parsed
+        .key
+        .as_deref()
+        .map(|key| URL_SAFE_NO_PAD.encode(key))
+        .map(|key| format!("v1.{key}"))
+        .context("share link has no included key")?;
+    Ok(ShareLinkPresentation {
+        link: format!("{}/{}", parsed.instance, parsed.id),
+        separate_key,
+    })
+}
+
 pub fn present_share_link(
     instance: &str,
     share_url: &str,
@@ -74,5 +91,20 @@ mod tests {
             .link,
             format!("https://filebeam.test/01ARZ3NDEKTSV4RRFFQ69G5FAV#k=v1.{KEY}")
         );
+    }
+
+    #[test]
+    fn splits_http_webrtc_and_note_links_with_the_same_portable_fragment() {
+        for path in ["/HTTP", "/WEBRTC", "/NOTE"] {
+            let source = format!("https://filebeam.test{path}#k=v1.{KEY}");
+            // Use valid transfer IDs while retaining labels in the test name.
+            let source = source.replace(path, "/01ARZ3NDEKTSV4RRFFQ69G5FAV");
+            let split = split_share_link("https://filebeam.test", &source).unwrap();
+            assert_eq!(
+                split.link,
+                "https://filebeam.test/01ARZ3NDEKTSV4RRFFQ69G5FAV"
+            );
+            assert_eq!(split.separate_key, format!("v1.{KEY}"));
+        }
     }
 }

@@ -1,5 +1,5 @@
 use crate::{
-    ClientConfig, DriverLimit, InstanceInfo, NativeRuntime, Result, SavedTransfer,
+    ClientConfig, DriverLimit, InstanceInfo, LinkInspection, NativeRuntime, Result, SavedTransfer,
     SavedTransferDetails, SecretStoreCallback, ShareLinkPresentation, SourceCallback, SourceKind,
     TransferJob, Transport, UploadAuthentication, UploadOptions, UploadSource, invalid, operation,
 };
@@ -135,8 +135,26 @@ impl TransferClient {
                     driver,
                     maximum_transfer_bytes: limits.maximum_transfer_bytes,
                     maximum_file_count: limits.maximum_file_count.map(|value| value as u64),
+                    maximum_note_bytes: limits.maximum_note_bytes,
                 })
                 .collect(),
+            default_driver: info.default_driver,
+        })
+    }
+
+    /// Reads only public routing metadata; it never unlocks, claims, consumes,
+    /// or starts a peer session.
+    pub fn inspect_link(&self, instance: String, input: String) -> Result<LinkInspection> {
+        let inspected =
+            protocol::inspect_link_for_instance(&input, &origin(&instance, self.allow_http)?)
+                .map_err(operation)?;
+        Ok(LinkInspection {
+            instance: inspected.instance,
+            id: inspected.id,
+            kind: inspected.kind,
+            driver: inspected.driver,
+            status: inspected.status,
+            password_required: inspected.password_required,
         })
     }
 
@@ -489,11 +507,19 @@ pub(crate) fn upload_options(options: UploadOptions) -> Result<protocol::UploadO
 
 impl TransferClient {
     fn start(&self, request: core::Request) -> Arc<TransferJob> {
-        Arc::new(TransferJob::new(core::Job::start_in(
-            &self.scheduler,
-            self.settings.clone(),
-            request,
-        )))
+        let transport = match &request {
+            core::Request::Upload { options, .. }
+            | core::Request::UploadSources { options, .. } => Some(match options.transport {
+                protocol::Transport::Http => "http",
+                protocol::Transport::WebRtc => "webrtc",
+            }),
+            _ => None,
+        };
+        let job = core::Job::start_in(&self.scheduler, self.settings.clone(), request);
+        Arc::new(match transport {
+            Some(transport) => TransferJob::new_upload(job, transport),
+            None => TransferJob::new(job),
+        })
     }
 
     fn start_operation(
@@ -543,4 +569,22 @@ pub fn present_share_link(
         link: presentation.link,
         separate_key: presentation.separate_key,
     })
+}
+
+/// Splits an existing canonical native link for separate-key presentation.
+#[uniffi::export]
+pub fn split_share_link(instance: String, link: String) -> Result<ShareLinkPresentation> {
+    let presentation =
+        core::link_presentation::split_share_link(&instance, &link).map_err(operation)?;
+    Ok(ShareLinkPresentation {
+        link: presentation.link,
+        separate_key: presentation.separate_key,
+    })
+}
+
+/// Estimates only known individual-file ciphertext bytes using the native v1
+/// chunk/tag rules. It does not invent an estimate for ZIP or unknown sources.
+#[uniffi::export]
+pub fn estimate_upload_ciphertext_bytes(file_sizes: Vec<u64>, chunk_bytes: u64) -> Result<u64> {
+    protocol::estimate_upload_ciphertext_bytes(&file_sizes, chunk_bytes).map_err(operation)
 }

@@ -53,6 +53,10 @@ pub fn run(
             .into_owned(),
         Request::Upload(files, _, _) => format!("{} files", files.len()),
         Request::Download { .. } => "Encrypted transfer".into(),
+        Request::InboxDownload { .. } => "Private inbox delivery".into(),
+        Request::Revoke { id } => format!("Revoke {id}"),
+        Request::EndLive { id } => format!("End live share {id}"),
+        Request::NoteLive(_) => "Live encrypted note".into(),
         Request::Update => "beam".into(),
         Request::Resume { id, .. } => format!("Saved transfer {}", clean(id)),
     };

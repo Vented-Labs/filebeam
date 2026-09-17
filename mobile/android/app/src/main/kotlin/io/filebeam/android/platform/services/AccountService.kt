@@ -26,6 +26,8 @@ data class AccountSummary(
     val notificationChannel: String = "mail",
 )
 data class InboxDownloadCredentials(val workingKey: ByteArray, val cookie: String)
+enum class KeyCustody { PASSWORD, SELF }
+data class AccountKeySituation(val activeBundleId: ULong?, val custody: KeyCustody?, val historicalBundleIds: List<ULong>, val replacementAcknowledgementRequired: Boolean)
 
 interface AccountService {
     val state: StateFlow<ServiceState<AccountSummary>>
@@ -34,13 +36,15 @@ interface AccountService {
     suspend fun resume(instance: String)
     suspend fun signOut()
     suspend fun resendVerification()
-    suspend fun verifyEmail(hash: String)
+    /** Submit a pasted signed verification link without a browser hand-off. */
+    suspend fun verifyEmail(link: String)
     suspend fun requestPasswordReset(instance: String, email: String)
     suspend fun resetPassword(instance: String, email: String, token: String, password: String)
     suspend fun setInboxEnabled(enabled: Boolean)
     suspend fun setNotificationChannel(channel: String)
-    suspend fun generateKey(): String
-    suspend fun exportKey(): String
+    suspend fun keySituation(): AccountKeySituation
+    suspend fun setupReceivingKey(custody: KeyCustody, password: String?, acknowledgeReplacement: Boolean): AccountKeySituation
+    suspend fun generateKey()
     /** Writes an explicit self-custody export to a caller-selected SAF document. */
     suspend fun exportKeyTo(destination: Uri)
     suspend fun importKey(value: String)
@@ -121,8 +125,8 @@ class NativeAccountService(
     override suspend fun resendVerification() = withContext(Dispatchers.IO) {
         sessions.service(requireAccount().instance).accountResendVerification()
     }
-    override suspend fun verifyEmail(hash: String) = withContext(Dispatchers.IO) {
-        sessions.service(requireAccount().instance).accountVerifyEmail(hash)
+    override suspend fun verifyEmail(link: String) = withContext(Dispatchers.IO) {
+        sessions.service(requireAccount().instance).accountVerifyEmailLink(link)
     }
     override suspend fun requestPasswordReset(instance: String, email: String) = withContext(Dispatchers.IO) {
         sessions.service(AccountSessionRegistry.normalizeOrigin(instance)).accountRequestPasswordReset(email)
@@ -140,8 +144,32 @@ class NativeAccountService(
         sessions.service(account.instance).accountSetNotificationChannel(channel)
         mutable.value = ServiceState.Ready(account.copy(notificationChannel = channel))
     }
+    override suspend fun keySituation() = withContext(Dispatchers.IO) {
+        keySituation(requireAccount())
+    }
+    override suspend fun setupReceivingKey(custody: KeyCustody, password: String?, acknowledgeReplacement: Boolean) = withContext(Dispatchers.IO) {
+        val account = requireAccount()
+        val service = sessions.service(account.instance)
+        val situation = keySituation(account)
+        if (situation.replacementAcknowledgementRequired && !acknowledgeReplacement) {
+            error("Replacing the active receiving key requires acknowledgement")
+        }
+        val generated = service.accountGenerateSelfKey()
+        try {
+            val envelope = when (custody) {
+                KeyCustody.PASSWORD -> service.accountWrapPasswordKey(generated.privateKey, requireNotNull(password) { "An account password is required for password custody" }, account.id, generated.publicKey)
+                KeyCustody.SELF -> null
+            }
+            val bundle = service.accountUploadKey(AccountKeyUpload(generated.publicKey, generated.fingerprint, if (custody == KeyCustody.PASSWORD) "password" else "self", envelope, password, acknowledgeReplacement))
+            keyStore(account, bundle.id).save(JSONObject().put("key", Base64.encodeToString(generated.privateKey, Base64.NO_WRAP)))
+            selectBundle(account, bundle.id)
+            keySituation(account)
+        } finally {
+            generated.privateKey.fill(0)
+        }
+    }
 
-    override suspend fun generateKey(): String = withContext(Dispatchers.IO) {
+    override suspend fun generateKey() = withContext(Dispatchers.IO) {
         val account = requireAccount()
         val service = sessions.service(account.instance)
         val generated = service.accountGenerateSelfKey()
@@ -152,9 +180,10 @@ class NativeAccountService(
             keyStore(account, bundle).save(JSONObject().put("key", Base64.encodeToString(key, Base64.NO_WRAP)))
             selectBundle(account, bundle)
         }
+        Unit
     }
 
-    override suspend fun exportKey(): String = withContext(Dispatchers.IO) {
+    private suspend fun exportKey(): String = withContext(Dispatchers.IO) {
         val account = requireAccount()
         val privateKey = loadPrivate(account)
         try {
@@ -223,6 +252,15 @@ class NativeAccountService(
         sessions.authenticated(origin, cookie)
         sessionStore(origin).save(JSONObject().put("cookie", cookie).put("user", session.id.toString()).put("username", session.username ?: session.name))
         mutable.value = ServiceState.Ready(AccountSummary(session.id, session.username ?: session.name, origin, session.inboxEnabled, session.emailVerifiedAt, session.profileUrl, session.notificationChannel))
+    }
+    private fun keySituation(account: AccountSummary): AccountKeySituation {
+        val situation = sessions.service(account.instance).accountKeySituation()
+        return AccountKeySituation(
+            situation.activeBundleId,
+            situation.activeCustodyMode?.let { if (it == "password") KeyCustody.PASSWORD else KeyCustody.SELF },
+            situation.historicalBundleIds,
+            situation.replacementAcknowledgementRequired,
+        )
     }
     private fun recoverPasswordCustody(origin: String, userId: ULong, password: String) {
         val service = sessions.service(origin)

@@ -12,7 +12,14 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-/** Process-restorable composer drafts. This is intentionally the only persistent location for note text/passwords. */
+sealed interface DraftLoadResult {
+    data object Missing : DraftLoadResult
+    data class Restored(val value: JSONObject) : DraftLoadResult
+    /** The old ciphertext cannot be recovered after keystore invalidation. It is not an empty draft. */
+    data class Unavailable(val cause: Throwable) : DraftLoadResult
+}
+
+/** Process-restorable composer drafts. Note text is encrypted; passwords are RAM-only and never serialized. */
 class EncryptedDraftStore(context: Context) {
     private val file = AtomicFile(File(context.noBackupFilesDir, "composer-drafts"))
     private val alias = "filebeam.composer-drafts.v1"
@@ -35,15 +42,22 @@ class EncryptedDraftStore(context: Context) {
         } catch (error: Exception) { file.failWrite(output); throw error }
     }
 
-    @Synchronized fun load(): JSONObject? {
-        if (!file.baseFile.exists()) return null
-        val bytes = file.readFully()
-        require(bytes.size >= 29 && bytes[0] == 1.toByte()) { "Invalid encrypted draft" }
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
-            init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, bytes.copyOfRange(1, 13)))
+    @Synchronized fun loadResult(): DraftLoadResult {
+        if (!file.baseFile.exists()) return DraftLoadResult.Missing
+        return try {
+            val bytes = file.readFully()
+            require(bytes.size >= 29 && bytes[0] == 1.toByte()) { "Invalid encrypted draft" }
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
+                init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, bytes.copyOfRange(1, 13)))
+            }
+            DraftLoadResult.Restored(JSONObject(cipher.doFinal(bytes.copyOfRange(13, bytes.size)).toString(Charsets.UTF_8)))
+        } catch (error: Exception) {
+            DraftLoadResult.Unavailable(error)
         }
-        return JSONObject(cipher.doFinal(bytes.copyOfRange(13, bytes.size)).toString(Charsets.UTF_8))
     }
+
+    /** Compatibility for callers that only need a successfully restored value. */
+    @Synchronized fun load(): JSONObject? = (loadResult() as? DraftLoadResult.Restored)?.value
 
     @Synchronized fun clear() = file.delete()
 }

@@ -16,6 +16,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Validation\Rules\Password as PasswordRule;
 use Illuminate\Validation\ValidationException;
 
@@ -80,11 +81,22 @@ class NativeAccountController extends Controller
 
     public function verifyEmail(Request $request): JsonResponse
     {
-        $data = $request->validate(['hash' => ['required', 'string']]);
+        $data = $request->validate(['link' => ['required', 'url', 'max:2048']]);
+        $signed = Request::create($data['link'], 'GET');
+        if ($signed->getSchemeAndHttpHost() !== rtrim((string) config('app.url'), '/') || ! URL::hasValidSignature($signed)) {
+            throw ValidationException::withMessages(['link' => 'Invalid or expired verification link.']);
+        }
+        try {
+            $route = app('router')->getRoutes()->match($signed);
+        } catch (\Symfony\Component\HttpKernel\Exception\NotFoundHttpException) {
+            throw ValidationException::withMessages(['link' => 'Invalid verification link.']);
+        }
         $user = $request->user();
         assert($user instanceof User);
-        if (! hash_equals(sha1($user->getEmailForVerification()), $data['hash'])) {
-            throw ValidationException::withMessages(['hash' => 'Invalid verification code.']);
+        if ($route->getName() !== 'verification.verify'
+            || ! hash_equals((string) $user->getKey(), (string) $route->parameter('id'))
+            || ! hash_equals(sha1($user->getEmailForVerification()), (string) $route->parameter('hash'))) {
+            throw ValidationException::withMessages(['link' => 'Invalid verification link.']);
         }
         if ($user->markEmailAsVerified()) {
             event(new Verified($user));

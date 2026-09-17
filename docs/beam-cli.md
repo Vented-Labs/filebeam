@@ -37,7 +37,8 @@ Run `beam` for the full-screen Send / Receive workspace. The interface uses File
 - `Space`: select files; `Enter`: open a folder; `Backspace`: parent folder.
 - `/`: enter search mode, `Enter`: apply, `Esc`: clear.
 - `Tab` / `Shift+Tab`: move focus between browser, queue, and action (or receive fields).
-- `1` / `2`: Send / Receive; `u`: upload; `U`: update; `?`: help.
+- `1` / `2`: Send / Receive; `u`: upload; `U`: update; `p`: native services; `?`: help.
+- `p` opens typed native forms for notes (including the built-in note editor), inbox list/download, recipient lookup, revoke/end-live, account login/register/profile/verification/recovery, and custody-key setup/import/export. Password fields are masked; the palette calls the Rust service client and transfer job directly, never a shell or browser.
 - In the Send action, `Enter` sends the normal encrypted HTTP transfer and
   `Shift+Enter` starts Turbo Transfer. The two actions are displayed side by
   side. Beam requests enhanced keyboard reporting only while its full-screen
@@ -57,10 +58,13 @@ Hosted notes are created and opened by the native client, with the same encrypte
 beam note create --input incident.md --title 'Incident notes' --language markdown
 printf '%s' 'one-time note' | beam note create --burn-on-read
 beam note create --input secrets.txt --password --separate-key
+beam note create --input standup.md --live
 beam note open 'https://files.company.test/01...#k=v1....' --password
 ```
 
 `--separate-key` prints the link and key as separate sensitive output lines; deliver them independently. `--burn-on-read` consumes a note only after successful decryption and integrity verification. `--password` opens a masked terminal prompt. For automation, use exactly one of `--password-file FILE` or `--password-stdin`; password files must be owner-only on Unix (`chmod 600 FILE`). Passwords are never persisted by Beam.
+
+`--live` serves the note through the native WebRTC service. Ctrl+C explicitly ends the remote live share after the service has published its link; it is not a local discard.
 
 ## Accounts
 
@@ -71,12 +75,37 @@ beam account register alice alice@example.test --name Alice
 beam account login alice@example.test
 beam account profile
 beam account resend-verification
+beam account verify 'https://files.example.test/verify-email/12/SIGNED_HASH?expires=...&signature=...'
 beam account recovery-request alice@example.test
 beam account recovery-reset alice@example.test RECOVERY_TOKEN
+beam account key-setup
+beam account key-setup --custody password
+beam account key-export --acknowledge-export
+beam account key-import ~/.filebeam-recovery-key --acknowledge-replace
 beam account logout
 ```
 
-Use the same password input rules as Notes. `logout` ends the remote session and removes the local encrypted session state. Verification and recovery use native account APIs. Custody-key setup/import/export/replacement, Inbox unlock/download, and username-directed delivery are not yet available in Beam; Beam does not open a browser as a substitute.
+Use the same password input rules as Notes. `key-setup --custody self` (the default) stores an owner-only local recovery key; `--custody password` encrypts the recovery key with the supplied password via the native password-key wrapper. `logout` ends the remote session and removes the local encrypted session state. Verification requires the complete, unexpired signed email link, not its public hash fragment. Recovery and custody keys use native account APIs. A local custody key is encrypted in owner-only state; export requires `--acknowledge-export`, and replacement requires `--acknowledge-replace`. Import files must be owner-only on Unix.
+
+## Inbox and directed delivery
+
+```sh
+beam up --username alice report.pdf
+beam inbox list
+beam inbox download 01K... --output ./received
+```
+
+`--username` resolves exactly one authenticated recipient and encrypts the transfer key to that account key. It requires HTTP and cannot be combined with Turbo or password protection. Inbox metadata stays locked until the stored custody key opens it; downloads use the authenticated inbox endpoint and a request-scoped key.
+
+## End and revoke
+
+```sh
+beam end-live JOB_ID
+beam revoke JOB_ID
+beam cancel JOB_ID
+```
+
+`end-live` remotely ends a live WebRTC share while retaining local recovery state. `revoke` remotely deletes an upload after server confirmation. `cancel` only discards local resumable state; it does not revoke a remote transfer.
 
 ## Turbo and WebRTC uploads
 

@@ -210,11 +210,12 @@ impl ManagedJob {
         if self.snapshot.prompt.as_ref().map(|prompt| prompt.id) != Some(id) {
             bail!("This transfer prompt is no longer active");
         }
-        if self
-            .reply
-            .as_ref()
-            .is_some_and(|prompt| matches!(&prompt.kind, PromptKind::Directory { .. }))
-        {
+        if self.reply.as_ref().is_some_and(|prompt| {
+            matches!(
+                &prompt.kind,
+                PromptKind::Directory { .. } | PromptKind::PeerConsent { .. }
+            )
+        }) {
             bail!("Directory prompts require an explicit ZIP or individual-files choice");
         }
         let prompt = self
@@ -252,6 +253,28 @@ impl ManagedJob {
                 "zip".into()
             } else {
                 "individual".into()
+            }))
+            .map_err(|_| anyhow::anyhow!("Transfer prompt is closed"))
+    }
+
+    pub fn respond_consent(&mut self, id: u64, allowed: bool) -> Result<()> {
+        if self.snapshot.prompt.as_ref().map(|prompt| prompt.id) != Some(id) {
+            bail!("This transfer prompt is no longer active");
+        }
+        let prompt = self
+            .reply
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("Transfer prompt is closed"))?;
+        if !matches!(&prompt.kind, PromptKind::PeerConsent { .. }) {
+            bail!("This transfer prompt does not accept peer consent");
+        }
+        self.snapshot.prompt = None;
+        prompt
+            .reply
+            .send(Zeroizing::new(if allowed {
+                "allow".into()
+            } else {
+                "deny".into()
             }))
             .map_err(|_| anyhow::anyhow!("Transfer prompt is closed"))
     }

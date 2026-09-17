@@ -12,9 +12,13 @@ import io.filebeam.android.platform.storage.DocumentStorage
 import io.filebeam.android.platform.services.AccountSessionRegistry
 import io.filebeam.android.platform.services.AccountService
 import io.filebeam.android.ui.JobCapabilities
-import io.filebeam.android.ui.dedupeActiveCatalog
+import io.filebeam.android.platform.services.AccountSessionRegistry.Companion.normalizeOrigin
+import io.filebeam.android.ui.ValidatedRecipient
 import io.filebeam.rust.ClientConfig
+import io.filebeam.rust.ClientException
+import io.filebeam.rust.DirectoryChoice
 import io.filebeam.rust.JobState
+import io.filebeam.rust.LinkInspection
 import io.filebeam.rust.SavedTransfer
 import io.filebeam.rust.TransferClient
 import io.filebeam.rust.NativeRuntime
@@ -29,6 +33,7 @@ import io.filebeam.rust.SourceCallback
 import io.filebeam.rust.SourceKind
 import io.filebeam.rust.UploadSource
 import io.filebeam.rust.NoteRequest as NativeNoteRequest
+import io.filebeam.rust.splitShareLink
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -40,6 +45,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -55,10 +62,23 @@ data class TransferUiState(
     val pending: Boolean = false,
     val message: String? = null,
     val receipt: TransferReceipt? = null,
+    val current: CurrentTransfer? = null,
+    /** Process-memory presentation only. Never written into checkpoints or receipts. */
+    val sharePresentation: SharePresentation? = null,
+    /** Compatibility projection while focused UI consumers migrate to CurrentTransfer. */
     val capabilities: JobCapabilities = JobCapabilities(),
 )
 
-data class TransferReceipt(val id: String, val disposition: String, val result: String? = null, val message: String? = null)
+data class SharePresentation(val link: String, val separateKey: String? = null)
+
+data class TransferReceipt(val id: String, val state: ReceiptState, val result: String? = null, val message: String? = null) {
+    val disposition: String get() = when (state) {
+        ReceiptState.VERIFIED_PRIVATE -> "private-verified"
+        ReceiptState.APP_PRIVATE_PUBLISHED -> "app-private-published"
+        ReceiptState.SAF_EXPORTED -> "exported"
+        ReceiptState.FAILED -> "failed"
+    }
+}
 
 /** Durable upload intent. Password text is intentionally not an option: native prompts hold it only in RAM. */
 data class UploadRequest(
@@ -70,6 +90,8 @@ data class UploadRequest(
     val retentionHours: ULong? = null,
     val account: String? = null,
     val recipients: List<String> = emptyList(),
+    val recipient: ValidatedRecipient? = null,
+    val includeKeyInLink: Boolean = true,
 )
 
 /** Process-scoped owner. Activities collect state; Android jobs/services execute work. */
@@ -93,6 +115,7 @@ class TransferCoordinator(
     @Volatile private var pausedByUser = false
     @Volatile private var activeCheckpoint: String? = null
     private var controlIntent: Pair<String, String>? = null
+    private val noteSubmission = Mutex()
     private var inboxCredentials: InboxCredentials? = null
 
     private data class InboxCredentials(val transferId: String, val key: ByteArray, val cookie: String)
@@ -121,12 +144,14 @@ class TransferCoordinator(
     fun upload(request: UploadRequest) = submit { config ->
         require(request.uris.isNotEmpty()) { "Select at least one source" }
         require(request.recipients.size <= 1) { "Filebeam currently supports one recipient" }
+        require(request.recipient == null || request.recipients == listOf(request.recipient.username)) { "Recipient identity does not match the upload request" }
         require(request.retentionHours == null || request.retentionHours > 0uL) { "Retention must be positive" }
         require(request.transport == Transport.HTTP || !request.turbo) { "Turbo Transfer requires HTTP" }
         require(request.recipients.isEmpty() || (!request.passwordProtected && !request.turbo && request.transport == Transport.HTTP)) {
             "Recipient delivery conflicts with the selected transfer options"
         }
-        val providers = runCatching { JSONArray(request.uris.map { uri ->
+        val durableUris: List<Uri> = request.uris.takeIf { uris -> uris.all(storage::hasPersistedReadGrant) } ?: emptyList()
+        val providers = runCatching { JSONArray(durableUris.map { uri ->
             val input = storage.providerInput(uri, uri.lastPathSegment ?: "file")
             JSONObject().put("identity", input.identity).put("name", input.displayName)
                 .put("offset", input.offset).put("length", input.length).put("mutation", input.mutationToken)
@@ -136,6 +161,9 @@ class TransferCoordinator(
             .put("turbo", request.turbo)
             .put("passwordProtected", request.passwordProtected).putOpt("retentionHours", request.retentionHours?.toString())
             .putOpt("account", request.account).put("recipients", JSONArray(request.recipients))
+            .put("includeKey", request.includeKeyInLink)
+            .putOpt("recipient", request.recipient?.let { recipient -> JSONObject().put("username", recipient.username).put("origin", recipient.origin)
+                .put("id", recipient.id.toString()).put("bundle", recipient.accountKeyBundleId.toString()).put("publicKey", recipient.publicKey) })
             .put("instance", config.instance).put("relay", config.relayOnly)
     }
 
@@ -173,13 +201,24 @@ class TransferCoordinator(
         return job
     }
 
+    /** HTTP notes share the same single-job arbitration as live notes and transfers. */
+    suspend fun createHttpNote(block: suspend () -> io.filebeam.rust.CreatedNote): io.filebeam.rust.CreatedNote = noteSubmission.withLock {
+        check(!mutable.value.busy && active == null) { context.getString(R.string.work_already_running) }
+        mutable.update { it.copy(busy = true, phase = "creating-note", message = null) }
+        try {
+            block()
+        } finally {
+            mutable.update { it.copy(busy = false) }
+        }
+    }
+
     fun resume(id: String) = submit { config ->
         resumeRequest(id, association(id).load(), config.instance, config.relayOnly)
     }
 
     private fun submit(clearSnapshot: Boolean = true, command: suspend (AppSettings) -> JSONObject) {
         if (mutable.value.busy) { message(context.getString(R.string.work_already_running)); return }
-        mutable.update { it.copy(busy = true, snapshot = if (clearSnapshot) null else it.snapshot, preparedBytes = 0, phase = "preparing", message = null) }
+        mutable.update { it.copy(busy = true, snapshot = if (clearSnapshot) null else it.snapshot, preparedBytes = 0, phase = "preparing", message = null, sharePresentation = null) }
         scope.launch {
             try {
                 val config = settings.values.first()
@@ -225,7 +264,7 @@ class TransferCoordinator(
                     if (pauseRequested) throw CancellationException()
                 }
                 withContext(Dispatchers.IO) { pending.clear() }
-                val receipt = TransferReceipt(request.optString("id"), "exported", request.getString("uri"), context.getString(R.string.saved_file))
+                val receipt = TransferReceipt(request.optString("id"), ReceiptState.SAF_EXPORTED, request.getString("uri"), context.getString(R.string.saved_file))
                 saveReceipt(receipt)
                 mutable.update { it.copy(phase = "complete", message = context.getString(R.string.saved_file), receipt = receipt) }
                 return@run
@@ -268,7 +307,12 @@ class TransferCoordinator(
                         val recipientName = request.optJSONArray("recipients")?.optString(0)?.trim()?.takeIf(String::isNotBlank)
                         val recipient = recipientName?.let { username ->
                             val resolved = accountSessions.service(origin).accountRecipient(username)
-                            UploadRecipient(resolved.username, resolved.id, resolved.accountKeyBundleId, resolved.publicKey)
+                            val expected = requireNotNull(request.optJSONObject("recipient")) { "Validate the recipient before sending" }
+                            require(expected.getString("origin") == origin && expected.getString("username") == resolved.username && expected.getString("id").toULong() == resolved.id &&
+                                expected.getString("bundle").toULong() == resolved.accountKeyBundleId && expected.getString("publicKey") == resolved.publicKey) {
+                                "Recipient identity changed. Validate it again before sending"
+                            }
+                            UploadRecipient(expected.getString("username"), expected.getString("id").toULong(), expected.getString("bundle").toULong(), expected.getString("publicKey"))
                         }
                         val options = UploadOptions(
                             transport = if (live) Transport.WEB_RTC else Transport.HTTP,
@@ -323,23 +367,24 @@ class TransferCoordinator(
                             .putOpt("transfer", request.optString("transfer").takeIf(String::isNotBlank)))
                     }
                 }
-                val capabilities = JobCapabilities(
-                    canPause = snapshot.state in listOf(JobState.RUNNING, JobState.PAUSING),
-                    canResume = snapshot.state == JobState.PAUSED && snapshot.checkpointId != null,
-                    canRetryExport = request.getString("kind") == "export" && snapshot.state == JobState.FAILED,
-                    canEndLive = request.optBoolean("live") && snapshot.checkpointId != null,
-                    canRevoke = request.getString("kind") == "upload" && snapshot.checkpointId != null,
-                    canRemoveLocal = !mutable.value.busy && snapshot.checkpointId != null,
-                )
-                mutable.update { it.copy(snapshot = snapshot, phase = snapshot.phase, capabilities = capabilities) }
+                val current = currentPresentation(request, snapshot.state)
+                val share = snapshot.shareUrl?.let { raw ->
+                    if (request.optString("kind") == "upload" && !request.optBoolean("includeKey", true)) {
+                        runCatching { splitShareLink(request.getString("instance"), raw) }
+                            .getOrNull()?.let { SharePresentation(it.link, it.separateKey) }
+                    } else SharePresentation(raw)
+                }
+                mutable.update { it.copy(snapshot = snapshot, phase = snapshot.phase, current = current, sharePresentation = share,
+                    capabilities = JobCapabilities(canPause = current.actions.pause)) }
                 if (snapshot.state !in listOf(JobState.RUNNING, JobState.PAUSING)) {
                     withContext(Dispatchers.IO) {
                         if (snapshot.state == JobState.COMPLETE) {
                             pending.clear()
                             if (request.getString("kind") == "upload") File(storage.root, "$id/sources").deleteRecursively()
                             val result = snapshot.results.firstOrNull()
-                            val disposition = if (request.getString("kind") == "download") "private-verified" else "complete"
-                            val receipt = TransferReceipt(id, disposition, result, null)
+                            val receipt = TransferReceipt(id,
+                                if (request.getString("kind") in setOf("download", "inbox-download")) ReceiptState.VERIFIED_PRIVATE else ReceiptState.APP_PRIVATE_PUBLISHED,
+                                result, null)
                             saveReceipt(receipt)
                             mutable.update { it.copy(receipt = receipt) }
                         }
@@ -358,7 +403,7 @@ class TransferCoordinator(
             active?.destroy()
             active = null
             activeCheckpoint = null
-            mutable.update { it.copy(busy = false) }
+            mutable.update { it.copy(busy = false, current = null) }
             refresh()
         }
     }
@@ -432,6 +477,27 @@ class TransferCoordinator(
         catch (error: Exception) { message(error.message ?: context.getString(R.string.unknown_error)) }
     }
 
+    /** Directory mode is a typed native choice, never an Android document-tree URI. */
+    fun respondDirectory(id: ULong, choice: DirectoryChoice) {
+        try { active?.respondDirectory(id, choice) }
+        catch (error: Exception) { message(error.message ?: context.getString(R.string.unknown_error)) }
+    }
+
+    /** Consent values remain explicit so a generic prompt can never approve peer exposure. */
+    fun respondConsent(id: ULong, allowed: Boolean) {
+        try { active?.respondConsent(id, allowed) }
+        catch (error: ClientException) { mutable.update { it.copy(message = error.message ?: "Unable to answer prompt") } }
+    }
+
+    /** Read-only server metadata; link parsing preserves its supplied origin and fragment. */
+    fun inspectLink(input: String, complete: (Result<LinkInspection>) -> Unit) = scope.launch {
+        val result = runCatching {
+            val config = settings.values.first()
+            withContext(Dispatchers.IO) { platformClient().inspectLink(config.instance, input) }
+        }
+        complete(result)
+    }
+
     fun discard(id: String) {
         if (mutable.value.busy) return
         scope.launch {
@@ -458,7 +524,7 @@ class TransferCoordinator(
                     platformClient().savedTransfers() to (pending.load() != null)
                 }
                 val activeId = mutable.value.snapshot?.checkpointId
-                mutable.update { it.copy(saved = dedupeActiveCatalog(activeId, saved) { item -> item.id }, pending = hasPending) }
+                mutable.update { it.copy(saved = saved.filterNot { it.id == activeId }, pending = hasPending) }
             } catch (error: Exception) { message(error.message ?: context.getString(R.string.unknown_error)) }
         }
     }
@@ -472,19 +538,47 @@ class TransferCoordinator(
         } catch (error: Exception) { message(error.message ?: context.getString(R.string.unknown_error)) }
     }
 
+    /** Discovery-only UI hook. It does not start, pause, or rebind a transfer. */
+    fun discoverSendInstance(instance: String, complete: (Result<io.filebeam.rust.InstanceInfo>) -> Unit) = scope.launch {
+        complete(runCatching {
+            val origin = AccountSessionRegistry.normalizeOrigin(instance)
+            withContext(Dispatchers.IO) { platformClient().discover(origin) }
+        })
+    }
+
     /** Uses the same origin-scoped service and recipient contract that upload uses. */
-    fun validateRecipient(username: String, complete: (String?) -> Unit) = scope.launch {
-        val error = runCatching {
+    fun validateRecipient(username: String, complete: (ValidatedRecipient?, String?) -> Unit) = scope.launch {
+        val result = runCatching {
             val config = settings.values.first()
             withContext(Dispatchers.IO) {
-                accountSessions.service(config.instance).accountRecipient(username.trim())
+                val origin = normalizeOrigin(config.instance)
+                accountSessions.service(origin).accountRecipient(username.trim()).let { recipient ->
+                    ValidatedRecipient(recipient.username, origin, recipient.id, recipient.accountKeyBundleId, recipient.publicKey, 0)
+                }
             }
-        }.exceptionOrNull()?.message
-        complete(error)
+        }
+        complete(result.getOrNull(), result.exceptionOrNull()?.message)
     }
 
     fun export(source: String, uri: Uri) = submit(clearSnapshot = false) {
         JSONObject().put("kind", "export").put("id", UUID.randomUUID().toString()).put("source", source).put("uri", uri.toString())
+    }
+
+    /** Re-validates native capability before exposing a fresh, cancellable SAF save. */
+    fun retrySafExport(id: String, complete: (Result<String>) -> Unit) = scope.launch {
+        complete(runCatching {
+            withContext(Dispatchers.IO) {
+                val details = platformClient().savedTransferDetails(id)
+                check(details.canRetrySave) { "This transfer is not available to save" }
+                storage.verifiedOutputs(details.id).singleOrNull()?.absolutePath
+                    ?: error("This verified download is no longer available to save")
+            }
+        })
+    }
+
+    /** Authenticated checkpoint detail, deliberately excluding keys, cookies, and action tokens. */
+    fun savedDetails(id: String, complete: (Result<SavedTransferPresentation>) -> Unit) = scope.launch {
+        complete(runCatching { withContext(Dispatchers.IO) { platformClient().savedTransferDetails(id).presentation() } })
     }
 
     private fun association(id: String): PendingTransferStore {
@@ -497,9 +591,21 @@ class TransferCoordinator(
         ?: activeCheckpoint?.let { "transfer:$it" }
     private suspend fun saveReceipt(receipt: TransferReceipt) = withContext(Dispatchers.IO) {
         PendingTransferStore(context, "receipt-${receipt.id}").save(JSONObject().put("id", receipt.id)
-            .put("disposition", receipt.disposition).putOpt("result", receipt.result).putOpt("message", receipt.message))
+            .put("state", receipt.state.name).putOpt("result", receipt.result).putOpt("message", receipt.message))
     }
     fun message(value: String?) { mutable.update { it.copy(message = value) } }
+}
+
+internal fun currentPresentation(request: JSONObject, state: JobState): CurrentTransfer {
+    val kind = when (request.getString("kind")) {
+        "upload" -> TransferKind.UPLOAD; "download" -> TransferKind.DOWNLOAD; "inbox-download" -> TransferKind.INBOX_DOWNLOAD
+        "note-live" -> TransferKind.NOTE_LIVE; "export" -> TransferKind.EXPORT; else -> TransferKind.CONTROL
+    }
+    val transport = if (kind == TransferKind.UPLOAD) if (request.optBoolean("live")) Transport.WEB_RTC else Transport.HTTP else null
+    return CurrentTransfer(request.getString("id"), kind, transport, TransferActions(
+        pause = state in listOf(JobState.RUNNING, JobState.PAUSING),
+        // Remote-token actions are exposed only by savedDetails(), whose FFI contract verifies token availability.
+    ))
 }
 
 internal fun resumeRequest(id: String, association: JSONObject?, instance: String, relayOnly: Boolean): JSONObject {

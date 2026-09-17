@@ -65,6 +65,14 @@ pub struct AccountKeyBundle {
 }
 
 #[derive(Clone, uniffi::Record)]
+pub struct AccountKeySituation {
+    pub active_bundle_id: Option<u64>,
+    pub active_custody_mode: Option<String>,
+    pub historical_bundle_ids: Vec<u64>,
+    pub replacement_acknowledgement_required: bool,
+}
+
+#[derive(Clone, uniffi::Record)]
 pub struct Recipient {
     pub id: u64,
     pub username: String,
@@ -375,6 +383,20 @@ impl NativeServices {
             })
     }
 
+    /// UI-safe custody state; it contains no private or encrypted key material.
+    pub fn account_key_situation(&self) -> Result<AccountKeySituation> {
+        self.inner
+            .account()
+            .key_situation()
+            .map_err(operation)
+            .map(|situation| AccountKeySituation {
+                replacement_acknowledgement_required: situation.active.is_some(),
+                active_bundle_id: situation.active.as_ref().map(|key| key.id),
+                active_custody_mode: situation.active.map(|key| key.custody_mode),
+                historical_bundle_ids: situation.historical_bundle_ids,
+            })
+    }
+
     pub fn account_upload_key(&self, key: AccountKeyUpload) -> Result<AccountKeyBundle> {
         if !matches!(key.custody_mode.as_str(), "password" | "self") {
             return Err(crate::invalid(
@@ -404,27 +426,50 @@ impl NativeServices {
 
     /// Explicit acknowledgement only; listing an inbox never changes read state.
     pub fn account_mark_inbox_notifications_read(&self) -> Result<()> {
-        self.inner.account().mark_inbox_notifications_read().map_err(operation)
+        self.inner
+            .account()
+            .mark_inbox_notifications_read()
+            .map_err(operation)
     }
 
     pub fn account_set_notification_channel(&self, channel: String) -> Result<()> {
-        self.inner.account().set_notification_channel(&channel).map_err(operation)
+        self.inner
+            .account()
+            .set_notification_channel(&channel)
+            .map_err(operation)
     }
 
     pub fn account_resend_verification(&self) -> Result<()> {
-        self.inner.account().resend_verification().map_err(operation)
+        self.inner
+            .account()
+            .resend_verification()
+            .map_err(operation)
     }
 
-    pub fn account_verify_email(&self, hash: String) -> Result<()> {
-        self.inner.account().verify_email(&hash).map_err(operation)
+    pub fn account_verify_email_link(&self, link: String) -> Result<()> {
+        self.inner
+            .account()
+            .verify_email_link(&link)
+            .map_err(operation)
     }
 
     pub fn account_request_password_reset(&self, email: String) -> Result<()> {
-        self.inner.account().request_password_reset(&email).map_err(operation)
+        self.inner
+            .account()
+            .request_password_reset(&email)
+            .map_err(operation)
     }
 
-    pub fn account_reset_password(&self, email: String, token: String, password: String) -> Result<()> {
-        self.inner.account().reset_password(&email, &token, &password).map_err(operation)
+    pub fn account_reset_password(
+        &self,
+        email: String,
+        token: String,
+        password: String,
+    ) -> Result<()> {
+        self.inner
+            .account()
+            .reset_password(&email, &token, &password)
+            .map_err(operation)
     }
 
     /// Exports a self-custody key without converting it to a printable diagnostic.

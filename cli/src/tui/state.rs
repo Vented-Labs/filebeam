@@ -3,7 +3,7 @@ use std::{
     fs,
     io::{self, Write},
     path::{Path, PathBuf},
-    sync::atomic::Ordering,
+    sync::{atomic::Ordering, mpsc},
     time::Instant,
 };
 
@@ -18,7 +18,123 @@ use crate::{
     input::Input,
     presentation::{Theme, clean},
     protocol::{self, Info, SavedTransfer},
+    services,
 };
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum NativeAction {
+    NoteCreate,
+    NoteOpen,
+    InboxList,
+    InboxDownload,
+    Recipient,
+    Revoke,
+    EndLive,
+    Login,
+    Register,
+    Logout,
+    Profile,
+    ResendVerification,
+    Verify,
+    RecoveryRequest,
+    RecoveryReset,
+    KeySelf,
+    KeyPassword,
+    KeyImport,
+    KeyExport,
+}
+
+impl NativeAction {
+    pub const ALL: [Self; 19] = [
+        Self::NoteCreate,
+        Self::NoteOpen,
+        Self::InboxList,
+        Self::InboxDownload,
+        Self::Recipient,
+        Self::Revoke,
+        Self::EndLive,
+        Self::Login,
+        Self::Register,
+        Self::Logout,
+        Self::Profile,
+        Self::ResendVerification,
+        Self::Verify,
+        Self::RecoveryRequest,
+        Self::RecoveryReset,
+        Self::KeySelf,
+        Self::KeyPassword,
+        Self::KeyImport,
+        Self::KeyExport,
+    ];
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::NoteCreate => "Note: create (native editor)",
+            Self::NoteOpen => "Note: open",
+            Self::InboxList => "Inbox: list",
+            Self::InboxDownload => "Inbox: download",
+            Self::Recipient => "Recipient: resolve",
+            Self::Revoke => "Transfer: revoke",
+            Self::EndLive => "Transfer: end live",
+            Self::Login => "Account: login",
+            Self::Register => "Account: register",
+            Self::Logout => "Account: logout",
+            Self::Profile => "Account: profile",
+            Self::ResendVerification => "Account: resend verification",
+            Self::Verify => "Account: verify email",
+            Self::RecoveryRequest => "Account: recovery request",
+            Self::RecoveryReset => "Account: recovery reset",
+            Self::KeySelf => "Custody: create self key",
+            Self::KeyPassword => "Custody: create password key",
+            Self::KeyImport => "Custody: import key",
+            Self::KeyExport => "Custody: export key",
+        }
+    }
+    pub fn fields(self) -> &'static [(&'static str, bool)] {
+        match self {
+            Self::NoteCreate => &[
+                ("title (optional)", false),
+                ("language", false),
+                ("note text", false),
+                ("password (optional)", true),
+                ("flags: burn live", false),
+            ],
+            Self::NoteOpen => &[("link", false), ("password (optional)", true)],
+            Self::InboxDownload => &[("delivery id", false), ("output folder", false)],
+            Self::Recipient | Self::Revoke | Self::EndLive => &[("username or transfer id", false)],
+            Self::Login => &[("email", false), ("password", true)],
+            Self::Register => &[
+                ("username", false),
+                ("email", false),
+                ("name (optional)", false),
+                ("password", true),
+            ],
+            Self::Verify => &[("complete verification link", false)],
+            Self::RecoveryRequest => &[("email", false)],
+            Self::RecoveryReset => &[
+                ("email", false),
+                ("recovery token", true),
+                ("new password", true),
+            ],
+            Self::KeySelf => &[("type REPLACE to replace", false)],
+            Self::KeyPassword => &[
+                ("custody password", true),
+                ("type REPLACE to replace", false),
+            ],
+            Self::KeyImport => &[
+                ("owner-only key file", false),
+                ("type REPLACE to replace", false),
+            ],
+            Self::KeyExport => &[("type EXPORT to reveal the key", false)],
+            _ => &[],
+        }
+    }
+}
+
+pub struct NativeForm {
+    pub action: NativeAction,
+    pub fields: Vec<Input>,
+    pub field: usize,
+}
 
 #[derive(Clone)]
 pub struct Entry {
@@ -106,6 +222,10 @@ pub struct State {
     pub config: Config,
     pub now: Instant,
     pub launched: Instant,
+    pub palette: bool,
+    pub palette_cursor: usize,
+    pub native: Option<NativeForm>,
+    pub service_result: Option<mpsc::Receiver<Result<Vec<String>, String>>>,
 }
 
 impl State {
@@ -143,6 +263,10 @@ impl State {
             config: config.clone(),
             now: Instant::now(),
             launched: Instant::now(),
+            palette: false,
+            palette_cursor: 0,
+            native: None,
+            service_result: None,
         };
         state.refresh()?;
         Ok(state)
@@ -346,6 +470,20 @@ impl State {
     }
 
     pub fn receive(&mut self, theme: Theme) {
+        if let Some(result) = self
+            .service_result
+            .as_ref()
+            .and_then(|job| job.try_recv().ok())
+        {
+            match result {
+                Ok(values) => {
+                    self.results.extend(values);
+                    self.toast("Native service action completed");
+                }
+                Err(error) => self.toast(error),
+            }
+            self.service_result = None;
+        }
         if let Some(job) = &self.job {
             if let Some(view) = &mut self.transfer {
                 view.tick(job.control.snapshot(), !theme.motion, Instant::now());
@@ -379,6 +517,10 @@ impl State {
     }
 
     pub fn paste(&mut self, value: &str) {
+        if let Some(form) = &mut self.native {
+            form.fields[form.field].insert(value);
+            return;
+        }
         if self.prompt.is_some() {
             self.secret.insert(value.trim());
         } else if self.searching {
@@ -405,6 +547,32 @@ impl State {
             if matches!(key.code, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('?')) {
                 self.help = false;
             }
+            return Ok(false);
+        }
+        if self.palette {
+            match key.code {
+                KeyCode::Esc => self.palette = false,
+                KeyCode::Down | KeyCode::Char('j') => {
+                    self.palette_cursor = (self.palette_cursor + 1).min(NativeAction::ALL.len() - 1)
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    self.palette_cursor = self.palette_cursor.saturating_sub(1)
+                }
+                KeyCode::Enter => {
+                    let action = NativeAction::ALL[self.palette_cursor];
+                    self.palette = false;
+                    self.native = Some(NativeForm {
+                        action,
+                        fields: action.fields().iter().map(|_| Input::default()).collect(),
+                        field: 0,
+                    });
+                }
+                _ => {}
+            }
+            return Ok(false);
+        }
+        if self.native.is_some() {
+            self.native_key(key)?;
             return Ok(false);
         }
         if self.prompt.is_some() {
@@ -533,6 +701,7 @@ impl State {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => return Ok(true),
             KeyCode::Char('?') => self.help = true,
+            KeyCode::Char('p') => self.palette = true,
             KeyCode::Char('1') | KeyCode::Char('s') => {
                 self.mode = Mode::Send;
                 self.focus = Focus::Browser;
@@ -561,6 +730,107 @@ impl State {
             _ => {}
         }
         Ok(false)
+    }
+
+    fn native_key(&mut self, key: KeyEvent) -> Result<()> {
+        let form = self.native.as_mut().expect("native form checked");
+        match key.code {
+            KeyCode::Esc => {
+                self.native = None;
+                return Ok(());
+            }
+            KeyCode::Tab | KeyCode::Down => {
+                form.field = (form.field + 1) % form.fields.len().max(1)
+            }
+            KeyCode::BackTab | KeyCode::Up => {
+                form.field = form
+                    .field
+                    .checked_sub(1)
+                    .unwrap_or(form.fields.len().saturating_sub(1))
+            }
+            KeyCode::Enter if form.field + 1 < form.fields.len() => form.field += 1,
+            KeyCode::Enter => {
+                let form = self.native.take().expect("form exists");
+                self.run_native(form)?;
+            }
+            _ => {
+                if let Some(input) = form.fields.get_mut(form.field) {
+                    input.handle(key)
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn run_native(&mut self, form: NativeForm) -> Result<()> {
+        let values: Vec<String> = form
+            .fields
+            .into_iter()
+            .map(|mut value| value.take())
+            .collect();
+        match form.action {
+            NativeAction::Revoke => {
+                self.begin(Request::Revoke {
+                    id: values[0].clone(),
+                });
+                return Ok(());
+            }
+            NativeAction::EndLive => {
+                self.begin(Request::EndLive {
+                    id: values[0].clone(),
+                });
+                return Ok(());
+            }
+            NativeAction::InboxDownload => {
+                let client = services::client(&self.config, &self.instance)?;
+                let private = services::stored_private_key(&self.config, &self.instance)?;
+                let metadata = client.account().inbox_metadata(&values[0])?;
+                let key = filebeam_client_core::services::open_recipient_key(
+                    &private,
+                    &metadata.recipient_key,
+                    &values[0],
+                )?;
+                self.begin(Request::InboxDownload {
+                    id: values[0].clone(),
+                    output: expand_path(&values[1]),
+                    key: key.to_vec(),
+                    cookie: client.cookie_context()?,
+                });
+                return Ok(());
+            }
+            NativeAction::NoteCreate
+                if values
+                    .get(4)
+                    .is_some_and(|flags| flags.split_whitespace().any(|v| v == "live")) =>
+            {
+                self.begin(Request::NoteLive(
+                    filebeam_client_core::services::NoteCreate {
+                        text: values[2].clone(),
+                        title: (!values[0].is_empty()).then(|| values[0].clone()),
+                        language: if values[1].is_empty() {
+                            "plain".into()
+                        } else {
+                            values[1].clone()
+                        },
+                        password: (!values[3].is_empty()).then(|| values[3].clone()),
+                        burn_on_read: values[4].split_whitespace().any(|v| v == "burn"),
+                        retention_hours: None,
+                    },
+                ));
+                return Ok(());
+            }
+            _ => {}
+        }
+        let config = self.config.clone();
+        let instance = self.instance.clone();
+        let (send, receive) = mpsc::channel();
+        self.service_result = Some(receive);
+        std::thread::spawn(move || {
+            let result = native_action(form.action, &config, &instance, values)
+                .map_err(|error| format!("{error:#}"));
+            let _ = send.send(result);
+        });
+        Ok(())
     }
 
     fn next_focus(&mut self, reverse: bool) {
@@ -665,6 +935,130 @@ fn expand_path(value: &str) -> PathBuf {
     }
 }
 
+fn native_action(
+    action: NativeAction,
+    config: &Config,
+    instance: &str,
+    v: Vec<String>,
+) -> Result<Vec<String>> {
+    let client = services::client(config, instance)?;
+    let account = client.account();
+    match action {
+        NativeAction::NoteCreate => Ok(vec![
+            client
+                .notes()
+                .create(filebeam_client_core::services::NoteCreate {
+                    text: v[2].clone(),
+                    title: (!v[0].is_empty()).then(|| v[0].clone()),
+                    language: if v[1].is_empty() {
+                        "plain".into()
+                    } else {
+                        v[1].clone()
+                    },
+                    password: (!v[3].is_empty()).then(|| v[3].clone()),
+                    burn_on_read: v[4].split_whitespace().any(|flag| flag == "burn"),
+                    retention_hours: None,
+                })?
+                .link,
+        ]),
+        // The TUI secret has already been collected in a masked field, so avoid
+        // routing it through stdin or a process argument.
+        NativeAction::NoteOpen => {
+            let password = (!v[1].is_empty()).then(|| v[1].as_str());
+            let note = services::client(config, instance)?
+                .notes()
+                .open(&v[0], password)?;
+            Ok(vec![
+                note.title.unwrap_or_default(),
+                format!("language: {}", note.language),
+                note.text,
+            ])
+        }
+        NativeAction::InboxList => Ok(account
+            .inbox()?
+            .into_iter()
+            .map(|item| format!("{}\t{}\t{}", item.id, item.item_count, item.expires_at))
+            .collect()),
+        NativeAction::Recipient => {
+            let recipient = account.recipient(&v[0])?;
+            Ok(vec![format!(
+                "{}\t{}\t{}",
+                recipient.username, recipient.id, recipient.fingerprint
+            )])
+        }
+        NativeAction::Login => {
+            let session = account.login(&v[0], &v[1], true)?;
+            services::save_session(config, instance, &client)?;
+            Ok(vec![session.email])
+        }
+        NativeAction::Register => {
+            let session = account.register(
+                &v[0],
+                (!v[2].is_empty()).then(|| v[2].as_str()),
+                &v[1],
+                &v[3],
+            )?;
+            services::save_session(config, instance, &client)?;
+            Ok(vec![session.email])
+        }
+        NativeAction::Logout => {
+            account.logout()?;
+            services::clear_session(config, instance)?;
+            Ok(vec!["logged out".into()])
+        }
+        NativeAction::Profile => {
+            let session = account.session()?;
+            Ok(vec![format!(
+                "{}\t{}\t{}",
+                session.email,
+                session.username.unwrap_or_default(),
+                session.inbox_enabled
+            )])
+        }
+        NativeAction::ResendVerification => {
+            account.resend_verification()?;
+            Ok(vec!["verification email requested".into()])
+        }
+        NativeAction::Verify => {
+            account.verify_email_link(&v[0])?;
+            Ok(vec!["email verified".into()])
+        }
+        NativeAction::RecoveryRequest => {
+            account.request_password_reset(&v[0])?;
+            Ok(vec!["recovery email requested".into()])
+        }
+        NativeAction::RecoveryReset => {
+            account.reset_password(&v[0], &v[1], &v[2])?;
+            Ok(vec!["password reset".into()])
+        }
+        NativeAction::KeySelf => {
+            services::setup_self_key(config, instance, v[0] == "REPLACE")?;
+            Ok(vec!["self-custody key created".into()])
+        }
+        NativeAction::KeyPassword => {
+            services::setup_password_key(config, instance, &v[0], v[1] == "REPLACE")?;
+            Ok(vec!["password custody key created".into()])
+        }
+        NativeAction::KeyImport => {
+            let value = services::private_text_file(Path::new(&v[0]))?;
+            services::import_self_key_for_account(
+                config,
+                instance,
+                value.trim(),
+                v[1] == "REPLACE",
+            )?;
+            Ok(vec!["self-custody key imported".into()])
+        }
+        NativeAction::KeyExport => {
+            anyhow::ensure!(v[0] == "EXPORT", "key export requires typing EXPORT");
+            Ok(vec![services::export_stored_key(config, instance)?])
+        }
+        NativeAction::InboxDownload | NativeAction::Revoke | NativeAction::EndLive => {
+            unreachable!("handled by shared transfer job")
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -722,5 +1116,28 @@ mod tests {
         assert!(state.job.is_some());
         state.cancel();
         assert!(state.job.is_some());
+    }
+
+    #[test]
+    fn native_palette_opens_a_masked_account_form_without_starting_a_transfer() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = State::new(
+            &Config::default(),
+            "http://localhost:8000",
+            dir.path().into(),
+        )
+        .unwrap();
+        state.key(KeyCode::Char('p').into()).unwrap();
+        assert!(state.palette);
+        while NativeAction::ALL[state.palette_cursor] != NativeAction::Login {
+            state.key(KeyCode::Down.into()).unwrap();
+        }
+        state.key(KeyCode::Enter.into()).unwrap();
+        assert!(state.native.is_some());
+        assert!(state.job.is_none());
+        assert_eq!(
+            state.native.as_ref().unwrap().action.fields()[1],
+            ("password", true)
+        );
     }
 }

@@ -8,6 +8,10 @@
     <application
         android:usesCleartextTraffic="true"
         tools:replace="android:usesCleartextTraffic">
+        <!-- Debug-only evidence entry point. It renders the production root and ViewModel. -->
+        <activity
+            android:name=".FixtureActivity"
+            android:exported="false" />
         <provider
             android:name=".TestDocumentsProvider"
             android:authorities="io.filebeam.android.testdocuments"

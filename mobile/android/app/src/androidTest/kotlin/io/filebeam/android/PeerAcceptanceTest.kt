@@ -138,7 +138,7 @@ class PeerAcceptanceTest {
             Log.i(TAG, "$label $state done=${snapshot.done}/${snapshot.total}")
         }
         if (prompt != null) when (prompt.kind) {
-            PromptType.PEER_CONSENT -> job.respond(prompt.id, "yes")
+            PromptType.PEER_CONSENT -> job.respond(prompt.id, "allow")
             PromptType.SHARE_READY -> job.respond(prompt.id, "continue")
             else -> error("$label requires unsupported prompt ${prompt.kind}")
         }

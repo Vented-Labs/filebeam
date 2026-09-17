@@ -5,6 +5,7 @@ use std::{
 };
 
 use crate::{config::Config, protocol, update, uploads::DirectoryMode};
+use filebeam_client_core::services::{NoteCreate, ServiceClient};
 #[allow(unused_imports)]
 pub use filebeam_transfer_native::control::{
     Cancelled, Control, PeerConsent, PeerFailed, Phase, Progress, Prompt, PromptKind, SecretKind,
@@ -31,9 +32,28 @@ impl Direction {
 
 pub enum Request {
     Upload(Vec<PathBuf>, DirectoryMode, protocol::UploadOptions),
-    Download { link: String, output: PathBuf },
+    Download {
+        link: String,
+        output: PathBuf,
+    },
+    InboxDownload {
+        id: String,
+        output: PathBuf,
+        key: Vec<u8>,
+        cookie: String,
+    },
+    Revoke {
+        id: String,
+    },
+    EndLive {
+        id: String,
+    },
+    NoteLive(NoteCreate),
     Update,
-    Resume { id: String, direction: Direction },
+    Resume {
+        id: String,
+        direction: Direction,
+    },
 }
 
 impl Request {
@@ -41,6 +61,9 @@ impl Request {
         match self {
             Self::Upload(..) => Direction::Upload,
             Self::Download { .. } => Direction::Download,
+            Self::InboxDownload { .. } => Direction::Download,
+            Self::Revoke { .. } | Self::EndLive { .. } => Direction::Update,
+            Self::NoteLive(..) => Direction::Upload,
             Self::Update => Direction::Update,
             Self::Resume { direction, .. } => *direction,
         }
@@ -81,6 +104,25 @@ impl Job {
                             .collect()
                     })
                 }
+                Request::InboxDownload {
+                    id,
+                    output,
+                    key,
+                    cookie,
+                } => protocol::download_inbox(&instance, &id, &key, &cookie, &output, worker).map(
+                    |paths| {
+                        paths
+                            .into_iter()
+                            .map(|path| path.display().to_string())
+                            .collect()
+                    },
+                ),
+                Request::Revoke { id } => protocol::revoke_upload(&id, worker).map(|_| vec![id]),
+                Request::EndLive { id } => protocol::end_live(&id, worker).map(|_| vec![id]),
+                Request::NoteLive(request) => ServiceClient::new(&instance)?
+                    .notes()
+                    .create_live(request, worker, worker.cancelled.clone())
+                    .map(|note| vec![note.link]),
                 Request::Update => worker
                     .phase(Phase::Updating)
                     .and_then(|_| update::check(&config))

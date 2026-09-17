@@ -3,9 +3,12 @@ package io.filebeam.android.ui.design
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -21,7 +24,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 
 @Composable
-fun ProductionGroupCard(modifier: Modifier = Modifier, content: @Composable Column.() -> Unit) {
+fun ProductionGroupCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     Card(modifier, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow), shape = MaterialTheme.shapes.large) {
         Column(content = content)
     }
@@ -39,7 +42,8 @@ fun OptionRow(
 ) {
     Row(
         Modifier.fillMaxWidth().heightIn(min = FilebeamSpace.MinimumTouchTarget).clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-            .semantics { stateDescription = if (selected) "Selected" else "Not selected" }.padding(horizontal = FilebeamSpace.Medium, vertical = FilebeamSpace.Small),
+            .semantics(mergeDescendants = true) { if (selected) stateDescription = "Selected" }
+            .padding(horizontal = FilebeamSpace.Medium, vertical = FilebeamSpace.Small),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(FilebeamSpace.Small),
     ) {
@@ -54,7 +58,7 @@ fun OptionRow(
 
 @Composable
 fun ActionDock(label: String, enabled: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, icon: ApprovedIcon = ApprovedIcon.Upload) {
-    Button(onClick = onClick, enabled = enabled, modifier = modifier.fillMaxWidth().heightIn(min = FilebeamSpace.PrimaryActionHeight)) {
+    Button(onClick = onClick, enabled = enabled, modifier = modifier.fillMaxWidth().navigationBarsPadding().imePadding().heightIn(min = FilebeamSpace.PrimaryActionHeight)) {
         ApprovedIcon(icon, null)
         Text(label, Modifier.padding(start = FilebeamSpace.Small))
     }

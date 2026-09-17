@@ -352,7 +352,10 @@ impl Control {
             peer_id: peer_id.clone(),
         }));
         let consent = self.ask(PromptKind::PeerConsent { peer_id })?;
-        if consent.trim().eq_ignore_ascii_case("yes") {
+        if matches!(
+            consent.trim().to_ascii_lowercase().as_str(),
+            "allow" | "yes"
+        ) {
             Ok(())
         } else {
             bail!("peer address exposure was not accepted")

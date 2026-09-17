@@ -13,6 +13,8 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\URL;
+use Illuminate\Auth\Notifications\VerifyEmail;
 use Symfony\Component\HttpFoundation\Cookie;
 
 beforeEach(function (): void {
@@ -163,6 +165,33 @@ test('native account preference and recovery APIs use persisted web behavior', f
     $this->postJson('/api/native/v1/password/reset', ['email' => $user->email, 'token' => $token, 'password' => 'another-long-secure-password', 'password_confirmation' => 'another-long-secure-password'], ['Sec-Fetch-Site' => 'same-origin'])
         ->assertNoContent();
     expect(Hash::check('another-long-secure-password', $user->fresh()->password))->toBeTrue();
+});
+
+test('native verification accepts only the current users real signed email capability', function (): void {
+    $user = User::factory()->unverified()->create();
+    $link = (new VerifyEmail)->toMail($user)->actionUrl;
+
+    $this->actingAs($user)->postJson('/api/native/v1/account/email/verify', ['link' => $link], ['Sec-Fetch-Site' => 'same-origin'])
+        ->assertNoContent();
+    expect($user->fresh()->hasVerifiedEmail())->toBeTrue();
+});
+
+test('native verification rejects unsigned, forged, expired, and cross-account links', function (): void {
+    $user = User::factory()->unverified()->create();
+    $other = User::factory()->unverified()->create();
+    $valid = URL::temporarySignedRoute('verification.verify', now()->addMinutes(10), ['id' => $user->id, 'hash' => sha1($user->email)]);
+    $unsigned = rtrim((string) config('app.url'), '/')."/verify-email/{$user->id}/".sha1($user->email);
+    $expired = URL::temporarySignedRoute('verification.verify', now()->subMinute(), ['id' => $user->id, 'hash' => sha1($user->email)]);
+    $forgedHost = preg_replace('#^https?://[^/]+#', 'https://forged.example', $valid);
+
+    foreach ([$unsigned, $expired, $forgedHost] as $link) {
+        $this->actingAs($user)->postJson('/api/native/v1/account/email/verify', ['link' => $link], ['Sec-Fetch-Site' => 'same-origin'])
+            ->assertUnprocessable();
+    }
+    $this->actingAs($other)->postJson('/api/native/v1/account/email/verify', ['link' => $valid], ['Sec-Fetch-Site' => 'same-origin'])
+        ->assertUnprocessable();
+    expect($user->fresh()->hasVerifiedEmail())->toBeFalse()
+        ->and($other->fresh()->hasVerifiedEmail())->toBeFalse();
 });
 
 test('native recipient lookup exposes only an active username delivery key', function (): void {

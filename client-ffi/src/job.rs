@@ -12,6 +12,9 @@ use std::sync::{
 pub struct TransferJob {
     inner: Mutex<core::ManagedJob>,
     end_requested: Option<Arc<AtomicBool>>,
+    direction: &'static str,
+    kind: &'static str,
+    transport: &'static str,
 }
 
 impl TransferJob {
@@ -19,12 +22,27 @@ impl TransferJob {
         Self {
             inner: Mutex::new(core::ManagedJob::new(job)),
             end_requested: None,
+            direction: "unknown",
+            kind: "unknown",
+            transport: "unknown",
+        }
+    }
+    pub(crate) fn new_upload(job: core::Job, transport: &'static str) -> Self {
+        Self {
+            inner: Mutex::new(core::ManagedJob::new(job)),
+            end_requested: None,
+            direction: "upload",
+            kind: "files",
+            transport,
         }
     }
     pub(crate) fn new_live(job: core::Job, end_requested: Arc<AtomicBool>) -> Self {
         Self {
             inner: Mutex::new(core::ManagedJob::new(job)),
             end_requested: Some(end_requested),
+            direction: "upload",
+            kind: "note",
+            transport: "webrtc",
         }
     }
 }
@@ -89,6 +107,16 @@ impl TransferJob {
                 core::SecretRetryKind::Password => SecretRetryKind::Password,
                 core::SecretRetryKind::Generic => SecretRetryKind::Generic,
             }),
+            direction: self.direction.into(),
+            kind: self.kind.into(),
+            transport: self.transport.into(),
+            can_pause: matches!(state.state, core::JobState::Running),
+            can_end_live: self.end_requested.is_some()
+                && matches!(state.state, core::JobState::Running),
+            // Upload delete capabilities are checkpoint-private and are only
+            // exposed by authenticated SavedTransferDetails after persistence.
+            can_revoke_remote: false,
+            expiry_known: false,
         }
     }
     pub fn respond(&self, prompt_id: u64, value: String) -> Result<()> {
@@ -103,6 +131,13 @@ impl TransferJob {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .respond_directory(prompt_id, matches!(choice, DirectoryChoice::Zip))
+            .map_err(operation)
+    }
+    pub fn respond_consent(&self, prompt_id: u64, allowed: bool) -> Result<()> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .respond_consent(prompt_id, allowed)
             .map_err(operation)
     }
     pub fn pause(&self) {

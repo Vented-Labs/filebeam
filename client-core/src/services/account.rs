@@ -46,6 +46,11 @@ pub struct AccountKeyBundle {
     pub encrypted_private_key: Option<String>,
     pub is_active: bool,
 }
+#[derive(Clone, Debug)]
+pub struct AccountKeySituation {
+    pub active: Option<AccountKeyBundle>,
+    pub historical_bundle_ids: Vec<u64>,
+}
 #[derive(Clone, Debug, Deserialize)]
 pub struct InboxTransfer {
     pub id: String,
@@ -257,6 +262,19 @@ impl AccountService {
     pub fn account_keys(&self) -> Result<Vec<AccountKeyBundle>> {
         self.get("api/native/v1/account/keys")
     }
+    /// Reports custody without creating, replacing, or exposing private material.
+    pub fn key_situation(&self) -> Result<AccountKeySituation> {
+        let keys = self.account_keys()?;
+        let active = keys.iter().find(|key| key.is_active).cloned();
+        Ok(AccountKeySituation {
+            historical_bundle_ids: keys
+                .into_iter()
+                .filter(|key| !key.is_active)
+                .map(|key| key.id)
+                .collect(),
+            active,
+        })
+    }
     pub fn recipient(&self, username: &str) -> Result<Recipient> {
         self.get(&format!("api/native/v1/recipients/{username}"))
     }
@@ -314,10 +332,12 @@ impl AccountService {
     pub fn resend_verification(&self) -> Result<()> {
         self.no_content("api/native/v1/account/email/verification-notification")
     }
-    pub fn verify_email(&self, hash: &str) -> Result<()> {
+    /// The server verifies the complete temporary signed email URL. A hash alone
+    /// is public in the verification route and is not proof of email possession.
+    pub fn verify_email_link(&self, link: &str) -> Result<()> {
         self.post_no_content(
             "api/native/v1/account/email/verify",
-            serde_json::json!({"hash": hash}),
+            serde_json::json!({"link": link}),
         )
     }
     pub fn request_password_reset(&self, email: &str) -> Result<()> {

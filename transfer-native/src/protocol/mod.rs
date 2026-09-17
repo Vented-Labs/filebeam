@@ -271,6 +271,8 @@ pub struct Info {
     pub anonymous_uploads_enabled: bool,
     #[serde(default)]
     pub enabled_drivers: Vec<String>,
+    #[serde(default = "http_driver")]
+    pub default_driver: String,
     pub maximum_transfer_bytes: Option<u64>,
     pub maximum_file_count: Option<usize>,
     #[serde(default)]
@@ -285,6 +287,7 @@ impl Info {
             file_retention_options: vec![24],
             anonymous_uploads_enabled: true,
             enabled_drivers: vec!["http".into()],
+            default_driver: "http".into(),
             maximum_transfer_bytes: Some(2 * 1024 * 1024 * 1024),
             maximum_file_count: Some(20),
             transport_limits: HashMap::new(),
@@ -310,6 +313,67 @@ pub fn instance_info(instance: &str) -> Result<Info> {
         );
     }
     Ok(response.json::<Api<Info>>()?.data)
+}
+
+/// Public, read-only metadata used to route a received link before unlock.
+/// It deliberately excludes encrypted manifests, filenames, and capabilities.
+#[derive(Clone, Debug)]
+pub struct LinkInspection {
+    pub instance: String,
+    pub id: String,
+    pub kind: String,
+    pub driver: String,
+    pub status: String,
+    pub password_required: bool,
+}
+
+pub fn inspect_link_for_instance(input: &str, instance: &str) -> Result<LinkInspection> {
+    let link = parse_link_for_instance(input, instance)?;
+    let client = reqwest::blocking::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(2))
+        .timeout(std::time::Duration::from_secs(3))
+        .build()?;
+    let response = client
+        .get(format!("{}/api/v1/transfers/{}", link.instance, link.id))
+        .send()?;
+    if !response.status().is_success() {
+        bail!("transfer metadata is unavailable");
+    }
+    #[derive(Deserialize)]
+    struct PublicTransfer {
+        id: String,
+        kind: String,
+        #[serde(default = "http_driver")]
+        driver: String,
+        status: String,
+        #[serde(default)]
+        encrypted_manifest: Option<String>,
+        #[serde(default)]
+        encrypted_descriptor: Option<String>,
+    }
+    let transfer = response.json::<Api<PublicTransfer>>()?.data;
+    if transfer.id != link.id
+        || !matches!(transfer.kind.as_str(), "files" | "note")
+        || !matches!(transfer.driver.as_str(), "http" | "webrtc")
+    {
+        bail!("unsupported transfer metadata");
+    }
+    let password_required = transfer
+        .encrypted_manifest
+        .or(transfer.encrypted_descriptor)
+        .is_some_and(|envelope| {
+            serde_json::from_str::<serde_json::Value>(&envelope)
+                .ok()
+                .is_some_and(|value| value.get("salt").is_some())
+        });
+    Ok(LinkInspection {
+        instance: link.instance,
+        id: link.id,
+        kind: transfer.kind,
+        driver: transfer.driver,
+        status: transfer.status,
+        password_required,
+    })
 }
 
 #[derive(Deserialize)]
@@ -411,6 +475,16 @@ pub fn upload(
             upload::run_webrtc(instance, paths, mode, options, control)
         }
     }
+}
+
+/// Exact v1 AEAD payload estimate for known individual file sizes. ZIP and
+/// provider sources with unknown sizes must remain unknown at the host layer.
+pub fn estimate_upload_ciphertext_bytes(file_sizes: &[u64], chunk_bytes: u64) -> Result<u64> {
+    file_sizes.iter().try_fold(0_u64, |total, size| {
+        total
+            .checked_add(upload::estimate_ciphertext_bytes(*size, chunk_bytes)?)
+            .context("ciphertext size overflow")
+    })
 }
 
 /// Upload provider-backed sources. Their opaque identities, bounds, and
@@ -664,6 +738,7 @@ mod tests {
             DriverLimits {
                 maximum_transfer_bytes: Some(8 * 1024 * 1024 * 1024),
                 maximum_file_count: None,
+                maximum_note_bytes: None,
             },
         );
         assert_eq!(

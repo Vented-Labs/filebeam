@@ -21,7 +21,8 @@ impl Input {
 
     pub fn insert(&mut self, text: &str) {
         let text = clean(text);
-        if self.value.len() + text.len() > 8192 {
+        // Native note editing accepts the same bounded 64 KiB schema as file/stdin input.
+        if self.value.len() + text.len() > 64 * 1024 {
             return;
         }
         self.value.insert_str(self.cursor, &text);

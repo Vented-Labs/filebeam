@@ -100,6 +100,15 @@ class DocumentStorage(private val context: Context) {
 
     fun outputDirectory(id: String) = File(root, "$id/downloads").apply { mkdirs() }.absolutePath
 
+    /** Verified downloads stay app-private until the user explicitly selects a SAF destination. */
+    fun verifiedOutputs(id: String): List<File> {
+        val directory = File(root, "$id/downloads")
+        if (!directory.isDirectory) return emptyList()
+        val canonicalRoot = root.canonicalFile.toPath()
+        return directory.walkTopDown().filter { it.isFile }.map { it.canonicalFile }
+            .filter { it.toPath().startsWith(canonicalRoot) }.toList()
+    }
+
     suspend fun export(source: String, uri: Uri, ensureRunning: () -> Unit) = withContext(Dispatchers.IO) {
         val file = File(source).canonicalFile
         require(file.toPath().startsWith(root.canonicalFile.toPath()))
@@ -208,6 +217,11 @@ class DocumentStorage(private val context: Context) {
             "${cursor.getLong(0)}:${if (cursor.isNull(1)) 0 else cursor.getLong(1)}"
         } ?: "$length:0"
         return ProviderInput(uri.toString(), treeNames[uri.toString()] ?: safeRelativePath(displayName), offset, length - offset, token)
+    }
+
+    /** Callback sources must be reopenable after the picker activity has gone away. */
+    fun hasPersistedReadGrant(uri: Uri): Boolean = context.contentResolver.persistedUriPermissions.any { grant ->
+        grant.isReadPermission && (grant.uri == uri || grant.uri.authority == uri.authority && uri.toString().startsWith(grant.uri.toString()))
     }
 
     /** Tree leaves retain relative paths for native ZIP and collision-safe individual names. */
