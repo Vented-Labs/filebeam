@@ -60,21 +60,30 @@ emulator harness:
 
 ```sh
 docker build -t filebeam-android-tooling:rust-1.98.0-sdk37 docker/android
+docker build --target emulator --build-arg 'SYSTEM_IMAGE=system-images;android-35;google_apis;x86_64' -t filebeam-android-emulator:api35-4k docker/android
+FILEBEAM_ANDROID_EMULATOR_IMAGE=filebeam-android-emulator:api35-4k FILEBEAM_ANDROID_REPORT_DIR="$PWD/test-results/android/api35-4k" bash scripts/android/device-test.sh
 docker build --target emulator -t filebeam-android-emulator:api35-16k docker/android
-bash scripts/android/device-test.sh
+FILEBEAM_ANDROID_EMULATOR_IMAGE=filebeam-android-emulator:api35-16k FILEBEAM_ANDROID_REPORT_DIR="$PWD/test-results/android/api35-16k" bash scripts/android/device-test.sh 'io.filebeam.android.NativeCoreTest,io.filebeam.android.CheckpointSecretStoreTest,io.filebeam.android.DocumentProviderRecoveryTest,io.filebeam.android.DocumentStorageExportRecoveryTest'
 ```
 
-The harness uses KVM when available, checks the 16-KiB page size, installs the
-APKs, and executes real Rust encryption, native WebRTC UDP/ICE/DTLS/framing, and
-binding-lifetime tests. Reports are written under `test-results/android/`.
+The required matrix builds the APKs once, then runs all 22 instrumentation tests on
+the API 35 `google_apis` x86_64 4 KiB image. It runs the nine-test ps16k native
+compatibility suite (`NativeCoreTest`, `CheckpointSecretStoreTest`, provider recovery,
+and storage/export recovery) separately. This retains real Rust encryption, JNI,
+crypto, WebRTC UDP/ICE/DTLS/framing, checkpoint, and storage coverage without running
+UI navigation or wallpaper cycling on ps16k. The harness uses KVM when available,
+checks ps16k guest page size, and writes separate report roots under
+`test-results/android/`. A single fresh cold-boot retry is allowed only if the
+emulator process exits before APK installation; test failures are never retried.
+The emulator guest defaults to 4 GiB while its Docker container defaults to 6 GiB.
 For Android 8 coverage, build a second emulator image with
 `--build-arg 'SYSTEM_IMAGE=system-images;android-26;google_apis;x86_64'` and select
 it using `FILEBEAM_ANDROID_EMULATOR_IMAGE`.
 
-The manual `Android acceptance` workflow exposes the same API 26 4 KiB and API
-35 16 KiB image choices. Its 513 MiB and 4097 MiB fixtures are an explicit
-workflow input, never part of normal pull-request coverage. Test signing does
-not establish production signing.
+The manual `Android acceptance` workflow retains API 26 4 KiB compatibility and
+API 35 ps16k image choices, running the full suite on the selected image. Its 513
+MiB and 4097 MiB fixtures are an explicit workflow input, never part of normal
+pull-request coverage. Test signing does not establish production signing.
 
 `check.sh` also checks APK ZIP alignment and native ELF load/RELRO layout for
 all packaged 64-bit libraries, including transitive AndroidX and JNA libraries.

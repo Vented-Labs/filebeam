@@ -59,11 +59,7 @@ ulimit -c 0
 avdmanager create avd --force --name filebeam-test --package "$FILEBEAM_TEST_SYSTEM_IMAGE" --device pixel_6
 printf '\ndisk.dataPartition.size=%s\n' "${FILEBEAM_ANDROID_AVD_DISK_SIZE:-8G}" >> "$HOME/.android/avd/filebeam-test.avd/config.ini"
 ensure_report_dir
-emulator -avd filebeam-test -no-window -no-audio -no-boot-anim -no-snapshot \
-    -no-metrics -gpu swangle \
-    -accel "$FILEBEAM_ANDROID_ACCEL" -memory "${FILEBEAM_ANDROID_AVD_MEMORY:-4096}" -cores 2 \
-    > "$report_dir/emulator.log" 2>&1 &
-emulator_pid=$!
+emulator_pid=''
 live_logcat_pid=''
 cleanup_device() {
     ensure_report_dir
@@ -76,19 +72,37 @@ cleanup_device() {
 }
 trap cleanup_device EXIT
 adb start-server
-booted=false
-for ((attempt=0; attempt<150; attempt++)); do
-    kill -0 "$emulator_pid" 2>/dev/null || { printf '%s\n' "Emulator exited; see $report_dir/emulator.log" >&2; exit 1; }
-    if [[ $(timeout 5 adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r') == 1 ]]; then booted=true; break; fi
-    sleep 2
+wait_for_framework() {
+    local booted=false package_ready=false ready_samples=0
+    for ((attempt=0; attempt<150; attempt++)); do
+        kill -0 "$emulator_pid" 2>/dev/null || { printf '%s\n' "Emulator exited; see $report_dir/emulator.log" >&2; return 3; }
+        if [[ $(timeout 5 adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r') == 1 ]]; then booted=true; break; fi
+        sleep 2
+    done
+    [[ $booted == true ]] || { printf '%s\n' 'Emulator boot timed out' >&2; return 1; }
+    for ((attempt=0; attempt<30; attempt++)); do
+        if [[ $(timeout 5 adb shell pm path android 2>/dev/null) == *package:* ]] && timeout 5 adb shell cmd package list packages android >/dev/null 2>&1; then
+            ((++ready_samples))
+            if [[ $ready_samples == 2 ]]; then package_ready=true; break; fi
+        else
+            ready_samples=0
+        fi
+        sleep 2
+    done
+    [[ $package_ready == true ]] || { printf '%s\n' 'Package manager did not become ready' >&2; return 1; }
+}
+for boot_attempt in 1 2; do
+    emulator -avd filebeam-test -no-window -no-audio -no-boot-anim -no-snapshot \
+        -no-metrics -gpu swangle \
+        -accel "$FILEBEAM_ANDROID_ACCEL" -memory "${FILEBEAM_ANDROID_AVD_MEMORY:-4096}" -cores 2 \
+        >> "$report_dir/emulator.log" 2>&1 &
+    emulator_pid=$!
+    if wait_for_framework; then break; else boot_status=$?; fi
+    # Retrying is limited to an emulator process crash before APK installation.
+    if [[ $boot_status != 3 || $boot_attempt == 2 ]]; then exit "$boot_status"; fi
+    printf '%s\n' 'Emulator exited before installation; retrying one fresh cold boot' >&2
+    wait "$emulator_pid" 2>/dev/null || true
 done
-[[ $booted == true ]] || { printf '%s\n' 'Emulator boot timed out' >&2; exit 1; }
-package_ready=false
-for ((attempt=0; attempt<30; attempt++)); do
-    if [[ $(timeout 5 adb shell pm path android 2>/dev/null) == *package:* ]]; then package_ready=true; break; fi
-    sleep 2
-done
-[[ $package_ready == true ]] || { printf '%s\n' 'Package manager did not become ready' >&2; exit 1; }
 # Probe variables must expand in the Android shell, not on the host.
 # shellcheck disable=SC2016
 page_size=$(adb shell '
@@ -105,8 +119,6 @@ printf '%s\n' "$page_size" > "$report_dir/page-size.txt"
 if [[ $FILEBEAM_TEST_SYSTEM_IMAGE == *ps16k* ]]; then
     [[ $page_size == 16384 ]] || { printf 'Expected 16-KiB pages, got %s\n' "$page_size" >&2; exit 1; }
 fi
-# Push first rather than holding an install-session pipe open through cold-boot
-# dex optimization on the software-rendered emulator.
 adb install --no-streaming -r "$root/mobile/android/app/build/outputs/apk/debug/app-debug.apk"
 adb install --no-streaming -r "$root/mobile/android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk"
 if [[ -n ${FILEBEAM_ANDROID_HTTP_PROBE:-} ]]; then

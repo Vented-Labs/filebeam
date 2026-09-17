@@ -61,6 +61,7 @@ import kotlinx.coroutines.launch
 class FixtureActivity : ComponentActivity() {
     private val model: io.filebeam.android.ui.FilebeamViewModel by viewModels()
     private var route by mutableStateOf("")
+    private var fixtureGeneration = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -98,6 +99,7 @@ class FixtureActivity : ComponentActivity() {
 
     /** Route Send only after the disposable peer's real policy has been discovered and committed. */
     private fun configureDisposableInstanceThenShow(route: String?) {
+        val generation = ++fixtureGeneration
         model.updateInstanceInput(instance = DISPOSABLE_INSTANCE)
         model.checkInstanceInput()
         lifecycleScope.launch {
@@ -105,22 +107,23 @@ class FixtureActivity : ComponentActivity() {
                 when (model.instanceTransaction.status) {
                     InstanceTransactionStatus.ReadyToCommit -> {
                         model.commitCheckedInstance()
-                        showFixture(route)
+                        if (generation == fixtureGeneration) showFixture(route)
                         return@launch
                     }
                     is InstanceTransactionStatus.Error -> {
-                        showFixture(route)
+                        if (generation == fixtureGeneration) showFixture(route)
                         return@launch
                     }
                     else -> delay(100)
                 }
             }
-            showFixture(route)
+            if (generation == fixtureGeneration) showFixture(route)
         }
     }
 
     /** Test-only semantic routing, avoiding coordinate-dependent capture setup. */
     fun showFixture(value: String?) {
+        fixtureGeneration++
         route = value.orEmpty()
         when (route) {
             "send-selected" -> {

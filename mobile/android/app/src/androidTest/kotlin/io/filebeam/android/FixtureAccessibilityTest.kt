@@ -3,6 +3,8 @@ package io.filebeam.android
 import android.view.WindowManager
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -56,8 +58,7 @@ class FixtureAccessibilityTest {
     @Test fun notesFixtureUsesTheProductionComposer() {
         compose.activityRule.scenario.onActivity { it.showFixture("notes") }
         compose.waitForIdle()
-        compose.onAllNodesWithText(compose.activity.getString(R.string.note_body))[1]
-            .performTextInput("fixture note")
+        compose.onNode(hasText(compose.activity.getString(R.string.note_body)).and(hasSetTextAction())).performTextInput("fixture note")
         compose.onNodeWithText(compose.activity.getString(R.string.encrypt_and_share)).assertIsDisplayed()
     }
 

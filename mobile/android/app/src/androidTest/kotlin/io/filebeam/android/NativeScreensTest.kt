@@ -17,6 +17,8 @@ class NativeScreensTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
 
     @Test fun nativeNavigationOpensReceiveAndSettings() {
+        compose.onNodeWithText(compose.activity.getString(R.string.send)).performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.files_tab)).performClick()
         compose.onNodeWithText(compose.activity.getString(R.string.send_title)).assertIsDisplayed()
         compose.onNodeWithText(compose.activity.getString(R.string.receive)).performClick()
         compose.onNodeWithText(compose.activity.getString(R.string.transfer_link)).assertIsDisplayed()

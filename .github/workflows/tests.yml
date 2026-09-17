@@ -138,10 +138,22 @@ jobs:
         run: docker buildx build --load --tag filebeam-android-tooling:rust-1.98.0-sdk37 docker/android
       - name: Check native Android build
         run: bash scripts/android/check.sh
-      - name: Build 16 KiB emulator
+      - name: Build API 35 4 KiB emulator
+        run: docker buildx build --load --target emulator --build-arg 'SYSTEM_IMAGE=system-images;android-35;google_apis;x86_64' --tag filebeam-android-emulator:api35-4k docker/android
+      - name: Build API 35 16 KiB emulator
         run: docker buildx build --load --target emulator --tag filebeam-android-emulator:api35-16k docker/android
-      - name: Exercise native bindings on Android
+      - name: Run full Android instrumentation suite on API 35 4 KiB
+        env:
+          FILEBEAM_ANDROID_EMULATOR_IMAGE: filebeam-android-emulator:api35-4k
+          FILEBEAM_ANDROID_REPORT_DIR: ${{ github.workspace }}/test-results/android/api35-4k
         run: bash scripts/android/device-test.sh
+      - name: Run native compatibility suite on API 35 16 KiB
+        env:
+          FILEBEAM_ANDROID_EMULATOR_IMAGE: filebeam-android-emulator:api35-16k
+          FILEBEAM_ANDROID_REPORT_DIR: ${{ github.workspace }}/test-results/android/api35-16k
+        run: >-
+          bash scripts/android/device-test.sh
+          'io.filebeam.android.NativeCoreTest,io.filebeam.android.CheckpointSecretStoreTest,io.filebeam.android.DocumentProviderRecoveryTest,io.filebeam.android.DocumentStorageExportRecoveryTest'
       - name: Upload development APK and test reports
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
