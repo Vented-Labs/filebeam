@@ -54,11 +54,15 @@ targets:
     type: bundle.unit-test
     platform: iOS
     sources: [Tests]
+    settings:
+      base: { GENERATE_INFOPLIST_FILE: YES }
     dependencies: [{ target: Filebeam }, { package: FilebeamDomain }, { package: FilebeamCore }]
   FilebeamUITests:
     type: bundle.ui-testing
     platform: iOS
     sources: [UITests]
+    settings:
+      base: { GENERATE_INFOPLIST_FILE: YES }
     dependencies: [{ target: Filebeam }]
 schemes:
   Filebeam:

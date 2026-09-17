@@ -99,3 +99,55 @@ rm -rf "$installed/share"
 bash "$repository/scripts/ios/bootstrap.sh" > "$fixture/repaired-install.log"
 [[ $(<"$IOS_TOOLCHAIN_TEST_DOWNLOADS") == $(printf 'download\ndownload') ]] || die 'binary-only XcodeGen cache was not repaired'
 cmp "$bundle/share/xcodegen/SettingPresets/Platforms/iOS.yml" "$installed/share/xcodegen/SettingPresets/Platforms/iOS.yml"
+
+cp "$root/scripts/ios/prepare-simulator.sh" "$repository/scripts/ios/"
+export IOS_TEST_RUNTIME_VERSION=17.5 IOS_SIMULATOR_TEST_STATE="$fixture/simulator"
+mkdir -p "$IOS_SIMULATOR_TEST_STATE"
+cat >"$fixture/bin/xcodebuild" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ ${DEVELOPER_DIR:-} == "$IOS_DEVELOPER_DIR" ]]
+case $1 in
+    -version) printf 'Xcode 26.3\nBuild version 17C529\n' ;;
+    -downloadPlatform)
+        [[ $2 == iOS && $3 == -buildVersion && $4 == 17.5 && $5 == -exportPath ]]
+        touch "$6/iOS Simulator.dmg"
+        printf 'download\n' >> "$IOS_SIMULATOR_TEST_STATE/calls"
+        ;;
+    -importPlatform)
+        [[ -f $2 ]]
+        touch "$IOS_SIMULATOR_TEST_STATE/runtime"
+        printf 'import\n' >> "$IOS_SIMULATOR_TEST_STATE/calls"
+        ;;
+    *) exit 1 ;;
+esac
+EOF
+cat >"$fixture/bin/xcrun" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+case "$*" in
+    'simctl list runtimes --json')
+        if [[ -f "$IOS_SIMULATOR_TEST_STATE/runtime" ]]; then
+            printf '{"runtimes":[{"version":"17.5","identifier":"com.apple.CoreSimulator.SimRuntime.iOS-17-5","isAvailable":true}]}\n'
+        else printf '{"runtimes":[]}\n'; fi
+        ;;
+    'simctl list devices available --json')
+        if [[ -f "$IOS_SIMULATOR_TEST_STATE/device" ]]; then
+            printf '{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-17-5":[{"name":"iPhone 15","udid":"fixture-device","isAvailable":true}]}}\n'
+        else printf '{"devices":{}}\n'; fi
+        ;;
+    'simctl create Filebeam iOS 17.5 com.apple.CoreSimulator.SimDeviceType.iPhone-15 com.apple.CoreSimulator.SimRuntime.iOS-17-5')
+        touch "$IOS_SIMULATOR_TEST_STATE/device"
+        printf 'create\n' >> "$IOS_SIMULATOR_TEST_STATE/calls"
+        printf 'fixture-device\n'
+        ;;
+    *) exit 1 ;;
+esac
+EOF
+bash "$repository/scripts/ios/prepare-simulator.sh"
+[[ $(<"$IOS_SIMULATOR_TEST_STATE/calls") == $(printf 'download\nimport\ncreate') ]] || die 'fresh simulator provisioning was incomplete'
+bash "$repository/scripts/ios/prepare-simulator.sh"
+[[ $(<"$IOS_SIMULATOR_TEST_STATE/calls") == $(printf 'download\nimport\ncreate') ]] || die 'existing simulator was not reused'
+rm "$IOS_SIMULATOR_TEST_STATE/device"
+bash "$repository/scripts/ios/prepare-simulator.sh"
+[[ $(<"$IOS_SIMULATOR_TEST_STATE/calls") == $(printf 'download\nimport\ncreate\ncreate') ]] || die 'installed runtime without a device was not repaired'

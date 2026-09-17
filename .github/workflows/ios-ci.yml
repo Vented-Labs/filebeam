@@ -14,10 +14,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ['17', '26']
+        include:
+          - { os: '17', runtime: '17.5' }
+          - { os: '26', runtime: '26.2' }
     env:
       IOS_XCODE_VERSION: '26.3'
       IOS_TEST_OS: ${{ matrix.os }}
+      IOS_TEST_RUNTIME_VERSION: ${{ matrix.runtime }}
     steps:
       - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
         with: { persist-credentials: false, ref: '${{ inputs.ref || github.ref }}' }
@@ -32,6 +35,8 @@ jobs:
             mobile/ios/.swiftpm
             .ios-tools
           key: ios-${{ matrix.os }}-${{ env.IOS_TOOLCHAIN_ID }}-rust1.98.0-xcodegen2.41.0-${{ hashFiles('client-ffi/**', 'client-core/**', 'encryption/**', 'transfer/**', 'transfer-native/**', 'mobile/ios/**', 'scripts/ios/**') }}
+      - name: Prepare requested iOS simulator
+        run: bash scripts/ios/prepare-simulator.sh
       - name: Check Rust, domain package, iOS builds, and tests
         run: bash scripts/ios/check.sh
       - if: always()

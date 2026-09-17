@@ -6,6 +6,7 @@ profile=${1:-release}; include_intel=${IOS_INCLUDE_X86_64_SIMULATOR:-1}
 [[ $profile == debug || $profile == release ]] || die 'profile must be debug or release'
 [[ $include_intel == 0 || $include_intel == 1 ]] || die 'IOS_INCLUDE_X86_64_SIMULATOR must be 0 or 1'
 require_macos; bash "$root/scripts/ios/bootstrap.sh"
+export IPHONEOS_DEPLOYMENT_TARGET=17.0
 package="$ios_root/Packages/FilebeamCore" generated="$package/Generated" artifacts="$package/Artifacts" target_dir="${CARGO_TARGET_DIR:-$root/client-ffi/target/ios}"
 # Retain Rust DWARF in release artifacts so Xcode archives can create useful dSYMs.
 export CARGO_PROFILE_RELEASE_STRIP=none
