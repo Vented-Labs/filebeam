@@ -1,6 +1,7 @@
 package io.filebeam.android
 
 import android.os.Build
+import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.test.assertIsDisplayed
@@ -64,7 +65,9 @@ class FallbackThemeEvidenceTest {
         bitmap.recycle()
     }
 
-    private fun shell(command: String) = instrumentation.uiAutomation.executeShellCommand(command).use { it.readBytes() }
+    private fun shell(command: String) {
+        ParcelFileDescriptor.AutoCloseInputStream(instrumentation.uiAutomation.executeShellCommand(command)).use { it.readBytes() }
+    }
     private val android.content.res.Configuration.isNightMode get() =
         uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK == android.content.res.Configuration.UI_MODE_NIGHT_YES
 }

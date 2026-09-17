@@ -2,6 +2,7 @@ import { expect, test, type Browser, type BrowserContext, type Page } from '@pla
 import { readFile } from 'node:fs/promises';
 
 type CreatedTransfer = { id: string; deleteToken: string };
+const mobileViewports = [320, 375, 390];
 
 let created: CreatedTransfer[];
 let recipients: BrowserContext[];
@@ -210,11 +211,13 @@ test('uploads a zero-byte file and rejects a tampered ciphertext', async ({ brow
 });
 
 test('does not overflow on a mobile viewport', async ({ page }, testInfo) => {
-    await page.setViewportSize({ width: 375, height: 812 });
-    await page.goto('/');
-    expect(
-        await page.locator('body').evaluate((body) => body.scrollWidth <= window.innerWidth),
-    ).toBe(true);
+    for (const width of mobileViewports) {
+        await page.setViewportSize({ width, height: 812 });
+        await page.goto('/');
+        expect(
+            await page.locator('body').evaluate((body) => body.scrollWidth <= window.innerWidth),
+        ).toBe(true);
+    }
     await page.screenshot({ path: testInfo.outputPath('mobile.png'), fullPage: true });
 });
 
@@ -234,13 +237,15 @@ test('does not overflow with the CI version label on a mobile viewport', async (
             body: body.replace(script, () => `${match[1]}${JSON.stringify(data)}${match[3]}`),
         });
     });
-    await page.setViewportSize({ width: 375, height: 812 });
-    await page.goto('/');
-    await expect(page.locator('.fb-footer')).toContainText(`v${version}`);
-    await expect(page.getByRole('link', { name: 'Filebeam acceptance home' })).toBeVisible();
-    expect(
-        await page.locator('body').evaluate((body) => body.scrollWidth <= window.innerWidth),
-    ).toBe(true);
+    for (const width of mobileViewports) {
+        await page.setViewportSize({ width, height: 812 });
+        await page.goto('/');
+        await expect(page.locator('.fb-footer')).toContainText(`v${version}`);
+        await expect(page.getByRole('link', { name: 'Filebeam acceptance home' })).toBeVisible();
+        expect(
+            await page.locator('body').evaluate((body) => body.scrollWidth <= window.innerWidth),
+        ).toBe(true);
+    }
 });
 
 test('retention and burn-on-read protect a titled note until successful decryption', async ({

@@ -93,7 +93,7 @@ fun SettingsContent(
             val detail = when (storage) {
                 StoragePresentation.Loading -> stringResource(R.string.loading)
                 is StoragePresentation.Ready -> (storage as StoragePresentation.Ready).let { ready ->
-                    context.getString(R.string.storage_available, android.text.format.Formatter.formatShortFileSize(context, ready.available), android.text.format.Formatter.formatShortFileSize(context, ready.total))
+                    stringResource(R.string.storage_available, android.text.format.Formatter.formatShortFileSize(context, ready.available), android.text.format.Formatter.formatShortFileSize(context, ready.total))
                 }
                 StoragePresentation.Error -> stringResource(R.string.unknown_error)
             }

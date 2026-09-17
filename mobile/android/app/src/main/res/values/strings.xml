@@ -189,7 +189,6 @@
     <string name="appearance_system">Appearance follows the device. Dynamic colors require Android 12 or later; earlier supported Android releases use the app theme.</string>
     <string name="storage">Storage and data</string>
     <string name="storage_categories">Review only app-private transfer snapshots, encrypted recovery data, and verified downloads. Account keys and draft contents are never inspected here.</string>
-    <string name="manage_local_transfers">Manage local transfer data</string>
     <string name="local_remote_difference">Removing local transfer data does not revoke a remote upload. Revoke it from the transfer detail while it is still available.</string>
     <string name="storage_usage">Storage usage</string>
     <string name="storage_available">%1$s available of %2$s on this device</string>

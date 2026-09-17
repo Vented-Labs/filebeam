@@ -343,9 +343,9 @@ function goHome(event: MouseEvent): void {
     height: auto;
 }
 .fb-footer__version {
-    flex: none;
-    white-space: nowrap;
-    overflow-wrap: normal;
+    flex: 1 1 auto;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 @media (min-width: 901px) and (max-width: 1100px) {
     .fb-header {
@@ -406,6 +406,9 @@ function goHome(event: MouseEvent): void {
 @media (max-width: 560px) {
     .fb-header .fb-header__actions {
         display: none;
+    }
+    .fb-footer {
+        grid-template-columns: minmax(0, 1fr);
     }
 }
 

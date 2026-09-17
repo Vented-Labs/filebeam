@@ -4,12 +4,14 @@ import android.app.WallpaperManager
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.os.Build
+import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
@@ -47,9 +49,10 @@ class DynamicWallpaperEvidenceTest {
     @Test fun a07_a08_resolvesThreeWallpapersInBothModesAndRendersSendAndSettings() {
         val palettes = listOf("coral" to 0xffd04a3a.toInt(), "cobalt" to 0xff2864c7.toInt(), "muted" to 0xff69706b.toInt())
         val observed = mutableSetOf<Int>()
+        var previousAccent = systemAccent()
 
         palettes.forEach { (name, color) ->
-            setWallpaper(color)
+            previousAccent = setWallpaper(color, previousAccent)
             listOf(false, true).forEach { dark ->
                 shell("cmd uimode night ${if (dark) "yes" else "no"}")
                 waitForNightMode(dark)
@@ -74,34 +77,51 @@ class DynamicWallpaperEvidenceTest {
         shell("cmd uimode night no")
         waitForNightMode(false)
         compose.onNodeWithText(compose.activity.getString(R.string.notes)).performClick()
-        compose.onNodeWithText(compose.activity.getString(R.string.note_body)).performTextInput("night-mode draft")
+        compose.onAllNodesWithText(compose.activity.getString(R.string.note_body))[1].performTextInput("night-mode draft")
+        // The production draft writer is conflated and asynchronous; allow it to persist before recreation.
+        SystemClock.sleep(1_000)
         shell("cmd uimode night yes")
         waitForNightMode(true)
         // The activity can recreate for system UI mode; reselect the production note surface.
         compose.activityRule.scenario.onActivity { it.showFixture("notes") }
         compose.waitForIdle()
-        compose.onNodeWithText(compose.activity.getString(R.string.note_body))
-            .assertTextContains("night-mode draft")
+        compose.onNodeWithText("night-mode draft").assertTextContains("night-mode draft")
     }
 
-    private fun setWallpaper(color: Int) {
+    private fun setWallpaper(color: Int, previousAccent: Int): Int {
         val bitmap = Bitmap.createBitmap(32, 32, Bitmap.Config.ARGB_8888).apply { eraseColor(color) }
         automation.adoptShellPermissionIdentity("android.permission.SET_WALLPAPER")
         try {
-            instrumentation.targetContext.getSystemService(WallpaperManager::class.java)
-                .setBitmap(bitmap, null, true, WallpaperManager.FLAG_SYSTEM)
+            val manager = instrumentation.targetContext.getSystemService(WallpaperManager::class.java)
+            repeat(2) {
+                manager.setBitmap(bitmap, null, true, WallpaperManager.FLAG_SYSTEM)
+                val wallpaperDeadline = SystemClock.elapsedRealtime() + 10_000
+                while (manager.getWallpaperColors(WallpaperManager.FLAG_SYSTEM)?.primaryColor?.toArgb() != color && SystemClock.elapsedRealtime() < wallpaperDeadline) {
+                    SystemClock.sleep(100)
+                }
+                assertEquals(color, manager.getWallpaperColors(WallpaperManager.FLAG_SYSTEM)?.primaryColor?.toArgb())
+
+                // WallpaperColors arrives before the framework publishes its tonal overlay.
+                val accentDeadline = SystemClock.elapsedRealtime() + 10_000
+                var accent = systemAccent()
+                while (accent == previousAccent && SystemClock.elapsedRealtime() < accentDeadline) {
+                    SystemClock.sleep(100)
+                    accent = systemAccent()
+                }
+                if (accent != previousAccent) return accent
+            }
         } finally {
             bitmap.recycle()
             automation.dropShellPermissionIdentity()
         }
-        val manager = instrumentation.targetContext.getSystemService(WallpaperManager::class.java)
-        val deadline = SystemClock.elapsedRealtime() + 10_000
-        while (manager.getWallpaperColors(WallpaperManager.FLAG_SYSTEM)?.primaryColor?.toArgb() != color && SystemClock.elapsedRealtime() < deadline) {
-            SystemClock.sleep(100)
-        }
-        assertEquals(color, manager.getWallpaperColors(WallpaperManager.FLAG_SYSTEM)?.primaryColor?.toArgb())
-        // Overlay publication is asynchronous after WallpaperColors updates.
-        SystemClock.sleep(1_000)
+        throw AssertionError("Android tonal overlay did not update for wallpaper ${color.hex()} after retry")
+    }
+
+    private fun systemAccent(): Int {
+        val context = instrumentation.targetContext
+        val accent = context.resources.getIdentifier("system_accent1_500", "color", "android")
+        check(accent != 0) { "Android system accent resource is unavailable" }
+        return context.getColor(accent)
     }
 
     private fun waitForNightMode(dark: Boolean) {
@@ -112,9 +132,7 @@ class DynamicWallpaperEvidenceTest {
 
     private fun resolvedRoles(activity: FixtureActivity, dark: Boolean): Roles {
         val scheme = if (dark) dynamicDarkColorScheme(activity) else dynamicLightColorScheme(activity)
-        val accent = activity.resources.getIdentifier("system_accent1_500", "color", "android")
-        check(accent != 0) { "Android system accent resource is unavailable" }
-        val systemAccent = activity.getColor(accent)
+        val systemAccent = systemAccent()
         check(systemAccent != 0) { "Android system accent did not resolve" }
         return Roles(scheme.primary.toArgb(), scheme.onPrimary.toArgb(), scheme.primaryContainer.toArgb(), scheme.surface.toArgb(), scheme.onSurface.toArgb(), systemAccent)
     }
@@ -131,7 +149,9 @@ class DynamicWallpaperEvidenceTest {
         bitmap.recycle()
     }
 
-    private fun shell(command: String) = automation.executeShellCommand(command).use { it.readBytes() }
+    private fun shell(command: String) {
+        ParcelFileDescriptor.AutoCloseInputStream(automation.executeShellCommand(command)).use { it.readBytes() }
+    }
 
     private val android.content.res.Configuration.isNightMode get() =
         uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK == android.content.res.Configuration.UI_MODE_NIGHT_YES
