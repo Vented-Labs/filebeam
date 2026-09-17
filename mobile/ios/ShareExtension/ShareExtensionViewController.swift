@@ -22,8 +22,8 @@ final class ShareExtensionViewController: UIViewController {
                         if let typeIdentifier = provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) ? (provider.registeredTypeIdentifiers.first(where: { $0 != UTType.fileURL.identifier && $0 != UTType.url.identifier }) ?? UTType.fileURL.identifier) : nil {
                             files.append(try await copyFileRepresentation(from: provider, typeIdentifier: typeIdentifier, into: providerStaging, fallbackName: "item-\(files.count + 1)"))
                         }
-                        else if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier), let url = try await provider.loadItem(forTypeIdentifier: UTType.url.identifier, options: nil) as? URL { links.append(url.absoluteString) }
-                        else if provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier), let value = try await provider.loadItem(forTypeIdentifier: UTType.plainText.identifier, options: nil) as? String { text = String(value.prefix(1_000_000)) }
+                        else if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier), let url = try await loadItem(from: provider, typeIdentifier: UTType.url.identifier, as: URL.self) { links.append(url.absoluteString) }
+                        else if provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier), let value = try await loadItem(from: provider, typeIdentifier: UTType.plainText.identifier, as: String.self) { text = String(value.prefix(1_000_000)) }
                         else { unsupported = true }
                     } catch { unsupported = true }
                 }
@@ -33,13 +33,23 @@ final class ShareExtensionViewController: UIViewController {
         }
     }
 
+    private func loadItem<Value: Sendable>(from provider: NSItemProvider, typeIdentifier: String, as type: Value.Type) async throws -> Value? {
+        try await withCheckedThrowingContinuation { continuation in
+            provider.loadItem(forTypeIdentifier: typeIdentifier, options: nil) { item, error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume(returning: item as? Value) }
+            }
+        }
+    }
+
     /// NSItemProvider invalidates this URL as soon as its completion returns. Copy it
     /// before resuming the awaiting task so the encrypted inbox only sees owned files.
     private func copyFileRepresentation(from provider: NSItemProvider, typeIdentifier: String, into directory: URL, fallbackName: String) async throws -> URL {
-        try await withCheckedThrowingContinuation { continuation in
+        let suggestedName = provider.suggestedName
+        return try await withCheckedThrowingContinuation { continuation in
             provider.loadFileRepresentation(forTypeIdentifier: typeIdentifier) { url, error in
                 guard let url else { continuation.resume(throwing: error ?? CocoaError(.fileReadUnknown)); return }
-                let name = provider.suggestedName?.isEmpty == false ? provider.suggestedName! : (url.lastPathComponent.isEmpty ? fallbackName : url.lastPathComponent)
+                let name = suggestedName?.isEmpty == false ? suggestedName! : (url.lastPathComponent.isEmpty ? fallbackName : url.lastPathComponent)
                 let destination = directory.appendingPathComponent(name.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "\\", with: "_"))
                 do {
                     guard FileManager.default.createFile(atPath: destination.path, contents: nil), let input = InputStream(url: url), let output = OutputStream(url: destination, append: false) else { throw CocoaError(.fileWriteUnknown) }

@@ -10,10 +10,12 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.graphics.toArgb
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -57,8 +59,7 @@ class DynamicWallpaperEvidenceTest {
                 shell("cmd uimode night ${if (dark) "yes" else "no"}")
                 waitForNightMode(dark)
                 compose.activityRule.scenario.onActivity { it.showFixture("send-selected") }
-                compose.waitForIdle()
-                compose.onNodeWithText("selected-source.txt").assertIsDisplayed()
+                awaitSelectedSource()
                 lateinit var roles: Roles
                 compose.activityRule.scenario.onActivity { activity -> roles = resolvedRoles(activity, dark) }
                 observed += roles.primary
@@ -78,8 +79,7 @@ class DynamicWallpaperEvidenceTest {
         waitForNightMode(false)
         compose.onNodeWithText(compose.activity.getString(R.string.notes)).performClick()
         compose.onAllNodesWithText(compose.activity.getString(R.string.note_body))[1].performTextInput("night-mode draft")
-        // The production draft writer is conflated and asynchronous; allow it to persist before recreation.
-        SystemClock.sleep(1_000)
+        compose.waitUntil(timeoutMillis = 5_000) { compose.activity.draftsPersisted }
         shell("cmd uimode night yes")
         waitForNightMode(true)
         // The activity can recreate for system UI mode; reselect the production note surface.
@@ -128,6 +128,11 @@ class DynamicWallpaperEvidenceTest {
         val deadline = SystemClock.elapsedRealtime() + 5_000
         while (compose.activity.resources.configuration.isNightMode != dark && SystemClock.elapsedRealtime() < deadline) SystemClock.sleep(50)
         assertEquals(dark, compose.activity.resources.configuration.isNightMode)
+    }
+
+    private fun awaitSelectedSource() {
+        compose.waitUntil(timeoutMillis = 5_000) { runCatching { compose.onAllNodesWithText("selected-source.txt").assertCountEquals(1) }.isSuccess }
+        compose.onNodeWithText("selected-source.txt").performScrollTo().assertIsDisplayed()
     }
 
     private fun resolvedRoles(activity: FixtureActivity, dark: Boolean): Roles {

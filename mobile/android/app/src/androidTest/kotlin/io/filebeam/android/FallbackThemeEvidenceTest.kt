@@ -5,8 +5,11 @@ import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.filebeam.android.ui.FilebeamDarkFallback
@@ -40,8 +43,7 @@ class FallbackThemeEvidenceTest {
             shell("cmd uimode night ${if (dark) "yes" else "no"}")
             waitForMode(dark)
             compose.activityRule.scenario.onActivity { it.showFixture("send-selected") }
-            compose.waitForIdle()
-            compose.onNodeWithText("selected-source.txt").assertIsDisplayed()
+            awaitSelectedSource()
             val name = if (dark) "dark" else "light"
             screenshot("api26-$name-send-selected")
             val scheme = if (dark) FilebeamDarkFallback else FilebeamLightFallback
@@ -57,6 +59,11 @@ class FallbackThemeEvidenceTest {
         val deadline = SystemClock.elapsedRealtime() + 5_000
         while (compose.activity.resources.configuration.isNightMode != dark && SystemClock.elapsedRealtime() < deadline) SystemClock.sleep(50)
         assertEquals(dark, compose.activity.resources.configuration.isNightMode)
+    }
+
+    private fun awaitSelectedSource() {
+        compose.waitUntil(timeoutMillis = 5_000) { runCatching { compose.onAllNodesWithText("selected-source.txt").assertCountEquals(1) }.isSuccess }
+        compose.onNodeWithText("selected-source.txt").performScrollTo().assertIsDisplayed()
     }
 
     private fun screenshot(name: String) {

@@ -22,6 +22,7 @@ for package in FilebeamCore FilebeamDomain; do
     cp "$ios_root/Packages/$package/Package.swift" "$fixture_ios/Packages/$package/"
 done
 printf 'import Foundation\n' > "$fixture_ios/App/Fixture.swift"
+printf 'import Foundation\n' > "$fixture_ios/ShareExtension/Shared/SharedFixture.swift"
 original=$(shasum -a 256 "$fixture_ios/Config/"*.plist "$fixture_ios/Config/"*.entitlements)
 ios_root="$fixture_ios"
 generate_project
@@ -33,3 +34,18 @@ grep -Fq 'ENABLE_TESTABILITY = YES;' "$project" || die 'XcodeGen debug presets w
 for file in Filebeam-Info.plist ShareExtension-Info.plist Filebeam.entitlements ShareExtension.entitlements; do
     grep -Fq "Config/$file" "$project" || die "generated project does not reference $file"
 done
+python3 - "$project" <<'PY'
+import collections
+import pathlib
+import re
+import sys
+
+project = pathlib.Path(sys.argv[1]).read_text()
+groups = project.split('/* Begin PBXGroup section */', 1)[1].split('/* End PBXGroup section */', 1)[0]
+children = []
+for block in re.findall(r'children = \((.*?)\);', groups, re.S):
+    children.extend(re.findall(r'^\s*([A-F0-9]{24})\b', block, re.M))
+duplicates = [reference for reference, count in collections.Counter(children).items() if count > 1]
+if duplicates:
+    raise SystemExit('project references belong to multiple groups: ' + ', '.join(duplicates))
+PY

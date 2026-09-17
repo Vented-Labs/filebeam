@@ -2,6 +2,7 @@
 set -euo pipefail
 # shellcheck source=scripts/ios/lib.sh
 source "$(dirname -- "$0")/lib.sh"
+require_macos
 bash "$root/scripts/ios/build-rust.sh" debug; bash "$root/scripts/ios/generate-project.sh"; mkdir -p "$root/test-results/ios"
 destination=${IOS_TEST_DESTINATION:-}
 test_os=${IOS_TEST_OS:-}

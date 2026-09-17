@@ -64,6 +64,7 @@ class FixtureActivity : ComponentActivity() {
     private var fixtureContentReady by mutableStateOf(false)
     private var fixtureGeneration = 0
     val fixtureReady get() = fixtureContentReady
+    val draftsPersisted get() = model.draftsPersisted
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

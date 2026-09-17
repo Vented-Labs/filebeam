@@ -26,6 +26,7 @@ targets:
           - '**/PortableTests/**'
           - '**/.build/**'
       - path: ShareExtension/Shared
+        group: ShareExtension
       - DesignSystem
       - PreviewSupport
       - Resources

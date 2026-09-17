@@ -60,14 +60,11 @@ class FixtureAccessibilityTest {
 
     @Test fun selectedSendUsesDebugProviderForSemanticAddAndRemove() {
         compose.activityRule.scenario.onActivity { it.showFixture("send-selected") }
-        compose.waitForIdle()
-        compose.onNodeWithText("selected-source.txt").assertIsDisplayed()
+        awaitDisplayedText("selected-source.txt")
         compose.onNodeWithText(compose.activity.getString(R.string.add_more)).performClick()
-        compose.waitForIdle()
-        compose.onNodeWithText("added-source.txt").assertIsDisplayed()
+        awaitDisplayedText("added-source.txt")
         compose.onNodeWithContentDescription(compose.activity.getString(R.string.remove_file, "selected-source.txt")).performClick()
-        compose.waitForIdle()
-        compose.onAllNodesWithText("selected-source.txt").assertCountEquals(0)
+        compose.waitUntil(timeoutMillis = 5_000) { runCatching { compose.onAllNodesWithText("selected-source.txt").assertCountEquals(0) }.isSuccess }
     }
 
     @Test fun visualFixturesUseProductionContentWithoutOnScreenQaLabels() {
@@ -96,5 +93,10 @@ class FixtureAccessibilityTest {
         compose.activityRule.scenario.onActivity {
             check(it.window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE == 0)
         }
+    }
+
+    private fun awaitDisplayedText(text: String) {
+        compose.waitUntil(timeoutMillis = 5_000) { runCatching { compose.onAllNodesWithText(text).assertCountEquals(1) }.isSuccess }
+        compose.onNodeWithText(text).performScrollTo().assertIsDisplayed()
     }
 }
