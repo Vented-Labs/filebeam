@@ -15,9 +15,9 @@ final class SettingsStore {
     }
     func save(_ settings: AppSettings) throws { defaults.set(try JSONEncoder().encode(validated(settings)), forKey: "app-settings") }
     private func validated(_ settings: AppSettings) throws -> AppSettings {
-        guard var c = URLComponents(string: settings.instanceOrigin.trimmingCharacters(in: .whitespacesAndNewlines)), c.scheme?.lowercased() == "https", c.host != nil, c.user == nil, c.password == nil else { throw CocoaError(.validationMissingMandatoryProperty) }
+        guard var c = URLComponents(string: settings.instanceOrigin.trimmingCharacters(in: .whitespacesAndNewlines)), c.scheme?.lowercased() == "https", c.host != nil, c.user == nil, c.password == nil else { throw URLError(.badURL) }
         c.path = ""; c.query = nil; c.fragment = nil
-        guard let origin = c.url?.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")) else { throw CocoaError(.validationCorrupt) }
+        guard let origin = c.url?.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")) else { throw URLError(.badURL) }
         return AppSettings(instanceOrigin: origin, relayOnly: settings.relayOnly)
     }
 }

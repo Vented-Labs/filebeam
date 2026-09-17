@@ -86,7 +86,7 @@ struct VerifiedNoteView: View {
     let note: VerifiedNote
     @State private var copied = false
     @State private var share = false
-    @State private var exportURL: URL?
+    @State private var exportDocument: ExportDocument?
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -104,14 +104,14 @@ struct VerifiedNoteView: View {
             .padding()
         }
         .sheet(isPresented: $share) { NativeShareSheet(items: [note.text]) }
-        .sheet(item: $exportURL) { url in DocumentExportSheet(urls: [url]) { _ in exportURL = nil } }
+        .sheet(item: $exportDocument) { document in DocumentExportSheet(urls: [document.url]) { _ in exportDocument = nil } }
         .navigationTitle("Encrypted note")
     }
     private func makeExportFile() {
         let filename = (note.title?.nilIfEmpty ?? "filebeam-note").replacingOccurrences(of: "/", with: "-")
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(filename).txt")
         try? Data(note.text.utf8).write(to: url, options: .atomic)
-        exportURL = url
+        exportDocument = ExportDocument(url: url)
     }
 }
 

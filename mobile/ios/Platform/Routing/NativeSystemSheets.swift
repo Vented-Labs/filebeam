@@ -21,6 +21,11 @@ struct NativeDocumentPicker: UIViewControllerRepresentable {
     }
 }
 
+struct ExportDocument: Identifiable {
+    let url: URL
+    var id: URL { url }
+}
+
 struct DocumentExportSheet: UIViewControllerRepresentable {
     let urls: [URL]
     let completion: (Result<[URL], Error>?) -> Void
