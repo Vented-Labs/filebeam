@@ -14,6 +14,13 @@ root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 ios_root="$root/mobile/ios"
 tools_root="$root/.ios-tools"
 die() { printf 'ios: %s\n' "$*" >&2; exit 1; }
+require_xcodegen_version() {
+    local tool=$1 actual
+    if ! actual=$("$tool" --version); then
+        die "could not determine XcodeGen version at \"$tool\""
+    fi
+    [[ $actual == "Version: $IOS_XCODEGEN_VERSION" ]] || die "expected XcodeGen $IOS_XCODEGEN_VERSION at \"$tool\"; got \"$actual\""
+}
 require_macos() {
     [[ $(uname -s) == Darwin ]] || die 'macOS with Xcode is required; iOS artifacts cannot be built on this host'
     [[ -n $IOS_DEVELOPER_DIR && -d $IOS_DEVELOPER_DIR ]] || die 'select a full Xcode with IOS_DEVELOPER_DIR or xcode-select'

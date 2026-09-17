@@ -19,7 +19,7 @@ if [[ ! -x $tool ]]; then
     install -m 0755 "$staging/xcodegen/bin/xcodegen" "$tool"
     rm -rf "$staging" "$archive"
 fi
-[[ $($tool --version) == "XcodeGen version $IOS_XCODEGEN_VERSION" ]] || die "expected XcodeGen $IOS_XCODEGEN_VERSION"
+require_xcodegen_version "$tool"
 rustup toolchain install "$IOS_RUST_VERSION" --profile minimal --component rustfmt --component clippy
 [[ $(rustup run "$IOS_RUST_VERSION" rustc --version) == "rustc $IOS_RUST_VERSION"* ]] || die "Rust $IOS_RUST_VERSION installation failed"
 rustup target add --toolchain "$IOS_RUST_VERSION" aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios
