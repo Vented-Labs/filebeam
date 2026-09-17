@@ -6,6 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.lifecycle.lifecycleScope
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -48,6 +49,8 @@ import io.filebeam.rust.JobState
 import io.filebeam.rust.TransferSnapshot
 import io.filebeam.rust.Transport
 import java.io.File
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * Debug-only evidence host. Root Send/Receive routes use the production ViewModel and
@@ -65,7 +68,7 @@ class FixtureActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         seedProviderFile()
-        showFixture(intent.getStringExtra(EXTRA_ROUTE))
+        configureDisposableInstanceThenShow(intent.getStringExtra(EXTRA_ROUTE))
         setContent {
             when (route) {
                 "visual-settings" -> FixtureSurface { SettingsFixture() }
@@ -92,7 +95,30 @@ class FixtureActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        showFixture(intent.getStringExtra(EXTRA_ROUTE))
+        configureDisposableInstanceThenShow(intent.getStringExtra(EXTRA_ROUTE))
+    }
+
+    /** Route Send only after the disposable peer's real policy has been discovered and committed. */
+    private fun configureDisposableInstanceThenShow(route: String?) {
+        model.updateInstanceInput(instance = DISPOSABLE_INSTANCE)
+        model.checkInstanceInput()
+        lifecycleScope.launch {
+            repeat(100) {
+                when (model.instanceTransaction.status) {
+                    InstanceTransactionStatus.ReadyToCommit -> {
+                        model.commitCheckedInstance()
+                        showFixture(route)
+                        return@launch
+                    }
+                    is InstanceTransactionStatus.Error -> {
+                        showFixture(route)
+                        return@launch
+                    }
+                    else -> delay(100)
+                }
+            }
+            showFixture(route)
+        }
     }
 
     /** Test-only semantic routing, avoiding coordinate-dependent capture setup. */
@@ -118,6 +144,7 @@ class FixtureActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_ROUTE = "io.filebeam.android.fixture.ROUTE"
+        private const val DISPOSABLE_INSTANCE = "http://127.0.0.1:8019"
     }
 }
 
