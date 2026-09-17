@@ -28,6 +28,8 @@ print(sorted(matches, reverse=True)[0][2])
 ' "$test_os")
     destination="platform=iOS Simulator,id=$udid"
 fi
-arguments=()
-[[ -z $only_testing ]] || arguments+=("-only-testing:$only_testing")
-xcodebuild test -project "$ios_root/Filebeam.xcodeproj" -scheme Filebeam -configuration Debug -destination "$destination" "${arguments[@]}" -resultBundlePath "$root/test-results/ios/Filebeam.xcresult"
+if [[ -n $only_testing ]]; then
+    xcodebuild test -project "$ios_root/Filebeam.xcodeproj" -scheme Filebeam -configuration Debug -destination "$destination" "-only-testing:$only_testing" -resultBundlePath "$root/test-results/ios/Filebeam.xcresult"
+else
+    xcodebuild test -project "$ios_root/Filebeam.xcodeproj" -scheme Filebeam -configuration Debug -destination "$destination" -resultBundlePath "$root/test-results/ios/Filebeam.xcresult"
+fi

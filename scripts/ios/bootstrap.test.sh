@@ -3,7 +3,7 @@ set -euo pipefail
 # shellcheck source=scripts/ios/lib.sh
 source "$(dirname -- "$0")/lib.sh"
 
-fixture=$(mktemp -d)
+fixture=$(mktemp -d "${TMPDIR:-/tmp}/filebeam-ios-bootstrap.XXXXXX")
 trap 'rm -rf "$fixture"' EXIT
 tool="$fixture/xcodegen tool/xcodegen"
 mkdir -p "$(dirname -- "$tool")"

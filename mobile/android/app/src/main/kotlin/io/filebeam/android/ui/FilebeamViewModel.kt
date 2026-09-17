@@ -69,6 +69,8 @@ class FilebeamViewModel(application: Application) : AndroidViewModel(application
     /** An unavailable keystore draft is surfaced to the UI; it is never represented as a new empty draft. */
     var draftRestoreError by mutableStateOf<String?>(null)
         private set
+    var draftRestoreComplete by mutableStateOf(false)
+        private set
     var link by mutableStateOf("")
     var receiveIngress by mutableStateOf<ReceiveIngress?>(null)
         private set
@@ -102,17 +104,23 @@ class FilebeamViewModel(application: Application) : AndroidViewModel(application
         // Capture before any coroutine can be delayed behind a first user edit.
         val initialRevision = draftRevision
         viewModelScope.launch(Dispatchers.IO) {
-            val restored = drafts.loadResult()
+            val restored = runCatching { drafts.loadResult() }
             withContext(Dispatchers.Main.immediate) {
-                when (restored) {
-                    is DraftLoadResult.Restored -> if (shouldRestoreDraft(initialRevision, draftRevision)) {
-                        runCatching { restore(restored.value) }.onFailure {
-                            draftRestoreError = "A protected draft is invalid and could not be restored."
+                restored.fold(
+                    onSuccess = {
+                        when (it) {
+                            is DraftLoadResult.Restored -> if (shouldRestoreDraft(initialRevision, draftRevision)) {
+                                runCatching { restore(it.value) }.onFailure {
+                                    draftRestoreError = "A protected draft is invalid and could not be restored."
+                                }
+                            }
+                            is DraftLoadResult.Unavailable -> draftRestoreError = "A protected draft could not be restored on this device."
+                            DraftLoadResult.Missing -> Unit
                         }
-                    }
-                    is DraftLoadResult.Unavailable -> draftRestoreError = "A protected draft could not be restored on this device."
-                    DraftLoadResult.Missing -> Unit
-                }
+                    },
+                    onFailure = { draftRestoreError = "A protected draft could not be restored on this device." },
+                )
+                draftRestoreComplete = true
             }
             // Writes submitted while decrypting were buffered by the conflated channel. Reading and
             // writing are therefore serialized through this one coroutine.

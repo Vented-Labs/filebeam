@@ -4,6 +4,7 @@ set -euo pipefail
 source "$(dirname -- "$0")/lib.sh"
 
 bash "$root/scripts/ios/bootstrap.test.sh"
+bash "$root/scripts/ios/build.test.sh"
 bash "$root/scripts/ios/bootstrap.sh"
 for crate in client-core client-ffi; do
     cargo "+$IOS_RUST_VERSION" fmt --manifest-path "$root/$crate/Cargo.toml" --check

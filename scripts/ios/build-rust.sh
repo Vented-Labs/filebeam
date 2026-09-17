@@ -7,12 +7,17 @@ profile=${1:-release}; include_intel=${IOS_INCLUDE_X86_64_SIMULATOR:-1}
 [[ $include_intel == 0 || $include_intel == 1 ]] || die 'IOS_INCLUDE_X86_64_SIMULATOR must be 0 or 1'
 require_macos; bash "$root/scripts/ios/bootstrap.sh"
 package="$ios_root/Packages/FilebeamCore" generated="$package/Generated" artifacts="$package/Artifacts" target_dir="${CARGO_TARGET_DIR:-$root/client-ffi/target/ios}"
-flags=(); [[ $profile != release ]] || flags+=(--release)
 # Retain Rust DWARF in release artifacts so Xcode archives can create useful dSYMs.
 export CARGO_PROFILE_RELEASE_STRIP=none
 export CARGO_PROFILE_RELEASE_DEBUG=2
 targets=(aarch64-apple-ios aarch64-apple-ios-sim); [[ $include_intel == 0 ]] || targets+=(x86_64-apple-ios)
-for target in "${targets[@]}"; do cargo "+$IOS_RUST_VERSION" build --manifest-path "$root/client-ffi/Cargo.toml" --locked --lib --target "$target" "${flags[@]}" --target-dir "$target_dir"; done
+for target in "${targets[@]}"; do
+    if [[ $profile == release ]]; then
+        cargo "+$IOS_RUST_VERSION" build --manifest-path "$root/client-ffi/Cargo.toml" --locked --lib --target "$target" --release --target-dir "$target_dir"
+    else
+        cargo "+$IOS_RUST_VERSION" build --manifest-path "$root/client-ffi/Cargo.toml" --locked --lib --target "$target" --target-dir "$target_dir"
+    fi
+done
 device="$target_dir/aarch64-apple-ios/$profile/libfilebeam_client_ffi.a" sim="$target_dir/aarch64-apple-ios-sim/$profile/libfilebeam_client_ffi.a"
 [[ -s $device && -s $sim ]] || die 'Cargo did not produce required static libraries'
 staging=$(mktemp -d "$package/.build.XXXXXX"); trap 'rm -rf "$staging"' EXIT

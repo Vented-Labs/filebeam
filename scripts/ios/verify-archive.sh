@@ -4,10 +4,10 @@ set -euo pipefail
 source "$(dirname -- "$0")/lib.sh"
 
 archive=${1:?archive path is required}
-app=$(find "$archive/Products/Applications" -maxdepth 1 -name '*.app' -type d -print -quit)
-[[ -n $app ]] || die 'archive does not contain an application'
-extension=$(find "$app/PlugIns" -maxdepth 1 -name '*.appex' -type d -print -quit)
-[[ -n $extension ]] || die 'archive does not contain ShareExtension'
+for candidate in "$archive/Products/Applications"/*.app; do [[ -d $candidate ]] && { app=$candidate; break; }; done
+[[ -n ${app:-} ]] || die 'archive does not contain an application'
+for candidate in "$app/PlugIns"/*.appex; do [[ -d $candidate ]] && { extension=$candidate; break; }; done
+[[ -n ${extension:-} ]] || die 'archive does not contain ShareExtension'
 security find-identity -v -p codesigning | grep -q '[0-9])' || die 'no usable code-signing identity in the selected keychain'
 codesign --verify --deep --strict --verbose=2 "$app"
 codesign --verify --strict --verbose=2 "$extension"

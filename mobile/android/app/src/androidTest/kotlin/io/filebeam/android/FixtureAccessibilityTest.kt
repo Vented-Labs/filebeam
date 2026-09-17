@@ -13,6 +13,10 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import io.filebeam.android.platform.security.EncryptedDraftStore
+import org.json.JSONObject
+import org.junit.After
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -21,6 +25,13 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class FixtureAccessibilityTest {
     @get:Rule val compose = createAndroidComposeRule<FixtureActivity>()
+
+    @Before fun awaitFixtureReady() {
+        compose.waitUntil(timeoutMillis = 5_000) { compose.activity.fixtureReady }
+        compose.waitForIdle()
+    }
+
+    @After fun clearDraftFixture() = EncryptedDraftStore(compose.activity).clear()
 
     @Test fun navigationHasLabeledActionsAndRetainsSendDraftAcrossRoutes() {
         compose.onNodeWithText(compose.activity.getString(R.string.send_title)).performScrollTo().assertIsDisplayed()
@@ -33,6 +44,18 @@ class FixtureAccessibilityTest {
     @Test fun bottomNavigationOpensTheProductionReceiveDestination() {
         compose.onNodeWithText(compose.activity.getString(R.string.receive)).performClick()
         compose.onNodeWithText(compose.activity.getString(R.string.transfer_link)).assertIsDisplayed()
+    }
+
+    @Test fun restoredNotesDraftDoesNotOverrideTheDefaultFilesFixture() {
+        compose.activityRule.scenario.onActivity { it.viewModelStore.clear() }
+        EncryptedDraftStore(compose.activity).save(
+            JSONObject().put("sendContent", "NOTES").put("note", JSONObject().put("body", "restored fixture note")),
+        )
+        compose.activityRule.scenario.recreate()
+        compose.waitUntil(timeoutMillis = 5_000) { compose.activity.fixtureReady }
+        compose.onNodeWithText(compose.activity.getString(R.string.send_title)).performScrollTo().assertIsDisplayed()
+        compose.activityRule.scenario.onActivity { it.showFixture("notes") }
+        compose.onNode(hasText("restored fixture note").and(hasSetTextAction())).assertIsDisplayed()
     }
 
     @Test fun selectedSendUsesDebugProviderForSemanticAddAndRemove() {

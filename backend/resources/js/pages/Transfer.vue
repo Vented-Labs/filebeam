@@ -2,7 +2,7 @@
 import { Head } from '@inertiajs/vue3';
 import { reactive } from 'vue';
 import { FilebeamTransfer, RouteSurface, type FilebeamConfig } from '@filebeam/ui';
-import FileReportController from '@/actions/App/Http/Controllers/FileReportController';
+import { store } from '@/routes/reports';
 import ReportDialog from '../../../../ui/src/components/reports/ReportDialog.vue';
 import { csrfHeaders } from '../../../../ui/src/lib/csrf';
 
@@ -33,7 +33,7 @@ async function submitReport(transferId: string, fields: ReportFields): Promise<v
     report.errors = {};
 
     try {
-        const response = await fetch(FileReportController.store().url, {
+        const response = await fetch(store().url, {
             method: 'POST',
             credentials: 'same-origin',
             headers: csrfHeaders(true),
@@ -78,7 +78,7 @@ async function submitReport(transferId: string, fields: ReportFields): Promise<v
             <template #report="{ transferId: reportTransferId }">
                 <ReportDialog
                     :transfer-id="reportTransferId"
-                    :action-uri="FileReportController.store().url"
+                    :action-uri="store().url"
                     :errors="report.errors"
                     :processing="report.processing"
                     :successful="report.successful"

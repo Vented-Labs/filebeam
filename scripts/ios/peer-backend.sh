@@ -11,11 +11,7 @@ url=
 die() { printf 'ios peer: %s\n' "$*" >&2; exit 1; }
 allocate_port() {
     if [[ -n $port ]]; then return; fi
-    for _ in $(seq 1 40); do
-        candidate=$(shuf -i 18080-28080 -n 1)
-        if ! ss -ltn "sport = :$candidate" | grep -q LISTEN; then port=$candidate; return; fi
-    done
-    die 'could not allocate a loopback port'
+    port=$(python3 -c 'import socket; sock = socket.socket(); sock.bind(("127.0.0.1", 0)); print(sock.getsockname()[1]); sock.close()')
 }
 prepare() {
     mkdir -p "$state" "$state/storage/framework/cache/data" "$state/storage/framework/sessions" "$state/storage/framework/views" "$state/storage/logs" "$state/filestore" "$state/staging"

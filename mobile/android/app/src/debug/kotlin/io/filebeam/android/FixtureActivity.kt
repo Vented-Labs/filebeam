@@ -61,7 +61,9 @@ import kotlinx.coroutines.launch
 class FixtureActivity : ComponentActivity() {
     private val model: io.filebeam.android.ui.FilebeamViewModel by viewModels()
     private var route by mutableStateOf("")
+    private var fixtureContentReady by mutableStateOf(false)
     private var fixtureGeneration = 0
+    val fixtureReady get() = fixtureContentReady
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -69,25 +71,28 @@ class FixtureActivity : ComponentActivity() {
         seedProviderFile()
         configureDisposableInstanceThenShow(intent.getStringExtra(EXTRA_ROUTE))
         setContent {
-            when (route) {
-                "visual-settings" -> FixtureSurface { SettingsFixture() }
-                "visual-settings-key-error" -> FixtureSurface { SettingsFixture(error = true) }
-                "visual-account" -> FixtureSurface { AccountFixture() }
-                "visual-inbox" -> FixtureSurface { InboxFixture() }
-                "visual-receipt-verified" -> FixtureSurface { ReceiptFixture("verified") }
-                "visual-receipt-waiting" -> FixtureSurface { ReceiptFixture("waiting") }
-                "visual-receipt-secret" -> FixtureSurface { ReceiptFixture("secret") }
-                "visual-receipt-error" -> FixtureSurface { ReceiptFixture("error") }
-                "visual-options" -> FixtureSurface { OptionsFixture() }
-                else -> FilebeamScreen(
-                    model = model,
-                    start = { action -> action() },
-                    pickFiles = { model.appendFiles(listOf(providerUri("added-source.txt"))) },
-                    pickTree = {},
-                    saveFile = {},
-                    exportAccountKey = {},
-                    importAccountKey = {},
-                )
+            when {
+                !fixtureReady -> FixtureSurface {}
+                else -> when (route) {
+                    "visual-settings" -> FixtureSurface { SettingsFixture() }
+                    "visual-settings-key-error" -> FixtureSurface { SettingsFixture(error = true) }
+                    "visual-account" -> FixtureSurface { AccountFixture() }
+                    "visual-inbox" -> FixtureSurface { InboxFixture() }
+                    "visual-receipt-verified" -> FixtureSurface { ReceiptFixture("verified") }
+                    "visual-receipt-waiting" -> FixtureSurface { ReceiptFixture("waiting") }
+                    "visual-receipt-secret" -> FixtureSurface { ReceiptFixture("secret") }
+                    "visual-receipt-error" -> FixtureSurface { ReceiptFixture("error") }
+                    "visual-options" -> FixtureSurface { OptionsFixture() }
+                    else -> FilebeamScreen(
+                        model = model,
+                        start = { action -> action() },
+                        pickFiles = { model.appendFiles(listOf(providerUri("added-source.txt"))) },
+                        pickTree = {},
+                        saveFile = {},
+                        exportAccountKey = {},
+                        importAccountKey = {},
+                    )
+                }
             }
         }
     }
@@ -100,10 +105,15 @@ class FixtureActivity : ComponentActivity() {
     /** Route Send only after the disposable peer's real policy has been discovered and committed. */
     private fun configureDisposableInstanceThenShow(route: String?) {
         val generation = ++fixtureGeneration
+        fixtureContentReady = false
         model.updateInstanceInput(instance = DISPOSABLE_INSTANCE)
         model.checkInstanceInput()
         lifecycleScope.launch {
             repeat(100) {
+                if (!model.draftRestoreComplete) {
+                    delay(25)
+                    return@repeat
+                }
                 when (model.instanceTransaction.status) {
                     InstanceTransactionStatus.ReadyToCommit -> {
                         model.commitCheckedInstance()
@@ -117,6 +127,7 @@ class FixtureActivity : ComponentActivity() {
                     else -> delay(100)
                 }
             }
+            while (!model.draftRestoreComplete) delay(25)
             if (generation == fixtureGeneration) showFixture(route)
         }
     }
@@ -124,6 +135,19 @@ class FixtureActivity : ComponentActivity() {
     /** Test-only semantic routing, avoiding coordinate-dependent capture setup. */
     fun showFixture(value: String?) {
         fixtureGeneration++
+        val generation = fixtureGeneration
+        if (!model.draftRestoreComplete) {
+            fixtureContentReady = false
+            lifecycleScope.launch {
+                while (!model.draftRestoreComplete) delay(25)
+                if (generation == fixtureGeneration) showFixture(value)
+            }
+            return
+        }
+        showReadyFixture(value)
+    }
+
+    private fun showReadyFixture(value: String?) {
         route = value.orEmpty()
         when (route) {
             "send-selected" -> {
@@ -133,6 +157,7 @@ class FixtureActivity : ComponentActivity() {
             "notes" -> model.showSend(SendContent.NOTES)
             else -> if (!route.startsWith("visual-")) model.navigateLegacy(route)
         }
+        fixtureContentReady = true
     }
 
     private fun seedProviderFile() {
