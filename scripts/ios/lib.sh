@@ -27,16 +27,17 @@ require_macos() {
     export DEVELOPER_DIR="$IOS_DEVELOPER_DIR"
     command -v xcodebuild >/dev/null || die 'select a full Xcode with xcode-select'
     command -v xcrun >/dev/null || die 'select a full Xcode with xcode-select'
-    local version build
-    version=$(xcodebuild -version | awk '/Xcode/{print $2; exit}')
-    build=$(xcodebuild -version | awk '/Build version/{print $3; exit}')
-    [[ $version == "$IOS_XCODE_VERSION" ]] || die "Xcode $IOS_XCODE_VERSION is required; selected ${version:-unknown} (${build:-unknown})"
+    local version_info
+    # Read all output before parsing: an early-closing pipe can crash xcodebuild.
+    version_info=$(xcodebuild -version)
+    selected_xcode_version=$(awk '/^Xcode /{print $2}' <<< "$version_info")
+    selected_xcode_build=$(awk '/^Build version /{print $3}' <<< "$version_info")
+    [[ $selected_xcode_version == "$IOS_XCODE_VERSION" ]] || die "Xcode $IOS_XCODE_VERSION is required; selected ${selected_xcode_version:-unknown} (${selected_xcode_build:-unknown})"
 }
 toolchain_identity() {
     require_macos
     printf 'xcode=%s\nbuild=%s\nsdk=%s\narch=%s\n' \
-        "$(xcodebuild -version | awk '/Xcode/{print $2; exit}')" \
-        "$(xcodebuild -version | awk '/Build version/{print $3; exit}')" \
+        "$selected_xcode_version" "$selected_xcode_build" \
         "$(xcrun --sdk iphoneos --show-sdk-version)" "$(uname -m)"
 }
 input_fingerprint() { { toolchain_identity; git -C "$root" rev-parse HEAD; python3 "$root/scripts/ios/source-fingerprint.py"; } | shasum -a 256 | awk '{print $1}'; }
@@ -46,3 +47,4 @@ require_generated() {
     [[ $(<"$generated/input-fingerprint") == "$(input_fingerprint)" ]] || die 'generated UniFFI artifacts are stale; run scripts/ios/build-rust.sh'
 }
 xcodegen() { "$tools_root/xcodegen-$IOS_XCODEGEN_VERSION/bin/xcodegen" "$@"; }
+generate_project() { xcodegen --spec "$ios_root/project.yml" --project "$ios_root"; }

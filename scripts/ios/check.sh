@@ -5,7 +5,9 @@ source "$(dirname -- "$0")/lib.sh"
 
 bash "$root/scripts/ios/bootstrap.test.sh"
 bash "$root/scripts/ios/build.test.sh"
+bash "$root/scripts/ios/toolchain.test.sh"
 bash "$root/scripts/ios/bootstrap.sh"
+bash "$root/scripts/ios/project.test.sh"
 for crate in client-core client-ffi; do
     cargo "+$IOS_RUST_VERSION" fmt --manifest-path "$root/$crate/Cargo.toml" --check
     cargo "+$IOS_RUST_VERSION" clippy --manifest-path "$root/$crate/Cargo.toml" --all-targets --locked -- -D warnings

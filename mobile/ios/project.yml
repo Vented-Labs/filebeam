@@ -31,10 +31,8 @@ targets:
       - Resources
       - path: Config/PrivacyInfo.xcprivacy
         buildPhase: resources
-    info: { path: Config/Filebeam-Info.plist }
-    entitlements: { path: Config/Filebeam.entitlements }
     settings:
-      base: { PRODUCT_BUNDLE_IDENTIFIER: io.filebeam.ios, PRODUCT_MODULE_NAME: Filebeam, APP_GROUP_IDENTIFIER: group.io.filebeam.ios, ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon }
+      base: { PRODUCT_BUNDLE_IDENTIFIER: io.filebeam.ios, PRODUCT_MODULE_NAME: Filebeam, APP_GROUP_IDENTIFIER: group.io.filebeam.ios, ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon, INFOPLIST_FILE: Config/Filebeam-Info.plist, CODE_SIGN_ENTITLEMENTS: Config/Filebeam.entitlements }
       configs:
         Debug: { PRODUCT_BUNDLE_IDENTIFIER: io.filebeam.ios.debug, APP_GROUP_IDENTIFIER: group.io.filebeam.ios.debug }
     dependencies:
@@ -46,10 +44,8 @@ targets:
     type: app-extension
     platform: iOS
     sources: [ShareExtension]
-    info: { path: Config/ShareExtension-Info.plist }
-    entitlements: { path: Config/ShareExtension.entitlements }
     settings:
-      base: { PRODUCT_BUNDLE_IDENTIFIER: io.filebeam.ios.share, PRODUCT_MODULE_NAME: ShareExtension, APP_GROUP_IDENTIFIER: group.io.filebeam.ios }
+      base: { PRODUCT_BUNDLE_IDENTIFIER: io.filebeam.ios.share, PRODUCT_MODULE_NAME: ShareExtension, APP_GROUP_IDENTIFIER: group.io.filebeam.ios, INFOPLIST_FILE: Config/ShareExtension-Info.plist, CODE_SIGN_ENTITLEMENTS: Config/ShareExtension.entitlements }
       configs:
         Debug: { PRODUCT_BUNDLE_IDENTIFIER: io.filebeam.ios.debug.share, APP_GROUP_IDENTIFIER: group.io.filebeam.ios.debug }
     dependencies: [{ package: FilebeamDomain }]
