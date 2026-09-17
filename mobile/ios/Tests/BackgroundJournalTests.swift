@@ -28,8 +28,9 @@ final class BackgroundJournalTests: XCTestCase {
         let session = URLSession(configuration: configuration)
         let task = session.downloadTask(with: URL(string: "https://example.invalid/ciphertext")!)
         let descriptor = try! BackgroundTaskDescriptor(operationID: "op", checkpointID: "checkpoint", direction: .download)
-        task.taskDescription = descriptor.taskDescription; task.resume()
-        XCTAssertEqual(BackgroundTaskDescriptor.parse((await session.allTasks).first?.taskDescription), descriptor)
+        task.taskDescription = descriptor.taskDescription
+        let tasks = await session.allTasks
+        XCTAssertEqual(BackgroundTaskDescriptor.parse(tasks.first?.taskDescription), descriptor)
         task.cancel(); session.invalidateAndCancel()
     }
 }

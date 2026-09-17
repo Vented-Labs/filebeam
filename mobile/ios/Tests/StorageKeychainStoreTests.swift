@@ -47,7 +47,8 @@ final class StorageKeychainStoreTests: XCTestCase {
         let store = DraftStore(directory: directory, keychain: IOSKeychainStore(namespace: "tests.\(UUID().uuidString)", stateDirectory: directory))
         let drafts = ComposerDrafts(note: NoteDraft(text: "sensitive note"))
         try await store.save(drafts)
-        XCTAssertEqual(try await store.load(), drafts)
+        let restored = try await store.load()
+        XCTAssertEqual(restored, drafts)
         let ciphertext = try Data(contentsOf: directory.appendingPathComponent("composer-drafts-v1.bin"))
         XCTAssertFalse(String(decoding: ciphertext, as: UTF8.self).contains("sensitive note"))
     }
