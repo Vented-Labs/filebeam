@@ -35,7 +35,7 @@ if [[ ${FILEBEAM_ANDROID_DEVICE_CONTAINER:-} != 1 ]]; then
         --user "$(id -u):$(id -g)" --env HOME=/tmp/home \
         --env FILEBEAM_ANDROID_DEVICE_CONTAINER=1 --env FILEBEAM_ANDROID_ACCEL="$accel" \
         --env FILEBEAM_ANDROID_AVD_DISK_SIZE="${FILEBEAM_ANDROID_AVD_DISK_SIZE:-8G}" \
-        --env FILEBEAM_ANDROID_AVD_MEMORY="${FILEBEAM_ANDROID_AVD_MEMORY:-2048}" \
+        --env FILEBEAM_ANDROID_AVD_MEMORY="${FILEBEAM_ANDROID_AVD_MEMORY:-4096}" \
         --env FILEBEAM_ANDROID_INSTRUMENTATION_TIMEOUT="${FILEBEAM_ANDROID_INSTRUMENTATION_TIMEOUT:-3600}" \
         --env FILEBEAM_ANDROID_HTTP_PROBE="${FILEBEAM_ANDROID_HTTP_PROBE:-}" \
         --env FILEBEAM_ANDROID_LIVE_LOGCAT_TAG="${FILEBEAM_ANDROID_LIVE_LOGCAT_TAG:-}" \
@@ -61,7 +61,7 @@ printf '\ndisk.dataPartition.size=%s\n' "${FILEBEAM_ANDROID_AVD_DISK_SIZE:-8G}" 
 ensure_report_dir
 emulator -avd filebeam-test -no-window -no-audio -no-boot-anim -no-snapshot \
     -no-metrics -gpu swangle \
-    -accel "$FILEBEAM_ANDROID_ACCEL" -memory "${FILEBEAM_ANDROID_AVD_MEMORY:-2048}" -cores 2 \
+    -accel "$FILEBEAM_ANDROID_ACCEL" -memory "${FILEBEAM_ANDROID_AVD_MEMORY:-4096}" -cores 2 \
     > "$report_dir/emulator.log" 2>&1 &
 emulator_pid=$!
 live_logcat_pid=''
