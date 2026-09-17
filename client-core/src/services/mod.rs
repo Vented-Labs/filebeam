@@ -2,6 +2,7 @@
 
 mod account;
 mod client;
+pub mod note_management;
 mod notes;
 mod turbo;
 

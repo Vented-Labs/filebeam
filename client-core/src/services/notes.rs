@@ -24,9 +24,13 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
-use super::client::url;
+use super::{client::url, note_management::NoteManagementStore};
 
 const TAG_BYTES: usize = 16;
+
+fn live_read_requires_peer_consent(driver: &str, relay_only: bool) -> bool {
+    driver == "webrtc" && !relay_only
+}
 
 #[derive(Clone)]
 pub struct NotesService {
@@ -70,7 +74,7 @@ pub enum NoteTransport {
 pub struct CreatedNote {
     pub id: String,
     pub link: String,
-    pub delete_token: String,
+    pub(crate) delete_token: String,
 }
 #[derive(Clone, Debug)]
 pub struct OpenedNote {
@@ -355,6 +359,14 @@ impl NotesService {
         })
     }
 
+    pub fn save_management(
+        &self,
+        note: &CreatedNote,
+        management: &NoteManagementStore,
+    ) -> Result<()> {
+        management.save(&note.id, &self.instance, &note.delete_token, None)
+    }
+
     /// Owns a live note until cancelled. Ciphertext never leaves this process
     /// except through the authenticated WebRTC data channel.
     pub fn create_live(
@@ -362,6 +374,7 @@ impl NotesService {
         request: NoteCreate,
         control: &Control,
         end_requested: Arc<AtomicBool>,
+        management: Option<NoteManagementStore>,
     ) -> Result<CreatedNote> {
         ensure!(!request.text.is_empty(), "note cannot be empty");
         if !control.webrtc_relay_only() {
@@ -457,6 +470,14 @@ impl NotesService {
             link: format!("{}#k=v1.{}", share_url, encode(&share_key)),
             delete_token: reservation.delete_token,
         };
+        if let Some(management) = &management {
+            management.save(
+                &created.id,
+                &self.instance,
+                &created.delete_token,
+                Some(&reservation.upload_token),
+            )?;
+        }
         control.emit(
             filebeam_transfer_native::control::TransferEvent::ShareReady(ShareReady {
                 share_url: created.link.clone(),
@@ -502,10 +523,26 @@ impl NotesService {
                 Ok(())
             }
         })?;
+        if end_requested.load(Ordering::Relaxed)
+            && let Some(management) = management
+        {
+            management.acknowledge_end(&created.id)?;
+        }
         Ok(created)
     }
 
+    /// The caller must supply a control when opening a live note. This keeps the
+    /// address-exposure decision and cancellation lifetime with the owning job.
     pub fn open(&self, link: &str, password: Option<&str>) -> Result<OpenedNote> {
+        self.open_controlled(link, password, None)
+    }
+
+    pub fn open_controlled(
+        &self,
+        link: &str,
+        password: Option<&str>,
+        control: Option<&Control>,
+    ) -> Result<OpenedNote> {
         let parsed = filebeam_transfer_native::protocol::parse_link_for_instance(
             link,
             self.instance.as_str(),
@@ -558,8 +595,29 @@ impl NotesService {
         let live_session = if note.driver == "webrtc" {
             let token = join_token.context("live note manifest has no join capability")?;
             let signal = Signaling::new(self.async_http.clone(), self.instance.as_str(), &note.id)?;
+            let relay_only = control.is_some_and(Control::webrtc_relay_only);
+            if live_read_requires_peer_consent(&note.driver, relay_only)
+                && let Some(control) = control
+            {
+                // ICE gathering can reveal peer addresses, so consent precedes session registration.
+                control.request_peer_consent(self.instance.origin().ascii_serialization())?;
+            }
             Some(shared_tokio_runtime().block_on(async {
-                let (peer, session, channel) = connect_receiver(&signal, &token, false).await?;
+                let connection_signal = signal.clone();
+                let connection = connect_receiver(&connection_signal, &token, relay_only);
+                tokio::pin!(connection);
+                let (peer, session, channel) = if let Some(control) = control {
+                    tokio::select! {
+                        result = &mut connection => result?,
+                        _ = async {
+                            while !control.cancelled.load(Ordering::Relaxed) {
+                                tokio::time::sleep(Duration::from_millis(50)).await;
+                            }
+                        } => bail!("Note read cancelled"),
+                    }
+                } else {
+                    connection.await?
+                };
                 Ok::<_, anyhow::Error>((peer, session, channel, signal))
             })?)
         } else {
@@ -801,5 +859,12 @@ mod tests {
     fn password_envelope_requires_a_password_after_restart() {
         assert!(password_key(&[1_u8; 32], None, Some(&[2_u8; 16])).is_err());
         assert!(password_key(&[1_u8; 32], Some("password"), None).is_err());
+    }
+
+    #[test]
+    fn relay_only_live_read_has_no_direct_peer_consent_or_fallback() {
+        assert!(!live_read_requires_peer_consent("webrtc", true));
+        assert!(live_read_requires_peer_consent("webrtc", false));
+        assert!(!live_read_requires_peer_consent("http", false));
     }
 }

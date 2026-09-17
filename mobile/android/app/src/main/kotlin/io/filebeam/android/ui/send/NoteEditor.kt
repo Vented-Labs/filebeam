@@ -35,6 +35,7 @@ fun NoteEditor(title: String, body: String, language: String, enabled: Boolean, 
     var languageMenu by remember { mutableStateOf(false) }
     Column(verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(FilebeamSpace.Small)) {
         OutlinedTextField(title, onTitleChange, enabled = enabled, label = { Text(stringResource(R.string.note_title)) }, modifier = Modifier.fillMaxWidth())
+        Text(stringResource(R.string.note_recipient_delivery_unavailable), style = androidx.compose.material3.MaterialTheme.typography.bodySmall, color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
         ProductionGroupCard {
             Row(Modifier.fillMaxWidth().padding(horizontal = FilebeamSpace.Medium, vertical = FilebeamSpace.Small)) {
                 Text(stringResource(R.string.note_editor), Modifier.weight(1f), style = androidx.compose.material3.MaterialTheme.typography.titleMedium)

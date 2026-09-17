@@ -10,9 +10,9 @@ import io.filebeam.android.R
 
 /** Approved Iconsax identities only. Vectors retain source two-tone alpha and take semantic tint. */
 enum class ApprovedIcon(@DrawableRes val resource: Int) {
-    Upload(R.drawable.ic_approved_upload), Folder(R.drawable.ic_approved_folder), File(R.drawable.ic_approved_file),
+    Upload(R.drawable.ic_approved_upload), Archive(R.drawable.ic_approved_archive), Folder(R.drawable.ic_approved_folder), File(R.drawable.ic_approved_file),
     Download(R.drawable.ic_approved_download), Transfers(R.drawable.ic_approved_transfers), Shield(R.drawable.ic_approved_shield),
-    Settings(R.drawable.ic_approved_settings), Add(R.drawable.ic_approved_add),
+    Settings(R.drawable.ic_approved_settings), Storage(R.drawable.ic_approved_storage), Add(R.drawable.ic_approved_add),
 }
 
 @Composable

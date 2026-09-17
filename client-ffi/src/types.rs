@@ -126,6 +126,15 @@ pub struct SavedTransferDetails {
     pub can_remove_local: bool,
 }
 
+/// Opaque local note-management identity and permitted remote actions. Tokens
+/// remain in the authenticated checkpoint record and never cross the FFI.
+#[derive(Clone, uniffi::Record)]
+pub struct NoteManagementActions {
+    pub id: String,
+    pub can_end_live: bool,
+    pub can_revoke_remote: bool,
+}
+
 #[derive(Clone, Copy, uniffi::Enum)]
 pub enum JobState {
     Running,

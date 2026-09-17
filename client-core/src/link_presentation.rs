@@ -10,6 +10,44 @@ pub struct ShareLinkPresentation {
     pub separate_key: String,
 }
 
+/// Formats the exact POSIX-shell command accepted by the current `beam down`
+/// parser. It deliberately has no output or transport flags: the CLI defaults
+/// are the only portable download invocation.
+pub fn format_download_with_cli(target: &str) -> Result<String> {
+    if target.is_empty() || target.chars().any(char::is_control) {
+        bail!("CLI target must be nonempty and contain no control characters");
+    }
+    if is_transfer_id(target) {
+        return Ok(format!("beam down {}", quote_shell_argument(target)));
+    }
+    let url = Url::parse(target).context("CLI target must be a full HTTP transfer URL")?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+    {
+        bail!("CLI target must be a full HTTP transfer URL without credentials or a query");
+    }
+    let parsed = filebeam_transfer_native::protocol::parse_link_for_instance(target, target)
+        .context("CLI target is not a supported transfer link")?;
+    if url.path() != format!("/{}", parsed.id) || !is_transfer_id(&parsed.id) {
+        bail!("CLI target is not a supported transfer link");
+    }
+    Ok(format!("beam down {}", quote_shell_argument(target)))
+}
+
+fn quote_shell_argument(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+fn is_transfer_id(value: &str) -> bool {
+    value.len() == 26
+        && value.bytes().enumerate().all(|(index, byte)| {
+            matches!(byte, b'0'..=b'7') || (index > 0 && matches!(byte, b'0'..=b'9' | b'A'..=b'H' | b'J'..=b'K' | b'M'..=b'N' | b'P'..=b'T' | b'V'..=b'Z' | b'a'..=b'h' | b'j'..=b'k' | b'm'..=b'n' | b'p'..=b't' | b'v'..=b'z'))
+        })
+}
+
 /// Splits a canonical existing native share link without requiring the caller
 /// to separately retain raw key material. The encrypted manifest continues to
 /// carry any WebRTC join capability; only the portable `k` fragment is split.
@@ -105,6 +143,56 @@ mod tests {
                 "https://filebeam.test/01ARZ3NDEKTSV4RRFFQ69G5FAV"
             );
             assert_eq!(split.separate_key, format!("v1.{KEY}"));
+        }
+    }
+
+    #[test]
+    fn formats_cli_downloads_with_literal_shell_quoting() {
+        let id = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+        let keyed = format!("https://files.example.test:8443/{id}#k=v1.{KEY}");
+        assert_eq!(
+            format_download_with_cli(&keyed).unwrap(),
+            format!("beam down '{keyed}'")
+        );
+        assert_eq!(
+            format_download_with_cli(&format!("https://files.example.test:8443/{id}")).unwrap(),
+            format!("beam down 'https://files.example.test:8443/{id}'")
+        );
+        assert_eq!(
+            format_download_with_cli(id).unwrap(),
+            format!("beam down '{id}'")
+        );
+        assert_eq!(
+            quote_shell_argument("$(not-run) it's literal"),
+            "'$(not-run) it'\"'\"'s literal'"
+        );
+    }
+
+    #[test]
+    fn cli_formatter_keeps_the_users_key_fragment_choice_and_rejects_unsupported_targets() {
+        let id = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+        let keyless =
+            present_share_link("https://files.example.test", &format!("/{id}"), KEY, false)
+                .unwrap();
+        let keyed =
+            present_share_link("https://files.example.test", &format!("/{id}"), KEY, true).unwrap();
+        assert_eq!(
+            format_download_with_cli(&keyless.link).unwrap(),
+            format!("beam down '{}'", keyless.link)
+        );
+        assert_eq!(
+            format_download_with_cli(&keyed.link).unwrap(),
+            format!("beam down '{}'", keyed.link)
+        );
+        for target in [
+            "--help",
+            &format!("https://u:p@files.example.test/{id}"),
+            &format!("https://files.example.test/{id}?output=/tmp"),
+            &format!("https://files.example.test/f/{id}"),
+            &format!("https://files.example.test/{id}#k=invalid"),
+            &format!("https://files.example.test/{id}\n"),
+        ] {
+            assert!(format_download_with_cli(target).is_err(), "{target}");
         }
     }
 }

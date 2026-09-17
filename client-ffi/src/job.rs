@@ -8,6 +8,8 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
+type NoteReadResult = Arc<Mutex<Option<std::result::Result<crate::OpenedNote, String>>>>;
+
 #[derive(uniffi::Object)]
 pub struct TransferJob {
     inner: Mutex<core::ManagedJob>,
@@ -15,6 +17,7 @@ pub struct TransferJob {
     direction: &'static str,
     kind: &'static str,
     transport: &'static str,
+    note_result: Option<NoteReadResult>,
 }
 
 impl TransferJob {
@@ -25,6 +28,7 @@ impl TransferJob {
             direction: "unknown",
             kind: "unknown",
             transport: "unknown",
+            note_result: None,
         }
     }
     pub(crate) fn new_upload(job: core::Job, transport: &'static str) -> Self {
@@ -34,6 +38,7 @@ impl TransferJob {
             direction: "upload",
             kind: "files",
             transport,
+            note_result: None,
         }
     }
     pub(crate) fn new_live(job: core::Job, end_requested: Arc<AtomicBool>) -> Self {
@@ -43,6 +48,17 @@ impl TransferJob {
             direction: "upload",
             kind: "note",
             transport: "webrtc",
+            note_result: None,
+        }
+    }
+    pub(crate) fn new_note_read(job: core::Job, result: NoteReadResult) -> Self {
+        Self {
+            inner: Mutex::new(core::ManagedJob::new(job)),
+            end_requested: None,
+            direction: "download",
+            kind: "note",
+            transport: "controlled",
+            note_result: Some(result),
         }
     }
 }
@@ -149,5 +165,17 @@ impl TransferJob {
             end.store(true, Ordering::Relaxed);
         }
         self.pause();
+    }
+    /// Available only after the job has authenticated and verified the entire note.
+    /// Note text is deliberately not included in `TransferSnapshot.results`.
+    pub fn read_note_result(&self) -> Result<Option<crate::OpenedNote>> {
+        let Some(result) = &self.note_result else {
+            return Err(crate::invalid("This is not a note read job"));
+        };
+        match result.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+            Some(Ok(note)) => Ok(Some(note.clone())),
+            Some(Err(error)) => Err(crate::operation(anyhow::anyhow!(error.clone()))),
+            None => Ok(None),
+        }
     }
 }

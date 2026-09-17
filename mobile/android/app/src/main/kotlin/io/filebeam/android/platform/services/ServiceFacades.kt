@@ -50,6 +50,7 @@ class NativeNotesService(
     private val startLive: (String, NativeNoteRequest) -> LiveNoteHandle,
     private val endLive: (String) -> Unit,
     private val createHttp: suspend (suspend () -> io.filebeam.rust.CreatedNote) -> io.filebeam.rust.CreatedNote,
+    private val openNote: suspend (String, String, String?) -> NoteContent,
 ) : NotesService {
     private val mutable = MutableStateFlow<ServiceState<List<NoteSummary>>>(ServiceState.Loading)
     private val liveJobs = mutableMapOf<String, String>()
@@ -72,7 +73,7 @@ class NativeNotesService(
                 snapshot.shareUrl?.let { ready ->
                     val transferId = noteTransferId(ready)
                     liveJobs[transferId] = handle.id
-                    created = io.filebeam.rust.CreatedNote(transferId, ready, "")
+                    created = io.filebeam.rust.CreatedNote(transferId, ready)
                 }
                 snapshot.error?.let { error(it) }
                 if (snapshot.state !in listOf(JobState.RUNNING, JobState.PAUSING)) {
@@ -87,11 +88,11 @@ class NativeNotesService(
             mutable.value = ServiceState.Ready(listOf(it))
         }
     }
-    override suspend fun claim(link: String, password: String?): NoteContent = withContext(Dispatchers.IO) {
+    override suspend fun claim(link: String, password: String?): NoteContent {
         // Passwords deliberately stay caller-owned memory. A process restart therefore prompts again.
-        val opened = sessions.service(originForLink(link)).openNote(link, password?.takeIf { it.isNotEmpty() })
+        val opened = openNote(originForLink(link), link, password?.takeIf { it.isNotEmpty() })
         mutable.value = ServiceState.Ready(listOf(NoteSummary(opened.id, opened.title ?: "Encrypted note", null)))
-        NoteContent(opened.id, opened.text, opened.title, opened.language, opened.consumed)
+        return opened
     }
     override fun endLive(link: String) { liveJobs.remove(noteTransferId(link))?.let(endLive) }
 }

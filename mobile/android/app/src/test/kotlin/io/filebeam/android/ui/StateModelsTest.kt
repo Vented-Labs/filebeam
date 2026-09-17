@@ -49,9 +49,9 @@ class StateModelsTest {
         assertTrue(notes.includeKeyInLink)
     }
 
-    @Test fun knownIndividualSizesUseNativeAeadEstimateWhileZipStaysUnknown() {
+    @Test fun noHandleFixtureNeverGuessesEncryptedSizeWhileZipStaysUnknown() {
         val policy = policy(maximumBytes = 100u)
-        assertEquals(SendLimitStatus.WithinKnownLimits, fileLimitStatus(policy, null, false, listOf(10)))
+        assertEquals(SendLimitStatus.UnknownSize, fileLimitStatus(policy, null, false, listOf(10)))
         assertEquals(SendLimitStatus.UnknownSize, fileLimitStatus(policy, null, true, listOf(10)))
     }
 

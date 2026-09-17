@@ -75,7 +75,7 @@ fun AccountDestination(
     Column(Modifier.verticalScroll(rememberScrollState()).imePadding().padding(horizontal = FilebeamSpace.Gutter, vertical = FilebeamSpace.Medium), verticalArrangement = Arrangement.spacedBy(FilebeamSpace.Medium)) {
         Text(stringResource(R.string.account), style = MaterialTheme.typography.headlineSmall)
         when (state) {
-            is ServiceState.Ready -> SignedInAccount(
+            is ServiceState.Ready -> AccountReadyContent(
                 username = state.value.username,
                 profileUrl = state.value.profileUrl,
                 inbox = state.value.inboxEnabled,
@@ -127,7 +127,8 @@ fun AccountDestination(
     OutlinedTextField(password, setPassword, label = { Text(stringResource(R.string.account_password)) }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
 }
 
-@Composable private fun SignedInAccount(username: String, profileUrl: String?, inbox: Boolean, channel: String, situation: AccountKeySituation?, custody: KeyCustody, password: String, replacementAcknowledged: Boolean, onInbox: (Boolean) -> Unit, onNotification: (String) -> Unit, onCustody: (KeyCustody) -> Unit, onPassword: (String) -> Unit, onAcknowledged: (Boolean) -> Unit, onPrepare: () -> Unit, onExport: () -> Unit, onImport: () -> Unit, onSignOut: () -> Unit) {
+/** Stateless signed-in account surface for production and debug fixture seeds. */
+@Composable fun AccountReadyContent(username: String, profileUrl: String?, inbox: Boolean, channel: String, situation: AccountKeySituation?, custody: KeyCustody, password: String, replacementAcknowledged: Boolean, onInbox: (Boolean) -> Unit, onNotification: (String) -> Unit, onCustody: (KeyCustody) -> Unit, onPassword: (String) -> Unit, onAcknowledged: (Boolean) -> Unit, onPrepare: () -> Unit, onExport: () -> Unit, onImport: () -> Unit, onSignOut: () -> Unit) {
     ProductionGroupCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(FilebeamSpace.Medium), verticalArrangement = Arrangement.spacedBy(FilebeamSpace.XSmall)) {
     Text(stringResource(R.string.signed_in_as, username), style = MaterialTheme.typography.titleMedium)
     profileUrl?.let { Text(stringResource(R.string.receiving_profile, it)) }

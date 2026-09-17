@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.ArrowBack
@@ -96,6 +97,7 @@ fun FilebeamScreen(
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 private fun FilebeamTopBar(model: FilebeamViewModel) {
     val account = model.accounts.state.collectAsStateWithLifecycle().value
     val nested = model.navigation.backStack.isNotEmpty()
@@ -106,8 +108,10 @@ private fun FilebeamTopBar(model: FilebeamViewModel) {
             else FilebeamMark(stringResource(R.string.app_name), Modifier.padding(start = 16.dp))
         },
         actions = {
-            IconButton(onClick = { model.navigate(Destination.Settings) }) { ApprovedIcon(ApprovedIcon.Settings, stringResource(R.string.settings)) }
-            IconButton(onClick = { model.navigate(Destination.Account) }) { AccountAvatar((account as? ServiceState.Ready)?.value?.username, stringResource(R.string.account)) }
+            if (!nested) {
+                IconButton(onClick = { model.navigate(Destination.Settings) }) { ApprovedIcon(ApprovedIcon.Settings, stringResource(R.string.settings)) }
+                IconButton(onClick = { model.navigate(Destination.Account) }) { AccountAvatar((account as? ServiceState.Ready)?.value?.username, stringResource(R.string.account)) }
+            }
         },
         windowInsets = TopAppBarDefaults.windowInsets,
     )
@@ -179,7 +183,7 @@ private fun Destination.icon() = when (this) {
     Destination.Send -> ApprovedIcon.Upload
     Destination.Receive -> ApprovedIcon.Download
     Destination.Transfers -> ApprovedIcon.Transfers
-    Destination.Inbox -> ApprovedIcon.Folder
+    Destination.Inbox -> ApprovedIcon.Archive
     else -> ApprovedIcon.Settings
 }
 

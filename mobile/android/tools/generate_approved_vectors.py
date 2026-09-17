@@ -10,7 +10,7 @@ from xml.etree import ElementTree as ET
 ROOT = Path(__file__).resolve().parents[3]
 SOURCE = ROOT / "backend/resources/icons/iconsax"
 OUTPUT = ROOT / "mobile/android/app/src/main/res/drawable"
-ICONS = {"add": "plus", "file": "file", "folder": "folder", "download": "download", "shield": "shield", "settings": "settings", "transfers": "transfers", "upload": "upload"}
+ICONS = {"add": "plus", "archive": "archive", "file": "file", "folder": "folder", "download": "download", "shield": "shield", "settings": "settings", "storage": "storage", "transfers": "transfers", "upload": "upload"}
 ANDROID = "http://schemas.android.com/apk/res/android"
 
 def emit_path(node: ET.Element, inherited_alpha: float, paths: list[str]) -> None:

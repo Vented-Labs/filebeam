@@ -1,7 +1,8 @@
 use crate::{
-    ClientConfig, DriverLimit, InstanceInfo, LinkInspection, NativeRuntime, Result, SavedTransfer,
-    SavedTransferDetails, SecretStoreCallback, ShareLinkPresentation, SourceCallback, SourceKind,
-    TransferJob, Transport, UploadAuthentication, UploadOptions, UploadSource, invalid, operation,
+    ClientConfig, DriverLimit, InstanceInfo, LinkInspection, NativeRuntime, NoteManagementActions,
+    Result, SavedTransfer, SavedTransferDetails, SecretStoreCallback, ShareLinkPresentation,
+    SourceCallback, SourceKind, TransferJob, Transport, UploadAuthentication, UploadOptions,
+    UploadSource, invalid, operation,
 };
 use filebeam_client_core::{self as core, control::TransferSettings, protocol, uploads};
 use std::{path::PathBuf, sync::Arc};
@@ -408,13 +409,47 @@ impl TransferClient {
     }
 
     pub fn revoke_upload(&self, id: String) -> Arc<TransferJob> {
+        let management =
+            core::services::note_management::NoteManagementStore::for_settings(&self.settings);
         self.start_operation(move |control| {
-            protocol::revoke_upload(&id, control).map(|()| Vec::new())
+            if management.contains(&id) {
+                management.action(
+                    &id,
+                    core::services::note_management::NoteManagementAction::Revoke,
+                )
+            } else {
+                protocol::revoke_upload(&id, control)
+            }
+            .map(|()| Vec::new())
         })
     }
 
     pub fn end_live(&self, id: String) -> Arc<TransferJob> {
-        self.start_operation(move |control| protocol::end_live(&id, control).map(|()| Vec::new()))
+        let management =
+            core::services::note_management::NoteManagementStore::for_settings(&self.settings);
+        self.start_operation(move |control| {
+            if management.contains(&id) {
+                management.action(
+                    &id,
+                    core::services::note_management::NoteManagementAction::EndLive,
+                )
+            } else {
+                protocol::end_live(&id, control)
+            }
+            .map(|()| Vec::new())
+        })
+    }
+
+    /// UI-safe note control state. `id` is the only value accepted by end/revoke.
+    pub fn note_management_actions(&self, id: String) -> NoteManagementActions {
+        let management =
+            core::services::note_management::NoteManagementStore::for_settings(&self.settings);
+        let availability = management.availability(&id);
+        NoteManagementActions {
+            id,
+            can_end_live: availability.can_end_live,
+            can_revoke_remote: availability.can_revoke,
+        }
     }
 
     /// Removes local recovery data. It does not revoke the remote share.

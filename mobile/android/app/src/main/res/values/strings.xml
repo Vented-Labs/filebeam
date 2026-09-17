@@ -58,6 +58,9 @@
     <string name="no_transfers">Your transfers will appear here.</string>
     <string name="active_transfers">Active</string>
     <string name="transfer_history">History</string>
+    <string name="all_transfers">All</string>
+    <string name="sent_transfers">Sent</string>
+    <string name="received_transfers">Received</string>
     <string name="no_active_transfers">No active transfers</string>
     <string name="no_active_transfers_detail">Transfers in progress, paused work, and verified output appear here.</string>
     <string name="transfer_history_detail">Recovery entries remain on this device until they are removed.</string>

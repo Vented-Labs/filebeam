@@ -11,6 +11,7 @@ import io.filebeam.android.platform.security.PendingTransferStore
 import io.filebeam.android.platform.storage.DocumentStorage
 import io.filebeam.android.platform.services.AccountSessionRegistry
 import io.filebeam.android.platform.services.AccountService
+import io.filebeam.android.platform.services.NoteContent
 import io.filebeam.android.ui.JobCapabilities
 import io.filebeam.android.platform.services.AccountSessionRegistry.Companion.normalizeOrigin
 import io.filebeam.android.ui.ValidatedRecipient
@@ -217,6 +218,40 @@ class TransferCoordinator(
             }
         }
         return LiveNoteHandle(id, job)
+    }
+
+    /** A note body remains in the native job's RAM-only result, never in a checkpoint or receipt. */
+    suspend fun openNote(instance: String, link: String, password: String?): NoteContent = noteSubmission.withLock {
+        check(!mutable.value.busy && active == null) { context.getString(R.string.work_already_running) }
+        val relayOnly = settings.values.first().relayOnly
+        val id = UUID.randomUUID().toString()
+        val job = withContext(Dispatchers.IO) {
+            accountSessions.service(instance).openNoteJob(link, password?.takeIf(String::isNotBlank), relayOnly)
+        }
+        active = job
+        mutable.update { it.copy(busy = true, phase = "opening-note", message = null,
+            current = CurrentTransfer(id, TransferKind.CONTROL, Transport.WEB_RTC, TransferActions(pause = true))) }
+        try {
+            while (true) {
+                val snapshot = withContext(Dispatchers.IO) { job.snapshot() }
+                mutable.update { it.copy(snapshot = snapshot, phase = snapshot.phase) }
+                if (snapshot.state !in listOf(JobState.RUNNING, JobState.PAUSING)) {
+                    if (snapshot.state != JobState.COMPLETE) error(snapshot.error ?: "Unable to open note")
+                    val opened = withContext(Dispatchers.IO) { job.readNoteResult() }
+                        ?: error("Note verification did not produce a body")
+                    val receipt = TransferReceipt(id, ReceiptState.VERIFIED_PRIVATE, null, "Note verified in memory")
+                    saveReceipt(receipt)
+                    mutable.update { it.copy(receipt = receipt) }
+                    return@withLock NoteContent(opened.id, opened.text, opened.title, opened.language, opened.consumed)
+                }
+                delay(100)
+            }
+            error("Note job loop ended unexpectedly")
+        } finally {
+            job.destroy()
+            if (active === job) active = null
+            mutable.update { it.copy(busy = false, current = null) }
+        }
     }
 
     /** Signals the retained job; `execute()` remains responsible for terminal acknowledgement and cleanup. */

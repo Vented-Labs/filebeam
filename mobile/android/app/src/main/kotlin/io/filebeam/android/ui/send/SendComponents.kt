@@ -37,6 +37,7 @@ import io.filebeam.android.ui.SendDiscoveryState
 import io.filebeam.android.ui.SendInstancePolicy
 import io.filebeam.android.ui.SendLimitStatus
 import io.filebeam.android.ui.recipientConflict
+import io.filebeam.android.ui.transportForDriver
 import io.filebeam.android.ui.design.ActionDock
 import io.filebeam.android.ui.design.ApprovedIcon
 import io.filebeam.android.ui.design.FilebeamSpace
@@ -91,7 +92,7 @@ private fun TransportCard(modifier: Modifier, transport: Transport, title: Strin
     ) {
         Column(Modifier.padding(FilebeamSpace.Medium), verticalArrangement = Arrangement.spacedBy(FilebeamSpace.XSmall)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                ApprovedIcon(if (transport == Transport.HTTP) ApprovedIcon.Transfers else ApprovedIcon.Upload, null)
+                ApprovedIcon(if (transport == Transport.HTTP) ApprovedIcon.Storage else ApprovedIcon.Upload, null)
                 Text(title, Modifier.padding(start = FilebeamSpace.XSmall).weight(1f), style = MaterialTheme.typography.titleLarge)
                 if (selected) Text("✓", style = MaterialTheme.typography.titleMedium)
             }

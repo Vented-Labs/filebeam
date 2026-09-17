@@ -3,6 +3,7 @@
 mod client;
 mod error;
 mod job;
+mod newlinkformatter;
 mod notes;
 mod runtime;
 mod secret_store;
@@ -14,6 +15,7 @@ mod types;
 pub use client::TransferClient;
 pub use error::{ClientError, Result, invalid, operation};
 pub use job::TransferJob;
+pub use newlinkformatter::format_download_with_cli;
 pub use notes::{CreatedNote, NoteRequest, OpenedNote};
 pub use runtime::NativeRuntime;
 pub use secret_store::{SecretStoreCallback, checkpoint_self_test};

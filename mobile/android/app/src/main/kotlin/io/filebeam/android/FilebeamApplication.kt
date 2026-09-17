@@ -14,12 +14,14 @@ import io.filebeam.android.platform.services.NativeTurboService
 import io.filebeam.android.platform.services.AccountSessionRegistry
 import io.filebeam.rust.ClientConfig
 import io.filebeam.rust.NativeRuntime
+import io.filebeam.rust.SecretStoreCallback
+import io.filebeam.android.platform.security.CheckpointSecretStore
 import java.io.File
 
 class FilebeamApplication : Application() {
     val settings by lazy { SettingsStore(this) }
     val nativeRuntime by lazy {
-        NativeRuntime(
+        NativeRuntime.newWithSecretStore(
             ClientConfig(
                 File(noBackupFilesDir, "transfers").absolutePath,
                 128u,
@@ -27,12 +29,17 @@ class FilebeamApplication : Application() {
                 false,
                 BuildConfig.DEBUG,
             ),
+            object : SecretStoreCallback {
+                private val secrets = CheckpointSecretStore(this@FilebeamApplication, File(noBackupFilesDir, "transfers"))
+                override fun loadOrCreate(scope: String): ByteArray = secrets.loadOrCreate(scope)
+                override fun remove(scope: String) = secrets.remove(scope)
+            },
         )
     }
     val accountSessions by lazy { AccountSessionRegistry(BuildConfig.DEBUG, nativeRuntime) }
     val accounts: AccountService by lazy { NativeAccountService(this, accountSessions) }
     val transfers by lazy { TransferCoordinator(this, settings, accountSessions, nativeRuntime, accounts) }
-    val notes: NotesService by lazy { NativeNotesService(accountSessions, { instance, request -> transfers.startLiveNote(instance, request) }, transfers::endLiveNote, transfers::createHttpNote) }
+    val notes: NotesService by lazy { NativeNotesService(accountSessions, { instance, request -> transfers.startLiveNote(instance, request) }, transfers::endLiveNote, transfers::createHttpNote, transfers::openNote) }
     val turbo: TurboService by lazy { NativeTurboService(accountSessions) }
     val inbox: InboxService by lazy { NativeInboxService(accountSessions, accounts, transfers) }
 }

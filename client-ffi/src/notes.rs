@@ -3,7 +3,7 @@ use crate::{Result, TransferJob, operation};
 use filebeam_client_core::services as core;
 use std::{
     path::PathBuf,
-    sync::{Arc, atomic::AtomicBool},
+    sync::{Arc, Mutex, atomic::AtomicBool},
 };
 
 #[derive(Clone, Copy, uniffi::Enum)]
@@ -27,7 +27,6 @@ pub struct NoteRequest {
 pub struct CreatedNote {
     pub id: String,
     pub link: String,
-    pub delete_token: String,
 }
 
 #[derive(Clone, uniffi::Record)]
@@ -37,6 +36,27 @@ pub struct OpenedNote {
     pub title: Option<String>,
     pub language: String,
     pub consumed: bool,
+}
+
+fn note_read_settings(
+    runtime: Option<&Arc<crate::NativeRuntime>>,
+    relay_only: bool,
+) -> filebeam_client_core::control::TransferSettings {
+    let mut settings = runtime.map(|runtime| runtime.settings.clone()).unwrap_or(
+        filebeam_client_core::control::TransferSettings {
+            state_home: PathBuf::from("/tmp/filebeam-notes"),
+            max_concurrency: Some(1),
+            memory_budget: 256 * 1024 * 1024,
+            client_user_agent: None,
+            webrtc_relay_only: relay_only,
+            checkpoint_secret_store: None,
+            source_resolver: None,
+        },
+    );
+    // The request policy is authoritative, including when the process runtime was
+    // created before the user committed a relay-only setting.
+    settings.webrtc_relay_only = relay_only;
+    settings
 }
 
 #[uniffi::export]
@@ -54,7 +74,8 @@ impl NativeServices {
                     .reserve_service_memory(filebeam_client_core::TRANSIENT_MEMORY_ALLOWANCE_BYTES)
             })
             .transpose()?;
-        self.inner
+        let note = self
+            .inner
             .notes()
             .create(core::NoteCreate {
                 text: request.text,
@@ -64,12 +85,23 @@ impl NativeServices {
                 burn_on_read: request.burn_on_read,
                 retention_hours: request.retention_hours,
             })
-            .map(|note| CreatedNote {
-                id: note.id,
-                link: note.link,
-                delete_token: note.delete_token,
-            })
-            .map_err(operation)
+            .map_err(operation)?;
+        let management =
+            filebeam_client_core::services::note_management::NoteManagementStore::for_settings(
+                &self
+                    .runtime
+                    .as_ref()
+                    .map(|runtime| runtime.settings.clone())
+                    .unwrap_or(note_read_settings(None, false)),
+            );
+        self.inner
+            .notes()
+            .save_management(&note, &management)
+            .map_err(operation)?;
+        Ok(CreatedNote {
+            id: note.id,
+            link: note.link,
+        })
     }
 
     pub fn start_live_note(&self, request: NoteRequest) -> Result<Arc<TransferJob>> {
@@ -96,6 +128,11 @@ impl NativeServices {
         };
         let end_requested = Arc::new(AtomicBool::new(false));
         let ending = end_requested.clone();
+        let management = self.runtime.as_ref().map(|runtime| {
+            filebeam_client_core::services::note_management::NoteManagementStore::for_settings(
+                &runtime.settings,
+            )
+        });
         let job = if let Some(runtime) = &self.runtime {
             filebeam_client_core::Job::spawn_in(
                 &runtime.scheduler,
@@ -103,7 +140,7 @@ impl NativeServices {
                 None,
                 move |control| {
                     notes
-                        .create_live(request, control, ending)
+                        .create_live(request, control, ending, management)
                         .map(|note| vec![note.link])
                 },
             )
@@ -111,7 +148,7 @@ impl NativeServices {
             // Compatibility constructor callers retain the historical isolated pool.
             filebeam_client_core::Job::spawn(settings, move |control| {
                 notes
-                    .create_live(request, control, ending)
+                    .create_live(request, control, ending, None)
                     .map(|note| vec![note.link])
             })
         };
@@ -139,5 +176,60 @@ impl NativeServices {
                 consumed: note.consumed,
             })
             .map_err(operation)
+    }
+
+    /// Starts an owned read operation. Direct peer connections require an explicit
+    /// consent response; relay-only reads never request address exposure.
+    pub fn open_note_job(
+        &self,
+        link: String,
+        password: Option<String>,
+        relay_only: bool,
+    ) -> Result<Arc<TransferJob>> {
+        let notes = self.inner.notes().clone();
+        let result = Arc::new(Mutex::new(None));
+        let output = result.clone();
+        let settings = note_read_settings(self.runtime.as_ref(), relay_only);
+        let run = move |control: &filebeam_client_core::control::Control| {
+            let opened = notes
+                .open_controlled(&link, password.as_deref(), Some(control))
+                .map(|note| OpenedNote {
+                    id: note.id,
+                    text: note.text,
+                    title: note.title,
+                    language: note.language,
+                    consumed: note.consumed,
+                })
+                .map_err(|error| error.to_string());
+            *output.lock().unwrap_or_else(|e| e.into_inner()) = Some(opened);
+            Ok(Vec::new())
+        };
+        let job = if let Some(runtime) = &self.runtime {
+            filebeam_client_core::Job::spawn_in(&runtime.scheduler, settings, None, run)
+        } else {
+            filebeam_client_core::Job::spawn(settings, run)
+        };
+        Ok(Arc::new(TransferJob::new_note_read(job, result)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_job_request_policy_overrides_a_stale_runtime_default() {
+        let runtime = Arc::new(
+            crate::NativeRuntime::new(crate::ClientConfig {
+                state_directory: "/tmp/filebeam-note-test".into(),
+                memory_budget_mib: 64,
+                max_concurrency: 1,
+                relay_only: false,
+                allow_http: true,
+            })
+            .unwrap(),
+        );
+        assert!(note_read_settings(Some(&runtime), true).webrtc_relay_only);
+        assert!(!note_read_settings(None, false).webrtc_relay_only);
     }
 }

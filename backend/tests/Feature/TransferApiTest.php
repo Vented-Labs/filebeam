@@ -187,6 +187,28 @@ test('disabling anonymous uploads preserves account-owned transfer continuation'
     ])->assertOk();
 });
 
+test('recipient inbox delivery is intentionally unavailable for notes', function (): void {
+    $recipient = User::factory()->create([
+        'username' => 'note_receiver',
+        'normalized_username' => 'note_receiver',
+        'inbox_enabled' => true,
+    ]);
+    $bundle = \App\Models\AccountKeyBundle::factory()->for($recipient)->create();
+
+    $this->postJson('/api/v1/transfers', [
+        'kind' => 'note',
+        'driver' => 'http',
+        'protocol_version' => 1,
+        'chunk_bytes' => config('filebeam.transfers.chunk_bytes'),
+        'items' => [['ciphertext_bytes' => 16, 'chunk_count' => 1]],
+        'recipient_username' => $recipient->username,
+        'account_key_bundle_id' => $bundle->id,
+    ])->assertUnprocessable()
+        ->assertJsonValidationErrors(['recipient_username']);
+
+    expect(Transfer::query()->count())->toBe(0);
+});
+
 test('upload capabilities are required and chunk retries are idempotent', function () {
     $creation = $this->postJson('/api/v1/transfers', [
         'kind' => 'note',

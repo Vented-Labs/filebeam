@@ -11,7 +11,11 @@
         <!-- Debug-only evidence entry point. It renders the production root and ViewModel. -->
         <activity
             android:name=".FixtureActivity"
-            android:exported="false" />
+            android:exported="false">
+            <meta-data
+                android:name="io.filebeam.android.fixture.CLASSIFICATION"
+                android:value="visual-only presentation fixture; not functional transfer evidence" />
+        </activity>
         <provider
             android:name=".TestDocumentsProvider"
             android:authorities="io.filebeam.android.testdocuments"

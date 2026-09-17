@@ -43,6 +43,7 @@ import io.filebeam.rust.JobState
 @Composable
 fun TransfersScreen(model: FilebeamViewModel, state: TransferUiState, start: (() -> Unit) -> Unit, saveFile: (String) -> Unit, retrySave: (String) -> Unit) {
     var history by remember { mutableStateOf(false) }
+    var direction by remember { mutableStateOf<String?>(null) }
     var expandedId by remember { mutableStateOf<String?>(null) }
     var confirmation by remember { mutableStateOf<TransferConfirmation?>(null) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = FilebeamSpace.Gutter, vertical = FilebeamSpace.Medium), verticalArrangement = Arrangement.spacedBy(FilebeamSpace.Medium)) {
@@ -51,15 +52,20 @@ fun TransfersScreen(model: FilebeamViewModel, state: TransferUiState, start: (()
             FilterChip(!history, { history = false }, label = { Text(stringResource(R.string.active_transfers)) })
             FilterChip(history, { history = true }, label = { Text(stringResource(R.string.transfer_history)) })
         }
+        if (history) Row(horizontalArrangement = Arrangement.spacedBy(FilebeamSpace.XSmall)) {
+            FilterChip(direction == null, { direction = null }, label = { Text(stringResource(R.string.all_transfers)) })
+            FilterChip(direction == "send", { direction = "send" }, label = { Text(stringResource(R.string.sent_transfers)) })
+            FilterChip(direction == "receive", { direction = "receive" }, label = { Text(stringResource(R.string.received_transfers)) })
+        }
         if (!history) {
-            if (state.busy || state.snapshot != null) TransferCard(state, model::pauseTransfer, saveFile)
+            if (state.busy || state.snapshot != null) TransferReceiptContent(state, model::pauseTransfer, saveFile)
             else EmptyErrorState(stringResource(R.string.no_active_transfers), stringResource(R.string.no_active_transfers_detail),
                 stringResource(R.string.transfer_history), false, { history = true })
             if (state.pending && !state.busy) OutlinedButton(onClick = { start(model::resumePendingTransfer) }, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.resume)) }
         } else if (state.saved.isEmpty()) {
             EmptyErrorState(stringResource(R.string.no_transfers), stringResource(R.string.transfer_history_detail),
                 stringResource(R.string.active_transfers), false, { history = false })
-        } else state.saved.forEach { saved ->
+        } else state.saved.filter { direction == null || it.direction.equals(direction, ignoreCase = true) || (direction == "send" && it.direction.equals("upload", ignoreCase = true)) || (direction == "receive" && it.direction.equals("download", ignoreCase = true)) }.forEach { saved ->
             val expanded = expandedId == saved.id
             var details by remember(saved.id) { mutableStateOf<Result<SavedTransferPresentation>?>(null) }
             LaunchedEffect(expanded) {
@@ -96,7 +102,7 @@ fun TransfersScreen(model: FilebeamViewModel, state: TransferUiState, start: (()
 }
 
 @Composable
-private fun TransferCard(state: TransferUiState, pause: () -> Unit, saveFile: (String) -> Unit) {
+fun TransferReceiptContent(state: TransferUiState, pause: () -> Unit, saveFile: (String) -> Unit) {
     val snapshot = state.snapshot
     val clipboard = LocalClipboardManager.current
     ProductionGroupCard(Modifier.fillMaxWidth()) {

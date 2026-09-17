@@ -297,6 +297,7 @@ class FilebeamViewModel(application: Application) : AndroidViewModel(application
             coordinator.message("Validate the recipient before sending")
             return
         }
+        val policy = (activeSendDiscovery as? SendDiscoveryState.Ready)?.policy ?: return
         val driver = sendDraft.driver ?: policy.defaultDriver
         coordinator.upload(UploadRequest(sendDraft.sources.map(SelectedSource::uri), transportForDriver(driver), archive, turboTransfer, passwordProtected,
             retentionHours(retentionHours).getOrNull(), recipients = recipient.username.takeIf(String::isNotBlank)?.let(::listOf) ?: emptyList(), recipient = recipient.identity,

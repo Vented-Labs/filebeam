@@ -117,11 +117,11 @@ impl Job {
                             .collect()
                     },
                 ),
-                Request::Revoke { id } => protocol::revoke_upload(&id, worker).map(|_| vec![id]),
-                Request::EndLive { id } => protocol::end_live(&id, worker).map(|_| vec![id]),
+                Request::Revoke { id } => { let notes = filebeam_client_core::services::note_management::NoteManagementStore::for_root(worker.transfer_home()); if notes.contains(&id) { notes.action(&id, filebeam_client_core::services::note_management::NoteManagementAction::Revoke) } else { protocol::revoke_upload(&id, worker) }.map(|_| vec![id]) },
+                Request::EndLive { id } => { let notes = filebeam_client_core::services::note_management::NoteManagementStore::for_root(worker.transfer_home()); if notes.contains(&id) { notes.action(&id, filebeam_client_core::services::note_management::NoteManagementAction::EndLive) } else { protocol::end_live(&id, worker) }.map(|_| vec![id]) },
                 Request::NoteLive(request) => ServiceClient::new(&instance)?
                     .notes()
-                    .create_live(request, worker, worker.cancelled.clone())
+                    .create_live(request, worker, worker.cancelled.clone(), Some(filebeam_client_core::services::note_management::NoteManagementStore::for_root(worker.transfer_home())))
                     .map(|note| vec![note.link]),
                 Request::Update => worker
                     .phase(Phase::Updating)

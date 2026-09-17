@@ -199,6 +199,7 @@ fn start_live(
             request,
             &worker,
             std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            None,
         )
     });
     let deadline = std::time::Instant::now() + Duration::from_secs(30);
