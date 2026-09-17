@@ -36,7 +36,7 @@
         "iconsax": "0.1.1",
         "typescript": "^6.0.3",
         "vite": "^8.2.2",
-        "vite-plus": "^0.3.0",
+        "vite-plus": "^0.3.2",
         "vue": "^3.5.42",
         "vue-tsc": "^3.3.11"
     },
