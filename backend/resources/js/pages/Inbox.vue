@@ -2,7 +2,7 @@
 import { Head, router } from '@inertiajs/vue3';
 import { ref } from 'vue';
 import { AnimatedReveal, RouteSurface, type FilebeamConfig } from '@filebeam/ui';
-import InboxController from '@/actions/App/Http/Controllers/InboxController';
+import { destroy, show } from '@/routes/inbox';
 import AppLink from '../../../../ui/src/components/primitives/AppLink.vue';
 import Button from '../../../../ui/src/components/primitives/Button.vue';
 import Icon from '../../../../ui/src/components/primitives/Icon.vue';
@@ -30,7 +30,7 @@ async function remove(id: string): Promise<void> {
     removing.value = id;
     error.value = '';
     try {
-        const response = await fetch(InboxController.destroy(id).url, {
+        const response = await fetch(destroy(id).url, {
             method: 'DELETE',
             headers: csrfHeaders(),
         });
@@ -74,7 +74,7 @@ async function remove(id: string): Promise<void> {
                 <li v-for="transfer in transfers" :key="transfer.id" class="inbox-row">
                     <span class="inbox-row__icon"><Icon name="lock" :size="18" /></span>
                     <div class="inbox-row__details">
-                        <AppLink :href="InboxController.show(transfer.id).url" class="fb-text-link"
+                        <AppLink :href="show(transfer.id).url" class="fb-text-link"
                             >{{ transfer.item_count }} encrypted
                             {{ transfer.item_count === 1 ? 'file' : 'files' }}</AppLink
                         >

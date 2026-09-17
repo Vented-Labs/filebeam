@@ -82,6 +82,7 @@ struct SenderSessionWire {
     id: String,
     offer: Option<Description>,
     status: String,
+    #[serde(default)]
     progress: u8,
 }
 #[derive(Deserialize)]

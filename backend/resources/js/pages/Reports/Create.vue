@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Head, useForm } from '@inertiajs/vue3';
 import { RouteSurface } from '@filebeam/ui';
-import FileReportController from '@/actions/App/Http/Controllers/FileReportController';
+import { store } from '@/routes/reports';
 
 defineOptions({ layout: RouteSurface });
 
@@ -19,7 +19,7 @@ const form = useForm({
 });
 
 const submit = (): void => {
-    form.post(FileReportController.store().url);
+    form.post(store().url);
 };
 </script>
 

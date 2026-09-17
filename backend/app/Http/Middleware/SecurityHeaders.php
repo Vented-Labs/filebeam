@@ -24,7 +24,9 @@ class SecurityHeaders
         $response->headers->set('X-Content-Type-Options', 'nosniff');
         $response->headers->set('X-Frame-Options', 'DENY');
         $response->headers->set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
-        $response->headers->set('Cache-Control', 'private, no-store');
+        if (! $response->headers->hasCacheControlDirective('public')) {
+            $response->headers->set('Cache-Control', 'private, no-store');
+        }
 
         if (app()->isProduction()) {
             $nonce = Vite::cspNonce();

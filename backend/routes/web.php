@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\AccountKeyController;
+use App\Http\Controllers\AppleAppSiteAssociationController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\InboxController;
 use App\Http\Controllers\ReceiveController;
@@ -52,6 +53,8 @@ Route::get('/u/{username}', ReceiveController::class)->where('username', '[a-z0-
 if (is_string(config('filebeam.username_domain'))) {
     Route::domain(config('filebeam.username_domain'))->get('/{username}', ReceiveController::class)->where('username', '[a-z0-9_]{3,24}')->name('receive.domain');
 }
+
+Route::get('/.well-known/apple-app-site-association', AppleAppSiteAssociationController::class)->name('apple-app-site-association');
 
 Route::get('/{transferId}', fn (string $transferId): Response => Inertia::render('Transfer', [
     'transferId' => $transferId,

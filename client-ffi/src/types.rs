@@ -135,6 +135,55 @@ pub struct NoteManagementActions {
     pub can_revoke_remote: bool,
 }
 
+/// A file-backed request for an iOS background URLSession. `body_path` is
+/// immutable ciphertext owned by Rust, never source plaintext.
+#[derive(Clone, uniffi::Record)]
+pub struct BackgroundWork {
+    pub operation_id: String,
+    pub transfer_id: String,
+    pub method: String,
+    pub url: String,
+    pub headers: Vec<BackgroundHeader>,
+    pub body_path: String,
+    pub expected_response_bytes: u64,
+}
+
+#[derive(Clone, uniffi::Record)]
+pub struct BackgroundHeader {
+    pub name: String,
+    pub value: String,
+}
+
+#[derive(Clone, uniffi::Record)]
+pub struct BackgroundCapabilities {
+    pub upload: bool,
+    pub download: bool,
+    pub turbo: bool,
+    pub detail: String,
+}
+
+#[derive(Clone, uniffi::Record)]
+pub struct BackgroundStatus {
+    pub state: String,
+    pub needs_execution: bool,
+    pub awaiting_unlock: bool,
+    pub done: u64,
+    pub total: u64,
+    pub direction: String,
+    pub kind: String,
+    pub transport: String,
+    pub remote_id: Option<String>,
+}
+
+/// Authenticated decrypted manifest metadata safe to display in a picker.
+/// It intentionally contains no keys, ciphertext locations, or digests.
+#[derive(Clone, uniffi::Record)]
+pub struct DownloadItem {
+    pub id: String,
+    pub name: String,
+    pub size: u64,
+}
+
 #[derive(Clone, Copy, uniffi::Enum)]
 pub enum JobState {
     Running,

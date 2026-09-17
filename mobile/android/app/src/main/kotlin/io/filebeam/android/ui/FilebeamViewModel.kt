@@ -39,10 +39,13 @@ enum class Destination(val label: Int) {
 }
 
 class FilebeamViewModel(application: Application) : AndroidViewModel(application) {
+    private data class DraftWrite(val send: SendDraft, val note: NoteDraft, val revision: Long)
+
     private val app = application as FilebeamApplication
     private val drafts = EncryptedDraftStore(application)
-    private val draftWrites = Channel<Pair<SendDraft, NoteDraft>>(Channel.CONFLATED)
+    private val draftWrites = Channel<DraftWrite>(Channel.CONFLATED)
     private var draftRevision = 0L
+    private var persistedDraftRevision by mutableStateOf(0L)
     private var recipientRevision = 0L
     val coordinator = app.transfers
     val accounts = app.accounts
@@ -69,6 +72,9 @@ class FilebeamViewModel(application: Application) : AndroidViewModel(application
     /** An unavailable keystore draft is surfaced to the UI; it is never represented as a new empty draft. */
     var draftRestoreError by mutableStateOf<String?>(null)
         private set
+    var draftRestoreComplete by mutableStateOf(false)
+        private set
+    internal val draftsPersisted get() = persistedDraftRevision >= draftRevision
     var link by mutableStateOf("")
     var receiveIngress by mutableStateOf<ReceiveIngress?>(null)
         private set
@@ -102,26 +108,36 @@ class FilebeamViewModel(application: Application) : AndroidViewModel(application
         // Capture before any coroutine can be delayed behind a first user edit.
         val initialRevision = draftRevision
         viewModelScope.launch(Dispatchers.IO) {
-            val restored = drafts.loadResult()
+            val restored = runCatching { drafts.loadResult() }
             withContext(Dispatchers.Main.immediate) {
-                when (restored) {
-                    is DraftLoadResult.Restored -> if (shouldRestoreDraft(initialRevision, draftRevision)) {
-                        runCatching { restore(restored.value) }.onFailure {
-                            draftRestoreError = "A protected draft is invalid and could not be restored."
+                restored.fold(
+                    onSuccess = {
+                        when (it) {
+                            is DraftLoadResult.Restored -> if (shouldRestoreDraft(initialRevision, draftRevision)) {
+                                runCatching { restore(it.value) }.onFailure {
+                                    draftRestoreError = "A protected draft is invalid and could not be restored."
+                                }
+                            }
+                            is DraftLoadResult.Unavailable -> draftRestoreError = "A protected draft could not be restored on this device."
+                            DraftLoadResult.Missing -> Unit
                         }
-                    }
-                    is DraftLoadResult.Unavailable -> draftRestoreError = "A protected draft could not be restored on this device."
-                    DraftLoadResult.Missing -> Unit
-                }
+                    },
+                    onFailure = { draftRestoreError = "A protected draft could not be restored on this device." },
+                )
+                draftRestoreComplete = true
             }
             // Writes submitted while decrypting were buffered by the conflated channel. Reading and
             // writing are therefore serialized through this one coroutine.
-            for ((send, note) in draftWrites) {
-                runCatching { drafts.save(send.toJson().put("note", note.toJson())) }.onFailure {
-                    withContext(Dispatchers.Main.immediate) {
-                        draftRestoreError = "A protected draft could not be saved on this device."
+            for (write in draftWrites) {
+                runCatching { drafts.save(write.send.toJson().put("note", write.note.toJson())) }
+                    .onSuccess {
+                        withContext(Dispatchers.Main.immediate) { persistedDraftRevision = maxOf(persistedDraftRevision, write.revision) }
                     }
-                }
+                    .onFailure {
+                        withContext(Dispatchers.Main.immediate) {
+                            draftRestoreError = "A protected draft could not be saved on this device."
+                        }
+                    }
             }
         }
         viewModelScope.launch { settings.collect {
@@ -337,7 +353,7 @@ class FilebeamViewModel(application: Application) : AndroidViewModel(application
     private fun updateSend(transform: (SendDraft) -> SendDraft) { sendDraft = transform(sendDraft); persistDrafts() }
     private fun persistDrafts() {
         draftRevision++
-        draftWrites.trySend(sendDraft to noteDraft)
+        draftWrites.trySend(DraftWrite(sendDraft, noteDraft, draftRevision))
     }
     private fun restore(value: JSONObject) {
         sendDraft = SendDraft(

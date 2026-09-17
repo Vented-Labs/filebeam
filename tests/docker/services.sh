@@ -30,8 +30,8 @@ ini_volume="$prefix-ini"
 
 # Keep this aligned with the already-pinned CI MinIO release. Service images are
 # explicit releases so a local acceptance run is reproducible.
-minio_image='minio/minio:RELEASE.2025-04-22T22-12-26Z'
-mc_image='minio/mc:RELEASE.2025-03-12T17-29-24Z'
+minio_image='quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z'
+mc_image='quay.io/minio/mc:RELEASE.2025-03-12T17-29-24Z'
 postgres_image='postgres:18.6-trixie'
 caddy_image='caddy:2.10.2-alpine'
 

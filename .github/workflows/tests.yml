@@ -167,6 +167,13 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  ios:
+    name: iOS
+    uses: ./.github/workflows/ios-ci.yml
+    with:
+      # Preserve the validated release ref when this workflow is called.
+      ref: ${{ inputs.ref || github.ref }}
+
   php-static:
     name: PHP static checks
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -470,7 +477,7 @@ jobs:
     # Keep this name in sync with the required GitHub Actions check on master.
     name: Test
     if: always()
-    needs: [frontend, rust, android, php-static, php, sail, small-chunks, distribution]
+    needs: [frontend, rust, android, ios, php-static, php, sail, small-chunks, distribution]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 5
     steps:

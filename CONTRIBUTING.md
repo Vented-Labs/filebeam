@@ -88,6 +88,7 @@ out of version control.
 - Keep storage private and keep changes compatible with SQLite, MySQL/MariaDB, and PostgreSQL unless a change explicitly documents otherwise.
 - We need to support traditional shared hosting as well as more modern (FrankenPHP/Docker) installations 100% on every feature.
 - Do not commit secrets, `.env` files, generated dependencies, build output, runtime state, or local tooling metadata.
+- Keep `docs/` and READMEs focused on durable usage, development, and operations. Put agent instructions, plans, progress reports, test-run results, and temporary issue notes in the ignored `.filebeam/` directory.
 
 Open a focused pull request with tests and documentation appropriate to the behavior changed.
 

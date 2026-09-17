@@ -14,6 +14,7 @@ pub use account::{
 };
 pub use client::ServiceClient;
 pub use notes::{
-    BurnResult, CreatedNote, NoteCreate, NoteMetadata, NoteTransport, NotesService, OpenedNote,
+    BurnResult, CreatedNote, NoteCreate, NoteInspection, NoteMetadata, NoteReceiveOptions,
+    NoteTransport, NotesService, OpenedNote, PendingBurn, ReceivedNote,
 };
 pub use turbo::{DownloadSession, DownloadSessionUpdate, TurboAvailability, TurboService};

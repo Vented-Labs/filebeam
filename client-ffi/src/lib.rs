@@ -1,5 +1,7 @@
 //! Kotlin and Swift control-plane bindings. File contents stay in Rust.
 
+mod activity;
+mod background;
 mod client;
 mod error;
 mod job;
@@ -12,11 +14,16 @@ mod services;
 mod source;
 mod types;
 
+pub use activity::{TransferActivity, TransferActivityRecord};
+pub use background::BackgroundTransfer;
 pub use client::TransferClient;
 pub use error::{ClientError, Result, invalid, operation};
 pub use job::TransferJob;
 pub use newlinkformatter::format_download_with_cli;
-pub use notes::{CreatedNote, NoteRequest, OpenedNote};
+pub use notes::{
+    CreatedNote, ManagedNoteCreate, ManagedNoteReceive, NoteInspection, NoteReceiveRequest,
+    NoteRequest, OpenedNote,
+};
 pub use runtime::NativeRuntime;
 pub use secret_store::{SecretStoreCallback, checkpoint_self_test};
 pub use self_test::{crypto_self_test, webrtc_self_test};

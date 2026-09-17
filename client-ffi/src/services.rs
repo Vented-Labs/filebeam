@@ -127,6 +127,11 @@ pub struct GeneratedAccountKey {
     pub public_key: String,
     pub fingerprint: String,
 }
+#[derive(Clone, uniffi::Record)]
+pub struct NativeInvitation {
+    pub email: Option<String>,
+    pub expires_at: Option<String>,
+}
 
 #[derive(uniffi::Object)]
 pub struct NativeServices {
@@ -360,6 +365,69 @@ impl NativeServices {
                     })
                     .collect()
             })
+    }
+    pub fn account_inbox_unread_count(&self) -> Result<u64> {
+        self.inner
+            .account()
+            .inbox_unread_count()
+            .map(|count| count.count)
+            .map_err(operation)
+    }
+    pub fn account_delete_inbox_item(&self, transfer_id: String) -> Result<()> {
+        self.inner
+            .account()
+            .delete_inbox_item(&transfer_id)
+            .map_err(operation)
+    }
+    pub fn account_policy_json(&self) -> Result<String> {
+        self.inner
+            .account()
+            .policy()
+            .and_then(|value| serde_json::to_string(&value).map_err(Into::into))
+            .map_err(operation)
+    }
+    pub fn account_inspect_invitation(&self, token: String) -> Result<NativeInvitation> {
+        self.inner
+            .account()
+            .invitation(&token)
+            .map(|value| NativeInvitation {
+                email: value.email,
+                expires_at: value.expires_at,
+            })
+            .map_err(operation)
+    }
+    pub fn account_accept_invitation(
+        &self,
+        token: String,
+        username: String,
+        name: Option<String>,
+        email: String,
+        password: String,
+    ) -> Result<AccountSession> {
+        self.inner
+            .account()
+            .accept_invitation(&token, &username, name.as_deref(), &email, &password)
+            .map(account_session)
+            .map_err(operation)
+    }
+    pub fn account_report(
+        &self,
+        transfer_id: String,
+        category: String,
+        description: String,
+        email: Option<String>,
+    ) -> Result<()> {
+        self.inner
+            .account()
+            .report(&transfer_id, &category, &description, email.as_deref())
+            .map_err(operation)
+    }
+    pub fn account_delete(&self, current_password: String, confirmation: String) -> Result<String> {
+        self.inner
+            .account()
+            .delete_account(&current_password, &confirmation)
+            .map(|result| result.status)
+            .map_err(operation)
     }
 
     pub fn account_keys(&self) -> Result<Vec<AccountKeyBundle>> {

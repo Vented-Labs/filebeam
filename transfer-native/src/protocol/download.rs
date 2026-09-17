@@ -12,6 +12,7 @@ use std::{
 };
 
 use crate::checkpoint::Store;
+use crate::http::{ResponseLimits, read_limited};
 use crate::webrtc::{NativePeer, ReceiverSession, Signaling, connect_receiver, request_chunk};
 use anyhow::{Context, Result, bail};
 use base64::Engine;
@@ -35,6 +36,7 @@ const VERSION: u8 = 1;
 const MAX_ATTEMPTS: u32 = 6;
 const BODY_IDLE: Duration = Duration::from_secs(20);
 const LIVE_HEARTBEAT: Duration = Duration::from_secs(2);
+const CONTROL_JSON_LIMIT: usize = 2 * 1024 * 1024;
 
 #[derive(Clone, Serialize, Deserialize)]
 struct DownloadJob {
@@ -60,6 +62,18 @@ struct DownloadJob {
     turbo: Option<TurboJob>,
     output: PathBuf,
     items: Vec<SavedItem>,
+    // `None` preserves pre-selection checkpoints: every manifest item is selected.
+    #[serde(default)]
+    selected_item_ids: Option<Vec<String>>,
+    #[serde(default)]
+    selection_frozen: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct DownloadItem {
+    pub id: String,
+    pub name: String,
+    pub size: u64,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -394,7 +408,33 @@ impl DownloadJob {
         {
             bail!("invalid download checkpoint");
         }
+        if let Some(ids) = &self.selected_item_ids
+            && (ids.is_empty()
+                || ids.iter().collect::<HashSet<_>>().len() != ids.len()
+                || ids
+                    .iter()
+                    .any(|id| !self.items.iter().any(|item| &item.id == id)))
+        {
+            bail!("invalid download item selection");
+        }
+        if self.selection_frozen && self.selected_item_ids.is_none() {
+            bail!("frozen download selection is missing");
+        }
         Ok(())
+    }
+
+    fn selected(&self, item: &SavedItem) -> bool {
+        self.selected_item_ids
+            .as_ref()
+            .is_none_or(|ids| ids.iter().any(|id| id == &item.id))
+    }
+
+    fn selected_total(&self) -> Result<u64> {
+        self.items
+            .iter()
+            .filter(|item| self.selected(item))
+            .try_fold(0u64, |total, item| total.checked_add(item.size))
+            .context("selected download is too large")
     }
 }
 
@@ -417,7 +457,69 @@ pub(super) fn run(
         output.to_path_buf(),
         store,
         control.clone(),
+        false,
     ))
+}
+
+pub(super) fn run_background(
+    instance: &str,
+    raw: &str,
+    output: &Path,
+    control: &Control,
+) -> Result<String> {
+    let parsed = parse_link_for_instance(raw, instance)?;
+    let id = uuid::Uuid::new_v4().to_string();
+    let store = control.create_checkpoint_store(&id)?;
+    let paths = crate::runtime::shared_tokio_runtime().block_on(async_run(
+        parsed,
+        DownloadSource::Public,
+        None,
+        output.to_path_buf(),
+        store,
+        control.clone(),
+        true,
+    ))?;
+    paths
+        .into_iter()
+        .next()
+        .map(|path| path.display().to_string())
+        .context("background download preparation returned no checkpoint id")
+}
+
+pub(super) fn run_inbox_background(
+    instance: &str,
+    transfer_id: &str,
+    working_key: &[u8],
+    cookie: &str,
+    output: &Path,
+    control: &Control,
+) -> Result<String> {
+    if working_key.len() != 32 || cookie.is_empty() || cookie.contains(['\r', '\n']) {
+        bail!("invalid authenticated inbox download credentials");
+    }
+    let parsed = parse_link_for_instance(
+        &format!(
+            "{transfer_id}#k=v1.{}",
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(working_key)
+        ),
+        instance,
+    )?;
+    let id = uuid::Uuid::new_v4().to_string();
+    let store = control.create_checkpoint_store(&id)?;
+    let paths = crate::runtime::shared_tokio_runtime().block_on(async_run(
+        parsed,
+        DownloadSource::Inbox,
+        Some(cookie),
+        output.to_path_buf(),
+        store,
+        control.clone(),
+        true,
+    ))?;
+    paths
+        .into_iter()
+        .next()
+        .map(|path| path.display().to_string())
+        .context("background inbox download preparation returned no checkpoint id")
 }
 
 pub(super) fn run_inbox(
@@ -447,6 +549,7 @@ pub(super) fn run_inbox(
         output.to_path_buf(),
         store,
         control.clone(),
+        false,
     ))
 }
 
@@ -465,6 +568,206 @@ pub(super) fn resume(store: Store, control: &Control) -> Result<Vec<String>> {
         None,
         control.clone(),
     ))
+}
+
+pub(super) fn background_work(
+    store: &Store,
+    cookie: Option<&str>,
+) -> Result<Vec<super::background::BackgroundWork>> {
+    let mut job = store
+        .load::<DownloadJob>()?
+        .context("saved download checkpoint is empty")?;
+    job.checked()?;
+    if job.state != "awaiting-execution" || job.driver != "http" || job.turbo.is_some() {
+        bail!("saved download is not eligible for external HTTP execution");
+    }
+    // Descriptor issuance is the durable boundary after which URLSession may
+    // have started. Legacy callers still get every item by default.
+    if !job.selection_frozen {
+        if job.selected_item_ids.is_none() {
+            job.selected_item_ids = Some(job.items.iter().map(|item| item.id.clone()).collect());
+        }
+        job.total = job.selected_total()?;
+        job.selection_frozen = true;
+        store.save(&job)?;
+    }
+    let cookie = match &job.source {
+        DownloadSource::Public => None,
+        DownloadSource::Inbox => {
+            Some(cookie.context("inbox background download requires a renewed cookie")?)
+        }
+    };
+    let mut work = Vec::new();
+    for (item_index, item) in job.items.iter().enumerate() {
+        if !job.selected(item) {
+            continue;
+        }
+        for index in 0..item.chunk_count {
+            if item.verified[index as usize]
+                || background_cipher_path(store.path(), item_index, index).exists()
+            {
+                continue;
+            }
+            let plain = plaintext_len(item.size, job.chunk_bytes, index);
+            let mut headers = Vec::new();
+            if let Some(cookie) = cookie {
+                if cookie.contains(['\r', '\n']) || cookie.is_empty() {
+                    bail!("invalid authenticated inbox download credentials");
+                }
+                headers.push(super::background::BackgroundHeader {
+                    name: "Cookie".into(),
+                    value: cookie.into(),
+                });
+            }
+            work.push(super::background::BackgroundWork {
+                operation_id: format!("{}:{}:{}", job.id, item.id, index),
+                transfer_id: job.id.clone(),
+                method: "GET".into(),
+                url: chunk_url(
+                    &job.instance,
+                    &job.transfer_id,
+                    &item.id,
+                    index,
+                    &job.source,
+                ),
+                headers,
+                body_path: String::new(),
+                expected_response_bytes: plain + TAG_BYTES,
+            });
+        }
+    }
+    Ok(work)
+}
+
+pub(super) fn ingest_background_completion(
+    store: &Store,
+    operation_id: &str,
+    status: u16,
+    response_headers: &[super::background::BackgroundHeader],
+    response_path: &Path,
+) -> Result<()> {
+    let job = store
+        .load::<DownloadJob>()?
+        .context("saved download checkpoint is empty")?;
+    job.checked()?;
+    if job.state != "awaiting-execution" || job.driver != "http" || job.turbo.is_some() {
+        bail!("saved download is not eligible for external HTTP execution");
+    }
+    if status != StatusCode::OK.as_u16() {
+        bail!("background download did not receive HTTP 200");
+    }
+    let job_id = job.id.clone();
+    let mut match_index = None;
+    for (item_index, item) in job.items.iter().enumerate() {
+        for index in 0..item.chunk_count {
+            if operation_id == format!("{job_id}:{}:{index}", item.id) {
+                match_index = Some((item_index, index));
+                break;
+            }
+        }
+    }
+    let (item_index, index) =
+        match_index.context("background completion does not match a pending download operation")?;
+    if !job.selection_frozen || !job.selected(&job.items[item_index]) {
+        bail!("background completion is not for a selected download item");
+    }
+    if job.items[item_index].verified[index as usize] {
+        return Ok(());
+    }
+    let expected = plaintext_len(job.items[item_index].size, job.chunk_bytes, index) + TAG_BYTES;
+    let length = response_headers
+        .iter()
+        .find(|header| header.name.eq_ignore_ascii_case("content-length"))
+        .context("background download response lacks Content-Length")?
+        .value
+        .parse::<u64>()
+        .context("invalid background Content-Length")?;
+    if length != expected {
+        bail!("background download Content-Length mismatch");
+    }
+    let etag = response_headers
+        .iter()
+        .find(|header| header.name.eq_ignore_ascii_case("etag"))
+        .context("background download response lacks strong ETag")?
+        .value
+        .as_str();
+    if etag.is_empty() || etag.starts_with("W/") || etag.contains(['\r', '\n']) {
+        bail!("background download ETag must be strong");
+    }
+    let metadata =
+        fs::symlink_metadata(response_path).context("inspect background download file")?;
+    if !metadata.file_type().is_file() || metadata.len() != expected {
+        bail!("background download response file length mismatch");
+    }
+    let ciphertext = fs::read(response_path).context("read background download file")?;
+    let name = format!("background-cipher-{item_index}-{index}");
+    let target = background_cipher_path(store.path(), item_index, index);
+    if target.exists() {
+        if fs::read(&target)? != ciphertext {
+            bail!("background download completion conflicts with retained ciphertext");
+        }
+        return Ok(());
+    }
+    store.persist_immutable(&name, &ciphertext)?;
+    Ok(())
+}
+
+pub(super) fn background_items(store: &Store) -> Result<Vec<DownloadItem>> {
+    let job = store
+        .load::<DownloadJob>()?
+        .context("saved download checkpoint is empty")?;
+    job.checked()?;
+    if job.state != "awaiting-execution"
+        || !matches!(job.driver.as_str(), "http" | "webrtc")
+        || job.turbo.is_some()
+    {
+        bail!("saved download is not eligible for item selection");
+    }
+    Ok(job
+        .items
+        .into_iter()
+        .map(|item| DownloadItem {
+            id: item.id,
+            name: item.name,
+            size: item.size,
+        })
+        .collect())
+}
+
+pub(super) fn select_background_items(store: &Store, item_ids: &[String]) -> Result<()> {
+    let mut job = store
+        .load::<DownloadJob>()?
+        .context("saved download checkpoint is empty")?;
+    job.checked()?;
+    if job.state != "awaiting-execution"
+        || !matches!(job.driver.as_str(), "http" | "webrtc")
+        || job.turbo.is_some()
+    {
+        bail!("saved download is not eligible for item selection");
+    }
+    if job.selection_frozen
+        || job
+            .items
+            .iter()
+            .any(|item| item.verified.iter().any(|verified| *verified))
+        || job.items.iter().enumerate().any(|(item, value)| {
+            (0..value.chunk_count)
+                .any(|chunk| background_cipher_path(store.path(), item, chunk).exists())
+        })
+    {
+        bail!("download item selection is frozen after work has started");
+    }
+    if item_ids.is_empty()
+        || item_ids.iter().collect::<HashSet<_>>().len() != item_ids.len()
+        || item_ids
+            .iter()
+            .any(|id| !job.items.iter().any(|item| &item.id == id))
+    {
+        bail!("download item selection must contain unique manifest item ids");
+    }
+    job.selected_item_ids = Some(item_ids.to_vec());
+    job.total = job.selected_total()?;
+    store.save(&job)
 }
 
 pub(super) fn resume_inbox(
@@ -508,6 +811,7 @@ async fn async_run(
     output: PathBuf,
     store: Store,
     control: Control,
+    background: bool,
 ) -> Result<Vec<PathBuf>> {
     let cancel = cancellation_bridge(control.clone());
     let client = async_client(&control, cookie)?;
@@ -605,7 +909,12 @@ async fn async_run(
             .to_string_lossy()
             .into_owned(),
         direction: "download".into(),
-        state: "running".into(),
+        state: if background {
+            "awaiting-execution"
+        } else {
+            "running"
+        }
+        .into(),
         instance: link.instance,
         done: 0,
         total,
@@ -619,10 +928,15 @@ async fn async_run(
         turbo,
         output,
         items,
+        selected_item_ids: None,
+        selection_frozen: false,
     };
     // The checkpoint is durable before network data can arrive.
     store.save(&job)?;
     control.set_checkpoint_id(job.id.clone());
+    if background {
+        return Ok(vec![PathBuf::from(job.id)]);
+    }
     Ok(
         download(store, job, master, client, cancel, control, live_join_token)
             .await?
@@ -707,6 +1021,7 @@ async fn async_resume(
     }
     let transfer_id = job.transfer_id.clone();
     let chunk_bytes = job.chunk_bytes;
+    let selected_ids = job.selected_item_ids.clone();
     for (item_index, (saved, item)) in job.items.iter_mut().zip(&manifest.items).enumerate() {
         if saved.id != item.id
             || saved.size != item.size
@@ -714,6 +1029,12 @@ async fn async_resume(
             || (job.turbo.is_none() && saved.digest != item.digest.value)
         {
             bail!("saved download layout changed");
+        }
+        if selected_ids
+            .as_ref()
+            .is_some_and(|ids| !ids.iter().any(|id| id == &saved.id))
+        {
+            continue;
         }
         if saved.published {
             if !saved.target.is_file() || sha256_file(&saved.target)? != saved.digest {
@@ -744,6 +1065,7 @@ async fn async_resume(
     job.done = job
         .items
         .iter()
+        .filter(|item| job.selected(item))
         .map(|i| {
             i.verified
                 .iter()
@@ -753,8 +1075,63 @@ async fn async_resume(
                 .sum::<u64>()
         })
         .sum();
+    consume_background_ciphertext(&store, &mut job, &master)?;
     store.save(&job)?;
     download(store, job, master, client, cancel, control, live_join_token).await
+}
+
+fn background_cipher_path(base: &Path, item: usize, chunk: u64) -> PathBuf {
+    base.join(format!("background-cipher-{item}-{chunk}"))
+}
+
+/// URLSession writes only ciphertext. It is authenticated here, after a fresh
+/// foreground unlock, before it can affect a verified bit or plaintext output.
+fn consume_background_ciphertext(
+    store: &Store,
+    job: &mut DownloadJob,
+    master: &[u8],
+) -> Result<()> {
+    for item_index in 0..job.items.len() {
+        if !job.selected(&job.items[item_index]) {
+            continue;
+        }
+        for index in 0..job.items[item_index].chunk_count {
+            if job.items[item_index].verified[index as usize] {
+                continue;
+            }
+            let path = background_cipher_path(store.path(), item_index, index);
+            let ciphertext = match fs::read(&path) {
+                Ok(ciphertext) => ciphertext,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error.into()),
+            };
+            let expected = plaintext_len(job.items[item_index].size, job.chunk_bytes, index);
+            if ciphertext.len() as u64 != expected + TAG_BYTES {
+                bail!("background ciphertext length changed");
+            }
+            authenticate_and_write(AuthenticateAndWriteRequest {
+                base: store.path(),
+                item_index,
+                index,
+                chunk_bytes: job.chunk_bytes,
+                transfer_id: &job.transfer_id,
+                item: &job.items[item_index],
+                master,
+                ciphertext,
+                retain_ciphertext: false,
+            })?;
+            job.items[item_index].verified[index as usize] = true;
+            job.done = job
+                .done
+                .checked_add(expected)
+                .context("download progress overflow")?;
+            fs::remove_file(path)?;
+        }
+    }
+    if job.state == "awaiting-execution" {
+        job.state = "running".into();
+    }
+    Ok(())
 }
 
 async fn download(
@@ -766,7 +1143,8 @@ async fn download(
     control: Control,
     live_join_token: Option<String>,
 ) -> Result<Vec<String>> {
-    control.totals(job.total, job.items.len());
+    let selected_count = job.items.iter().filter(|item| job.selected(item)).count();
+    control.totals(job.total, selected_count);
     let configured = control.max_concurrency().unwrap_or(4);
     let slots = concurrency_limit(
         configured,
@@ -819,6 +1197,9 @@ async fn download(
     // queue work on resume, yet still needs the authenticated scratch file
     // published before the job can become complete.
     for item_index in 0..job.items.len() {
+        if !job.selected(&job.items[item_index]) {
+            continue;
+        }
         if job.turbo.is_none()
             && !job.items[item_index].published
             && job.items[item_index].verified.iter().all(|ok| *ok)
@@ -849,7 +1230,7 @@ async fn download(
         .unwrap_or(0);
     for chunk in 0..max_chunks {
         for (item_index, item) in job.items.iter().enumerate() {
-            if chunk < item.chunk_count && !item.verified[chunk as usize] {
+            if job.selected(item) && chunk < item.chunk_count && !item.verified[chunk as usize] {
                 pending.push_back((item_index, chunk));
             }
         }
@@ -1111,6 +1492,9 @@ async fn download(
     if job.turbo.is_some() {
         finalize_turbo_manifest(&client, &mut job, &master, &cancel, &control).await?;
         for item_index in 0..job.items.len() {
+            if !job.selected(&job.items[item_index]) {
+                continue;
+            }
             let store_path = store.path().to_path_buf();
             let item = job.items[item_index].clone();
             tokio::task::spawn_blocking(move || publish_item(&store_path, &item, item_index))
@@ -1136,6 +1520,7 @@ async fn download(
     Ok(job
         .items
         .iter()
+        .filter(|item| job.selected(item))
         .map(|i| i.target.display().to_string())
         .collect())
 }
@@ -1877,11 +2262,17 @@ async fn response_json<T: serde::de::DeserializeOwned>(
     cancel: &CancellationToken,
     label: &str,
 ) -> Result<T> {
-    let body = tokio::select! {
-        _ = cancel.cancelled() => bail!("transfer cancelled"),
-        body = tokio::time::timeout(BODY_IDLE, response.bytes()) => body,
-    }
-    .with_context(|| format!("{label} timed out or could not be read"))??;
+    let body = read_limited(
+        response,
+        ResponseLimits {
+            headers_timeout: BODY_IDLE,
+            body_idle_timeout: BODY_IDLE,
+            maximum_bytes: CONTROL_JSON_LIMIT,
+        },
+        cancel.cancelled(),
+    )
+    .await
+    .with_context(|| format!("{label} timed out or could not be read"))?;
     serde_json::from_slice(&body).with_context(|| format!("invalid {label} JSON"))
 }
 fn async_client(control: &Control, cookie: Option<&str>) -> Result<Client> {
@@ -2066,11 +2457,17 @@ fn sync_parent(path: &Path) -> Result<()> {
 }
 fn completed_paths(job: &DownloadJob) -> Result<Vec<String>> {
     job.checked()?;
-    if job.items.iter().any(|item| !item.published) {
+    if job
+        .items
+        .iter()
+        .filter(|item| job.selected(item))
+        .any(|item| !item.published)
+    {
         bail!("completed download checkpoint has unpublished items");
     }
     job.items
         .iter()
+        .filter(|item| job.selected(item))
         .map(|item| {
             if !item.target.is_file() || sha256_file(&item.target)? != item.digest {
                 bail!("published download target is missing or corrupted");
@@ -2208,6 +2605,159 @@ mod tests {
     }
 
     #[test]
+    fn background_ciphertext_is_staged_then_authenticated_before_progress() {
+        let home = tempfile::tempdir().unwrap();
+        let store = Store::create(home.path(), &uuid::Uuid::new_v4().to_string()).unwrap();
+        let output = home.path().join("output");
+        fs::create_dir(&output).unwrap();
+        let transfer = "01ARZ3NDEKTSV4RRFFQ69G5FAV";
+        let master = [7; 32];
+        let prefix = filebeam_encryption::generate_nonce_prefix().unwrap();
+        let plain = b"background payload";
+        let item = SavedItem {
+            id: "01ARZ3NDEKTSV4RRFFQ69G5FAW".into(),
+            name: "file".into(),
+            size: plain.len() as u64,
+            nonce_prefix: encode(&prefix),
+            chunk_count: 1,
+            digest: hex::encode(Sha256::digest(plain)),
+            target: output.join("file"),
+            verified: vec![false],
+            published: false,
+        };
+        let skipped = SavedItem {
+            id: "01ARZ3NDEKTSV4RRFFQ69G5FAX".into(),
+            name: "unselected-file".into(),
+            size: plain.len() as u64,
+            nonce_prefix: encode(&prefix),
+            chunk_count: 1,
+            digest: hex::encode(Sha256::digest(plain)),
+            target: output.join("unselected-file"),
+            verified: vec![false],
+            published: false,
+        };
+        let key = derive_item_key(&master, transfer, &item.id).unwrap();
+        let cipher = filebeam_encryption::encrypt_chunk(
+            &key,
+            &prefix,
+            0,
+            plain,
+            aad(transfer, &item.id, "0").as_bytes(),
+        )
+        .unwrap();
+        let job = DownloadJob {
+            version: VERSION,
+            id: store
+                .path()
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
+            direction: "download".into(),
+            state: "awaiting-execution".into(),
+            instance: "https://files.example".into(),
+            done: 0,
+            total: plain.len() as u64 * 2,
+            transfer_id: transfer.into(),
+            chunk_bytes: plain.len() as u64,
+            server_concurrency: 1,
+            ranges: false,
+            driver: "http".into(),
+            envelope: "{}".into(),
+            source: DownloadSource::Public,
+            turbo: None,
+            output,
+            items: vec![item, skipped],
+            selected_item_ids: None,
+            selection_frozen: false,
+        };
+        store.save(&job).unwrap();
+        let items = background_items(&store).unwrap();
+        assert_eq!(items.len(), 2);
+        assert!(select_background_items(&store, &[]).is_err());
+        assert!(
+            select_background_items(&store, &[items[0].id.clone(), items[0].id.clone()]).is_err()
+        );
+        assert!(select_background_items(&store, &["unknown".into()]).is_err());
+        select_background_items(&store, &[items[0].id.clone()]).unwrap();
+        let checkpoint_id = store
+            .path()
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        drop(store);
+        let store = Store::open(home.path(), &checkpoint_id).unwrap();
+        let mut work = background_work(&store, None).unwrap();
+        assert_eq!(
+            work.len(),
+            1,
+            "unselected ciphertext must not get a descriptor"
+        );
+        assert!(select_background_items(&store, &[items[1].id.clone()]).is_err());
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/ciphertext", listener.local_addr().unwrap());
+        let served = cipher.clone();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0; 2048];
+            assert!(stream.read(&mut request).unwrap() > 0);
+            stream
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nETag: \"v1\"\r\nConnection: close\r\n\r\n",
+                        served.len()
+                    )
+                    .as_bytes(),
+                )
+                .unwrap();
+            stream.write_all(&served).unwrap();
+        });
+        // This mimics URLSession's file-backed GET: the descriptor itself is
+        // the request authority and Rust consumes only the returned file.
+        work[0].url = url;
+        let response = reqwest::blocking::get(&work[0].url).unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let headers = [
+            super::super::background::BackgroundHeader {
+                name: "Content-Length".into(),
+                value: response
+                    .headers()
+                    .get(CONTENT_LENGTH)
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .into(),
+            },
+            super::super::background::BackgroundHeader {
+                name: "ETag".into(),
+                value: response
+                    .headers()
+                    .get(ETAG)
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .into(),
+            },
+        ];
+        let response_path = home.path().join("response");
+        fs::write(&response_path, response.bytes().unwrap()).unwrap();
+        server.join().unwrap();
+        ingest_background_completion(&store, &work[0].operation_id, 200, &headers, &response_path)
+            .unwrap();
+        assert!(background_work(&store, None).unwrap().is_empty());
+        let mut job = store.load::<DownloadJob>().unwrap().unwrap();
+        consume_background_ciphertext(&store, &mut job, &master).unwrap();
+        assert!(job.items[0].verified[0]);
+        assert!(!job.items[1].verified[0]);
+        assert_eq!(fs::read(plain_path(store.path(), 0)).unwrap(), plain);
+        fs::write(background_cipher_path(store.path(), 0, 0), b"bad").unwrap();
+        job.items[0].verified[0] = false;
+        assert!(consume_background_ciphertext(&store, &mut job, &master).is_err());
+    }
+
+    #[test]
     fn turbo_descriptor_binds_server_item_identity_before_chunks_arrive() {
         let key = vec![7; 32];
         let prefix = filebeam_encryption::generate_nonce_prefix().unwrap();
@@ -2294,6 +2844,8 @@ mod tests {
                 verified: vec![],
                 published: false,
             }],
+            selected_item_ids: None,
+            selection_frozen: false,
         };
         assert!(job.checked().is_err());
     }
@@ -2334,6 +2886,8 @@ mod tests {
                     verified: vec![false],
                     published: false,
                 }],
+                selected_item_ids: None,
+                selection_frozen: false,
             })
             .unwrap();
         drop(store);
@@ -2419,5 +2973,72 @@ mod tests {
         };
         assert!(publish_item(directory.path(), &item, 0).is_err());
         assert_eq!(fs::read(target).unwrap(), b"other");
+    }
+
+    #[test]
+    fn webrtc_metadata_selection_is_durable_without_http_work() {
+        let home = tempfile::tempdir().unwrap();
+        let store = Store::create(home.path(), &uuid::Uuid::new_v4().to_string()).unwrap();
+        let output = home.path().join("output");
+        fs::create_dir(&output).unwrap();
+        let items = vec![
+            SavedItem {
+                id: "first".into(),
+                name: "first.txt".into(),
+                size: 1,
+                nonce_prefix: "nonce".into(),
+                chunk_count: 1,
+                digest: "digest".into(),
+                target: output.join("first.txt"),
+                verified: vec![false],
+                published: false,
+            },
+            SavedItem {
+                id: "second".into(),
+                name: "second.txt".into(),
+                size: 1,
+                nonce_prefix: "nonce".into(),
+                chunk_count: 1,
+                digest: "digest".into(),
+                target: output.join("second.txt"),
+                verified: vec![false],
+                published: false,
+            },
+        ];
+        let job = DownloadJob {
+            version: VERSION,
+            id: store
+                .path()
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
+            direction: "download".into(),
+            state: "awaiting-execution".into(),
+            instance: "https://files.example".into(),
+            done: 0,
+            total: 2,
+            transfer_id: "transfer".into(),
+            chunk_bytes: 1,
+            server_concurrency: 1,
+            ranges: false,
+            driver: "webrtc".into(),
+            envelope: "envelope".into(),
+            source: DownloadSource::Public,
+            turbo: None,
+            output,
+            items,
+            selected_item_ids: None,
+            selection_frozen: false,
+        };
+        store.save(&job).unwrap();
+        let items = background_items(&store).unwrap();
+        select_background_items(&store, &[items[1].id.clone()]).unwrap();
+        let saved = store.load::<DownloadJob>().unwrap().unwrap();
+        assert_eq!(saved.selected_item_ids, Some(vec![items[1].id.clone()]));
+        assert!(
+            background_work(&store, None).is_err(),
+            "WebRTC never exposes HTTP descriptors"
+        );
     }
 }

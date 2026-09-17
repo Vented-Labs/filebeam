@@ -34,10 +34,14 @@ use crate::{
     uploads::DirectoryMode,
 };
 
+pub mod activity;
+pub mod background;
 mod download;
 mod live;
 mod revocation;
 mod upload;
+
+pub use activity::{SenderActivity, SenderActivityRecord};
 
 pub(crate) const PASSWORD_KDF_BYTES: u64 = 64 * 1024 * 1024;
 
@@ -217,7 +221,7 @@ pub fn saved_transfer_details_with_secret_store(
         expires_at: None,
         can_resume: matches!(
             summary.state.as_str(),
-            "paused" | "running" | "preparing" | "sending" | "receiving"
+            "paused" | "running" | "preparing" | "awaiting-execution" | "sending" | "receiving"
         ),
         can_retry_save: !is_upload && verified && !published,
         can_end_live: is_upload && transport == "webrtc" && !ended && has_token("upload_token"),

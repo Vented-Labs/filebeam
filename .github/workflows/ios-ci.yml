@@ -1,0 +1,44 @@
+name: iOS CI
+on:
+  workflow_call:
+    inputs: { ref: { required: false, type: string } }
+permissions: { contents: read }
+concurrency:
+  group: ios-ci-${{ github.event.pull_request.number || inputs.ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  test:
+    name: iOS build and tests (iOS ${{ matrix.os }})
+    runs-on: blacksmith-6vcpu-macos-15
+    timeout-minutes: 55
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: '17', runtime: '17.5' }
+          - { os: '26', runtime: '26.2' }
+    env:
+      IOS_XCODE_VERSION: '26.3'
+      IOS_TEST_OS: ${{ matrix.os }}
+      IOS_TEST_RUNTIME_VERSION: ${{ matrix.runtime }}
+    steps:
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+        with: { persist-credentials: false, ref: '${{ inputs.ref || github.ref }}' }
+      - name: Identify selected Xcode and SDK
+        run: bash scripts/ios/toolchain-id.sh >> "$GITHUB_ENV"
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |-
+            ~/.cargo/registry
+            ~/.cargo/git
+            client-ffi/target/ios
+            mobile/ios/.swiftpm
+            .ios-tools
+          key: ios-${{ matrix.os }}-${{ env.IOS_TOOLCHAIN_ID }}-rust1.98.0-xcodegen2.41.0-${{ hashFiles('client-ffi/**', 'client-core/**', 'encryption/**', 'transfer/**', 'transfer-native/**', 'mobile/ios/**', 'scripts/ios/**') }}
+      - name: Prepare requested iOS simulator
+        run: bash scripts/ios/prepare-simulator.sh
+      - name: Check Rust, domain package, iOS builds, and tests
+        run: bash scripts/ios/check.sh
+      - if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with: { name: 'ios-development-${{ matrix.os }}', path: 'test-results/ios/', if-no-files-found: ignore, retention-days: 7 }
