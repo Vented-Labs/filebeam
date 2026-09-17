@@ -1,0 +1,18 @@
+{
+  "link": "https://filebeam.io/01arz3ndektsv4rrffq69g5fav#k=v1.KGGOo1frIIN3t1kAgQ2STIKjGXOFPKiPBATHBKDpzxY",
+  "manifest": {
+    "version": 1,
+    "items": [
+      {
+        "id": "item",
+        "name": "file",
+        "type": "application/octet-stream",
+        "size": 1,
+        "nonce_prefix": "AAAAAAAAAAAAAAAAAAAAAA",
+        "chunk_count": 1,
+        "digest": { "algorithm": "sha256", "value": "0000000000000000000000000000000000000000000000000000000000000000" }
+      }
+    ]
+  },
+  "server_items": [{ "id": "item", "position": 0, "chunk_count": 1 }]
+}

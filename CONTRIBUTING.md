@@ -48,6 +48,11 @@ Tests run when a PR is opened, updated, or reopened, and on pushes to `master`. 
 
 Frontend build/checks, Rust, and PHP static checks start independently. The compiled frontend is shared with isolated SQLite, MySQL, Sail PostgreSQL/Redis, distribution, and browser jobs. Main browser tests run in two Sail shards with two workers each; small-chunk tests use their own SQLite application. The final `Test` check requires every job and matrix entry to succeed.
 
+Android runs in that required aggregate on every PR, covering changes to the
+shared client, transfer/encryption engine, and `mobile/` without excluding the
+web or CLI jobs. The separate `Android acceptance` workflow is manual-only so
+its optional 4 GiB fixture work is never imposed on ordinary PRs.
+
 ### Blacksmith caching
 
 - Checkouts use `useblacksmith/checkout`, retaining the requested source ref and fetch settings. Container-mounted source checkouts use `dissociate: true` so Git objects remain accessible inside Docker.
@@ -59,6 +64,25 @@ Frontend build/checks, Rust, and PHP static checks start independently. The comp
 Run `actionlint` from the repository root when editing workflows. `.github/actionlint.yaml` declares the Blacksmith runner labels. Shared PHP, Node, Rust, and MinIO setup lives in `.github/actions/`. Third-party actions are pinned to full commit SHAs; add new revisions to the repository's Actions allowlist before running CI.
 
 ## Contribution Rules
+
+### Native Android
+
+Open `mobile/android/` in Android Studio or build with the pinned Linux Docker
+toolchain from the repository root:
+
+```sh
+bash scripts/android/check.sh
+```
+
+The Android check builds real Rust libraries for ARM64, ARMv7, and x86_64,
+generates UniFFI bindings, runs Rust/Kotlin checks, builds debug and R8 release
+APKs, and verifies native-library 16 KiB alignment. See
+[`mobile/android/README.md`](mobile/android/README.md) for device instrumentation
+and the IDE setup. Changes to `client-core/` also require the CLI checks because
+the CLI shares its worker lifecycle. Keep generated bindings and build artifacts
+out of version control.
+
+### General
 
 - Preserve browser encryption: plaintext files, notes, titles, filenames, and manifest metadata must not become API metadata or server logs.
 - Keep storage private and keep changes compatible with SQLite, MySQL/MariaDB, and PostgreSQL unless a change explicitly documents otherwise.

@@ -40,7 +40,7 @@ test('built CLI and browser exchange real encrypted files through the Laravel AP
                 response.request().method() === 'POST' &&
                 new URL(response.url()).pathname === '/api/v1/transfers',
         );
-        await page.getByRole('button', { name: 'Encrypt and share' }).click();
+        await page.getByRole('button', { name: 'Send encrypted' }).click();
         created = (await (await creation).json()).data;
         await expect(page.locator('#share-link')).toBeVisible();
         const link = await page.locator('#share-link').inputValue();

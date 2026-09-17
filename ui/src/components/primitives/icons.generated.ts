@@ -66,6 +66,7 @@ export const iconNames = [
     'sun',
     'moon',
     'monitor',
+    'mobile',
     'info',
     'bell',
     'bell-off',
@@ -209,6 +210,7 @@ export const iconMarkup: Record<IconName, string> = {
     moon: '<g clip-path="url(#clip0_4418_5497)"> <path d="M2.03009 12.42C2.39009 17.57 6.76009 21.76 11.9901 21.99C15.6801 22.15 18.9801 20.43 20.9601 17.72C21.7801 16.61 21.3401 15.87 19.9701 16.12C19.3001 16.24 18.6101 16.29 17.8901 16.26C13.0001 16.06 9.00009 11.97 8.98009 7.13996C8.97009 5.83996 9.24009 4.60996 9.73009 3.48996C10.2701 2.24996 9.62009 1.65996 8.37009 2.18996C4.41009 3.85996 1.70009 7.84996 2.03009 12.42Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/> </g> <defs> <clipPath id="clip0_4418_5497"> <rect width="24" height="24" fill="currentColor"/> </clipPath> </defs>',
     monitor:
         '<g clip-path="url(#clip0_4418_6360)"> <path d="M6.44 2H17.55C21.11 2 22 2.89 22 6.44V12.77C22 16.33 21.11 17.21 17.56 17.21H6.44C2.89 17.22 2 16.33 2 12.78V6.44C2 2.89 2.89 2 6.44 2Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/> <path opacity="0.4" d="M12 17.2207V22.0007" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/> <path opacity="0.4" d="M2 13H22" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/> <path d="M7.5 22H16.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/> </g> <defs> <clipPath id="clip0_4418_6360"> <rect width="24" height="24" fill="currentColor"/> </clipPath> </defs>',
+    mobile: '<path d="M20 7V17C20 21 19 22 15 22H9C5 22 4 21 4 17V7C4 3 5 2 9 2H15C19 2 20 3 20 7Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/> <path opacity="0.4" d="M14 5.5H10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/> <path opacity="0.4" d="M12.0002 19.1C12.8562 19.1 13.5502 18.406 13.5502 17.55C13.5502 16.694 12.8562 16 12.0002 16C11.1442 16 10.4502 16.694 10.4502 17.55C10.4502 18.406 11.1442 19.1 12.0002 19.1Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
     info: '<g clip-path="url(#clip0_4418_6160)"> <path d="M12 22C17.5 22 22 17.5 22 12C22 6.5 17.5 2 12 2C6.5 2 2 6.5 2 12C2 17.5 6.5 22 12 22Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/> <path opacity="0.34" d="M12 8V13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/> <path opacity="0.34" d="M11.9946 16H12.0036" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/> </g> <defs> <clipPath id="clip0_4418_6160"> <rect width="24" height="24" fill="currentColor"/> </clipPath> </defs>',
     bell: '<g clip-path="url(#clip0_655_9532)"> <path d="M20.8896 17.56V16.78C20.8896 16.22 20.5596 15.78 19.9996 15.45L19.2196 15.12C18.7796 15.01 18.4396 14.68 18.4396 14.23L17.7696 7.9C17.5496 6.34 16.5496 5.12 15.0996 4.46L13.6596 3.9C13.2196 3.68 12.8796 3.23 12.7696 2.79L12.5496 2.01H11.4396L11.2196 2.79C11.1096 3.23 10.7796 3.68 10.3296 3.9L8.88961 4.46C7.44961 5.13 6.44961 6.35 6.21961 7.9L5.54961 14.23C5.54961 14.67 5.21961 15.01 4.76961 15.12L3.98961 15.45C3.42961 15.78 3.09961 16.23 3.09961 16.78V17.56H20.8796H20.8896Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/> <path opacity="0.4" d="M7.56055 17.56C7.56055 20 9.56055 22 12.0005 22C14.4405 22 16.4405 20 16.4405 17.56" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/> </g> <defs> <clipPath id="clip0_655_9532"> <rect width="24" height="24" fill="currentColor"/> </clipPath> </defs>',
     'bell-off':
@@ -285,4 +287,4 @@ export const iconMarkup: Record<IconName, string> = {
         '<path fill="currentColor" d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714Z"/>',
 };
 export const iconsaxSourceDigest =
-    'd375ea2788c78f8e810196ba9463c70664108b1ae24bb9eaa547b764fd1ed4fa';
+    'dd3ee74a5958c3661d5f18782a726a3becbb2222fcbb88667d7f36710ef0ebdb';

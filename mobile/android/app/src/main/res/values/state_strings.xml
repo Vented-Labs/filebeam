@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="instance_error_invalid">Enter a valid Filebeam instance origin.</string>
+    <string name="instance_error_check_failed">Could not verify this Filebeam instance.</string>
+    <string name="instance_error_active_transfer">Pause or finish the active transfer before changing the instance.</string>
+    <string name="share_key_review">Review the separate key before copying it.</string>
+    <string name="copy_separate_key">Copy separate key</string>
+</resources>

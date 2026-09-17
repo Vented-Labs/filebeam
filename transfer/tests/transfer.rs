@@ -122,6 +122,45 @@ fn transport_rejects_every_unsupported_server_bound() {
 }
 
 #[test]
+fn portable_link_manifest_and_transport_limits_reject_cross_transport_confusion() {
+    use capabilities::{DriverLimits, select_driver_limits};
+    use link::parse_share_link;
+    use manifest::{Manifest, ManifestServerItem, validate_manifest};
+    use serde::Deserialize;
+    use std::collections::HashMap;
+
+    #[derive(Deserialize)]
+    struct Fixture {
+        link: String,
+        manifest: Manifest,
+        server_items: Vec<ManifestServerItem>,
+    }
+    let fixture: Fixture = serde_json::from_str(include_str!("fixtures/policy.json")).unwrap();
+    let link = parse_share_link(&fixture.link).unwrap();
+    assert_eq!(link.id, "01ARZ3NDEKTSV4RRFFQ69G5FAV");
+    assert!(parse_share_link("550e8400-e29b-41d4-a716-446655440000").is_err());
+    assert!(validate_manifest(&fixture.manifest, "http", 10, &fixture.server_items).is_ok());
+    assert!(validate_manifest(&fixture.manifest, "webrtc", 10, &fixture.server_items).is_err());
+    let mut advertised = HashMap::new();
+    advertised.insert(
+        "webrtc".into(),
+        DriverLimits {
+            maximum_transfer_bytes: Some(8),
+            maximum_file_count: None,
+            maximum_note_bytes: None,
+        },
+    );
+    assert_eq!(
+        select_driver_limits("http", &advertised, Some(2), Some(1)).maximum_transfer_bytes,
+        Some(2)
+    );
+    assert_eq!(
+        select_driver_limits("webrtc", &advertised, Some(2), Some(1)).maximum_transfer_bytes,
+        Some(8)
+    );
+}
+
+#[test]
 fn controller_learns_short_requests_and_respects_cooldown() {
     let mut c = AdaptiveConcurrency::new(4);
     c.observe(600_000, 1_000, 0);

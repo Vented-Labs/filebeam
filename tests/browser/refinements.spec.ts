@@ -47,7 +47,7 @@ async function upload(
             response.url().endsWith('/api/v1/transfers') &&
             response.ok(),
     );
-    await page.getByRole('button', { name: 'Encrypt and share' }).click();
+    await page.getByRole('button', { name: 'Send encrypted' }).click();
     const payload = (await created).json() as Promise<{
         data: { id: string; delete_token: string };
     }>;
@@ -80,7 +80,7 @@ test('keeps independent file and note composers across completed results and res
             response.url().endsWith('/api/v1/transfers') &&
             response.ok(),
     );
-    await page.getByRole('button', { name: 'Encrypt and share' }).click();
+    await page.getByRole('button', { name: 'Send encrypted' }).click();
     const data = (await (await created).json()).data as { id: string; delete_token: string };
     transfers.push({ id: data.id, deleteToken: data.delete_token });
     await expect(page.getByRole('heading', { name: 'Your encrypted link is ready' })).toBeVisible();
@@ -574,7 +574,7 @@ test('copies the full decrypted note from its icon-only header action', async ({
                 response.request().method() === 'POST' &&
                 response.url().endsWith('/api/v1/transfers'),
         );
-        await page.getByRole('button', { name: 'Encrypt and share' }).click();
+        await page.getByRole('button', { name: 'Send encrypted' }).click();
         const { data } = await (await creation).json();
         transfers.push({ id: data.id, deleteToken: data.delete_token });
         await expect(page.locator('#share-link')).toBeVisible();

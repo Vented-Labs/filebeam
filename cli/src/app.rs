@@ -1,17 +1,11 @@
 use std::{
     collections::VecDeque,
     path::PathBuf,
-    sync::{
-        atomic::Ordering,
-        mpsc::{self, Receiver, TryRecvError},
-    },
-    thread,
     time::{Duration, Instant},
 };
 
-use anyhow::Result;
-
 use crate::{config::Config, protocol, update, uploads::DirectoryMode};
+use filebeam_client_core::services::{NoteCreate, ServiceClient};
 #[allow(unused_imports)]
 pub use filebeam_transfer_native::control::{
     Cancelled, Control, PeerConsent, PeerFailed, Phase, Progress, Prompt, PromptKind, SecretKind,
@@ -38,9 +32,28 @@ impl Direction {
 
 pub enum Request {
     Upload(Vec<PathBuf>, DirectoryMode, protocol::UploadOptions),
-    Download { link: String, output: PathBuf },
+    Download {
+        link: String,
+        output: PathBuf,
+    },
+    InboxDownload {
+        id: String,
+        output: PathBuf,
+        key: Vec<u8>,
+        cookie: String,
+    },
+    Revoke {
+        id: String,
+    },
+    EndLive {
+        id: String,
+    },
+    NoteLive(NoteCreate),
     Update,
-    Resume { id: String, direction: Direction },
+    Resume {
+        id: String,
+        direction: Direction,
+    },
 }
 
 impl Request {
@@ -48,85 +61,77 @@ impl Request {
         match self {
             Self::Upload(..) => Direction::Upload,
             Self::Download { .. } => Direction::Download,
+            Self::InboxDownload { .. } => Direction::Download,
+            Self::Revoke { .. } | Self::EndLive { .. } => Direction::Update,
+            Self::NoteLive(..) => Direction::Upload,
             Self::Update => Direction::Update,
             Self::Resume { direction, .. } => *direction,
         }
     }
 }
 
-pub struct Job {
-    pub control: Control,
-    pub prompts: Receiver<Prompt>,
-    pub events: Receiver<TransferEvent>,
-    result: Receiver<Result<Vec<String>>>,
+pub struct Job(filebeam_client_core::Job);
+
+impl std::ops::Deref for Job {
+    type Target = filebeam_client_core::Job;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 impl Job {
     pub fn start(instance: String, config: Config, request: Request) -> Self {
-        let (prompts, receiver) = mpsc::channel();
-        let (event_sender, events) = mpsc::channel();
-        let (sender, result) = mpsc::channel();
-        let control = Control::with_events(
+        Self(filebeam_client_core::Job::spawn(
             TransferSettings {
                 state_home: config.home.join("transfers"),
                 max_concurrency: config.max_concurrency,
                 memory_budget: config.memory_limit_mib * 1024 * 1024,
                 client_user_agent: Some(format!("beam/{}", env!("BEAM_VERSION"))),
                 webrtc_relay_only: config.webrtc_relay_only,
+                checkpoint_secret_store: None,
+                source_resolver: None,
             },
-            prompts,
-            event_sender,
-        );
-        let worker = control.clone();
-        thread::spawn(move || {
-            let outcome = match request {
+            move |worker| {
+                match request {
                 Request::Upload(paths, mode, options) => {
-                    protocol::upload(&instance, &paths, mode, options, &worker)
+                    protocol::upload(&instance, &paths, mode, options, worker)
                         .map(|link| vec![link])
                 }
                 Request::Download { link, output } => {
-                    protocol::download(&instance, &link, &output, &worker).map(|paths| {
+                    protocol::download(&instance, &link, &output, worker).map(|paths| {
                         paths
                             .into_iter()
                             .map(|path| path.display().to_string())
                             .collect()
                     })
                 }
+                Request::InboxDownload {
+                    id,
+                    output,
+                    key,
+                    cookie,
+                } => protocol::download_inbox(&instance, &id, &key, &cookie, &output, worker).map(
+                    |paths| {
+                        paths
+                            .into_iter()
+                            .map(|path| path.display().to_string())
+                            .collect()
+                    },
+                ),
+                Request::Revoke { id } => { let notes = filebeam_client_core::services::note_management::NoteManagementStore::for_root(worker.transfer_home()); if notes.contains(&id) { notes.action(&id, filebeam_client_core::services::note_management::NoteManagementAction::Revoke) } else { protocol::revoke_upload(&id, worker) }.map(|_| vec![id]) },
+                Request::EndLive { id } => { let notes = filebeam_client_core::services::note_management::NoteManagementStore::for_root(worker.transfer_home()); if notes.contains(&id) { notes.action(&id, filebeam_client_core::services::note_management::NoteManagementAction::EndLive) } else { protocol::end_live(&id, worker) }.map(|_| vec![id]) },
+                Request::NoteLive(request) => ServiceClient::new(&instance)?
+                    .notes()
+                    .create_live(request, worker, worker.cancelled.clone(), Some(filebeam_client_core::services::note_management::NoteManagementStore::for_root(worker.transfer_home())))
+                    .map(|note| vec![note.link]),
                 Request::Update => worker
                     .phase(Phase::Updating)
                     .and_then(|_| update::check(&config))
                     .map(|value| vec![value]),
-                Request::Resume { id, .. } => protocol::resume(&id, &worker),
-            };
-            let outcome = if worker.cancelled.load(Ordering::Relaxed) && outcome.is_err() {
-                Err(Cancelled.into())
-            } else {
-                outcome
-            };
-            let _ = sender.send(outcome);
-        });
-        Self {
-            control,
-            prompts: receiver,
-            events,
-            result,
-        }
-    }
-
-    pub fn poll(&self) -> Option<Result<Vec<String>>> {
-        match self.result.try_recv() {
-            Ok(value) => Some(value),
-            Err(TryRecvError::Empty) => None,
-            Err(TryRecvError::Disconnected) => {
-                Some(Err(anyhow::anyhow!("Transfer worker stopped unexpectedly")))
-            }
-        }
-    }
-}
-
-impl Drop for Job {
-    fn drop(&mut self) {
-        self.control.cancel();
+                    Request::Resume { id, .. } => protocol::resume(&id, worker),
+                }
+            },
+        ))
     }
 }
 
@@ -144,6 +149,7 @@ pub struct TransferView {
     last_sample: Instant,
     last_movement: Instant,
     sampled_bytes: u64,
+    generation: u64,
 }
 
 impl TransferView {
@@ -163,12 +169,20 @@ impl TransferView {
             last_sample: now,
             last_movement: now,
             sampled_bytes: 0,
+            generation: 0,
         }
     }
 
     pub fn tick(&mut self, progress: Progress, reduced_motion: bool, now: Instant) {
         if self.finished {
             return;
+        }
+        let generation_changed = progress.generation != self.generation;
+        if generation_changed {
+            self.generation = progress.generation;
+            self.sampled_bytes = progress.wire_bytes;
+            self.last_sample = now;
+            self.rate = 0.0;
         }
         if progress.wire_bytes > self.progress.wire_bytes {
             self.last_movement = now;
@@ -184,6 +198,13 @@ impl TransferView {
             .map(|total| self.progress.done as f64 / total as f64)
             .unwrap_or(0.0)
             .min(0.995);
+        // A checkpoint retry may legitimately restart lower. Within one phase
+        // generation, a lower snapshot is stale/uncommitted display progress.
+        let target = if generation_changed {
+            target
+        } else {
+            target.max(self.ratio)
+        };
         self.ratio = if reduced_motion {
             target
         } else {
@@ -326,5 +347,23 @@ mod tests {
         assert_eq!(Phase::Retrying.label(), "Retrying transfer");
         assert_eq!(Phase::Reconnecting.label(), "Reconnecting");
         assert_eq!(Phase::Storing.label(), "Saving encrypted transfer state");
+    }
+
+    #[test]
+    fn progress_is_monotonic_within_a_phase_and_resets_on_a_new_generation() {
+        let mut view = TransferView::new(Direction::Upload);
+        let start = view.started;
+        let progress = |done, generation| Progress {
+            phase: Phase::Sending,
+            total: Some(100),
+            done,
+            generation,
+            ..Progress::default()
+        };
+        view.tick(progress(80, 1), true, start + Duration::from_secs(1));
+        view.tick(progress(20, 1), true, start + Duration::from_secs(2));
+        assert_eq!(view.ratio, 0.8);
+        view.tick(progress(20, 2), true, start + Duration::from_secs(3));
+        assert_eq!(view.ratio, 0.2);
     }
 }

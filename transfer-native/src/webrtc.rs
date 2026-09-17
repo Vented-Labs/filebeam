@@ -39,7 +39,9 @@ pub const CHANNEL_LABEL: &str = "filebeam";
 pub const CONTROL_LIMIT: usize = 1024;
 pub const FRAME_PAYLOAD_BYTES: usize = 16 * 1024;
 pub const SDP_TIMEOUT: Duration = Duration::from_secs(10);
-pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+/// The signaling protocol has no abort endpoint for a receiver registration,
+/// so bound the whole receiver handshake rather than only its poll interval.
+pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 pub const SIGNALING_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -299,29 +301,71 @@ pub async fn connect_receiver(
     join_token: &str,
     relay_only: bool,
 ) -> Result<(NativePeer, ReceiverSession, Arc<dyn DataChannel>)> {
-    let session = signaling.register(join_token).await?;
-    let peer = NativePeer::new(&session.ice_servers, relay_only).await?;
-    let result = async {
-        let (offer, channel) = peer.offer_channel().await?;
-        signaling.offer(&session, &offer).await?;
-        let started = tokio::time::Instant::now();
+    connect_receiver_cancellable(
+        signaling,
+        join_token,
+        relay_only,
+        Arc::new(AtomicBool::new(false)),
+    )
+    .await
+}
+
+/// Register a receiver and establish its data channel, aborting each signaling
+/// stage when `cancelled` is set. On cancellation or timeout the peer is closed
+/// before this function returns.
+pub async fn connect_receiver_cancellable(
+    signaling: &Signaling,
+    join_token: &str,
+    relay_only: bool,
+    cancelled: Arc<AtomicBool>,
+) -> Result<(NativePeer, ReceiverSession, Arc<dyn DataChannel>)> {
+    let deadline = tokio::time::Instant::now() + CONNECT_TIMEOUT;
+    let session = tokio::select! {
+        session = signaling.register(join_token) => session?,
+        _ = wait_for_cancellation(&cancelled) => bail!("Transfer cancelled"),
+        _ = tokio::time::sleep_until(deadline) => bail!("timed out connecting WebRTC receiver"),
+    };
+    let peer = tokio::select! {
+        peer = NativePeer::new(&session.ice_servers, relay_only) => peer?,
+        _ = wait_for_cancellation(&cancelled) => bail!("Transfer cancelled"),
+        _ = tokio::time::sleep_until(deadline) => bail!("timed out connecting WebRTC receiver"),
+    };
+    let result = tokio::time::timeout_at(deadline, async {
+        let (offer, channel) = tokio::select! {
+            offer = peer.offer_channel() => offer?,
+            _ = wait_for_cancellation(&cancelled) => bail!("Transfer cancelled"),
+        };
+        tokio::select! {
+            result = signaling.offer(&session, &offer) => result?,
+            _ = wait_for_cancellation(&cancelled) => bail!("Transfer cancelled"),
+        }
         loop {
-            let (answer, status) = signaling.receiver_status(&session).await?;
+            let (answer, status) = tokio::select! {
+                status = signaling.receiver_status(&session) => status?,
+                _ = wait_for_cancellation(&cancelled) => bail!("Transfer cancelled"),
+            };
             if let Some(answer) = answer {
-                peer.accept_answer(&answer).await?;
-                wait_for_open(&channel).await?;
+                tokio::select! {
+                    result = peer.accept_answer(&answer) => result?,
+                    _ = wait_for_cancellation(&cancelled) => bail!("Transfer cancelled"),
+                }
+                tokio::select! {
+                    result = wait_for_open(&channel) => result?,
+                    _ = wait_for_cancellation(&cancelled) => bail!("Transfer cancelled"),
+                }
                 return Ok(channel);
             }
             if matches!(status.as_str(), "cancelled" | "completed" | "failed") {
                 bail!("live sender ended the WebRTC session ({status})");
             }
-            if started.elapsed() >= CONNECT_TIMEOUT {
-                bail!("timed out waiting for WebRTC sender");
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_millis(1800)) => {},
+                _ = wait_for_cancellation(&cancelled) => bail!("Transfer cancelled"),
             }
-            tokio::time::sleep(Duration::from_millis(1800)).await;
         }
-    }
-    .await;
+    })
+    .await
+    .context("timed out connecting WebRTC receiver")?;
     match result {
         Ok(channel) => Ok((peer, session, channel)),
         Err(error) => {
@@ -794,6 +838,48 @@ async fn wait_for_open(channel: &Arc<dyn DataChannel>) -> Result<()> {
     .context("timed out opening WebRTC data channel")?
 }
 
+/// An on-device diagnostic for the complete native UDP/ICE/DTLS/data-channel
+/// stack. Kept here so Android and future native hosts exercise the real framing.
+pub fn loopback_self_test() -> Result<bool> {
+    use filebeam_encryption::{
+        decrypt_chunk, encrypt_chunk, generate_nonce_prefix, generate_transfer_key,
+    };
+    crate::runtime::shared_tokio_runtime().block_on(async {
+        let receiver =
+            NativePeer::with_udp_addrs_and_policy(&[], vec!["127.0.0.1:0".into()], false).await?;
+        let sender =
+            NativePeer::with_udp_addrs_and_policy(&[], vec!["127.0.0.1:0".into()], false).await?;
+        let outcome = timeout(CONNECT_TIMEOUT, async {
+            let (offer, channel) = receiver.offer_channel().await?;
+            let answer = sender.answer(&offer).await?;
+            receiver.accept_answer(&answer).await?;
+            let sending = sender.receiver_channel().await?;
+            wait_for_open(&channel).await?;
+            wait_for_open(&sending).await?;
+            let key = generate_transfer_key()?;
+            let prefix = generate_nonce_prefix()?;
+            let plain = vec![0x59; FRAME_PAYLOAD_BYTES + 17];
+            let cipher = encrypt_chunk(&key, &prefix, 0, &plain, b"native-self-test")?;
+            let length = cipher.len() as u64;
+            let serving = tokio::spawn(serve_channel(
+                sending,
+                HashMap::from([(("probe".into(), 0), cipher)]),
+            ));
+            let received = request_chunk(channel.clone(), 1, "probe".into(), 0, length).await?;
+            channel.close().await?;
+            let _ = serving.await?;
+            Ok::<_, anyhow::Error>(
+                decrypt_chunk(&key, &prefix, 0, &received, b"native-self-test")? == plain,
+            )
+        })
+        .await
+        .context("local WebRTC diagnostic timed out")?;
+        receiver.close().await;
+        sender.close().await;
+        outcome
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -896,6 +982,20 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[tokio::test]
+    async fn receiver_connect_honors_cancellation_before_signaling() -> Result<()> {
+        let cancelled = Arc::new(AtomicBool::new(true));
+        let signaling = Signaling::new(Client::new(), "http://127.0.0.1:9", "transfer")?;
+        let started = tokio::time::Instant::now();
+        let error = match connect_receiver_cancellable(&signaling, "join", false, cancelled).await {
+            Ok(_) => bail!("cancelled receiver started signaling"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("Transfer cancelled"));
+        assert!(started.elapsed() < Duration::from_secs(1));
+        Ok(())
     }
 
     #[tokio::test]

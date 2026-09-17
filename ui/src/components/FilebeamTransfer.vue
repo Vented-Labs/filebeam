@@ -367,8 +367,12 @@ function makeOutgoingInert(element: Element): void {
                                 driver: download.transfer.value.driver ?? 'http',
                                 available:
                                     !download.burned.value &&
-                                    download.transfer.value.status !== 'pending' &&
-                                    download.transfer.value.status !== 'ended',
+                                    download.transfer.value.status !== 'ended' &&
+                                    (download.transfer.value.status !== 'pending' ||
+                                        download.turbo.value),
+                                pending: download.transfer.value.status === 'pending',
+                                // A true turbo value means the authenticated early descriptor was accepted.
+                                turbo: download.turbo.value,
                                 expiresAt: download.transfer.value.expires_at,
                                 inbox: Boolean(inbox),
                                 burnOnRead: download.transfer.value.burn_on_read,

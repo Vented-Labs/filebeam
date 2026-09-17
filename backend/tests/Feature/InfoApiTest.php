@@ -42,6 +42,10 @@ test('anonymous clients receive the effective default transfer configuration', f
             'transfer_capabilities' => ['upload_status' => true, 'download_ranges' => true],
             'maximum_transfer_bytes' => 123_456,
             'maximum_file_count' => 4,
+            'transport_limits' => [
+                'http' => ['maximum_transfer_bytes' => 123_456, 'maximum_file_count' => 4, 'maximum_note_bytes' => 1_048_576],
+                'webrtc' => ['maximum_transfer_bytes' => 987_654, 'maximum_file_count' => 9, 'maximum_note_bytes' => 1_048_576],
+            ],
             'file_retention_hours' => 12,
             'file_retention_options' => [1, 6, 12, 24, 72, 168],
         ]]);

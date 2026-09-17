@@ -100,7 +100,7 @@ test.describe('WebRTC live transfers', () => {
         }
         if (options.password) await setSenderPassword(page, options.password);
         await chooseDriver(page, 'webrtc');
-        await clickWithRisk(page, page.getByRole('button', { name: 'Encrypt and share' }));
+        await clickWithRisk(page, page.getByRole('button', { name: 'Send encrypted' }));
         await expect(
             page.getByRole('heading', { name: 'Your live transfer is ready' }),
         ).toBeVisible({
@@ -174,7 +174,7 @@ test.describe('WebRTC live transfers', () => {
         await page
             .locator('#share-link')
             .evaluate((node) => Object.assign(window, { cliLiveLink: node }));
-        await page.locator('.fb-header').getByRole('button', { name: 'Install CLI' }).click();
+        await page.locator('.cli-footer-launcher').click();
         await expect(page.getByRole('dialog', { name: 'Install CLI', exact: true })).toBeVisible();
         await page.keyboard.press('Escape');
         await expect(page.locator('#share-link')).toHaveValue(live.link);
@@ -183,7 +183,7 @@ test.describe('WebRTC live transfers', () => {
                 .locator('#share-link')
                 .evaluate((node) => node === (window as any).cliLiveLink),
         ).toBe(true);
-        await expect(page.getByRole('textbox', { name: 'Download command' })).toHaveCount(0);
+        await expect(page.getByRole('textbox', { name: 'Download command' })).toHaveCount(1);
 
         const recipient = await newPage(browser, () => {
             const Original = window.RTCPeerConnection;
@@ -198,8 +198,7 @@ test.describe('WebRTC live transfers', () => {
         });
         await unlockLive(recipient, live.link, live.key);
         const cli = recipient.getByRole('region', { name: 'Download with CLI' });
-        await expect(cli).toContainText('Use the browser for this live transfer');
-        await expect(cli.getByRole('textbox')).toHaveCount(0);
+        await expect(cli.getByRole('textbox')).toHaveValue(`beam down '${live.link}'`);
         await cli.getByRole('button', { name: 'Install CLI' }).click();
         await expect(
             recipient.getByRole('dialog', { name: 'Install CLI', exact: true }),

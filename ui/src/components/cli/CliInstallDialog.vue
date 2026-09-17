@@ -65,8 +65,11 @@ function selectPlatformWithKeyboard(event: KeyboardEvent): void {
 }
 const examples = [
     { command: 'beam', description: 'Interactive TUI' },
-    { command: 'beam up <files...>', description: 'Upload via terminal' },
-    { command: 'beam down <url or ulid>', description: 'Download via terminal' },
+    { command: 'beam up <files...>', description: 'Send HTTP, Turbo, or live WebRTC files' },
+    {
+        command: 'beam down <url or ulid>',
+        description: 'Receive stored, Turbo, or live file links',
+    },
 ];
 </script>
 

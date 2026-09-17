@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="note_recipient_delivery_unavailable">Notes are shared by link. Inbox username delivery supports files only.</string>
+</resources>

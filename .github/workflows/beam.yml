@@ -12,6 +12,7 @@ on:
   pull_request:
     paths:
       - 'cli/**'
+      - 'client-core/**'
       - 'transfer/**'
       - 'transfer-native/**'
       - 'transfer-wasm/**'

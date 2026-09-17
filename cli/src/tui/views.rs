@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Block, Paragraph, Sparkline, Widget, Wrap},
 };
 
-use super::state::{Entry, Focus, Mode, State};
+use super::state::{Entry, Focus, Mode, NativeAction, State};
 use crate::{
     app::{Direction, Phase, PromptKind},
     input::Input,
@@ -62,7 +62,15 @@ pub fn render(
         transfers(body, buffer, state, theme)
     };
     footer_view(footer, buffer, state, theme);
-    if state.help {
+    if state.palette {
+        state.hyperlink = None;
+        dim(area, buffer, theme);
+        cursor = palette(area, buffer, state, theme);
+    } else if state.native.is_some() {
+        state.hyperlink = None;
+        dim(area, buffer, theme);
+        cursor = native_form(area, buffer, state, theme);
+    } else if state.help {
         state.hyperlink = None;
         dim(area, buffer, theme);
         help(area, buffer, theme);
@@ -233,12 +241,12 @@ fn send(area: Rect, buffer: &mut Buffer, state: &mut State, theme: Theme) -> Opt
         Block::default()
             .style(Style::default().bg(theme.raised()))
             .render(tray, buffer);
-        let action_width = 26.min(tray.width / 2);
+        let action_width = tray.width / 2;
         paint::line(
             Rect::new(
                 tray.x + 2,
                 tray.y + u16::from(tray.height > 2),
-                tray.width.saturating_sub(action_width + 3),
+                tray.width.saturating_sub(action_width * 2 + 3),
                 1,
             ),
             buffer,
@@ -251,17 +259,16 @@ fn send(area: Rect, buffer: &mut Buffer, state: &mut State, theme: Theme) -> Opt
                 theme.strong(),
             ),
         );
-        paint::button(
+        send_actions(
             Rect::new(
-                tray.right() - action_width,
+                tray.right() - action_width * 2,
                 tray.y,
-                action_width,
+                action_width * 2,
                 tray.height,
             ),
             buffer,
+            state,
             theme,
-            "Send encrypted  ↵",
-            state.focus == Focus::Action,
         );
         cursor
     }
@@ -565,17 +572,40 @@ fn queue(area: Rect, buffer: &mut Buffer, state: &mut State, theme: Theme) {
             Line::styled(limits, theme.dim()),
         );
     }
-    paint::button(
+    send_actions(
         at(inner, inner.height.saturating_sub(4), 3),
         buffer,
+        state,
         theme,
-        "Send encrypted  ↵",
-        state.focus == Focus::Action,
     );
     paint::line(
         at(inner, inner.height.saturating_sub(1), 1),
         buffer,
         Line::styled("Only your link can unlock it.", theme.dim()),
+    );
+}
+
+fn send_actions(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) {
+    let gap = u16::from(area.width >= 54);
+    let left_width = (area.width.saturating_sub(gap)) / 2;
+    paint::button(
+        Rect::new(area.x, area.y, left_width, area.height),
+        buffer,
+        theme,
+        "Send Encrypted  ↵",
+        state.focus == Focus::Action,
+    );
+    paint::button(
+        Rect::new(
+            area.x + left_width + gap,
+            area.y,
+            area.width.saturating_sub(left_width + gap),
+            area.height,
+        ),
+        buffer,
+        theme,
+        "Turbo Transfer  Shift+↵",
+        state.focus == Focus::Action,
     );
 }
 
@@ -1005,6 +1035,18 @@ fn footer_view(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) {
             ("↑↓", "scroll"),
             ("q", "finish"),
         ]
+    } else if state.palette {
+        vec![
+            ("↑↓", "choose native action"),
+            ("Enter", "open form"),
+            ("Esc", "close"),
+        ]
+    } else if state.native.is_some() {
+        vec![
+            ("Tab", "next field"),
+            ("Enter", "run native action"),
+            ("Esc", "cancel"),
+        ]
     } else if state.searching {
         vec![("Enter", "apply search"), ("Esc", "clear")]
     } else if state.mode == Mode::Receive {
@@ -1018,9 +1060,11 @@ fn footer_view(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) {
     } else {
         vec![
             ("Space", "select"),
-            ("u", "send"),
+            ("Enter", "send encrypted"),
+            ("Shift+Enter", "Turbo transfer"),
             ("Tab", "focus"),
             ("/", "search"),
+            ("p", "native services"),
             ("?", "help"),
         ]
     };
@@ -1064,12 +1108,20 @@ fn help(area: Rect, buffer: &mut Buffer, theme: Theme) {
         ("Your keyboard, a little more powerful.", ""),
         ("", ""),
         ("1 / 2 / 3", "Send files / receive a link / saved transfers"),
+        (
+            "p",
+            "Native notes, account, inbox, recipient, end and revoke",
+        ),
         ("Tab / Shift+Tab", "Move between panels or form fields"),
         ("↑↓ / j k", "Move through files"),
         ("Space", "Add or remove a file"),
         ("Enter / Backspace", "Open folder / go to parent"),
         ("/  then type", "Search files (Enter applies, Esc clears)"),
         (". / Ctrl+R", "Hidden files / refresh directory"),
+        (
+            "Enter / Shift+Enter",
+            "Send encrypted / Turbo transfer (supported terminals)",
+        ),
         ("u / U", "Send selected files / update beam"),
         ("c", "Copy a completed result via terminal clipboard"),
         ("Ctrl+C", "Cancel active transfer, or exit when idle"),
@@ -1085,6 +1137,91 @@ fn help(area: Rect, buffer: &mut Buffer, theme: Theme) {
             ]),
         );
     }
+}
+
+fn palette(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) -> Option<(u16, u16)> {
+    let inner = paint::card(centered(area, 74, 24), buffer, theme, true);
+    paint::line(
+        at(inner, 0, 1),
+        buffer,
+        Line::styled("Native services", theme.strong().fg(theme.accent())),
+    );
+    paint::line(
+        at(inner, 1, 1),
+        buffer,
+        Line::styled(
+            "Typed Filebeam actions. Nothing is passed to a shell or browser.",
+            theme.dim(),
+        ),
+    );
+    let capacity = inner.height.saturating_sub(4) as usize;
+    let start = state
+        .palette_cursor
+        .saturating_sub(capacity.saturating_sub(1));
+    for (row, action) in NativeAction::ALL
+        .iter()
+        .skip(start)
+        .take(capacity)
+        .enumerate()
+    {
+        let selected = start + row == state.palette_cursor;
+        paint::line(
+            at(inner, row as u16 + 3, 1),
+            buffer,
+            Line::styled(
+                format!("{} {}", if selected { ">" } else { " " }, action.label()),
+                if selected {
+                    theme.strong().fg(theme.accent()).bg(theme.selected())
+                } else {
+                    theme.dim()
+                },
+            ),
+        );
+    }
+    None
+}
+
+fn native_form(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) -> Option<(u16, u16)> {
+    let form = state.native.as_ref()?;
+    let height = (form.fields.len() as u16 * 3 + 7).min(area.height.saturating_sub(2));
+    let inner = paint::card(centered(area, 76, height), buffer, theme, true);
+    paint::line(
+        at(inner, 0, 1),
+        buffer,
+        Line::styled(form.action.label(), theme.strong().fg(theme.accent())),
+    );
+    let fields = form.action.fields();
+    let mut cursor = None;
+    for (index, input) in form.fields.iter().enumerate() {
+        let row = 2 + index as u16 * 3;
+        if row + 1 >= inner.height {
+            break;
+        }
+        let (label, masked) = fields[index];
+        paint::line(at(inner, row, 1), buffer, Line::styled(label, theme.dim()));
+        let active = index == form.field;
+        let field_cursor = field(
+            at(inner, row + 1, 1),
+            buffer,
+            input,
+            theme,
+            masked,
+            "",
+            active,
+        );
+        if active {
+            cursor = field_cursor;
+        }
+    }
+    paint::line(
+        at(inner, inner.height.saturating_sub(1), 1),
+        buffer,
+        Line::styled(
+            "Enter runs when on the last field. Passwords are masked and never logged.",
+            theme.dim(),
+        ),
+    );
+    cursor
 }
 
 fn secret(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) -> Option<(u16, u16)> {
@@ -1213,6 +1350,21 @@ mod tests {
         let text: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
         assert!(text.contains("file-79.txt"));
         assert!(state.scroll > 0);
+    }
+
+    #[test]
+    fn send_form_exposes_both_transfer_actions() {
+        let directory = tempfile::tempdir().unwrap();
+        let config = Config::default();
+        let mut state =
+            State::new(&config, "http://localhost:8000", directory.path().into()).unwrap();
+        state.focus = Focus::Action;
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 120, 36));
+        render(buffer.area, &mut buffer, &mut state, Theme::fixture());
+        let text: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+        assert!(text.contains("Send Encrypted"));
+        assert!(text.contains("Turbo Transfer"));
+        assert!(text.contains("Shift+"));
     }
 
     #[test]

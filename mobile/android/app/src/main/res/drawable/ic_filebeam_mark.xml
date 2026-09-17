@@ -1,0 +1,8 @@
+<!-- Folded Filebeam mark geometry from backend/public/brand/filebeam-mark.svg. Semantic tint is supplied by Compose. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="34dp" android:viewportWidth="200" android:viewportHeight="280">
+    <path android:fillColor="#000000" android:pathData="M30,83L156,21C169,15 184,23 184,38L184,60C184,75 181,81 169,87L97,123L161,152L95,184C106,189 109,196 109,209L109,243C109,257 100,266 86,260L32,234C21,229 16,221 16,209L16,105C16,95 21,87 30,83Z"/>
+    <path android:fillColor="#000000" android:fillAlpha="0.72" android:pathData="M30,83C21,87 16,95 16,105L16,176C16,168 20,163 28,159L97,123L30,91C24,88 24,86 30,83Z"/>
+    <path android:fillColor="#000000" android:pathData="M30,83L156,21C169,15 184,23 184,38L184,60C184,75 181,81 169,87L97,123L30,91C24,88 24,86 30,83Z"/>
+    <path android:fillColor="#000000" android:fillAlpha="0.86" android:pathData="M28,159L97,123L161,152L95,184Z"/>
+    <path android:fillColor="#000000" android:fillAlpha="0.92" android:pathData="M28,159L95,184C106,189 109,196 109,209L109,243C109,257 100,266 86,260L32,234C21,229 16,221 16,209L16,176C16,168 20,163 28,159Z"/>
+</vector>

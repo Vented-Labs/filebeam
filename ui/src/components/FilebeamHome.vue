@@ -67,6 +67,7 @@ const webRtcSupported = typeof RTCPeerConnection !== 'undefined';
 const dragDepth = ref(0);
 const deleting = ref(false);
 const transferDeletedToastOpen = ref(false);
+let keyboardSubmitInFlight = false;
 const filesUpload = useEncryptedUpload(() => props.config, driver);
 const noteUpload = useEncryptedUpload(() => props.config, driver);
 const activeUpload = computed(() => (mode.value === 'files' ? filesUpload : noteUpload));
@@ -337,6 +338,36 @@ function preventFileNavigation(event: DragEvent): void {
 function resetDraggingOnHidden(): void {
     if (document.visibilityState !== 'visible') resetDragging();
 }
+function isEditableTarget(target: EventTarget | null): boolean {
+    const element = target instanceof Element ? target : undefined;
+    return Boolean(
+        element?.closest(
+            'input, textarea, select, button, [contenteditable="true"], [role="textbox"]',
+        ),
+    );
+}
+async function submitWithKeyboard(event: KeyboardEvent): Promise<void> {
+    if (
+        event.defaultPrevented ||
+        event.repeat ||
+        event.key !== 'Enter' ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        mode.value !== 'files' ||
+        !canUpload.value ||
+        keyboardSubmitInFlight ||
+        isEditableTarget(event.target)
+    )
+        return;
+    event.preventDefault();
+    keyboardSubmitInFlight = true;
+    try {
+        await submit(event.shiftKey);
+    } finally {
+        keyboardSubmitInFlight = false;
+    }
+}
 onMounted(() => {
     window.addEventListener('dragenter', onDragEnter);
     window.addEventListener('dragleave', onDragLeave);
@@ -345,6 +376,7 @@ onMounted(() => {
     window.addEventListener('dragend', resetDragging);
     window.addEventListener('blur', resetDragging);
     document.addEventListener('visibilitychange', resetDraggingOnHidden);
+    window.addEventListener('keydown', submitWithKeyboard);
     window.addEventListener('filebeam:home', goToFiles);
 });
 onBeforeUnmount(() => {
@@ -355,6 +387,7 @@ onBeforeUnmount(() => {
     window.removeEventListener('dragend', resetDragging);
     window.removeEventListener('blur', resetDragging);
     document.removeEventListener('visibilitychange', resetDraggingOnHidden);
+    window.removeEventListener('keydown', submitWithKeyboard);
     window.removeEventListener('filebeam:home', goToFiles);
 });
 </script>

@@ -113,7 +113,8 @@ class API(http.server.BaseHTTPRequestHandler):
             STATE.update(items=items, chunks={})
             STATE.pop("manifest", None)
             self.respond(201, dict(id=ID, share_url=f"/{ID}", driver="http", chunk_bytes=CHUNK,
-                                   items=items, upload_token="test-upload-token"))
+                                   items=items, upload_token="test-upload-token",
+                                   delete_token="test-delete-token"))
         elif self.path.endswith("/complete"):
             STATE["manifest"] = data["encrypted_manifest"]
             self.respond(200, {})

@@ -1,4 +1,8 @@
-use std::{future::Future, sync::Arc, time::Duration};
+use std::{
+    future::Future,
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 
 use anyhow::{Result, bail};
 use filebeam_transfer::{retry_delay_ms, retryable_status};
@@ -7,6 +11,20 @@ use tokio::{
     time::sleep,
 };
 use tokio_util::sync::CancellationToken;
+
+/// Process-owned Tokio runtime for synchronous native entry points. Operations
+/// share drivers and blocking capacity instead of creating a runtime per call.
+pub fn shared_tokio_runtime() -> &'static tokio::runtime::Runtime {
+    static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+    RUNTIME.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .max_blocking_threads(4)
+            .enable_all()
+            .build()
+            .expect("shared native Tokio runtime must initialize")
+    })
+}
 
 /// Aggregate limits, rather than one limit per item, prevent large selections
 /// from multiplying memory, disk IO, or open sockets.
