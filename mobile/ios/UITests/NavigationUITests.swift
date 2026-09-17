@@ -1,7 +1,7 @@
 import XCTest
 
 final class NavigationUITests: XCTestCase {
-    func testFivePrimaryTabsAreReachable() {
+    @MainActor func testFivePrimaryTabsAreReachable() {
         let app = XCUIApplication()
         app.launch()
         for tab in ["Send", "Receive", "Transfers", "Inbox", "Settings"] {
@@ -10,7 +10,7 @@ final class NavigationUITests: XCTestCase {
         }
     }
 
-    func testReceiveDraftSurvivesTabSwitch() {
+    @MainActor func testReceiveDraftSurvivesTabSwitch() {
         let app = XCUIApplication()
         app.launch()
         app.tabBars.buttons["Receive"].tap()

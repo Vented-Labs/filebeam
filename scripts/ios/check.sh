@@ -16,5 +16,5 @@ for crate in client-core client-ffi; do
 done
 swift test --package-path "$ios_root/Packages/FilebeamDomain"
 bash "$root/scripts/ios/build.sh" Debug simulator
-bash "$root/scripts/ios/build.sh" Release device
 bash "$root/scripts/ios/test.sh"
+bash "$root/scripts/ios/build.sh" Release device

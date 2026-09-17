@@ -1,7 +1,7 @@
 import XCTest
 
 final class PeerAcceptanceTests: XCTestCase {
-    func testHTTPSFixtureDownloadsThroughExplicitOriginConfirmation() throws {
+    @MainActor func testHTTPSFixtureDownloadsThroughExplicitOriginConfirmation() throws {
         guard let link = ProcessInfo.processInfo.environment["FILEBEAM_ACCEPTANCE_HTTPS_LINK_FIXTURE"], link.hasPrefix("https://") else {
             throw XCTSkip("A securely supplied HTTPS fixture is required.")
         }
@@ -14,11 +14,13 @@ final class PeerAcceptanceTests: XCTestCase {
         field.typeText(link)
         app.buttons["Download and verify"].tap()
         XCTAssertTrue(app.staticTexts["Transfer from another instance"].waitForExistence(timeout: 20) || app.staticTexts["Ready to receive"].exists)
-        app.buttons["Download and verify"].lastMatch.tap()
+        let confirm = app.navigationBars["Receive transfer"].buttons["Download and verify"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        confirm.tap()
         XCTAssertTrue(app.staticTexts["Verified on this device"].waitForExistence(timeout: 180), "The fixture did not complete native decrypt-and-verify")
     }
 
-    func testReceiveDraftStillRetainsTypedInputAcrossTabs() {
+    @MainActor func testReceiveDraftStillRetainsTypedInputAcrossTabs() {
         let app = XCUIApplication()
         app.launch()
         app.tabBars.buttons["Receive"].tap()
