@@ -14,7 +14,7 @@ jobs:
     outputs:
       commit: ${{ steps.tag.outputs.commit }}
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: refs/heads/master
@@ -38,7 +38,7 @@ jobs:
     environment: ios-release
     timeout-minutes: 45
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with: { persist-credentials: false, ref: '${{ needs.validate.outputs.commit }}' }
       - name: Import protected signing material
         env:
