@@ -1616,8 +1616,9 @@ fn persist_noclobber(stage: tempfile::NamedTempFile, target: &Path) -> std::io::
     }
     #[cfg(windows)]
     {
-        return move_file_noclobber(stage.as_ref(), target);
+        move_file_noclobber(stage.as_ref(), target)
     }
+    #[cfg(not(windows))]
     stage.persist_noclobber(target).map_err(|error| error.error)
 }
 
@@ -2464,6 +2465,8 @@ fn sha256_file(path: &Path) -> Result<String> {
     }
 }
 fn sync_parent(path: &Path) -> Result<()> {
+    #[cfg(not(unix))]
+    let _ = path;
     #[cfg(unix)]
     {
         File::open(path.parent().context("download target has no parent")?)?.sync_all()?;
@@ -2506,6 +2509,8 @@ fn validate_range(
     Ok(())
 }
 fn restrict(path: &Path) -> Result<()> {
+    #[cfg(not(unix))]
+    let _ = path;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

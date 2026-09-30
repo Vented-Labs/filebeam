@@ -76,7 +76,7 @@ jobs:
       tag: ${{ steps.verify.outputs.tag }}
       commit: ${{ steps.verify.outputs.commit }}
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: refs/heads/master
@@ -99,7 +99,7 @@ jobs:
       RELEASE_TAG: ${{ needs.validate-ref.outputs.tag }}
       RELEASE_COMMIT: ${{ needs.validate-ref.outputs.commit }}
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: ${{ env.RELEASE_COMMIT }}
@@ -148,7 +148,7 @@ jobs:
       RELEASE_TAG: ${{ needs.validate-ref.outputs.tag }}
       RELEASE_COMMIT: ${{ needs.validate-ref.outputs.commit }}
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: refs/heads/master
@@ -184,7 +184,7 @@ jobs:
       WITHDRAWN: ${{ inputs.withdrawn }}
       NOTES_URL: ${{ inputs.notes_url }}
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: refs/heads/master
@@ -208,7 +208,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     environment: release
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: refs/heads/master
@@ -232,7 +232,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     environment: release
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with: {persist-credentials: false, ref: refs/heads/master}
       - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240
         with: {php-version: '8.5', extensions: sodium, coverage: none}
@@ -253,7 +253,7 @@ jobs:
       revision: ${{ steps.tags.outputs.revision }}
       advance_aliases: ${{ steps.tags.outputs.advance_aliases }}
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: refs/heads/master
@@ -312,7 +312,7 @@ jobs:
       IMAGE: ${{ matrix.image }}
       IMAGE_TAG: ${{ needs.docker-plan.outputs.revision }}-${{ matrix.arch }}
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           dissociate: true
@@ -378,7 +378,7 @@ jobs:
       REVISION: ${{ needs.docker-plan.outputs.revision }}
       ADVANCE_ALIASES: ${{ needs.docker-plan.outputs.advance_aliases }}
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: ${{ needs.validate-ref.outputs.commit }}
@@ -451,7 +451,7 @@ jobs:
       GH_REPO: ${{ github.repository }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: ${{ env.RELEASE_COMMIT }}

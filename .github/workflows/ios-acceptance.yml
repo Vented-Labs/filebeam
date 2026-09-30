@@ -19,7 +19,7 @@ jobs:
     env:
       IOS_ACCEPTANCE_EVIDENCE_DIR: test-results/ios/acceptance
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with: { persist-credentials: false, ref: '${{ inputs.ref || github.ref }}' }
       - uses: ./.github/actions/setup-php
       - uses: ./.github/actions/setup-rust
@@ -49,7 +49,7 @@ jobs:
       IOS_ACCEPTANCE_HTTPS_LINK_FIXTURE: ${{ secrets.IOS_ACCEPTANCE_HTTPS_LINK_FIXTURE }}
       IOS_TEST_ONLY: FilebeamUITests/PeerAcceptanceTests
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with: { persist-credentials: false, ref: '${{ inputs.ref || github.ref }}' }
       - name: Run HTTPS XCUITest acceptance suite
         run: |

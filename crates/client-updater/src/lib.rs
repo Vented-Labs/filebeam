@@ -239,6 +239,7 @@ impl Updater {
         if !enabled()
             || staged.product != self.options.product.catalog()
             || !valid_sha256(&staged.sha256)
+            || Version::parse(&staged.version)? <= Version::parse(&self.options.version)?
         {
             entry.staged = None;
             self.save_state(&state)?;
@@ -257,6 +258,17 @@ impl Updater {
             bail!("staged update payload is invalid");
         }
         self.ensure_managed()?;
+        #[cfg(windows)]
+        {
+            if staged.kind == PayloadKind::App.as_str() {
+                bail!("macOS application bundle staged on another platform");
+            }
+            self.stage_windows_helper(&source, &staged)?;
+            // The helper owns clearing the record after replacing the executable.
+            Ok(Activation::Reexec)
+        }
+        #[cfg(not(windows))]
+        {
         let outcome = if staged.kind == PayloadKind::App.as_str() {
             #[cfg(target_os = "macos")]
             {
@@ -269,27 +281,18 @@ impl Updater {
                 bail!("macOS application bundle staged on another platform")
             }
         } else {
-            #[cfg(windows)]
-            {
-                self.stage_windows_helper(&source, &staged)?;
-                // The helper validates this record after this process releases its
-                // executable. It owns clearing the record after replacement.
-                return Ok(Activation::Reexec);
-            }
-            #[cfg(not(windows))]
-            {
                 replace_file(
                     &source,
-                    &self.options.executable.canonicalize()?,
+                    &self.options.executable,
                     self.options.product,
                 )?;
                 Activation::Reexec
-            }
         };
         entry.staged = None;
         entry.last_success = Some(now());
         self.save_state(&state)?;
         Ok(outcome)
+        }
     }
     #[cfg(windows)]
     pub fn apply_windows_helper(&self, arguments: &[std::ffi::OsString]) -> Result<bool> {
@@ -315,10 +318,16 @@ impl Updater {
             .join("staged")
             .join(self.options.product.catalog())
             .canonicalize()?;
-        let _lease = loop {
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        let lease = loop {
             match self.lease() {
                 Ok(lease) => break lease,
-                Err(_) => thread::sleep(Duration::from_millis(100)),
+                Err(error) => {
+                    if std::time::Instant::now() >= deadline {
+                        return Err(error.context("timed out waiting for update lease"));
+                    }
+                    thread::sleep(Duration::from_millis(100));
+                }
             }
         };
         let mut state = self.load_state()?;
@@ -350,7 +359,7 @@ impl Updater {
                 entry.staged = None;
                 entry.last_success = Some(now());
                 self.save_state(&state)?;
-                drop(_lease);
+                drop(lease);
                 Command::new(dst)
                     .args(arguments)
                     .spawn()
@@ -898,12 +907,13 @@ fn replace_bundle(source: &Path, executable: &Path) -> Result<()> {
 }
 #[cfg(not(windows))]
 fn replace_file(source: &Path, destination: &Path, p: Product) -> Result<()> {
+    let destination = destination.canonicalize()?;
     let backup =
         destination.with_file_name(format!("{}.previous{}", p.binary(), executable_suffix()));
     let _ = fs::remove_file(&backup);
-    fs::rename(destination, &backup)?;
-    if let Err(e) = fs::rename(source, destination) {
-        let _ = fs::rename(&backup, destination);
+    fs::rename(&destination, &backup)?;
+    if let Err(e) = fs::rename(source, &destination) {
+        let _ = fs::rename(&backup, &destination);
         return Err(e.into());
     }
     Ok(())
@@ -991,6 +1001,68 @@ mod tests {
     };
     fn envelope(payload: &str, key: &SigningKey) -> Vec<u8> {
         serde_json::to_vec(&serde_json::json!({"signed": STANDARD.encode(payload), "signature": STANDARD.encode(key.sign(payload.as_bytes()).to_bytes())})).unwrap()
+    }
+    struct TestDirectory(PathBuf);
+    impl TestDirectory {
+        fn new() -> Self {
+            let path = env::temp_dir().join(format!("filebeam-updater-{}", Uuid::new_v4()));
+            fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+    }
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn already_installed_update_is_cleared_without_replacing_or_relaunching() {
+        let directory = TestDirectory::new();
+        let updater = Updater::new(Options::for_product(directory.0.clone(), Product::Desktop, "0.3.0", "").unwrap());
+        let mut state = State::default();
+        state.desktop.staged = Some(Staged {
+            path: directory.0.join("missing").to_string_lossy().into_owned(),
+            version: "0.3.0".into(), product: "desktop".into(), kind: "tar-gz".into(), sha256: "a".repeat(64),
+        });
+        updater.save_state(&state).unwrap();
+        assert_eq!(updater.activate_staged(|| true).unwrap(), Activation::None);
+        assert!(updater.load_state().unwrap().desktop.staged.is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replacement_preserves_managed_symlink_and_rolls_back_on_failure() {
+        let directory = TestDirectory::new();
+        let image = directory.0.join("Filebeam.AppImage");
+        let link = directory.0.join("filebeam");
+        let staged = directory.0.join("staged");
+        fs::write(&image, b"old").unwrap();
+        fs::write(&staged, b"new").unwrap();
+        std::os::unix::fs::symlink(&image, &link).unwrap();
+        replace_file(&staged, &link, Product::Desktop).unwrap();
+        assert!(fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+        assert_eq!(fs::read(&link).unwrap(), b"new");
+        assert!(replace_file(&staged, &link, Product::Desktop).is_err());
+        assert_eq!(fs::read(&link).unwrap(), b"new");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn bundle_extraction_retains_executable_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = TestDirectory::new();
+        let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        let mut archive = tar::Builder::new(encoder);
+        let mut header = tar::Header::new_gnu();
+        header.set_size(3);
+        header.set_mode(0o755);
+        header.set_cksum();
+        archive.append_data(&mut header, "Filebeam.app/Contents/MacOS/filebeam", &b"app"[..]).unwrap();
+        let bytes = archive.into_inner().unwrap().finish().unwrap();
+        let target = directory.0.join("staged.app");
+        extract_bundle(&bytes, &target).unwrap();
+        assert_eq!(fs::metadata(target.join("Contents/MacOS/filebeam")).unwrap().permissions().mode() & 0o777, 0o755);
     }
     #[test]
     fn signed_catalog_rejects_wrong_product_expiry_and_prerelease() {

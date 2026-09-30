@@ -8,6 +8,8 @@ use App\Models\Plan;
 
 beforeEach(function (): void {
     $this->withoutMiddleware(RequireInstallation::class);
+    config()->set('filebeam.instance_settings.environment.enabled_drivers', null);
+    config()->set('filebeam.instance_settings.environment.default_driver', null);
 });
 
 test('anonymous clients receive the effective default transfer configuration', function (): void {

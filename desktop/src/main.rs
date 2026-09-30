@@ -57,6 +57,8 @@ fn run(arguments: Vec<OsString>) -> Result<()> {
     if matches!(instance, Instance::Forwarded) {
         return Ok(());
     }
+    #[cfg(not(windows))]
+    let relaunch_executable = Options::for_product(config.home.clone(), Product::Desktop, VERSION, "")?.executable;
     let activation = activate_update(&config).unwrap_or_else(|error| {
         log::warn!("could not activate desktop update: {error}");
         filebeam_client_updater::Activation::None
@@ -65,8 +67,7 @@ fn run(arguments: Vec<OsString>) -> Result<()> {
         drop(instance);
         #[cfg(not(windows))]
         {
-            let options = Options::for_product(config.home.clone(), Product::Desktop, VERSION, "")?;
-            std::process::Command::new(options.executable)
+            std::process::Command::new(relaunch_executable)
                 .args(env::args_os().skip(1))
                 .spawn()
                 .context("relaunch updated Filebeam")?;
