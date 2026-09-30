@@ -128,6 +128,13 @@ jobs:
         run: |
           bash scripts/desktop/transfer.test.sh
           bash scripts/desktop/run.sh bash -ceu 'bash scripts/desktop/run.test.sh; bash scripts/desktop/catalog.test.sh'
+      - uses: ./.github/actions/setup-php
+        if: runner.os == 'Linux'
+      - name: Desktop and CLI E2E against Laravel
+        if: runner.os == 'Linux'
+        run: |
+          bash scripts/desktop/run.sh bash scripts/desktop/ci-e2e.sh dist/native-tests
+          python3 scripts/desktop/backend.test.py --desktop dist/native-tests/native_acceptance --services dist/native-tests/services_acceptance --cli dist/native-tests/beam
       - name: Install pinned AppImage tooling
         if: runner.os == 'Linux'
         run: |
