@@ -57,7 +57,20 @@ fn run(arguments: Vec<OsString>) -> Result<()> {
     if matches!(instance, Instance::Forwarded) {
         return Ok(());
     }
-    if activate_update(&config)? {
+    let activation = activate_update(&config).unwrap_or_else(|error| {
+        log::warn!("could not activate desktop update: {error}");
+        filebeam_client_updater::Activation::None
+    });
+    if activation != filebeam_client_updater::Activation::None {
+        drop(instance);
+        #[cfg(not(windows))]
+        {
+            let options = Options::for_product(config.home.clone(), Product::Desktop, VERSION, "")?;
+            std::process::Command::new(options.executable)
+                .args(env::args_os().skip(1))
+                .spawn()
+                .context("relaunch updated Filebeam")?;
+        }
         return Ok(());
     }
     schedule_update(&config);
@@ -119,51 +132,26 @@ fn updater(config: &Config) -> Result<Updater> {
     let key = option_env!("FILEBEAM_RELEASE_PUBLIC_KEY")
         .filter(|key| !key.is_empty())
         .context("this development build has no embedded release key")?;
-    Ok(Updater::new(Options {
-        home: config.home.clone(),
-        product: Product::Desktop,
-        version: VERSION.into(),
-        public_key: key.into(),
-        executable: config.home.join("bin").join(if cfg!(windows) {
-            "filebeam.exe"
-        } else {
-            "filebeam"
-        }),
-    }))
+    Ok(Updater::new(Options::for_product(
+        config.home.clone(),
+        Product::Desktop,
+        VERSION,
+        key,
+    )?))
 }
 
-fn activate_update(config: &Config) -> Result<bool> {
+fn activate_update(config: &Config) -> Result<filebeam_client_updater::Activation> {
     if config.updates.auto_update {
         // Unsigned local builds deliberately have no updater rather than failing startup.
         if let Ok(updater) = updater(config) {
-            match updater.activate_staged(|| {
+            return updater.activate_staged(|| {
                 Config::load(Some(config.home.clone()))
                     .map(|fresh| fresh.updates.auto_update)
                     .unwrap_or(false)
-            })? {
-                filebeam_client_updater::Activation::None => {}
-                filebeam_client_updater::Activation::Reexec => return Ok(true),
-                filebeam_client_updater::Activation::RelaunchGui => {
-                    relaunch_macos()?;
-                    return Ok(true);
-                }
-            }
+            });
         }
     }
-    Ok(false)
-}
-
-#[cfg(target_os = "macos")]
-fn relaunch_macos() -> Result<()> {
-    std::process::Command::new(env::current_exe()?)
-        .spawn()
-        .context("relaunch updated Filebeam")?;
-    Ok(())
-}
-
-#[cfg(not(target_os = "macos"))]
-fn relaunch_macos() -> Result<()> {
-    bail!("received a macOS application update on an unsupported platform")
+    Ok(filebeam_client_updater::Activation::None)
 }
 
 fn print_short_lived(output: ShortLived) {
@@ -187,7 +175,7 @@ fn handle_updater_worker(arguments: &[OsString]) -> Result<bool> {
     if command != "--filebeam-update-worker" && command != "--filebeam-apply-staged" {
         return Ok(false);
     }
-    if arguments.len() != 3 || arguments[1].to_str() != Some("desktop") {
+    if arguments.len() < 3 || arguments[1].to_str() != Some("desktop") {
         bail!("invalid desktop update worker arguments");
     }
     let home = PathBuf::from(arguments[2].clone());
@@ -195,15 +183,25 @@ fn handle_updater_worker(arguments: &[OsString]) -> Result<bool> {
         bail!("desktop update worker home must be absolute");
     }
     let config = Config::load(Some(home))?;
-    let Ok(updater) = updater(&config) else {
-        return Ok(true);
-    };
     if command == "--filebeam-update-worker" {
-        updater.bootstrap(|| config.updates.auto_update)?;
+        if arguments.len() != 4 {
+            bail!("desktop update worker is missing executable");
+        }
+        let key = option_env!("FILEBEAM_RELEASE_PUBLIC_KEY").context("build has no release key")?;
+        let mut options =
+            Options::for_product(config.home.clone(), Product::Desktop, VERSION, key)?;
+        options.executable = PathBuf::from(&arguments[3]);
+        Updater::new(options).bootstrap(|| {
+            Config::load(Some(config.home.clone()))
+                .map(|fresh| fresh.updates.auto_update)
+                .unwrap_or(false)
+        })?;
     } else {
         #[cfg(windows)]
         {
-            updater.apply_windows_helper()?;
+            if config.updates.auto_update {
+                updater(&config)?.apply_windows_helper(&arguments[3..])?;
+            }
         }
         #[cfg(not(windows))]
         {

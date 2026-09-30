@@ -18,6 +18,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: desktop-${{ github.event_name == 'pull_request' && github.ref || 'release-catalog' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   validate:
     if: github.event_name != 'pull_request'
@@ -43,7 +47,8 @@ jobs:
         env: {BASE: '${{ github.event.pull_request.base.sha }}'}
         run: |
           if [[ "${{ github.event_name }}" != pull_request ]]; then printf 'relevant=true\n' >> "$GITHUB_OUTPUT"; exit 0; fi
-          git diff --name-only "$BASE" HEAD | grep -Eq '^(desktop/|crates/(client-config|client-core|client-updater|transfer-native)/|icons/|docker/desktop/|scripts/desktop/|scripts/release/(desktop-|github-release)|\.github/workflows/(desktop|release)\.yml$)' && value=true || value=false
+          paths=$(git diff --name-only "$BASE" HEAD)
+          if grep -Eq '^(desktop/|crates/|backend/|icons/|docker/desktop/|scripts/(desktop|cli|native)/|scripts/release/|\.github/workflows/(desktop|release)\.yml$)' <<< "$paths"; then value=true; else value=false; fi
           printf 'relevant=%s\n' "$value" >> "$GITHUB_OUTPUT"
 
   targets:
@@ -59,16 +64,17 @@ jobs:
           - {runner: blacksmith-6vcpu-macos-15, target: x86_64-apple-darwin, os: macos, arch: x86_64, suffix: ''}
           - {runner: blacksmith-4vcpu-windows-2025, target: x86_64-pc-windows-msvc, os: windows, arch: x86_64, suffix: '.exe'}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 45
+    timeout-minutes: 90
     env:
       FILEBEAM_RELEASE_VERSION: ${{ needs.validate.outputs.tag || 'v0.1.0' }}
       FILEBEAM_RELEASE_TAG: ${{ needs.validate.outputs.tag || 'v0.1.0' }}
       FILEBEAM_RELEASE_SHA: ${{ needs.validate.outputs.commit || github.event.pull_request.head.sha }}
       FILEBEAM_RELEASE_PUBLIC_KEY: ${{ secrets.RELEASE_PUBLIC_KEY }}
       CARGO_BUILD_JOBS: '2'
+      MACOSX_DEPLOYMENT_TARGET: '11.0'
     steps:
       - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
-        with: {persist-credentials: false, ref: '${{ needs.validate.outputs.commit || github.event.pull_request.head.sha }}'}
+        with: {persist-credentials: false, dissociate: true, ref: '${{ needs.validate.outputs.commit || github.event.pull_request.head.sha }}'}
       - name: Install Rust 1.98 and native build dependencies
         if: runner.os != 'Linux'
         shell: bash
@@ -78,7 +84,19 @@ jobs:
           rustup component add rustfmt clippy
           rustup target add '${{ matrix.target }}'
           if [[ "$RUNNER_OS" == macOS ]]; then brew install pkg-config; fi
-          if [[ "$RUNNER_OS" == Windows ]]; then choco install llvm --no-progress --yes; fi
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            choco install llvm nsis --no-progress --yes
+            printf '%s\n' '/c/Program Files (x86)/NSIS' >> "$GITHUB_PATH"
+          fi
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/filebeam/desktop
+            ~/.cargo/registry
+            ~/.cargo/git
+            desktop/target
+          key: desktop-${{ matrix.target }}-rust1.98.0-${{ hashFiles('desktop/Cargo.lock', 'desktop/Cargo.toml', 'crates/**/Cargo.toml', 'docker/desktop/Dockerfile') }}-${{ github.sha }}
+          restore-keys: desktop-${{ matrix.target }}-rust1.98.0-${{ hashFiles('desktop/Cargo.lock', 'desktop/Cargo.toml', 'crates/**/Cargo.toml', 'docker/desktop/Dockerfile') }}-
       - name: Build and test in the bounded Linux container
         if: runner.os == 'Linux'
         run: bash scripts/desktop/run.sh bash scripts/desktop/ci-build.sh '${{ matrix.target }}' dist/desktop
@@ -89,33 +107,40 @@ jobs:
         env:
           FILEBEAM_BINARY_SUFFIX: ${{ matrix.suffix }}
           FILEBEAM_DESKTOP_BUILD_ONLY: ${{ matrix.target == 'x86_64-apple-darwin' && '1' || '0' }}
-      - name: Make updater archive
-        shell: bash
+      - name: Desktop transfer E2E and packaging contracts
+        if: runner.os == 'Linux'
         run: |
-          if [[ '${{ matrix.os }}' == macos ]]; then
-            FILEBEAM_DESKTOP_UNSIGNED=1 ARCH='${{ matrix.arch }}' bash scripts/desktop/package-macos-installer.sh "dist/desktop/filebeam${{ matrix.suffix }}" "${{ needs.validate.outputs.tag || 'v0.1.0' }}" dist/desktop
-          else
-            bash scripts/desktop/package-update-payload.sh "${{ needs.validate.outputs.tag || 'v0.1.0' }}" '${{ matrix.os }}' '${{ matrix.arch }}' "dist/desktop/filebeam${{ matrix.suffix }}" dist/desktop
-          fi
-      - name: Make signed native installer
-        if: inputs.publish || github.event.inputs.publish == 'true'
+          bash scripts/desktop/transfer.test.sh
+          bash scripts/desktop/run.sh bash -ceu 'bash scripts/desktop/run.test.sh; bash scripts/desktop/catalog.test.sh'
+      - name: Install pinned AppImage tooling
+        if: runner.os == 'Linux'
+        run: |
+          bash scripts/desktop/install-appimagetool.sh '${{ matrix.arch }}' "$RUNNER_TEMP/appimage-tools"
+          printf '%s\n' "$RUNNER_TEMP/appimage-tools" >> "$GITHUB_PATH"
+      - name: Make native installers and updater archives
         shell: bash
         env:
           ARCH: ${{ matrix.arch }}
+          TAG: ${{ needs.validate.outputs.tag || 'v0.1.0' }}
+          FILEBEAM_DESKTOP_UNSIGNED: ${{ (inputs.publish || github.event.inputs.publish == 'true') && '0' || '1' }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_NOTARY_PROFILE: ${{ secrets.APPLE_NOTARY_PROFILE }}
           WINDOWS_SIGNING_CERTIFICATE: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE }}
           WINDOWS_SIGNING_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PASSWORD }}
         run: |
           case '${{ matrix.os }}' in
-            linux) sudo apt-get update && sudo apt-get install --yes appimagetool; bash scripts/desktop/package-linux-installer.sh dist/desktop/filebeam '${{ needs.validate.outputs.tag }}' dist/desktop ;;
-            macos) ARCH='${{ matrix.arch }}' bash scripts/desktop/package-macos-installer.sh dist/desktop/filebeam '${{ needs.validate.outputs.tag }}' dist/desktop ;;
-            windows) bash scripts/desktop/package-windows-installer.sh dist/desktop/filebeam.exe '${{ needs.validate.outputs.tag }}' dist/desktop ;;
+            linux)
+              bash scripts/desktop/package-linux-installer.sh dist/desktop/filebeam "$TAG" dist/desktop
+              bash scripts/desktop/package-update-payload.sh "$TAG" linux "$ARCH" "dist/desktop/filebeam-desktop-$TAG-linux-$ARCH.AppImage" dist/desktop
+              APPIMAGE_EXTRACT_AND_RUN=1 "dist/desktop/filebeam-desktop-$TAG-linux-$ARCH.AppImage" --version
+              ;;
+            macos) bash scripts/desktop/package-macos-installer.sh dist/desktop/filebeam "$TAG" dist/desktop ;;
+            windows) bash scripts/desktop/package-windows-installer.sh dist/desktop/filebeam.exe "$TAG" dist/desktop ;;
           esac
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: desktop-${{ matrix.os }}-${{ matrix.arch }}-${{ needs.validate.outputs.tag || github.event.pull_request.head.sha }}
-          path: dist/desktop/
+          path: dist/desktop/filebeam-desktop-*
           if-no-files-found: error
 
   publish:
@@ -130,6 +155,8 @@ jobs:
         with: {persist-credentials: false, ref: '${{ needs.validate.outputs.commit }}'}
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with: {pattern: 'desktop-*-*-${{ needs.validate.outputs.tag }}', path: dist/download, merge-multiple: true}
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240
+        with: {php-version: '8.5', extensions: sodium, coverage: none}
       - name: Verify and publish the signed desktop catalog
         run: |
           php scripts/release/desktop-write-release.php "$RELEASE_TAG" dist/download dist/download/release.json
@@ -153,11 +180,12 @@ jobs:
       - env:
           VALIDATE: ${{ needs.validate.result }}
           RELEVANT: ${{ needs.changes.outputs.relevant }}
+          CHANGES: ${{ needs.changes.result }}
           TARGETS: ${{ needs.targets.result }}
           PUBLISH: ${{ needs.publish.result }}
           REQUESTED_PUBLISH: ${{ inputs.publish || github.event.inputs.publish }}
         run: |
           [[ "$VALIDATE" == success || "${{ github.event_name }}" == pull_request ]]
-          [[ "$RELEVANT" == true || "$TARGETS" == skipped ]]
-          [[ "$TARGETS" == success || "$TARGETS" == skipped ]]
+          [[ "$CHANGES" == success ]]
+          if [[ "$RELEVANT" == true ]]; then [[ "$TARGETS" == success ]]; else [[ "$TARGETS" == skipped ]]; fi
           [[ "$REQUESTED_PUBLISH" != true || "$PUBLISH" == success ]]

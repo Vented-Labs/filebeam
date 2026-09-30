@@ -413,7 +413,15 @@ fn wait_snapshot_ignore_messages<T>(
                     .map(|message| format!("{}: {}", message.operation, message.error.detail))
                     .collect::<Vec<_>>()
                     .join("; "),
-                snapshot.jobs.iter().map(|job| format!("{}: {} ({:?})", job.id, job.progress.phase, job.state as u8)).collect::<Vec<_>>().join("; ")
+                snapshot
+                    .jobs
+                    .iter()
+                    .map(|job| format!(
+                        "{}: {} ({:?})",
+                        job.id, job.progress.phase, job.state as u8
+                    ))
+                    .collect::<Vec<_>>()
+                    .join("; ")
             );
         }
         thread::sleep(Duration::from_millis(25));

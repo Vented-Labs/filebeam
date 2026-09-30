@@ -62,8 +62,23 @@ impl Options {
         version: impl Into<String>,
         public_key: impl Into<String>,
     ) -> Result<Self> {
+        let executable = home.join("bin").join(executable_name(product));
+        #[cfg(target_os = "macos")]
+        let executable = if product == Product::Desktop {
+            let current = env::current_exe()?;
+            if current
+                .ancestors()
+                .any(|path| path.extension().is_some_and(|ext| ext == "app"))
+            {
+                current
+            } else {
+                executable
+            }
+        } else {
+            executable
+        };
         Ok(Self {
-            executable: home.join("bin").join(executable_name(product)),
+            executable,
             home,
             product,
             version: version.into(),
@@ -133,7 +148,7 @@ impl Updater {
             Uuid::new_v4(),
             executable_suffix()
         ));
-        fs::copy(env::current_exe()?, &worker).context("copy update worker")?;
+        fs::copy(self.running_executable()?, &worker).context("copy update worker")?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -144,9 +159,14 @@ impl Updater {
             .arg("--filebeam-update-worker")
             .arg(self.options.product.catalog())
             .arg(&self.options.home)
+            .arg(&self.options.executable)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
+        #[cfg(target_os = "linux")]
+        if self.options.product == Product::Desktop {
+            command.env("APPIMAGE_EXTRACT_AND_RUN", "1");
+        }
         #[cfg(unix)]
         {
             use std::os::unix::process::CommandExt;
@@ -252,11 +272,17 @@ impl Updater {
             #[cfg(windows)]
             {
                 self.stage_windows_helper(&source, &staged)?;
-                Activation::Reexec
+                // The helper validates this record after this process releases its
+                // executable. It owns clearing the record after replacement.
+                return Ok(Activation::Reexec);
             }
             #[cfg(not(windows))]
             {
-                replace_file(&source, &self.options.executable, self.options.product)?;
+                replace_file(
+                    &source,
+                    &self.options.executable.canonicalize()?,
+                    self.options.product,
+                )?;
                 Activation::Reexec
             }
         };
@@ -266,8 +292,8 @@ impl Updater {
         Ok(outcome)
     }
     #[cfg(windows)]
-    pub fn apply_windows_helper(&self) -> Result<bool> {
-        self.apply_windows()
+    pub fn apply_windows_helper(&self, arguments: &[std::ffi::OsString]) -> Result<bool> {
+        self.apply_windows(arguments)
     }
     #[cfg(windows)]
     fn stage_windows_helper(&self, source: &Path, _staged: &Staged) -> Result<()> {
@@ -275,12 +301,13 @@ impl Updater {
             .arg("--filebeam-apply-staged")
             .arg(self.options.product.catalog())
             .arg(&self.options.home)
+            .args(env::args_os().skip(1))
             .spawn()
             .context("start Windows update helper")?;
         Ok(())
     }
     #[cfg(windows)]
-    fn apply_windows(&self) -> Result<bool> {
+    fn apply_windows(&self, arguments: &[std::ffi::OsString]) -> Result<bool> {
         use std::{thread, time::Duration};
         let current = env::current_exe()?.canonicalize()?;
         let root = self
@@ -288,10 +315,17 @@ impl Updater {
             .join("staged")
             .join(self.options.product.catalog())
             .canonicalize()?;
-        let state = self.load_state()?;
+        let _lease = loop {
+            match self.lease() {
+                Ok(lease) => break lease,
+                Err(_) => thread::sleep(Duration::from_millis(100)),
+            }
+        };
+        let mut state = self.load_state()?;
         let staged = state
             .entry(self.options.product)
             .staged
+            .as_ref()
             .context("Windows helper has no staged update")?;
         if !current.starts_with(root)
             || current != PathBuf::from(staged.path).canonicalize()?
@@ -312,7 +346,13 @@ impl Updater {
                     let _ = fs::rename(&backup, dst);
                     return Err(e.into());
                 }
+                let entry = state.entry_mut(self.options.product);
+                entry.staged = None;
+                entry.last_success = Some(now());
+                self.save_state(&state)?;
+                drop(_lease);
                 Command::new(dst)
+                    .args(arguments)
                     .spawn()
                     .context("relaunch updated application")?;
                 return Ok(true);
@@ -431,7 +471,7 @@ impl Updater {
         ))
     }
     fn ensure_managed(&self) -> Result<()> {
-        let current = env::current_exe()?.canonicalize()?;
+        let current = self.running_executable()?.canonicalize()?;
         let expected = self
             .options
             .executable
@@ -441,6 +481,15 @@ impl Updater {
             bail!("update requires an installer-managed binary");
         }
         Ok(())
+    }
+    fn running_executable(&self) -> Result<PathBuf> {
+        #[cfg(target_os = "linux")]
+        if self.options.product == Product::Desktop
+            && let Some(image) = env::var_os("APPIMAGE")
+        {
+            return Ok(PathBuf::from(image));
+        }
+        env::current_exe().context("locate running executable")
     }
     fn due(&self) -> Result<bool> {
         Ok(self
@@ -759,6 +808,11 @@ fn extract_bundle(bytes: &[u8], target: &Path) -> Result<()> {
                     .write(true)
                     .open(out)?;
                 std::io::copy(&mut e, &mut f)?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    f.set_permissions(fs::Permissions::from_mode(e.header().mode()? & 0o777))?;
+                }
             } else if ty.is_symlink() {
                 let link = e
                     .link_name()?
@@ -842,6 +896,7 @@ fn replace_bundle(source: &Path, executable: &Path) -> Result<()> {
     }
     Ok(())
 }
+#[cfg(not(windows))]
 fn replace_file(source: &Path, destination: &Path, p: Product) -> Result<()> {
     let backup =
         destination.with_file_name(format!("{}.previous{}", p.binary(), executable_suffix()));
@@ -925,6 +980,7 @@ fn executable_suffix() -> &'static str {
 mod tests {
     use super::*;
     use ed25519_dalek::{Signer, SigningKey};
+    #[cfg(target_os = "linux")]
     use std::{
         collections::HashMap,
         process::{Command, Stdio},
@@ -1019,7 +1075,6 @@ mod tests {
     }
     #[cfg(target_os = "linux")]
     #[test]
-    #[ignore = "requires the host PHP release signer; the bounded Cargo image intentionally has no PHP CLI"]
     fn php_catalog_round_trip_stages_only_the_update_payload() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let fixture = env::temp_dir().join(format!("filebeam-updater-{}", Uuid::new_v4()));

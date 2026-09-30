@@ -12,6 +12,9 @@ on:
   pull_request:
     paths:
       - 'crates/cli/**'
+      - 'crates/client-config/**'
+      - 'crates/client-updater/**'
+      - 'crates/encryption/**'
       - 'crates/client-core/**'
       - 'crates/transfer/**'
       - 'crates/transfer-native/**'
@@ -21,6 +24,7 @@ on:
       - 'package.json'
       - 'scripts/release/cli-*'
       - '.github/workflows/beam.yml'
+      - '.github/workflows/release.yml'
   push:
     tags:
       - 'beam-v*.*.*'
@@ -158,6 +162,15 @@ jobs:
         if: ${{ !matrix.test }}
         shell: bash
         run: cargo build --manifest-path crates/cli/Cargo.toml --locked --target "${{ matrix.target }}"
+      - name: Package optimized CLI candidate
+        shell: bash
+        env:
+          BEAM_RELEASE_PUBLIC_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+        run: bash scripts/cli/package-target.sh beam-v0.0.0 '${{ runner.os == 'Windows' && 'windows' || 'macos' }}' '${{ matrix.target == 'aarch64-apple-darwin' && 'aarch64' || 'x86_64' }}' dist/beam
+      - name: Smoke test optimized CLI
+        if: matrix.test
+        shell: bash
+        run: crates/cli/target/${{ matrix.target }}/release/beam${{ runner.os == 'Windows' && '.exe' || '' }} --version
       - name: Validate PowerShell installer syntax
         if: runner.os == 'Windows'
         shell: pwsh

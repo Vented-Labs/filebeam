@@ -675,22 +675,23 @@ fn main() -> Result<()> {
 fn bootstrap_update_startup() -> Result<bool> {
     let home = bootstrap_home();
     if let Ok(config) = config::Config::load(home) {
-        update::notify_if_available(&config);
         if config.check_updates {
-            if update::activate_staged(&config)? == filebeam_client_updater::Activation::Reexec {
+            if update::activate_staged(&config).unwrap_or(filebeam_client_updater::Activation::None)
+                == filebeam_client_updater::Activation::Reexec
+            {
                 #[cfg(unix)]
-                reexec_with_original_arguments()?;
+                reexec_with_original_arguments(config.home.join("bin/beam"))?;
                 #[cfg(windows)]
                 return Ok(true);
             }
         }
+        update::notify_if_available(&config);
     }
     Ok(false)
 }
 
 #[cfg(unix)]
-fn reexec_with_original_arguments() -> Result<()> {
-    let executable = env::current_exe()?;
+fn reexec_with_original_arguments(executable: PathBuf) -> Result<()> {
     let mut command = ProcessCommand::new(executable);
     command.args(env::args_os().skip(1));
     use std::os::unix::process::CommandExt;

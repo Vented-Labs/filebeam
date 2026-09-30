@@ -45,11 +45,11 @@ pub fn apply_staged_update() -> Result<bool> {
             .next()
             .map(PathBuf::from)
             .context("Windows update helper is missing home")?;
-        if arguments.next().is_some() || product != "cli" {
+        if product != "cli" {
             bail!("Windows update helper received invalid arguments");
         }
         #[cfg(windows)]
-        return updater(home)?.apply_windows_helper();
+        return updater(home)?.apply_windows_helper(&arguments.collect::<Vec<_>>());
         #[cfg(not(windows))]
         {
             let _ = home;
@@ -64,11 +64,19 @@ pub fn apply_staged_update() -> Result<bool> {
             .next()
             .map(PathBuf::from)
             .context("update worker is missing home")?;
+        let executable = arguments
+            .next()
+            .map(PathBuf::from)
+            .context("update worker is missing executable")?;
         if arguments.next().is_some() || product != "cli" {
             bail!("update worker received invalid arguments");
         }
         // Re-read after every network boundary; a settings change wins over a running worker.
-        updater(home.clone())?.bootstrap(|| {
+        let key = option_env!("BEAM_RELEASE_PUBLIC_KEY").context("build has no release key")?;
+        let mut options =
+            Options::for_product(home.clone(), Product::Cli, env!("BEAM_VERSION"), key)?;
+        options.executable = executable;
+        Updater::new(options).bootstrap(|| {
             Config::load(Some(home.clone()))
                 .map(|config| config.check_updates)
                 .unwrap_or(false)
