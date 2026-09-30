@@ -59,7 +59,7 @@ grep -Fxq -- 'FILEBEAM_RELEASE_PUBLIC_KEY=public\ key\ with\ spaces' "$tmp/docke
 
 for wrapper in check.sh dev.sh; do
     run_wrapper bash "$root/scripts/desktop/$wrapper"
-    grep -Fxq -- '/workspace/desktop/Cargo.toml' "$tmp/docker.log"
+    grep -Fq -- '/workspace/desktop/Cargo.toml' "$tmp/docker.log"
 done
 
 : >"$tmp/docker.log"

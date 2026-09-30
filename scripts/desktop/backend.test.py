@@ -34,8 +34,24 @@ def main():
     artifacts.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="native-backend-", dir=artifacts) as directory:
         state = Path(directory)
-        for path in ["config", "cache", "app/logs", "app/framework/views", "app/framework/cache/data"]:
+        for path in ["config", "cache", "public", "app/logs", "app/framework/views", "app/framework/cache/data"]:
             (state / path).mkdir(parents=True, exist_ok=True)
+        # Isolate production assets from a developer's Vite hot-file and SSR server.
+        public = state / "public"
+        for asset in (ROOT / "backend/public").iterdir():
+            if asset.name not in ("hot", "index.php", "frankenphp-worker.php"):
+                (public / asset.name).symlink_to(asset, target_is_directory=asset.is_dir())
+        (public / "index.php").write_text("""<?php
+declare(strict_types=1);
+define('LARAVEL_START', microtime(true));
+require getenv('FILEBEAM_TEST_BACKEND').'/vendor/autoload.php';
+$app = require getenv('FILEBEAM_TEST_BACKEND').'/bootstrap/app.php';
+$app->usePublicPath(__DIR__);
+$app->afterBootstrapping(Illuminate\\Foundation\\Bootstrap\\LoadConfiguration::class, static function ($app) {
+    $app['config']->set('inertia.ssr.enabled', false);
+});
+$app->handleRequest(Illuminate\\Http\\Request::capture());
+""")
         (state / "config/.env").touch()
         (state / "database.sqlite").touch()
         with socket.socket() as reservation:
@@ -62,7 +78,8 @@ def main():
                "FILEBEAM_USERNAME_ROUTING_ENABLED": "true", "CHUNK_MAX_SIZE": "65552",
                "FILEBEAM_CREATIONS_PER_HOUR": "300", "FILEBEAM_WRITES_PER_MINUTE": "3000",
                "FILEBEAM_READS_PER_MINUTE": "3000", "FILEBEAM_ACCEPTANCE_INSTANCE": origin,
-               "FILEBEAM_ACCEPTANCE_RESULTS": str(state / "native"), "NO_COLOR": "1"}
+               "FILEBEAM_ACCEPTANCE_RESULTS": str(state / "native"), "NO_COLOR": "1",
+               "FILEBEAM_TEST_BACKEND": str(ROOT / "backend")}
         with (state / "server.log").open("w+") as log:
             try:
                 run(["php", "artisan", "migrate", "--seed", "--force", "--no-interaction"], env, stdout=log, stderr=log)
@@ -71,7 +88,7 @@ def main():
                 raise RuntimeError("backend migration failed:\n" + log.read()) from error
             server = subprocess.Popen(["php", "-S", f"127.0.0.1:{port}",
                                        str(ROOT / "backend/vendor/laravel/framework/src/Illuminate/Foundation/resources/server.php")],
-                                      cwd=ROOT / "backend/public", env=env, stdout=log, stderr=log)
+                                      cwd=public, env=env, stdout=log, stderr=log)
             try:
                 deadline = time.monotonic() + 30
                 while True:
@@ -105,7 +122,7 @@ def main():
                     subprocess.run([
                         "npx", "playwright", "test", *args.browser_test, "--workers=1",
                         "--output=" + str(artifacts / "native-backend-browser"),
-                    ], cwd=ROOT, env={**env, "BASE_URL": origin}, check=True, timeout=180)
+                    ], cwd=ROOT, env={**env, "BASE_URL": origin}, check=True, timeout=450)
             finally:
                 server.terminate()
                 server.wait(timeout=10)

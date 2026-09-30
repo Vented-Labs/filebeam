@@ -26,7 +26,7 @@ bash scripts/desktop/run.sh cargo test --manifest-path desktop/Cargo.toml --lock
 ```
 
 The runner limits local builds to 4 GiB of memory, two CPUs, and one Cargo job.
-CI builds use their allocated runner resources without Docker wrapper limits. It caches
+CI builds use their allocated runner resources without Docker wrapper limits. The runner caches
 builds under `${XDG_CACHE_HOME:-$HOME/.cache}/filebeam/desktop/<worktree-hash>`;
 `FILEBEAM_DESKTOP_CACHE_DIR` overrides this location. Binaries are in its `target/`
 directory (`/target` inside the container). Set `FILEBEAM_DESKTOP_BUILD_IMAGE=true`

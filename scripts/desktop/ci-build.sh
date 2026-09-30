@@ -28,13 +28,13 @@ fi
 
 target_dir=${CARGO_TARGET_DIR:-"$root/desktop/target"}
 host=$(rustc -vV | sed -n 's/^host: //p')
-build_args=()
+build_args=(--manifest-path "$manifest" --locked --release)
 binary_dir="$target_dir/release"
 if [[ $target != "$host" ]]; then
     build_args+=(--target "$target")
     binary_dir="$target_dir/$target/release"
 fi
-cargo build --manifest-path "$manifest" --locked --release "${build_args[@]}"
+cargo build "${build_args[@]}"
 
 binary_name=filebeam
 [[ $target == *-windows-* ]] && binary_name+=.exe
