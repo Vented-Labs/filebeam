@@ -328,7 +328,7 @@ impl Updater {
             .as_ref()
             .context("Windows helper has no staged update")?;
         if !current.starts_with(root)
-            || current != PathBuf::from(staged.path).canonicalize()?
+            || current != PathBuf::from(&staged.path).canonicalize()?
             || digest_path(&current)? != staged.sha256
         {
             bail!("Windows update helper payload is invalid");

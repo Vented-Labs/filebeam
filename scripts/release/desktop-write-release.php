@@ -2,7 +2,7 @@
 <?php
 
 declare(strict_types=1);
-if ($argc !== 4) {
+if (! isset($argc, $argv) || $argc !== 4) {
     fwrite(STDERR, "Usage: desktop-write-release.php vX.Y.Z DIRECTORY OUTPUT\n");
     exit(64);
 }

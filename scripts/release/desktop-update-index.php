@@ -2,7 +2,7 @@
 <?php
 
 declare(strict_types=1);
-if ($argc !== 3) {
+if (! isset($argc, $argv) || $argc !== 3) {
     fwrite(STDERR, "Usage: desktop-update-index.php CURRENT RELEASE|--refresh\n");
     exit(64);
 }

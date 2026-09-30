@@ -1289,11 +1289,9 @@ impl Worker {
         let mut prompts = Vec::new();
         let mut results = Vec::new();
         for mut entry in snapshots {
-            let id = entry
-                .job
-                .checkpoint_id
-                .clone()
-                .unwrap_or_else(|| entry.id.0.to_string());
+            // A preparation and its download can share a checkpoint. Actions and
+            // retained selections address the process-owned job, not that record.
+            let id = entry.id.0.to_string();
             let separate_key = if self.include_keys.get(&entry.id) == Some(&false)
                 || self
                     .note_jobs
