@@ -406,13 +406,14 @@ fn wait_snapshot_ignore_messages<T>(
         }
         if Instant::now() >= deadline {
             bail!(
-                "desktop acceptance timed out: {}",
+                "desktop acceptance timed out: {}; jobs: {}",
                 snapshot
                     .messages
                     .iter()
                     .map(|message| format!("{}: {}", message.operation, message.error.detail))
                     .collect::<Vec<_>>()
-                    .join("; ")
+                    .join("; "),
+                snapshot.jobs.iter().map(|job| format!("{}: {} ({:?})", job.id, job.progress.phase, job.state as u8)).collect::<Vec<_>>().join("; ")
             );
         }
         thread::sleep(Duration::from_millis(25));
