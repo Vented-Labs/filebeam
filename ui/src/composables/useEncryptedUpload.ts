@@ -21,6 +21,7 @@ import { enabledTransferDrivers, transferLimits } from '../lib/transfer-policy';
 import { startWebRtcSender, type WebRtcSender } from '../lib/webrtc';
 import { csrfHeaders } from '../lib/csrf';
 import { buildShareLink } from '../lib/share-link';
+import { createTransferCryptoWorker } from '../lib/crypto-workers';
 
 type ServerTransfer = {
     id: string;
@@ -168,13 +169,7 @@ export function useEncryptedUpload(
     }
 
     function getWorker(): Worker {
-        worker ??= new Worker(
-            new URL(
-                '../../../backend/resources/js/workers/filebeam-crypto.worker.ts',
-                import.meta.url,
-            ),
-            { type: 'module' },
-        );
+        worker ??= createTransferCryptoWorker();
         return worker;
     }
 

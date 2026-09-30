@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\AccountKeyController;
+use App\Http\Controllers\Api\V1\DesktopReleaseController;
 use App\Http\Controllers\Api\V1\DownloadSessionController;
 use App\Http\Controllers\Api\V1\InfoController;
 use App\Http\Controllers\Api\V1\TransferChunkController;
@@ -26,6 +27,7 @@ use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function (): void {
     Route::get('/info', InfoController::class)->name('api.info');
+    Route::get('/desktop/releases', DesktopReleaseController::class)->middleware('throttle:60,1')->name('api.desktop.releases');
 
     Route::post('/transfers', [TransferController::class, 'store'])
         ->middleware([

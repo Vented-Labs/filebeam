@@ -343,7 +343,7 @@ function goHome(event: MouseEvent): void {
     height: auto;
 }
 .fb-footer__version {
-    flex: 1 1 auto;
+    flex: 0 1 auto;
     white-space: normal;
     overflow-wrap: anywhere;
 }

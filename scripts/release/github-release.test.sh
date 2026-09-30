@@ -100,4 +100,21 @@ if MOCK_STATE=published MOCK_MISSING=release.json MOCK_LOG="$tmp/log" MOCK_COMMI
 if MOCK_STATE=draft MOCK_RETAG_AFTER=1 MOCK_RETAG_COMMIT=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa MOCK_LOG="$tmp/log" MOCK_COMMIT=$commit MOCK_TAG_COUNT="$tmp/tag-count" MOCK_SOURCE=$source GH_REPO=Vented-Labs/filebeam PATH="$bin:$PATH" "$root/scripts/release/github-release.sh" "$tag" "$commit" "$app" "$cli"; then exit 1; fi
 [[ $(<"$tmp/log") != *'release edit'* ]]
 
+# A desktop manifest must verify long after its original publication timestamp.
+desktop="$tmp/desktop"
+mkdir "$desktop"
+for suffix in linux-x86_64.tar.gz linux-aarch64.tar.gz macos-x86_64.tar.gz macos-aarch64.tar.gz windows-x86_64.zip linux-x86_64.AppImage linux-aarch64.AppImage macos-x86_64.dmg macos-aarch64.dmg windows-x86_64-setup.exe; do
+    printf '%s\n' "$suffix" > "$desktop/filebeam-desktop-$tag-$suffix"
+done
+SOURCE_DATE_EPOCH=1700000000 php "$root/scripts/release/desktop-write-release.php" "$tag" "$desktop" "$desktop/release.json"
+cp "$desktop"/filebeam-desktop-* "$source/"
+cp "$desktop/release.json" "$source/desktop-$tag-release.json"
+: > "$tmp/log"; : > "$tmp/tag-count"
+MOCK_STATE=missing MOCK_LOG="$tmp/log" MOCK_COMMIT=$commit MOCK_TAG_COUNT="$tmp/tag-count" MOCK_SOURCE=$source GH_REPO=Vented-Labs/filebeam PATH="$bin:$PATH" "$root/scripts/release/github-release.sh" "$tag" "$commit" "$app" "$cli" "$desktop"
+[[ $(grep -c 'release download' "$tmp/log") -eq 24 ]]
+printf 'tampered\n' > "$desktop/filebeam-desktop-$tag-linux-x86_64.tar.gz"
+: > "$tmp/log"
+if MOCK_STATE=missing MOCK_LOG="$tmp/log" MOCK_COMMIT=$commit MOCK_TAG_COUNT="$tmp/tag-count" MOCK_SOURCE=$source GH_REPO=Vented-Labs/filebeam PATH="$bin:$PATH" "$root/scripts/release/github-release.sh" "$tag" "$commit" "$app" "$cli" "$desktop"; then exit 1; fi
+[[ $(<"$tmp/log") != *'release create'* ]]
+
 printf 'Combined GitHub release draft, verification, and immutable retry checks passed.\n'

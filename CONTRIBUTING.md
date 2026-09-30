@@ -10,6 +10,17 @@ Use Docker Engine and Docker Compose. Follow the local setup commands in the [RE
 ./sail run cargo test --manifest-path ../crates/encryption/Cargo.toml
 ```
 
+For Vue/CSS hot reload, keep `./sail npm run dev` running in a second terminal and open `http://localhost:8000`. Reload the page once after starting Vite. `./sail up -d` starts the application services; `npm run build` generates static assets and does not watch for changes.
+
+The build renders social images with Playwright. After creating or recreating the Sail container, install its browser and system dependencies:
+
+```sh
+./sail npx playwright install chromium
+./sail root-shell -c 'npx playwright install-deps chromium'
+```
+
+Run builds through `./sail npm run build` so generated files belong to the Sail user. If an earlier root-run build left unwritable assets, repair their ownership with `./sail root-shell -c 'chown -R sail:sail public/build'`. For a root-owned Vite cache, use `./sail root-shell -c 'chown -R sail:sail node_modules/.vite'`.
+
 Browser tests run on the host against an isolated application instance. Set `SAIL_APP_URL=http://127.0.0.1:8000` in `backend/.env`, then recreate the application container and use the same URL for Playwright so same-origin authentication stays within the Vue document:
 
 ```sh

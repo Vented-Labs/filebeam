@@ -212,7 +212,7 @@ test('unavailable state and footer version are centered and branded', async ({ p
     await expect(page.locator('.fb-footer')).toContainText('v0.1.0');
 });
 
-test('CLI instructions restore focus to the mobile header install entry', async ({ page }) => {
+test('CLI instructions restore focus to mobile navigation after resizing', async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 812 });
     await page.goto('/');
     const trigger = page.locator('.cli-footer-launcher');
@@ -235,11 +235,10 @@ test('CLI instructions restore focus to the mobile header install entry', async 
     );
     await page.setViewportSize({ width: 375, height: 812 });
     const mobileInstall = page.locator('header [data-app-install-entry]');
-    await expect(mobileInstall).toBeVisible();
+    await expect(mobileInstall).toBeHidden();
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
-    await expect(mobileInstall).toHaveAccessibleName('Install Mobile App');
-    await expect(mobileInstall).toBeFocused();
+    await expect(page.getByRole('button', { name: 'Open navigation' })).toBeFocused();
 });
 
 test('editor selection stays visible when switching modes', async ({ page }) => {

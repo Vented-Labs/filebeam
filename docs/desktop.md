@@ -1,5 +1,20 @@
 # Desktop Development
 
+## Install from the web app
+
+Open **Install Desktop App** in the web header to choose a platform and processor.
+The dialog detects the operating system and, where browser client hints permit,
+the processor architecture. Both selections can be changed manually. The install
+entry is hidden on mobile devices and at viewport widths of 900px or less.
+
+Downloads come from the newest stable GitHub release containing native desktop
+installers: AppImage for Linux x86_64/aarch64, DMG for Intel/Apple Silicon macOS,
+and the setup executable for Windows x86_64. The dialog shows availability when
+an installer has not been published. Release metadata is cached for five minutes;
+failed lookups are retried after a 30-second cache period.
+
+## Build locally
+
 The desktop client uses Rust and GPUI Kit. Run local Cargo commands through the
 Docker runner from the repository root:
 

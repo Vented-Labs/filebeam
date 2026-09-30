@@ -27,7 +27,7 @@ jobs:
     if: github.event_name != 'pull_request'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     environment: ${{ (inputs.publish || github.event.inputs.publish == 'true') && 'release' || '' }}
-    outputs: {tag: '${{ steps.ref.outputs.tag }}', commit: '${{ steps.ref.outputs.commit }}'}
+    outputs: {tag: '${{ steps.ref.outputs.tag }}', version: '${{ steps.ref.outputs.version }}', commit: '${{ steps.ref.outputs.commit }}'}
     steps:
       - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with: {persist-credentials: false, ref: refs/heads/master, fetch-depth: 0, fetch-tags: true}
@@ -36,7 +36,7 @@ jobs:
         run: |
           commit=$(bash scripts/release/validate-ref.sh "$TAG")
           [[ -z "$COMMIT" || "$COMMIT" == "$commit" ]]
-          printf 'tag=%s\ncommit=%s\n' "$TAG" "$commit" >> "$GITHUB_OUTPUT"
+          printf 'tag=%s\nversion=%s\ncommit=%s\n' "$TAG" "${TAG#v}" "$commit" >> "$GITHUB_OUTPUT"
       - name: Check release signing configuration
         if: inputs.publish || github.event.inputs.publish == 'true'
         env:
@@ -82,7 +82,7 @@ jobs:
     environment: ${{ (inputs.publish || github.event.inputs.publish == 'true') && 'release' || '' }}
     timeout-minutes: 90
     env:
-      FILEBEAM_RELEASE_VERSION: ${{ needs.validate.outputs.tag || 'v0.1.0' }}
+      FILEBEAM_RELEASE_VERSION: ${{ needs.validate.outputs.version || '0.1.0' }}
       FILEBEAM_RELEASE_TAG: ${{ needs.validate.outputs.tag || 'v0.1.0' }}
       FILEBEAM_RELEASE_SHA: ${{ needs.validate.outputs.commit || github.event.pull_request.head.sha }}
       FILEBEAM_RELEASE_PUBLIC_KEY: ${{ secrets.RELEASE_PUBLIC_KEY }}
@@ -199,6 +199,7 @@ jobs:
         with: {php-version: '8.5', extensions: sodium, coverage: none}
       - name: Verify and publish the signed desktop catalog
         run: |
+          export SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)
           php scripts/release/desktop-write-release.php "$RELEASE_TAG" dist/download dist/download/release.json
           scripts/release/desktop-publish.sh "$RELEASE_TAG" dist/download
         env:

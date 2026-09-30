@@ -65,7 +65,15 @@ if [[ -n $desktop_dir ]]; then
         "$desktop_dir/filebeam-desktop-$tag-windows-x86_64.zip" "$desktop_dir/release.json"
     )
     for asset in "${desktop_assets[@]}"; do [[ -f $asset ]] || { printf 'Missing desktop release asset: %s\n' "$asset" >&2; exit 1; }; done
-    php "$root/scripts/release/desktop-write-release.php" "$tag" "$desktop_dir" "$temporary/desktop-release.json"
+    published_epoch=$(php -r '
+        $release = json_decode(file_get_contents($argv[1]), true, flags: JSON_THROW_ON_ERROR);
+        $published = $release["published_at"] ?? null;
+        if (!is_string($published)) exit(1);
+        $date = DateTimeImmutable::createFromFormat("!Y-m-d\\TH:i:s\\Z", $published, new DateTimeZone("UTC"));
+        if ($date === false || $date->format("Y-m-d\\TH:i:s\\Z") !== $published) exit(1);
+        echo $date->getTimestamp();
+    ' "$desktop_dir/release.json")
+    SOURCE_DATE_EPOCH="$published_epoch" php "$root/scripts/release/desktop-write-release.php" "$tag" "$desktop_dir" "$temporary/desktop-release.json"
     cmp --silent "$temporary/desktop-release.json" "$desktop_dir/release.json" || { printf 'Desktop release manifest does not verify every archive.\n' >&2; exit 1; }
     # Installer names do not collide with updater archives and are independently signed.
     for asset in "$desktop_dir"/*.{AppImage,dmg,exe}; do [[ -e $asset ]] && desktop_assets+=("$asset"); done

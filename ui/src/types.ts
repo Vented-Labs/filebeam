@@ -69,6 +69,27 @@ export type CliConfig = {
     executable: 'beam';
 };
 
+export type DesktopArchitecture = 'x86_64' | 'aarch64';
+
+export type DesktopInstaller = {
+    os: 'linux' | 'macos' | 'windows';
+    architecture: DesktopArchitecture;
+    format: 'AppImage' | 'dmg' | 'exe';
+    name: string;
+    url: string;
+    size: number;
+};
+
+export type DesktopRelease = {
+    version: string;
+    notes_url: string;
+    assets: DesktopInstaller[];
+};
+
+export type DesktopReleaseResult =
+    | { state: 'available'; release: DesktopRelease }
+    | { state: 'unavailable' | 'error'; release: null };
+
 export type PublicRecipient = {
     id: number;
     username: string;

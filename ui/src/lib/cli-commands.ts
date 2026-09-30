@@ -1,21 +1,14 @@
 import { decodeBase64Url, encodeBase64Url } from './base64url';
 import type { CliConfig } from '../types';
+export { detectDesktopPlatform } from './platform';
+export type { DesktopPlatform as CliPlatform, UserAgentDetails } from './platform';
+import type { DesktopPlatform as CliPlatform } from './platform';
 
 export const cliDefaults: CliConfig = {
     installer_url: 'https://releases.filebeam.io/cli/install.sh',
     windows_installer_url: 'https://releases.filebeam.io/cli/install.ps1',
     installer_interpreter: 'sh',
     executable: 'beam',
-};
-
-export type CliPlatform = 'linux' | 'macos' | 'windows';
-
-export type UserAgentDetails = {
-    userAgentDataPlatform?: string;
-    userAgentDataMobile?: boolean;
-    platform?: string;
-    userAgent?: string;
-    maxTouchPoints?: number;
 };
 
 export function quoteShellArgument(value: string): string {
@@ -59,25 +52,6 @@ export function buildInstallCommand(
         throw new Error('A published HTTPS shell installer is required.');
     const url = publishedInstallerUrl(config.installer_url);
     return url && `curl -fsSL ${quoteShellArgument(url)} | sh`;
-}
-
-export function detectDesktopPlatform({
-    userAgentDataPlatform,
-    userAgentDataMobile,
-    platform,
-    userAgent,
-    maxTouchPoints,
-}: UserAgentDetails): CliPlatform | undefined {
-    const agent = userAgent ?? '';
-    if (userAgentDataMobile || /\b(?:iPad|iPhone|iPod|Android|Mobile|Windows Phone)\b/i.test(agent))
-        return;
-    for (const value of [userAgentDataPlatform, platform, agent]) {
-        if (!value) continue;
-        if (/win/i.test(value)) return 'windows';
-        if (/linux/i.test(value)) return 'linux';
-        if (/mac/i.test(value) && !((platform ?? '').includes('MacIntel') && maxTouchPoints))
-            return 'macos';
-    }
 }
 
 export function buildDownloadCommand(target: string): string {

@@ -11,6 +11,7 @@ import {
     transferPolicy,
 } from '../lib/transfer';
 import { waitForWorkerMessage, type WorkerMessage } from '../lib/worker-request';
+import { createTransferCryptoWorker } from '../lib/crypto-workers';
 import { connectWebRtcReceiver, type WebRtcReceiver } from '../lib/webrtc';
 import { progress as transferProgress } from '../../../backend/resources/js/actions/App/Http/Controllers/Api/V1/TurboTransferController';
 import {
@@ -490,13 +491,7 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
     }
 
     function getWorker(): Worker {
-        worker ??= new Worker(
-            new URL(
-                '../../../backend/resources/js/workers/filebeam-crypto.worker.ts',
-                import.meta.url,
-            ),
-            { type: 'module' },
-        );
+        worker ??= createTransferCryptoWorker();
         return worker;
     }
 
