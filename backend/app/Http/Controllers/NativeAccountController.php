@@ -15,10 +15,10 @@ use App\Models\TransferKeyEnvelope;
 use App\Models\User;
 use App\Models\UserInvitation;
 use App\Notifications\InboxTransferCompleted;
-use App\Services\FilebeamUrlGenerator;
 use App\Support\Branding;
 use App\Support\EffectivePlan;
 use App\Support\InstanceSettings;
+use App\Support\NativeSession;
 use App\Support\TransportPolicy;
 use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Auth\Events\Verified;
@@ -91,15 +91,15 @@ class NativeAccountController extends Controller
         $request->session()->regenerate();
         $request->session()->put('password_hash_'.config('auth.defaults.guard'), $user->getAuthPassword());
 
-        return response()->json(['data' => $this->sessionData($user)], 201, ['Cache-Control' => 'no-store, private']);
+        return response()->json(['data' => NativeSession::forUser($user)], 201, ['Cache-Control' => 'no-store, private']);
     }
 
-    public function session(Request $request, FilebeamUrlGenerator $urls): JsonResponse
+    public function session(Request $request): JsonResponse
     {
         $user = $request->user();
         assert($user instanceof User);
 
-        return response()->json(['data' => $this->sessionData($user, $urls)], 200, ['Cache-Control' => 'no-store, private']);
+        return response()->json(['data' => NativeSession::forUser($user)], 200, ['Cache-Control' => 'no-store, private']);
     }
 
     public function inbox(Request $request): JsonResponse
@@ -282,21 +282,6 @@ class NativeAccountController extends Controller
             'removed' => ['account' => true, 'accountKeys' => true, 'ownedTransfers' => 'scheduled_for_cleanup'],
             'preserved' => ['transfersOwnedByOthers' => true],
         ]], 202, ['Cache-Control' => 'no-store, private']);
-    }
-
-    /** @return array<string, bool|int|string|null> */
-    private function sessionData(User $user, ?FilebeamUrlGenerator $urls = null): array
-    {
-        $urls ??= app(FilebeamUrlGenerator::class);
-
-        return [
-            'id' => $user->id, 'name' => $user->name, 'username' => $user->username, 'email' => $user->email,
-            'emailVerifiedAt' => $user->email_verified_at?->toIso8601String(),
-            'profileUrl' => is_string($user->username) ? $urls->profile($user->username) : null,
-            'inboxEnabled' => $user->inbox_enabled,
-            'usernameRoutingEnabled' => app(InstanceSettings::class)->boolean('username_routing'),
-            'notificationChannel' => $user->notification_channel ?? 'mail',
-        ];
     }
 
     private function invitationForToken(string $token): ?UserInvitation

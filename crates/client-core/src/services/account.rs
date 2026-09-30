@@ -170,10 +170,9 @@ impl AccountService {
         if !response.status().is_success() {
             bail!("native login returned {}", response.status());
         }
-        response
-            .json::<Api<AccountSession>>()
-            .context("decode native session")
-            .map(|v| v.data)
+        // Older servers return a smaller login payload. Read the canonical
+        // session with the newly issued cookie before exposing account state.
+        self.session()
     }
     pub fn register(
         &self,

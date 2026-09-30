@@ -10,6 +10,7 @@ use App\Models\Plan;
 use App\Models\User;
 use App\Support\Branding;
 use App\Support\InstanceSettings;
+use App\Support\NativeSession;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -59,17 +60,7 @@ class RegisteredUserController extends Controller
         $request->session()->put('password_hash_'.config('auth.defaults.guard'), $user->getAuthPassword());
 
         if ($request->expectsJson()) {
-            return response()->json(['data' => [
-                'id' => $user->id,
-                'name' => $user->name,
-                'username' => $user->username,
-                'email' => $user->email,
-                'emailVerifiedAt' => null,
-                'profileUrl' => null,
-                'inboxEnabled' => $user->inbox_enabled,
-                'usernameRoutingEnabled' => app(InstanceSettings::class)->boolean('username_routing'),
-                'notificationChannel' => $user->notification_channel ?? 'mail',
-            ]], 201);
+            return response()->json(['data' => NativeSession::forUser($user)], 201, ['Cache-Control' => 'no-store, private']);
         }
 
         return to_route('verification.notice');

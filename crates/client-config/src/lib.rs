@@ -170,7 +170,8 @@ impl Config {
                     let mut document = source
                         .parse::<DocumentMut>()
                         .context("parse legacy config.toml")?;
-                    let (config, _) = from_document(&document, home)?;
+                    let (mut config, _) = from_document(&document, home)?;
+                    import_legacy_instance(&mut config, &document, legacy_instance)?;
                     config.validate()?;
                     apply_config(&mut document, &config);
                     atomic_write(&path, document.to_string().as_bytes())?;
@@ -193,7 +194,8 @@ impl Config {
             let source =
                 fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
             let mut document = source.parse::<DocumentMut>().context("parse config.toml")?;
-            let (config, migrated) = from_document(&document, home)?;
+            let (mut config, migrated) = from_document(&document, home)?;
+            import_legacy_instance(&mut config, &document, legacy_instance)?;
             config.validate()?;
             if migrated {
                 apply_config(&mut document, &config);
@@ -663,6 +665,17 @@ fn legacy_instance_env(value: Option<std::ffi::OsString>) -> Option<String> {
         .map(|value| value.to_string_lossy().into_owned())
 }
 
+fn import_legacy_instance(config: &mut Config, document: &DocumentMut, instance: Option<std::ffi::OsString>) -> Result<()> {
+    if document.get("schema_version").is_none()
+        && string_at(document, "server", "url")?.is_none()
+        && let Some(instance) = legacy_instance_env(instance)
+    {
+        config.server.url = normalize_server_url(&instance)?;
+        config.baseline = Some(config.settings());
+    }
+    Ok(())
+}
+
 fn ensure_home(home: &Path) -> Result<()> {
     fs::create_dir_all(home).with_context(|| format!("create {}", home.display()))?;
     #[cfg(unix)]
@@ -890,6 +903,18 @@ mod tests {
         )
         .unwrap();
         assert_eq!(config.server.url, "https://legacy.example");
+    }
+
+    #[test]
+    fn migrating_existing_flat_settings_keeps_the_legacy_instance_and_opt_out() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join(CONFIG_FILE), "check_updates = false\ncustom = 'keep'\n").unwrap();
+        let config = Config::load_with_legacy_settings(Some(temp.path().to_owned()), Some("https://existing.example".into()), None).unwrap();
+        assert_eq!(config.server.url, "https://existing.example");
+        assert!(!config.updates.auto_update);
+        let config = Config::load_with_legacy_settings(Some(temp.path().to_owned()), Some("https://ignored.example".into()), None).unwrap();
+        assert_eq!(config.server.url, "https://existing.example");
+        assert!(fs::read_to_string(temp.path().join(CONFIG_FILE)).unwrap().contains("custom = 'keep'"));
     }
 
     #[test]
