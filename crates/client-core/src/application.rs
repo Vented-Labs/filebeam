@@ -931,7 +931,6 @@ mod tests {
     #[test]
     fn resume_uses_authenticated_checkpoint_direction_and_uploads_cannot_export() {
         let home = std::env::temp_dir().join(format!("filebeam-resume-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&home).unwrap();
         let checkpoint = uuid::Uuid::new_v4().to_string();
         let store = Store::create(&home, &checkpoint).unwrap();
         store
@@ -974,7 +973,6 @@ mod tests {
     #[test]
     fn configured_secret_store_restores_detached_checkpoint_without_a_worker() {
         let home = std::env::temp_dir().join(format!("filebeam-restore-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&home).unwrap();
         let checkpoint = uuid::Uuid::new_v4().to_string();
         let secrets: std::sync::Arc<dyn filebeam_transfer_native::checkpoint::SecretStore> =
             std::sync::Arc::new(MockSecretStore);

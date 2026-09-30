@@ -1,3 +1,8 @@
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
+
 use std::{env, ffi::OsString, path::PathBuf, process::ExitCode, sync::Arc};
 
 use anyhow::{Context, Result, bail};

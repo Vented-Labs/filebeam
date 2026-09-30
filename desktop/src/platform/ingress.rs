@@ -15,6 +15,7 @@ use anyhow::{Context, Result, bail};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
+#[cfg(unix)]
 use sha2::{Digest, Sha256};
 use url::Url;
 
@@ -225,6 +226,9 @@ fn socket_path_at(
     xdg: Option<PathBuf>,
     temporary: PathBuf,
 ) -> Result<PathBuf> {
+    let runtime = runtime
+        .canonicalize()
+        .context("canonicalize desktop runtime")?;
     let mut base = xdg.unwrap_or_else(|| temporary.join(format!("filebeam-{uid}")));
     // macOS TMPDIR can itself approach sockaddr_un's limit. Keep the full
     // home digest and use a protected per-user directory under the short /tmp.
@@ -527,6 +531,17 @@ mod tests {
         .unwrap();
         assert!(socket.as_os_str().as_encoded_bytes().len() < 100);
         ensure_private_directory(socket.parent().unwrap(), current_uid().unwrap()).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn runtime_aliases_resolve_to_the_same_socket() {
+        let root = home();
+        let runtime = root.join("real");
+        let alias = root.join("alias");
+        fs::create_dir(&runtime).unwrap();
+        std::os::unix::fs::symlink(&runtime, &alias).unwrap();
+        assert_eq!(socket_path(&runtime).unwrap(), socket_path(&alias).unwrap());
         fs::remove_dir_all(root).unwrap();
     }
 

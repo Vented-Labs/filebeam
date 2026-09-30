@@ -713,13 +713,17 @@ fn stage_payload(
     root: &Path,
     version: &Version,
 ) -> Result<PathBuf> {
-    let target = root.join(format!("{}-{}", version, Uuid::new_v4()));
+    let target = root.join(format!(
+        "{}-{}{}",
+        version,
+        Uuid::new_v4(),
+        executable_suffix()
+    ));
     if kind == "app-tar-gz" {
         extract_bundle(bytes, &target)?;
         return Ok(target);
     }
     let binary = extract_binary(bytes, kind, p)?;
-    let target = target.with_extension(executable_suffix().trim_start_matches('.'));
     atomic_write(&target, &binary, p)?;
     Ok(target)
 }
@@ -1029,6 +1033,32 @@ mod tests {
         updater.save_state(&state).unwrap();
         assert_eq!(updater.activate_staged(|| true).unwrap(), Activation::None);
         assert!(updater.load_state().unwrap().desktop.staged.is_none());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn repeated_staging_keeps_the_first_validated_payload_intact() {
+        let directory = TestDirectory::new();
+        let version = Version::parse("0.3.0").unwrap();
+        let first = stage_payload(
+            b"first",
+            "appimage",
+            Product::Desktop,
+            &directory.0,
+            &version,
+        )
+        .unwrap();
+        let second = stage_payload(
+            b"second",
+            "appimage",
+            Product::Desktop,
+            &directory.0,
+            &version,
+        )
+        .unwrap();
+        assert_ne!(first, second);
+        assert_eq!(fs::read(first).unwrap(), b"first");
+        assert_eq!(fs::read(second).unwrap(), b"second");
     }
 
     #[cfg(unix)]

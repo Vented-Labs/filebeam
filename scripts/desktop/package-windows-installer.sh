@@ -9,8 +9,8 @@ root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 mkdir -p "$out"
 out=$(CDPATH='' cd -- "$out" && pwd)
 sign() {
-    MSYS_NO_PATHCONV=1 signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f "$WINDOWS_SIGNING_CERTIFICATE" /p "$WINDOWS_SIGNING_PASSWORD" "$1"
-    MSYS_NO_PATHCONV=1 signtool verify /pa "$1"
+    MSYS_NO_PATHCONV=1 signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f "$(cygpath -w "$WINDOWS_SIGNING_CERTIFICATE")" /p "$WINDOWS_SIGNING_PASSWORD" "$(cygpath -w "$1")"
+    MSYS_NO_PATHCONV=1 signtool verify /pa "$(cygpath -w "$1")"
 }
 if [[ $unsigned != 1 ]]; then sign "$binary"; fi
 makensis -DINPUT="$binary" -DOUTPUT="$out/filebeam-desktop-$tag-windows-x86_64-setup.exe" -DICON="$root/desktop/packaging/icons/filebeam.ico" "$root/desktop/packaging/windows/filebeam.nsi"

@@ -68,7 +68,7 @@ jobs:
 
   targets:
     needs: [validate, changes]
-    if: always() && needs.changes.outputs.relevant == 'true' && (github.event_name == 'pull_request' || needs.validate.result == 'success')
+    if: ${{ !cancelled() && needs.changes.outputs.relevant == 'true' && (github.event_name == 'pull_request' || needs.validate.result == 'success') }}
     strategy:
       fail-fast: false
       matrix:
