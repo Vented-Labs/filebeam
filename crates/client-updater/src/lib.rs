@@ -269,29 +269,25 @@ impl Updater {
         }
         #[cfg(not(windows))]
         {
-        let outcome = if staged.kind == PayloadKind::App.as_str() {
-            #[cfg(target_os = "macos")]
-            {
-                verify_macos_bundle(&source)?;
-                replace_bundle(&source, &self.options.executable)?;
-                Activation::RelaunchGui
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                bail!("macOS application bundle staged on another platform")
-            }
-        } else {
-                replace_file(
-                    &source,
-                    &self.options.executable,
-                    self.options.product,
-                )?;
+            let outcome = if staged.kind == PayloadKind::App.as_str() {
+                #[cfg(target_os = "macos")]
+                {
+                    verify_macos_bundle(&source)?;
+                    replace_bundle(&source, &self.options.executable)?;
+                    Activation::RelaunchGui
+                }
+                #[cfg(not(target_os = "macos"))]
+                {
+                    bail!("macOS application bundle staged on another platform")
+                }
+            } else {
+                replace_file(&source, &self.options.executable, self.options.product)?;
                 Activation::Reexec
-        };
-        entry.staged = None;
-        entry.last_success = Some(now());
-        self.save_state(&state)?;
-        Ok(outcome)
+            };
+            entry.staged = None;
+            entry.last_success = Some(now());
+            self.save_state(&state)?;
+            Ok(outcome)
         }
     }
     #[cfg(windows)]
@@ -622,7 +618,7 @@ enum PayloadKind {
 }
 impl PayloadKind {
     fn as_str(&self) -> &'static str {
-        "app"
+        "app-tar-gz"
     }
 }
 fn key(encoded: &str) -> Result<VerifyingKey> {
@@ -1019,11 +1015,16 @@ mod tests {
     #[test]
     fn already_installed_update_is_cleared_without_replacing_or_relaunching() {
         let directory = TestDirectory::new();
-        let updater = Updater::new(Options::for_product(directory.0.clone(), Product::Desktop, "0.3.0", "").unwrap());
+        let updater = Updater::new(
+            Options::for_product(directory.0.clone(), Product::Desktop, "0.3.0", "").unwrap(),
+        );
         let mut state = State::default();
         state.desktop.staged = Some(Staged {
             path: directory.0.join("missing").to_string_lossy().into_owned(),
-            version: "0.3.0".into(), product: "desktop".into(), kind: "tar-gz".into(), sha256: "a".repeat(64),
+            version: "0.3.0".into(),
+            product: "desktop".into(),
+            kind: "tar-gz".into(),
+            sha256: "a".repeat(64),
         });
         updater.save_state(&state).unwrap();
         assert_eq!(updater.activate_staged(|| true).unwrap(), Activation::None);
@@ -1041,7 +1042,12 @@ mod tests {
         fs::write(&staged, b"new").unwrap();
         std::os::unix::fs::symlink(&image, &link).unwrap();
         replace_file(&staged, &link, Product::Desktop).unwrap();
-        assert!(fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+        assert!(
+            fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
         assert_eq!(fs::read(&link).unwrap(), b"new");
         assert!(replace_file(&staged, &link, Product::Desktop).is_err());
         assert_eq!(fs::read(&link).unwrap(), b"new");
@@ -1058,11 +1064,24 @@ mod tests {
         header.set_size(3);
         header.set_mode(0o755);
         header.set_cksum();
-        archive.append_data(&mut header, "Filebeam.app/Contents/MacOS/filebeam", &b"app"[..]).unwrap();
+        archive
+            .append_data(
+                &mut header,
+                "Filebeam.app/Contents/MacOS/filebeam",
+                &b"app"[..],
+            )
+            .unwrap();
         let bytes = archive.into_inner().unwrap().finish().unwrap();
         let target = directory.0.join("staged.app");
         extract_bundle(&bytes, &target).unwrap();
-        assert_eq!(fs::metadata(target.join("Contents/MacOS/filebeam")).unwrap().permissions().mode() & 0o777, 0o755);
+        assert_eq!(
+            fs::metadata(target.join("Contents/MacOS/filebeam"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o755
+        );
     }
     #[test]
     fn signed_catalog_rejects_wrong_product_expiry_and_prerelease() {

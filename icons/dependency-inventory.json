@@ -8,7 +8,7 @@
             "@vue/compiler-sfc": "^3.5.42",
             "iconsax": "0.1.1",
             "typescript": "^6.0.3",
-            "vite": "^8.2.2",
+            "vite": "npm:@voidzero-dev/vite-plus-core@1.0.0",
             "vite-plus": "1.0.0",
             "vue": "^3.5.42",
             "vue-tsc": "^3.3.11"
@@ -27,7 +27,7 @@
             "concurrently": "^10.0.3",
             "laravel-vite-plugin": "^3.1",
             "tailwindcss": "^4.1.1",
-            "vite": "^8.0.0",
+            "vite": "npm:@voidzero-dev/vite-plus-core@1.0.0",
             "vite-plus": "1.0.0",
             "vue": "^3.5.13",
             "vue-tsc": "^3.3.11"
@@ -73,8 +73,8 @@
         }
     },
     "npmResolved": {
-        "count": 383,
-        "sha256": "0af13f013ee4b85bdc8c92fc427e9b433dc72fd95458c7f34f5f1091b7d63074"
+        "count": 365,
+        "sha256": "f4cb3d22f411bbca77ddee5c0cee414e03bc81d778680d8fc63a6b29270cdef9"
     },
     "composerResolved": {
         "count": 181,

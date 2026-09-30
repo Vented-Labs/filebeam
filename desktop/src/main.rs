@@ -58,7 +58,8 @@ fn run(arguments: Vec<OsString>) -> Result<()> {
         return Ok(());
     }
     #[cfg(not(windows))]
-    let relaunch_executable = Options::for_product(config.home.clone(), Product::Desktop, VERSION, "")?.executable;
+    let relaunch_executable =
+        Options::for_product(config.home.clone(), Product::Desktop, VERSION, "")?.executable;
     let activation = activate_update(&config).unwrap_or_else(|error| {
         log::warn!("could not activate desktop update: {error}");
         filebeam_client_updater::Activation::None

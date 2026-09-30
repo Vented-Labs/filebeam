@@ -26,6 +26,7 @@ jobs:
   validate:
     if: github.event_name != 'pull_request'
     runs-on: blacksmith-4vcpu-ubuntu-2404
+    environment: ${{ (inputs.publish || github.event.inputs.publish == 'true') && 'release' || '' }}
     outputs: {tag: '${{ steps.ref.outputs.tag }}', commit: '${{ steps.ref.outputs.commit }}'}
     steps:
       - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
@@ -36,6 +37,20 @@ jobs:
           commit=$(bash scripts/release/validate-ref.sh "$TAG")
           [[ -z "$COMMIT" || "$COMMIT" == "$commit" ]]
           printf 'tag=%s\ncommit=%s\n' "$TAG" "$commit" >> "$GITHUB_OUTPUT"
+      - name: Check release signing configuration
+        if: inputs.publish || github.event.inputs.publish == 'true'
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+          RELEASE_PUBLIC_KEY: ${{ secrets.RELEASE_PUBLIC_KEY }}
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_NOTARY_KEY_BASE64: ${{ secrets.APPLE_NOTARY_KEY_BASE64 }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER }}
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_SIGNING_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PASSWORD }}
+        run: bash scripts/desktop/check-signing.sh
 
   changes:
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -64,6 +79,7 @@ jobs:
           - {runner: blacksmith-6vcpu-macos-15, target: x86_64-apple-darwin, os: macos, arch: x86_64, suffix: ''}
           - {runner: blacksmith-4vcpu-windows-2025, target: x86_64-pc-windows-msvc, os: windows, arch: x86_64, suffix: '.exe'}
     runs-on: ${{ matrix.runner }}
+    environment: ${{ (inputs.publish || github.event.inputs.publish == 'true') && 'release' || '' }}
     timeout-minutes: 90
     env:
       FILEBEAM_RELEASE_VERSION: ${{ needs.validate.outputs.tag || 'v0.1.0' }}
@@ -115,8 +131,18 @@ jobs:
       - name: Install pinned AppImage tooling
         if: runner.os == 'Linux'
         run: |
-          bash scripts/desktop/install-appimagetool.sh '${{ matrix.arch }}' "$RUNNER_TEMP/appimage-tools"
-          printf '%s\n' "$RUNNER_TEMP/appimage-tools" >> "$GITHUB_PATH"
+          bash scripts/desktop/install-appimagetool.sh '${{ matrix.arch }}' dist/desktop-tools
+      - name: Prepare native signing
+        if: (inputs.publish || github.event.inputs.publish == 'true') && runner.os != 'Linux'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_NOTARY_KEY_BASE64: ${{ secrets.APPLE_NOTARY_KEY_BASE64 }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER: ${{ secrets.APPLE_NOTARY_ISSUER }}
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+        run: bash scripts/desktop/prepare-signing.sh
       - name: Make native installers and updater archives
         shell: bash
         env:
@@ -124,19 +150,26 @@ jobs:
           TAG: ${{ needs.validate.outputs.tag || 'v0.1.0' }}
           FILEBEAM_DESKTOP_UNSIGNED: ${{ (inputs.publish || github.event.inputs.publish == 'true') && '0' || '1' }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_NOTARY_PROFILE: ${{ secrets.APPLE_NOTARY_PROFILE }}
-          WINDOWS_SIGNING_CERTIFICATE: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE }}
           WINDOWS_SIGNING_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PASSWORD }}
         run: |
           case '${{ matrix.os }}' in
             linux)
-              bash scripts/desktop/package-linux-installer.sh dist/desktop/filebeam "$TAG" dist/desktop
-              bash scripts/desktop/package-update-payload.sh "$TAG" linux "$ARCH" "dist/desktop/filebeam-desktop-$TAG-linux-$ARCH.AppImage" dist/desktop
-              APPIMAGE_EXTRACT_AND_RUN=1 "dist/desktop/filebeam-desktop-$TAG-linux-$ARCH.AppImage" --version
+              bash scripts/desktop/run.sh env TAG="$TAG" ARCH="$ARCH" bash -ceu '
+                export PATH="/workspace/dist/desktop-tools:$PATH"
+                bash scripts/desktop/package-linux-installer.sh dist/desktop/filebeam "$TAG" dist/desktop
+                bash scripts/desktop/package-update-payload.sh "$TAG" linux "$ARCH" "dist/desktop/filebeam-desktop-$TAG-linux-$ARCH.AppImage" dist/desktop
+                APPIMAGE_EXTRACT_AND_RUN=1 "dist/desktop/filebeam-desktop-$TAG-linux-$ARCH.AppImage" --version
+              '
               ;;
             macos) bash scripts/desktop/package-macos-installer.sh dist/desktop/filebeam "$TAG" dist/desktop ;;
             windows) bash scripts/desktop/package-windows-installer.sh dist/desktop/filebeam.exe "$TAG" dist/desktop ;;
           esac
+      - name: Remove signing material
+        if: always() && (inputs.publish || github.event.inputs.publish == 'true') && runner.os != 'Linux'
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == macOS ]]; then security delete-keychain "$RUNNER_TEMP/filebeam.keychain-db" || true; fi
+          rm -f "$RUNNER_TEMP/filebeam.p12" "$RUNNER_TEMP/filebeam.pfx" "$RUNNER_TEMP/filebeam-notary.p8"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: desktop-${{ matrix.os }}-${{ matrix.arch }}-${{ needs.validate.outputs.tag || github.event.pull_request.head.sha }}

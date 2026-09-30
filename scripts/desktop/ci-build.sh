@@ -12,6 +12,10 @@ for variable in FILEBEAM_RELEASE_VERSION FILEBEAM_RELEASE_TAG FILEBEAM_RELEASE_S
 done
 FILEBEAM_RELEASE_VERSION=${FILEBEAM_RELEASE_VERSION#v}
 export FILEBEAM_RELEASE_VERSION
+if [[ -n ${FILEBEAM_RELEASE_PUBLIC_KEY:-} ]]; then
+    FILEBEAM_RELEASE_PUBLIC_KEY=$(python3 -c 'import base64, os; key = base64.b64decode("".join(os.environ["FILEBEAM_RELEASE_PUBLIC_KEY"].split()) + "==="); assert len(key) == 32, "release public key must be 32 bytes"; print(base64.b64encode(key).decode())')
+    export FILEBEAM_RELEASE_PUBLIC_KEY
+fi
 
 if [[ ${FILEBEAM_DESKTOP_BUILD_ONLY:-0} == 1 ]]; then
     : # The macOS x86_64 cross-target is intentionally build-only.

@@ -675,15 +675,14 @@ fn main() -> Result<()> {
 fn bootstrap_update_startup() -> Result<bool> {
     let home = bootstrap_home();
     if let Ok(config) = config::Config::load(home) {
-        if config.check_updates {
-            if update::activate_staged(&config).unwrap_or(filebeam_client_updater::Activation::None)
+        if config.check_updates
+            && update::activate_staged(&config).unwrap_or(filebeam_client_updater::Activation::None)
                 == filebeam_client_updater::Activation::Reexec
-            {
-                #[cfg(unix)]
-                reexec_with_original_arguments(config.home.join("bin/beam"))?;
-                #[cfg(windows)]
-                return Ok(true);
-            }
+        {
+            #[cfg(unix)]
+            reexec_with_original_arguments(config.home.join("bin/beam"))?;
+            #[cfg(windows)]
+            return Ok(true);
         }
         update::notify_if_available(&config);
     }

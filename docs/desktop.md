@@ -61,3 +61,29 @@ workers or reading user settings:
 ```sh
 bash scripts/desktop/run.sh cargo run --manifest-path desktop/Cargo.toml --example visual_studio --features visual-test -- transfers-mixed
 ```
+
+## CI and releases
+
+Desktop PR checks build optimized binaries and unsigned installers for Linux
+x86_64/aarch64, macOS x86_64/aarch64, and Windows x86_64. Linux also runs the
+headless transfer E2E suite; native runners test the shared configuration and
+updater contracts. Production profiles use level-3 optimization, thin LTO, one
+codegen unit, and stripped symbols, with debug information and assertions disabled.
+
+The `vX.Y.Z` release workflow publishes Desktop and CLI alongside the server.
+Signed desktop releases require these GitHub `release` environment secrets:
+
+- `RELEASE_SIGNING_KEY` and `RELEASE_PUBLIC_KEY`: matching Ed25519 catalog keys.
+- `APPLE_CERTIFICATE_BASE64`, `APPLE_CERTIFICATE_PASSWORD`, and
+  `APPLE_SIGNING_IDENTITY`: exported Developer ID Application certificate and key.
+- `APPLE_NOTARY_KEY_BASE64`, `APPLE_NOTARY_KEY_ID`, and `APPLE_NOTARY_ISSUER`:
+  App Store Connect API key for notarization.
+- `WINDOWS_CERTIFICATE_BASE64` and `WINDOWS_SIGNING_PASSWORD`: exported Authenticode
+  signing certificate and key.
+
+Certificate and API key files are Base64-encoded. CI imports them into temporary
+storage and removes them after packaging. It notarizes the macOS app before
+archiving it for updates, and signs both the Windows executable and installer.
+Linux update archives contain the complete AppImage, including bundled libraries.
+Both clients share `~/.filebeam/config.toml`, while their managed executables,
+update state, and backups remain product-specific.

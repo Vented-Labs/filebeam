@@ -141,7 +141,7 @@ jobs:
 
   publish:
     if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.publish && !inputs.metadata_only)) && needs.validate-ref.result == 'success'
-    needs: [package, validate-ref]
+    needs: [package, validate-ref, cli, desktop]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     environment: release
     env:
