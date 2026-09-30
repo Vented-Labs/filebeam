@@ -1201,7 +1201,10 @@ mod tests {
         let fixture = env::temp_dir().join(format!("filebeam-updater-{}", Uuid::new_v4()));
         fs::create_dir_all(&fixture).unwrap();
         let tag = "v9.8.7";
-        let selected = fixture.join(format!("filebeam-desktop-{tag}-linux-x86_64.tar.gz"));
+        let selected = fixture.join(format!(
+            "filebeam-desktop-{tag}-linux-{}.tar.gz",
+            arch().unwrap()
+        ));
         let mut archive = Vec::new();
         {
             let encoder = flate2::write::GzEncoder::new(&mut archive, flate2::Compression::fast());
@@ -1216,16 +1219,16 @@ mod tests {
         }
         fs::write(&selected, &archive).unwrap();
         for suffix in [
+            "linux-x86_64.tar.gz",
             "linux-aarch64.tar.gz",
             "macos-x86_64.tar.gz",
             "macos-aarch64.tar.gz",
             "windows-x86_64.zip",
         ] {
-            fs::write(
-                fixture.join(format!("filebeam-desktop-{tag}-{suffix}")),
-                b"installer",
-            )
-            .unwrap();
+            let path = fixture.join(format!("filebeam-desktop-{tag}-{suffix}"));
+            if path != selected {
+                fs::write(path, b"installer").unwrap();
+            }
         }
         assert!(
             Command::new("php")

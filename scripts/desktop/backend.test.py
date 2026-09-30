@@ -25,6 +25,7 @@ def main():
     parser.add_argument("--desktop", required=True, type=Path)
     parser.add_argument("--services", required=True, type=Path)
     parser.add_argument("--cli", type=Path)
+    parser.add_argument("--browser-test", action="append", default=[])
     args = parser.parse_args()
     for path in [args.desktop, args.services, args.cli]:
         if path is not None and not path.is_file():
@@ -100,6 +101,11 @@ def main():
                     assert (destination / source.name).read_bytes() == source.read_bytes()
                     assert "auto_update = false" in (home / "config.toml").read_text()
                     print("PASS CLI migrated-config upload/download hash")
+                if args.browser_test:
+                    subprocess.run([
+                        "npx", "playwright", "test", *args.browser_test, "--workers=1",
+                        "--output=" + str(artifacts / "native-backend-browser"),
+                    ], cwd=ROOT, env={**env, "BASE_URL": origin}, check=True, timeout=180)
             finally:
                 server.terminate()
                 server.wait(timeout=10)

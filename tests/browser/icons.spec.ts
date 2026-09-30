@@ -5,6 +5,24 @@ import { resolve } from 'node:path';
 test('transport and homepage feature icons render the approved custom artwork', async ({
     page,
 }) => {
+    await page.route(
+        (url) => url.pathname === '/',
+        async (route) => {
+            const response = await route.fetch();
+            const body = await response.text();
+            const opening = '<script data-page="app" type="application/json">';
+            const start = body.indexOf(opening);
+            const contentStart = start + opening.length;
+            const end = body.indexOf('</script>', contentStart);
+            if (start < 0 || end < 0) throw new Error('Inertia page payload was not found.');
+            const payload = JSON.parse(body.slice(contentStart, end));
+            payload.props.filebeam.transport_policy.enabled_drivers = ['http', 'webrtc'];
+            await route.fulfill({
+                response,
+                body: `${body.slice(0, contentStart)}${JSON.stringify(payload)}${body.slice(end)}`,
+            });
+        },
+    );
     await page.goto('/');
     const icons = [
         ['http-server', page.getByRole('radio', { name: 'HTTP (stored)', exact: true })],
