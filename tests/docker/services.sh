@@ -28,10 +28,10 @@ proxy_data_volume="$prefix-proxy-data"
 ca_volume="$prefix-ca"
 ini_volume="$prefix-ini"
 
-# Keep this aligned with the already-pinned CI MinIO release. Service images are
-# explicit releases so a local acceptance run is reproducible.
-minio_image='quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z'
-mc_image='quay.io/minio/mc:RELEASE.2025-03-12T17-29-24Z'
+# Official binary images are no longer public; build the pinned test releases.
+bash "$(dirname "${BASH_SOURCE[0]}")/../../scripts/ci/build-test-storage.sh"
+minio_image='filebeam-test-minio:local'
+mc_image='filebeam-test-mc:local'
 postgres_image='postgres:18.6-trixie'
 caddy_image='caddy:2.10.2-alpine'
 

@@ -152,31 +152,15 @@ impl Config {
         legacy_instance: Option<std::ffi::OsString>,
         legacy_home: Option<PathBuf>,
     ) -> Result<Self> {
-        let use_legacy_home = home.is_none();
-        let home = home.unwrap_or_else(default_home);
+        let home = home
+            .or_else(|| legacy_home.map(|path| path.join(".filebeam")))
+            .unwrap_or_else(default_home);
         ensure_home(&home)?;
         let path = home.join(CONFIG_FILE);
         let lock = lock_file(&home)?;
         lock.lock_exclusive().context("lock config.toml")?;
         let result = (|| {
             if !path.exists() {
-                if let Some(legacy_path) = use_legacy_home
-                    .then(|| legacy_home.map(|path| path.join(CONFIG_FILE)))
-                    .flatten()
-                    .filter(|path| path.is_file())
-                {
-                    let source = fs::read_to_string(&legacy_path)
-                        .with_context(|| format!("read {}", legacy_path.display()))?;
-                    let mut document = source
-                        .parse::<DocumentMut>()
-                        .context("parse legacy config.toml")?;
-                    let (mut config, _) = from_document(&document, home)?;
-                    import_legacy_instance(&mut config, &document, legacy_instance)?;
-                    config.validate()?;
-                    apply_config(&mut document, &config);
-                    atomic_write(&path, document.to_string().as_bytes())?;
-                    return Ok(config);
-                }
                 let mut config = Self {
                     home,
                     ..Self::default()
@@ -394,7 +378,12 @@ pub struct IcePolicy<'a> {
 }
 
 pub fn default_home() -> PathBuf {
-    dirs::home_dir()
+    // FILEBEAM_HOME historically names the parent of .filebeam. Keep that
+    // location so upgrades retain sessions, keys, and transfer checkpoints.
+    std::env::var_os("FILEBEAM_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(dirs::home_dir)
         .map(|path| path.join(".filebeam"))
         .unwrap_or_else(|| PathBuf::from(".filebeam"))
 }
@@ -665,7 +654,11 @@ fn legacy_instance_env(value: Option<std::ffi::OsString>) -> Option<String> {
         .map(|value| value.to_string_lossy().into_owned())
 }
 
-fn import_legacy_instance(config: &mut Config, document: &DocumentMut, instance: Option<std::ffi::OsString>) -> Result<()> {
+fn import_legacy_instance(
+    config: &mut Config,
+    document: &DocumentMut,
+    instance: Option<std::ffi::OsString>,
+) -> Result<()> {
     if document.get("schema_version").is_none()
         && string_at(document, "server", "url")?.is_none()
         && let Some(instance) = legacy_instance_env(instance)
@@ -908,13 +901,31 @@ mod tests {
     #[test]
     fn migrating_existing_flat_settings_keeps_the_legacy_instance_and_opt_out() {
         let temp = tempfile::tempdir().unwrap();
-        fs::write(temp.path().join(CONFIG_FILE), "check_updates = false\ncustom = 'keep'\n").unwrap();
-        let config = Config::load_with_legacy_settings(Some(temp.path().to_owned()), Some("https://existing.example".into()), None).unwrap();
+        fs::write(
+            temp.path().join(CONFIG_FILE),
+            "check_updates = false\ncustom = 'keep'\n",
+        )
+        .unwrap();
+        let config = Config::load_with_legacy_settings(
+            Some(temp.path().to_owned()),
+            Some("https://existing.example".into()),
+            None,
+        )
+        .unwrap();
         assert_eq!(config.server.url, "https://existing.example");
         assert!(!config.updates.auto_update);
-        let config = Config::load_with_legacy_settings(Some(temp.path().to_owned()), Some("https://ignored.example".into()), None).unwrap();
+        let config = Config::load_with_legacy_settings(
+            Some(temp.path().to_owned()),
+            Some("https://ignored.example".into()),
+            None,
+        )
+        .unwrap();
         assert_eq!(config.server.url, "https://existing.example");
-        assert!(fs::read_to_string(temp.path().join(CONFIG_FILE)).unwrap().contains("custom = 'keep'"));
+        assert!(
+            fs::read_to_string(temp.path().join(CONFIG_FILE))
+                .unwrap()
+                .contains("custom = 'keep'")
+        );
     }
 
     #[test]
@@ -933,5 +944,24 @@ mod tests {
         )
         .unwrap();
         assert_eq!(config.server.url, "https://filebeam.io");
+    }
+
+    #[test]
+    fn legacy_home_is_migrated_in_place_with_private_state_retained() {
+        let parent = tempfile::tempdir().unwrap();
+        let home = parent.path().join(".filebeam");
+        fs::create_dir(&home).unwrap();
+        fs::write(home.join(CONFIG_FILE), "check_updates = false\n").unwrap();
+        fs::write(home.join("private-state"), b"retained").unwrap();
+        let config = Config::load_with_legacy_settings(
+            None,
+            Some("https://legacy.example".into()),
+            Some(parent.path().to_owned()),
+        )
+        .unwrap();
+        assert_eq!(config.home, home);
+        assert_eq!(config.server.url, "https://legacy.example");
+        assert!(!config.updates.auto_update);
+        assert_eq!(fs::read(home.join("private-state")).unwrap(), b"retained");
     }
 }

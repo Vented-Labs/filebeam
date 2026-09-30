@@ -2038,7 +2038,14 @@ mod tests {
             window.input("first line", cx);
             window.press("enter", cx);
             window.input("second line", cx);
-            window.press("ctrl-z", cx);
+            window.press(
+                if cfg!(target_os = "macos") {
+                    "cmd-z"
+                } else {
+                    "ctrl-z"
+                },
+                cx,
+            );
         })
         .unwrap();
         handle

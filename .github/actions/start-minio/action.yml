@@ -5,10 +5,11 @@ runs:
   steps:
     - shell: bash
       run: |
+        bash scripts/ci/build-test-storage.sh minio
         docker run --detach --name filebeam-minio --publish 127.0.0.1:9000:9000 \
           --env MINIO_ROOT_USER=filebeam-test \
           --env MINIO_ROOT_PASSWORD=filebeam-test-secret \
-          quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z server /data --console-address :9001
+          filebeam-test-minio:local server /data --console-address :9001
         for _ in {1..30}; do
           if curl --fail --silent http://127.0.0.1:9000/minio/health/live; then
             exit 0

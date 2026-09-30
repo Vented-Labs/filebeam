@@ -215,7 +215,22 @@ fn socket_path(runtime: &Path) -> Result<PathBuf> {
     let xdg = std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
         .filter(|path| path.is_absolute());
-    let base = xdg.unwrap_or_else(|| std::env::temp_dir().join(format!("filebeam-{uid}")));
+    socket_path_at(runtime, uid, xdg, std::env::temp_dir())
+}
+
+#[cfg(unix)]
+fn socket_path_at(
+    runtime: &Path,
+    uid: u32,
+    xdg: Option<PathBuf>,
+    temporary: PathBuf,
+) -> Result<PathBuf> {
+    let mut base = xdg.unwrap_or_else(|| temporary.join(format!("filebeam-{uid}")));
+    // macOS TMPDIR can itself approach sockaddr_un's limit. Keep the full
+    // home digest and use a protected per-user directory under the short /tmp.
+    if base.join("filebeam").as_os_str().as_encoded_bytes().len() + 38 >= 100 {
+        base = PathBuf::from("/tmp").join(format!("filebeam-{uid}"));
+    }
     ensure_private_directory(&base, uid)?;
     let directory = base.join("filebeam");
     ensure_private_directory(&directory, uid)?;
@@ -235,7 +250,7 @@ fn socket_path(runtime: &Path) -> Result<PathBuf> {
 
 #[cfg(unix)]
 fn ensure_private_directory(path: &Path, uid: u32) -> Result<()> {
-    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt};
     if let Ok(metadata) = fs::symlink_metadata(path) {
         if metadata.file_type().is_symlink()
             || !metadata.is_dir()
@@ -245,8 +260,11 @@ fn ensure_private_directory(path: &Path, uid: u32) -> Result<()> {
             bail!("private runtime directory is not owned and protected by the current user");
         }
     } else {
-        fs::create_dir(path)?;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+        match fs::DirBuilder::new().mode(0o700).create(path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.into()),
+        }
     }
     let metadata = fs::symlink_metadata(path)?;
     if metadata.file_type().is_symlink()
@@ -495,6 +513,21 @@ mod tests {
         drop(owner);
         assert!(!endpoint.exists());
         let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn long_platform_temp_directory_uses_a_short_owned_fallback() {
+        let root = home();
+        let socket = socket_path_at(
+            &root,
+            current_uid().unwrap(),
+            None,
+            root.join("t".repeat(100)),
+        )
+        .unwrap();
+        assert!(socket.as_os_str().as_encoded_bytes().len() < 100);
+        ensure_private_directory(socket.parent().unwrap(), current_uid().unwrap()).unwrap();
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

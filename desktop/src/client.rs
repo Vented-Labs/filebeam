@@ -193,6 +193,7 @@ impl Worker {
     }
 
     fn run(mut self, receiver: Receiver<ClientCommand>) {
+        self.publish();
         // Discovery is public and must not depend on a saved account session.
         self.refresh_policy();
         loop {
@@ -1963,7 +1964,7 @@ mod tests {
         assert!(exported.export_error.is_none());
     }
     #[test]
-    fn desktop_client_reopens_authenticated_paused_checkpoint_as_same_row() {
+    fn desktop_client_reopens_authenticated_paused_checkpoint() {
         let home = tempfile::tempdir().unwrap();
         let config = Config::load(Some(home.path().to_owned())).unwrap();
         let checkpoint = "11111111-1111-4111-8111-111111111111".to_owned();
@@ -1987,7 +1988,7 @@ mod tests {
                     .snapshot()
                     .jobs
                     .into_iter()
-                    .find(|job| job.id == checkpoint)
+                    .find(|job| job.checkpoint_id.as_deref() == Some(&checkpoint))
                 {
                     assert!(matches!(job.state, TransferState::Paused));
                     assert!(job.capabilities.can_resume);

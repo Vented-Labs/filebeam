@@ -87,3 +87,7 @@ archiving it for updates, and signs both the Windows executable and installer.
 Linux update archives contain the complete AppImage, including bundled libraries.
 Both clients share `~/.filebeam/config.toml`, while their managed executables,
 update state, and backups remain product-specific.
+`--home` selects an explicit shared directory. The legacy `FILEBEAM_HOME` override
+retains its original meaning: a parent directory containing `.filebeam`. Flat CLI
+settings migrate in place, preserving private state and the update opt-out; a
+legacy `FILEBEAM_INSTANCE` is imported only before the configuration is migrated.

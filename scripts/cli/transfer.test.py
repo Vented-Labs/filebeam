@@ -194,7 +194,7 @@ class API(http.server.BaseHTTPRequestHandler):
 
 
 def run(args, env, cwd, timeout=90):
-    return subprocess.run([BINARY, "--plain", *map(str, args)], cwd=cwd, env=env,
+    return subprocess.run([BINARY, "--home", env["FILEBEAM_HOME"], "--plain", *map(str, args)], cwd=cwd, env=env,
                           stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout)
 def require(result, text=""):
     assert result.returncode == 0, (text + "\n" + result.stderr.decode(errors="replace"))
@@ -287,7 +287,7 @@ def main():
             source=root/"kill-upload.bin"; source.write_bytes(os.urandom(CHUNK*3+1))
             sequence=STATE.sequence
             before={line.split("\t",1)[0] for line in run(["transfers"],env,root).stdout.decode().splitlines() if line}
-            STATE.next_mode="upload-stall"; process=subprocess.Popen([BINARY,"--plain","up",str(source)],cwd=root,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+            STATE.next_mode="upload-stall"; process=subprocess.Popen([BINARY,"--home",str(home),"--plain","up",str(source)],cwd=root,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
             transfer=None
             deadline=time.monotonic()+10
             while transfer is None and time.monotonic()<deadline:
@@ -299,7 +299,7 @@ def main():
             source=root/"kill-download.bin"; source.write_bytes(os.urandom(CHUNK*2+7)); link=upload(root,env,[source])
             transfer=transfer_for(link); transfer["mode"]="download-stall"
             before={line.split("\t",1)[0] for line in run(["transfers"],env,root).stdout.decode().splitlines() if line}
-            process=subprocess.Popen([BINARY,"--plain","down",link,"--output",str(root/"kill-out")],cwd=root,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+            process=subprocess.Popen([BINARY,"--home",str(home),"--plain","down",link,"--output",str(root/"kill-out")],cwd=root,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
             wait_gate(transfer); kill(process); ident=saved_id(env,root,before)
             checkpoint=home/"transfers"/ident
             share=checkpoint/"share-key"; expected=base64.urlsafe_b64decode(link.split("#k=v1.")[1]+"===")
@@ -312,7 +312,7 @@ def main():
             source=root/"changed-source.bin"; source.write_bytes(os.urandom(CHUNK*2+1)); STATE.next_mode="upload-stall"
             sequence=STATE.sequence
             before={line.split("\t",1)[0] for line in run(["transfers"],env,root).stdout.decode().splitlines() if line}
-            process=subprocess.Popen([BINARY,"--plain","up",str(source)],cwd=root,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+            process=subprocess.Popen([BINARY,"--home",str(home),"--plain","up",str(source)],cwd=root,env=env,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
             deadline=time.monotonic()+10; transfer=None
             while transfer is None and time.monotonic()<deadline:
                 transfer=next((t for t in STATE.transfers.values() if t["id"] == ID_PREFIX + f"{sequence+1:02}"[-2:]),None); time.sleep(.02)
