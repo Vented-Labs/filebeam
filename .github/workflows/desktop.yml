@@ -102,7 +102,7 @@ jobs:
           if [[ "$RUNNER_OS" == macOS ]]; then brew install pkg-config; fi
           if [[ "$RUNNER_OS" == Windows ]]; then
             choco install llvm nsis --no-progress --yes
-            printf '%s\n' '/c/Program Files (x86)/NSIS' >> "$GITHUB_PATH"
+            cygpath -w '/c/Program Files (x86)/NSIS' >> "$GITHUB_PATH"
           fi
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:

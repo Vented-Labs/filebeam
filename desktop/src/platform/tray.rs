@@ -1,3 +1,4 @@
+#[cfg(target_os = "linux")]
 use std::sync::mpsc::{self, Receiver};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
