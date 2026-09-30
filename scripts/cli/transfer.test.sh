@@ -9,7 +9,10 @@ case "$binary" in
     "$root"/*) container_binary=/workspace/${binary#"$root"/} ;;
     *) container_binary=/beam-bin/$(basename -- "$binary") ;;
 esac
-limits=(--memory "${BEAM_DOCKER_MEMORY:-512m}" --memory-swap "${BEAM_DOCKER_MEMORY_SWAP:-512m}" --cpus "${BEAM_DOCKER_CPUS:-1}")
+limits=()
+if [[ ${CI:-false} != true ]]; then
+    limits+=(--memory "${BEAM_DOCKER_MEMORY:-512m}" --memory-swap "${BEAM_DOCKER_MEMORY_SWAP:-512m}" --cpus "${BEAM_DOCKER_CPUS:-1}")
+fi
 volumes=(--volume "$root:/workspace:ro")
 case "$binary" in "$root"/*) ;; *) volumes+=(--volume "$(dirname -- "$binary"):/beam-bin:ro") ;; esac
 exec docker run --rm --init "${limits[@]}" --user "$(id -u):$(id -g)" \

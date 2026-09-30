@@ -30,8 +30,11 @@ if [[ ${FILEBEAM_ANDROID_DEVICE_CONTAINER:-} != 1 ]]; then
         network_args+=(--network "$network" --sysctl net.ipv6.conf.all.disable_ipv6=0 --sysctl net.ipv6.conf.default.disable_ipv6=0)
     fi
     device_status=0
-    docker run --rm --init "${devices[@]}" "${network_args[@]}" \
-        --memory "${FILEBEAM_ANDROID_MEMORY:-6g}" --cpus "${FILEBEAM_ANDROID_CPUS:-4}" \
+    limits=()
+    if [[ ${CI:-false} != true ]]; then
+        limits+=(--memory "${FILEBEAM_ANDROID_MEMORY:-6g}" --cpus "${FILEBEAM_ANDROID_CPUS:-4}")
+    fi
+    docker run --rm --init "${devices[@]}" "${network_args[@]}" "${limits[@]}" \
         --user "$(id -u):$(id -g)" --env HOME=/tmp/home \
         --env FILEBEAM_ANDROID_DEVICE_CONTAINER=1 --env FILEBEAM_ANDROID_ACCEL="$accel" \
         --env FILEBEAM_ANDROID_AVD_DISK_SIZE="${FILEBEAM_ANDROID_AVD_DISK_SIZE:-8G}" \

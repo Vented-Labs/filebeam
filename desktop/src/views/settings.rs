@@ -904,17 +904,12 @@ fn manual_update(home: PathBuf) -> anyhow::Result<String> {
     let key = option_env!("FILEBEAM_RELEASE_PUBLIC_KEY")
         .filter(|key| !key.is_empty())
         .ok_or_else(|| anyhow::anyhow!("this build has no embedded release key"))?;
-    Updater::new(Options {
-        home: config.home.clone(),
-        product: Product::Desktop,
-        version: VERSION.into(),
-        public_key: key.into(),
-        executable: config.home.join("bin").join(if cfg!(windows) {
-            "filebeam.exe"
-        } else {
-            "filebeam"
-        }),
-    })
+    Updater::new(Options::for_product(
+        config.home,
+        Product::Desktop,
+        VERSION,
+        key,
+    )?)
     .run_manual()
 }
 

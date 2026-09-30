@@ -25,7 +25,8 @@ bash scripts/desktop/dev.sh
 bash scripts/desktop/run.sh cargo test --manifest-path desktop/Cargo.toml --locked
 ```
 
-The runner limits builds to 4 GiB of memory, two CPUs, and one Cargo job. It caches
+The runner limits local builds to 4 GiB of memory, two CPUs, and one Cargo job.
+CI builds use their allocated runner resources without Docker wrapper limits. It caches
 builds under `${XDG_CACHE_HOME:-$HOME/.cache}/filebeam/desktop/<worktree-hash>`;
 `FILEBEAM_DESKTOP_CACHE_DIR` overrides this location. Binaries are in its `target/`
 directory (`/target` inside the container). Set `FILEBEAM_DESKTOP_BUILD_IMAGE=true`
@@ -84,6 +85,9 @@ x86_64/aarch64, macOS x86_64/aarch64, and Windows x86_64. Linux also runs the
 headless transfer E2E suite; native runners test the shared configuration and
 updater contracts. Production profiles use level-3 optimization, thin LTO, one
 codegen unit, and stripped symbols, with debug information and assertions disabled.
+Shared-crate tests use the desktop dependency graph, and native builds reuse the
+host target directory. Cargo caches are saved after failed checks as well as
+successful runs so a later job can reuse compiled dependencies.
 
 The `vX.Y.Z` release workflow publishes Desktop and CLI alongside the server.
 Signed desktop releases require these GitHub `release` environment secrets:
@@ -102,6 +106,8 @@ archiving it for updates, and signs both the Windows executable and installer.
 Linux update archives contain the complete AppImage, including bundled libraries.
 Both clients share `~/.filebeam/config.toml`, while their managed executables,
 update state, and backups remain product-specific.
+Portable Linux AppImages update in place, and macOS updates replace the running
+application bundle. The installation location must be writable by the user.
 `--home` selects an explicit shared directory. The legacy `FILEBEAM_HOME` override
 retains its original meaning: a parent directory containing `.filebeam`. Flat CLI
 settings migrate in place, preserving private state and the update opt-out; a

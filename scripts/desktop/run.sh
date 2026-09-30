@@ -30,15 +30,22 @@ case $build_image in
     *) printf 'FILEBEAM_DESKTOP_BUILD_IMAGE must be auto, true, or false\n' >&2; exit 2 ;;
 esac
 
+limits=()
+cargo_env=()
+if [[ ${CI:-false} != true ]]; then
+    limits+=(--memory 4g --memory-swap 4g --cpus 2)
+    cargo_env+=(--env CARGO_BUILD_JOBS=1)
+elif [[ -n ${CARGO_BUILD_JOBS:-} ]]; then
+    cargo_env+=(--env CARGO_BUILD_JOBS)
+fi
+
 docker_args=(
     run --rm --init
-    --memory 4g
-    --memory-swap 4g
-    --cpus 2
+    "${limits[@]}"
     --user "$(id -u):$(id -g)"
     --env CARGO_HOME=/cargo
     --env CARGO_TARGET_DIR=/target
-    --env CARGO_BUILD_JOBS=1
+    "${cargo_env[@]}"
     --env CARGO_PROFILE_DEV_DEBUG=0
     --env CARGO_PROFILE_TEST_DEBUG=0
     --env CARGO_PROFILE_DEV_SPLIT_DEBUGINFO=off

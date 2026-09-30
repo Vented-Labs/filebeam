@@ -30,6 +30,7 @@ run_wrapper() {
         FILEBEAM_RELEASE_SHA='abc def' \
         FILEBEAM_RELEASE_PUBLIC_KEY='public key with spaces' \
         FILEBEAM_RELEASE_SIGNING_KEY=must-not-cross-boundary \
+        CI=false \
         CARGO_BUILD_JOBS=99 \
         "$@"
 }
@@ -60,6 +61,12 @@ for wrapper in check.sh dev.sh; do
     run_wrapper bash "$root/scripts/desktop/$wrapper"
     grep -Fxq -- '/workspace/desktop/Cargo.toml' "$tmp/docker.log"
 done
+
+: >"$tmp/docker.log"
+PATH="$tmp/bin:$PATH" MOCK_DOCKER_LOG="$tmp/docker.log" MOCK_IMAGE_EXISTS=1 \
+    CI=true CARGO_BUILD_JOBS='' FILEBEAM_DESKTOP_CACHE_DIR="$tmp/cache-ci" \
+    bash "$root/scripts/desktop/run.sh" true
+! grep -Eq -- '^--(memory|memory-swap|cpus)$|^CARGO_BUILD_JOBS=' "$tmp/docker.log"
 
 : >"$tmp/docker.log"
 PATH="$tmp/bin:$PATH" MOCK_DOCKER_LOG="$tmp/docker.log" MOCK_IMAGE_EXISTS=0 \

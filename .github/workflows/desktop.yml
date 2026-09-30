@@ -86,7 +86,7 @@ jobs:
       FILEBEAM_RELEASE_TAG: ${{ needs.validate.outputs.tag || 'v0.1.0' }}
       FILEBEAM_RELEASE_SHA: ${{ needs.validate.outputs.commit || github.event.pull_request.head.sha }}
       FILEBEAM_RELEASE_PUBLIC_KEY: ${{ secrets.RELEASE_PUBLIC_KEY }}
-      CARGO_BUILD_JOBS: '2'
+      CARGO_TARGET_DIR: ${{ github.workspace }}/desktop/target
       MACOSX_DEPLOYMENT_TARGET: '11.0'
     steps:
       - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
@@ -104,15 +104,18 @@ jobs:
             choco install llvm nsis --no-progress --yes
             cygpath -w '/c/Program Files (x86)/NSIS' >> "$GITHUB_PATH"
           fi
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cargo-cache
         with:
           path: |
             ~/.cache/filebeam/desktop
             ~/.cargo/registry
             ~/.cargo/git
             desktop/target
-          key: desktop-${{ matrix.target }}-rust1.98.0-${{ hashFiles('desktop/Cargo.lock', 'desktop/Cargo.toml', 'crates/**/Cargo.toml', 'docker/desktop/Dockerfile') }}-${{ github.sha }}
-          restore-keys: desktop-${{ matrix.target }}-rust1.98.0-${{ hashFiles('desktop/Cargo.lock', 'desktop/Cargo.toml', 'crates/**/Cargo.toml', 'docker/desktop/Dockerfile') }}-
+          key: desktop-v2-${{ matrix.target }}-rust1.98.0-${{ hashFiles('desktop/Cargo.lock', 'crates/**/Cargo.lock', 'desktop/Cargo.toml', 'crates/**/Cargo.toml', 'docker/desktop/Dockerfile') }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            desktop-v2-${{ matrix.target }}-rust1.98.0-${{ hashFiles('desktop/Cargo.lock', 'crates/**/Cargo.lock', 'desktop/Cargo.toml', 'crates/**/Cargo.toml', 'docker/desktop/Dockerfile') }}-${{ github.sha }}-
+            desktop-v2-${{ matrix.target }}-rust1.98.0-${{ hashFiles('desktop/Cargo.lock', 'crates/**/Cargo.lock', 'desktop/Cargo.toml', 'crates/**/Cargo.toml', 'docker/desktop/Dockerfile') }}-
       - name: Build and test in the bounded Linux container
         if: runner.os == 'Linux'
         run: bash scripts/desktop/run.sh bash scripts/desktop/ci-build.sh '${{ matrix.target }}' dist/desktop
@@ -177,6 +180,16 @@ jobs:
         run: |
           if [[ "$RUNNER_OS" == macOS ]]; then security delete-keychain "$RUNNER_TEMP/filebeam.keychain-db" || true; fi
           rm -f "$RUNNER_TEMP/filebeam.p12" "$RUNNER_TEMP/filebeam.pfx" "$RUNNER_TEMP/filebeam-notary.p8"
+      - name: Save Cargo work even when a check fails
+        if: always() && steps.cargo-cache.outcome == 'success' && steps.cargo-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/filebeam/desktop
+            ~/.cargo/registry
+            ~/.cargo/git
+            desktop/target
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: desktop-${{ matrix.os }}-${{ matrix.arch }}-${{ needs.validate.outputs.tag || github.event.pull_request.head.sha }}

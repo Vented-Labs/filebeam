@@ -63,6 +63,12 @@ impl Options {
         public_key: impl Into<String>,
     ) -> Result<Self> {
         let executable = home.join("bin").join(executable_name(product));
+        #[cfg(target_os = "linux")]
+        let executable = if product == Product::Desktop {
+            current_appimage()?.unwrap_or(executable)
+        } else {
+            executable
+        };
         #[cfg(target_os = "macos")]
         let executable = if product == Product::Desktop {
             let current = env::current_exe()?;
@@ -490,9 +496,9 @@ impl Updater {
     fn running_executable(&self) -> Result<PathBuf> {
         #[cfg(target_os = "linux")]
         if self.options.product == Product::Desktop
-            && let Some(image) = env::var_os("APPIMAGE")
+            && let Some(image) = current_appimage()?
         {
-            return Ok(PathBuf::from(image));
+            return Ok(image);
         }
         env::current_exe().context("locate running executable")
     }
@@ -525,6 +531,30 @@ impl Updater {
         fs::create_dir_all(self.update_dir())?;
         Lease::acquire(self.update_dir().join("lock"))
     }
+}
+
+#[cfg(target_os = "linux")]
+fn current_appimage() -> Result<Option<PathBuf>> {
+    Ok(appimage_for_executable(
+        &env::current_exe()?,
+        env::var_os("APPIMAGE").map(PathBuf::from),
+        env::var_os("APPDIR").map(PathBuf::from),
+    ))
+}
+
+#[cfg(target_os = "linux")]
+fn appimage_for_executable(
+    current: &Path,
+    image: Option<PathBuf>,
+    directory: Option<PathBuf>,
+) -> Option<PathBuf> {
+    let image = image?;
+    let bundled = directory?.join("usr/bin/filebeam").canonicalize().ok()?;
+    // APPIMAGE may be inherited from an unrelated AppImage (such as a terminal).
+    // Only update it when this process is its bundled Filebeam executable.
+    (current.canonicalize().ok()? == bundled)
+        .then(|| image.canonicalize().ok())
+        .flatten()
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -1033,6 +1063,25 @@ mod tests {
         updater.save_state(&state).unwrap();
         assert_eq!(updater.activate_staged(|| true).unwrap(), Activation::None);
         assert!(updater.load_state().unwrap().desktop.staged.is_none());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn portable_appimage_identity_rejects_an_inherited_parent_image() {
+        let root = TestDirectory::new();
+        let directory = root.0.join("mount");
+        fs::create_dir_all(directory.join("usr/bin")).unwrap();
+        let bundled = directory.join("usr/bin/filebeam");
+        let other = root.0.join("standalone-filebeam");
+        let image = root.0.join("Filebeam.AppImage");
+        for path in [&bundled, &other, &image] {
+            fs::write(path, b"fixture").unwrap();
+        }
+        assert_eq!(
+            appimage_for_executable(&bundled, Some(image.clone()), Some(directory.clone())),
+            Some(image.canonicalize().unwrap())
+        );
+        assert!(appimage_for_executable(&other, Some(image), Some(directory)).is_none());
     }
 
     #[cfg(target_os = "linux")]

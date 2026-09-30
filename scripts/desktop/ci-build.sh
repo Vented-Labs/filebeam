@@ -21,20 +21,24 @@ if [[ ${FILEBEAM_DESKTOP_BUILD_ONLY:-0} == 1 ]]; then
     : # The macOS x86_64 cross-target is intentionally build-only.
 else
     cargo fmt --manifest-path "$manifest" --check
-    for crate in client-config client-core client-updater; do
-        cargo test --manifest-path "$root/crates/$crate/Cargo.toml" --locked
-    done
-    cargo test --manifest-path "$manifest" --locked
-    cargo test --manifest-path "$manifest" --locked --features visual-test
+    cargo test --manifest-path "$manifest" --locked --features visual-test \
+        -p filebeam-client-config -p filebeam-client-core -p filebeam-client-updater -p filebeam-desktop
     cargo clippy --manifest-path "$manifest" --all-targets --locked -- -D warnings
 fi
 
-cargo build --manifest-path "$manifest" --locked --release --target "$target"
-
 target_dir=${CARGO_TARGET_DIR:-"$root/desktop/target"}
+host=$(rustc -vV | sed -n 's/^host: //p')
+build_args=()
+binary_dir="$target_dir/release"
+if [[ $target != "$host" ]]; then
+    build_args+=(--target "$target")
+    binary_dir="$target_dir/$target/release"
+fi
+cargo build --manifest-path "$manifest" --locked --release "${build_args[@]}"
+
 binary_name=filebeam
 [[ $target == *-windows-* ]] && binary_name+=.exe
-binary="$target_dir/$target/release/$binary_name"
+binary="$binary_dir/$binary_name"
 [[ -f $binary ]] || { printf 'Missing native binary: %s\n' "$binary" >&2; exit 1; }
 mkdir -p "$output"
 install -m 0755 "$binary" "$output/filebeam${FILEBEAM_BINARY_SUFFIX:-}"
