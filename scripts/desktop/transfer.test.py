@@ -55,12 +55,17 @@ def run(pause=False):
                             return
                 time.sleep(.02)
         threading.Thread(target=release_after_pause, daemon=True).start()
-    command = ["cargo", "run", "--quiet", "--manifest-path", "desktop/Cargo.toml", "--features", "headless-acceptance", "--example", "native_acceptance", "--", f"http://127.0.0.1:{server.server_port}"]
+    command = [str(BINARY), f"http://127.0.0.1:{server.server_port}"]
     result = subprocess.run(command, cwd=ROOT, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=180)
     server.shutdown(); thread.join()
     if result.returncode:
         raise SystemExit(result.stderr)
     print(result.stdout, end="")
 
+subprocess.run([
+    "cargo", "build", "--locked", "--manifest-path", "desktop/Cargo.toml",
+    "--features", "headless-acceptance", "--example", "native_acceptance",
+], cwd=ROOT, check=True)
+BINARY = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "desktop/target")) / "debug/examples/native_acceptance"
 run()
 run(True)

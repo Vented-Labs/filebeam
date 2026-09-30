@@ -987,6 +987,7 @@ impl Render for SendPanel {
             ))
             .child(
                 Button::new("encrypt-share")
+                    .icon(Icon::default().path("icons/lock.svg").size(px(16.)))
                     .label("Encrypt and share")
                     .primary()
                     .with_size(Size::Large)

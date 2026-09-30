@@ -39,7 +39,6 @@ docker_args=(
     --env CARGO_HOME=/cargo
     --env CARGO_TARGET_DIR=/target
     --env CARGO_BUILD_JOBS=1
-    --env CARGO_INCREMENTAL=1
     --env CARGO_PROFILE_DEV_DEBUG=0
     --env CARGO_PROFILE_TEST_DEBUG=0
     --env CARGO_PROFILE_DEV_SPLIT_DEBUGINFO=off

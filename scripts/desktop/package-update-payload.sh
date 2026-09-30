@@ -3,7 +3,9 @@ set -euo pipefail
 [[ $# -eq 5 ]] || { printf 'Usage: %s vX.Y.Z OS ARCH BINARY OUTPUT\n' "$0" >&2; exit 64; }
 tag=$1 os=$2 arch=$3 binary=$4 output=$5
 [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 64
-mkdir -p "$output"; tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT; mkdir -p "$tmp/filebeam"
+mkdir -p "$output"
+output=$(CDPATH='' cd -- "$output" && pwd)
+tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT; mkdir -p "$tmp/filebeam"
 suffix=''; [[ $os == windows ]] && suffix=.exe
 name="filebeam-desktop-$tag-$os-$arch"
 if [[ $os == macos ]]; then

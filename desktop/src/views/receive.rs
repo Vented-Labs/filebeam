@@ -595,6 +595,7 @@ impl ReceivePanel {
                             .items_center()
                             .gap(px(10.))
                             .bg(p.raised)
+                            .rounded_b(px(17.))
                             .border_t_1()
                             .border_color(p.border_soft)
                             .child(

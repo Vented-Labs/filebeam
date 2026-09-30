@@ -48,3 +48,12 @@ tokio-util = { version = "0.7", features = ["rt", "io"] }
 
 [dev-dependencies]
 assert_matches = "1.5.0"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+debug = false
+debug-assertions = false
+incremental = false

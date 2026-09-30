@@ -389,6 +389,7 @@ impl Render for TransfersPanel {
                     .flex()
                     .flex_col()
                     .pt(px(vertical_padding))
+                    .pb(px(vertical_padding))
                     .gap(px(crate::views::page::HEADER_GAP))
                     .child(crate::views::page::heading(
                         p,

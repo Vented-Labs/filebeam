@@ -21,6 +21,7 @@ else
         cargo test --manifest-path "$root/crates/$crate/Cargo.toml" --locked
     done
     cargo test --manifest-path "$manifest" --locked
+    cargo test --manifest-path "$manifest" --locked --features visual-test
     cargo clippy --manifest-path "$manifest" --all-targets --locked -- -D warnings
 fi
 

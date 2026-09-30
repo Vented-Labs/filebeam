@@ -61,6 +61,15 @@ embed-resource = "=3.0.11"
 gpui = { package = "gpui-kit", version = "=0.6.1", default-features = false, features = ["component", "test-support"] }
 tempfile = "=3.24.0"
 
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+debug = false
+debug-assertions = false
+incremental = false
+
 [lints.rust]
 unsafe_code = "forbid"
 

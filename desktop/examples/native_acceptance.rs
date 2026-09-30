@@ -387,11 +387,33 @@ fn wait_snapshot_ignore_messages<T>(
 ) -> Result<T> {
     let deadline = Instant::now() + Duration::from_secs(90);
     loop {
-        if let Some(value) = get(&client.snapshot()) {
+        let snapshot = client.snapshot();
+        if let Some(value) = get(&snapshot) {
             return Ok(value);
         }
+        if let Some(job) = snapshot
+            .jobs
+            .iter()
+            .find(|job| job.state == TransferState::Failed)
+        {
+            bail!(
+                "desktop transfer failed: {}",
+                job.error
+                    .as_ref()
+                    .map(|error| error.detail.as_str())
+                    .unwrap_or("unknown error")
+            );
+        }
         if Instant::now() >= deadline {
-            bail!("desktop acceptance timed out");
+            bail!(
+                "desktop acceptance timed out: {}",
+                snapshot
+                    .messages
+                    .iter()
+                    .map(|message| format!("{}: {}", message.operation, message.error.detail))
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            );
         }
         thread::sleep(Duration::from_millis(25));
     }

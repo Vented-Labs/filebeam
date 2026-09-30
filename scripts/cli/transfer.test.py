@@ -82,7 +82,7 @@ class API(http.server.BaseHTTPRequestHandler):
         if path == "/api/v1/info":
             return self.json(200, {"name":"Filebeam", "chunk_bytes":CHUNK,
                 "file_retention_hours":24, "anonymous_uploads_enabled":True,
-                "enabled_drivers":["http"], "maximum_transfer_bytes":2**31,
+                "enabled_drivers":["http"], "default_driver":"http", "maximum_transfer_bytes":2**31,
                 "maximum_file_count":25, "upload_concurrency":2, "download_concurrency":2,
                 "transfer_capabilities":{"upload_status":True,"download_ranges":True}})
         transfer = self.transfer()

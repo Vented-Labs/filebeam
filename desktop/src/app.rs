@@ -1351,13 +1351,13 @@ fn shell_navigation_item(
         .px(px(if narrow { 2. } else { 12. }))
         .rounded(px(8.))
         .border_1()
-        .border_color(if active { p.selected } else { p.sidebar })
+        .border_color(gpui::transparent_black())
         .bg(if active { p.selected } else { p.sidebar })
         .text_color(if active { p.selection_text } else { p.muted })
         .hover(move |style| style.bg(if active { p.raised } else { p.hover }))
-        .active(move |style| style.bg(p.selected))
+        .active(move |style| style.bg(p.selected).border_color(p.focus))
         .focusable()
-        .focus(move |style| style.border_color(p.focus))
+        .focus_visible(move |style| style.border_color(p.focus))
         .when(narrow, |this| this.flex_col().justify_center())
         .when(active, |this| {
             this.child(

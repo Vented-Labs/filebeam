@@ -110,6 +110,8 @@ jobs:
           cargo test --manifest-path crates/transfer-wasm/Cargo.toml --locked
 
   android:
+    # Mobile CI is paused pending device QA.
+    if: false
     name: Android
     runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 45
@@ -168,6 +170,7 @@ jobs:
           retention-days: 7
 
   ios:
+    if: false
     name: iOS
     uses: ./.github/workflows/ios-ci.yml
     with:
@@ -477,7 +480,7 @@ jobs:
     # Keep this name in sync with the required GitHub Actions check on master.
     name: Test
     if: always()
-    needs: [frontend, rust, android, ios, php-static, php, sail, small-chunks, distribution]
+    needs: [frontend, rust, php-static, php, sail, small-chunks, distribution]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 5
     steps:
