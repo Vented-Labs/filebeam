@@ -1,0 +1,15 @@
+[package]
+name = "filebeam-client-config"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Shared, local client configuration for Filebeam applications"
+
+[dependencies]
+anyhow = "1.0.98"
+dirs = "6.0.0"
+fs2 = "0.4.3"
+tempfile = "3.20.0"
+toml_edit = "0.22.26"
+url = "2.5.4"
+filebeam-transfer-native = { path = "../transfer-native" }

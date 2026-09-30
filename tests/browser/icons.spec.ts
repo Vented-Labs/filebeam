@@ -1,4 +1,47 @@
 import { expect, test } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+
+test('transport and homepage feature icons render the approved custom artwork', async ({
+    page,
+}) => {
+    await page.goto('/');
+    const icons = [
+        ['http-server', page.getByRole('radio', { name: 'HTTP (stored)', exact: true })],
+        ['webrtc-p2p', page.getByRole('radio', { name: 'WebRTC (live)', exact: true })],
+        [
+            'end-to-end-encrypted',
+            page.locator('.fb-trust-feature').filter({ hasText: 'End-to-end encrypted' }),
+        ],
+        [
+            'fast-and-simple',
+            page.locator('.fb-trust-feature').filter({ hasText: 'Fast and simple' }),
+        ],
+    ] as const;
+    for (const [name, container] of icons) {
+        const source = await readFile(resolve(`icons/custom/${name}.svg`), 'utf8');
+        const svg = container.locator('svg.fb-icon');
+        await expect(svg).toBeVisible();
+        expect(
+            await svg
+                .locator('path')
+                .evaluateAll((paths) => paths.map((path) => path.getAttribute('d'))),
+        ).toEqual([...source.matchAll(/<path d="([^"]+)"/g)].map((match) => match[1]));
+        await expect(svg.locator('g[stroke="currentColor"]')).toHaveAttribute(
+            'stroke-width',
+            '1.5',
+        );
+        await expect(svg.locator('g[opacity="0.4"]')).toHaveCount(1);
+        await expect(svg).toHaveAttribute('aria-hidden', 'true');
+    }
+    await page.getByRole('tab', { name: 'Notes', exact: true }).click();
+    await expect(
+        page.getByRole('radio', { name: 'HTTP (stored)', exact: true }).locator('svg.fb-icon'),
+    ).toBeVisible();
+    await expect(
+        page.getByRole('radio', { name: 'WebRTC (live)', exact: true }).locator('svg.fb-icon'),
+    ).toBeVisible();
+});
 
 test('icons retain fixed artwork attributes while inheriting visual classes', async ({ page }) => {
     await page.goto('/');

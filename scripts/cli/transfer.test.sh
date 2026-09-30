@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
-binary=${BEAM_TRANSFER_TEST_BINARY:-"$root/cli/target/release/beam"}
+binary=${BEAM_TRANSFER_TEST_BINARY:-"$root/crates/cli/target/release/beam"}
 [[ -x "$binary" ]] || { printf 'Missing explicit release candidate: %s\n' "$binary" >&2; exit 1; }
 binary=$(realpath -- "$binary")
 sha256sum "$binary"

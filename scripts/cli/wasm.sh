@@ -33,4 +33,4 @@ exec docker run --rm --init \
     --volume "$root:/workspace" \
     --workdir /workspace \
     filebeam-wasm-tooling:rust-1.98.0 \
-    wasm-pack build "$crate" --target web --release --no-opt
+    wasm-pack build "crates/$crate" --target web --release --no-opt

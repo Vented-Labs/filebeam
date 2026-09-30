@@ -9,8 +9,8 @@
         "ui"
     ],
     "scripts": {
-        "build:encryption": "wasm-pack build encryption --target web --release --no-opt",
-        "build:transfer": "wasm-pack build transfer-wasm --target web --release --no-opt",
+        "build:encryption": "wasm-pack build crates/encryption --target web --release --no-opt",
+        "build:transfer": "wasm-pack build crates/transfer-wasm --target web --release --no-opt",
         "build": "npm run check:icons && npm run build:encryption && npm run build:transfer && npm run build --workspace=backend",
         "build:og": "node scripts/og/render.mjs",
         "preview:og": "vite --config scripts/og/vite.config.mjs",
@@ -24,8 +24,8 @@
         "format": "npm run format --workspace=backend && vp fmt ui/src tests/browser scripts/og scripts/prism-gallery playwright.config.ts vite.config.ts",
         "test:browser": "playwright test",
         "dev": "npm run dev --workspace=backend",
-        "test:encryption": "scripts/cli/run.sh cargo test --manifest-path encryption/Cargo.toml --locked",
-        "test:transfer": "scripts/cli/run.sh bash -ceu 'cargo test --manifest-path transfer/Cargo.toml --locked && cargo test --manifest-path transfer-native/Cargo.toml --locked && cargo test --manifest-path transfer-wasm/Cargo.toml --locked'"
+        "test:encryption": "scripts/cli/run.sh cargo test --manifest-path crates/encryption/Cargo.toml --locked",
+        "test:transfer": "scripts/cli/run.sh bash -ceu 'cargo test --manifest-path crates/transfer/Cargo.toml --locked && cargo test --manifest-path crates/transfer-native/Cargo.toml --locked && cargo test --manifest-path crates/transfer-wasm/Cargo.toml --locked'"
     },
     "devDependencies": {
         "@fontsource-variable/inter": "^5.3.0",

@@ -46,10 +46,10 @@ jobs:
             .android-cache/cargo
             .android-cache/gradle/caches
             .android-cache/gradle/wrapper
-            client-ffi/target
-            client-core/target
-          key: android-acceptance-${{ runner.os }}-rust1.98.0-${{ inputs.system_image }}-${{ hashFiles('docker/android/Dockerfile', 'client-ffi/Cargo.lock', 'client-core/Cargo.lock', 'mobile/android/gradle/libs.versions.toml') }}-${{ github.sha }}
-          restore-keys: android-acceptance-${{ runner.os }}-rust1.98.0-${{ inputs.system_image }}-${{ hashFiles('docker/android/Dockerfile', 'client-ffi/Cargo.lock', 'client-core/Cargo.lock', 'mobile/android/gradle/libs.versions.toml') }}-
+            crates/client-ffi/target
+            crates/client-core/target
+          key: android-acceptance-${{ runner.os }}-rust1.98.0-${{ inputs.system_image }}-${{ hashFiles('docker/android/Dockerfile', 'crates/client-ffi/Cargo.lock', 'crates/client-core/Cargo.lock', 'mobile/android/gradle/libs.versions.toml') }}-${{ github.sha }}
+          restore-keys: android-acceptance-${{ runner.os }}-rust1.98.0-${{ inputs.system_image }}-${{ hashFiles('docker/android/Dockerfile', 'crates/client-ffi/Cargo.lock', 'crates/client-core/Cargo.lock', 'mobile/android/gradle/libs.versions.toml') }}-
       - name: Build pinned Android tooling
         run: docker buildx build --load --tag filebeam-android-tooling:rust-1.98.0-sdk37 docker/android
       - name: Build selected emulator image

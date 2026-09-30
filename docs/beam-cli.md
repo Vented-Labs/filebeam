@@ -14,7 +14,7 @@ On Windows, run this in PowerShell after installing Git for Windows, whose OpenS
 Invoke-RestMethod -Uri 'https://releases.filebeam.io/cli/install.ps1' | Invoke-Expression
 ```
 
-Use `--dir DIRECTORY` with the shell installer or `-InstallDir DIRECTORY` when invoking the PowerShell script block directly to choose a different state directory. The installer creates `bin`, `config.toml`, and `cache`, validates the signed release catalog and selected archive, replaces the executable, and idempotently adds the selected `bin` directory to PATH. Installer scripts execute from the network stream and are not retained after installation.
+Use `--dir DIRECTORY` with the shell installer or `-InstallDir DIRECTORY` with the PowerShell script block to choose a state directory. The installer verifies the signed release, installs Beam, and adds its `bin` directory to PATH.
 
 Open a new terminal after installation to load the PATH change.
 
@@ -28,23 +28,17 @@ For example:
 beam down 'https://files.company.test/01K46FN13WJVCWKMBWRMC9Q9KN'
 ```
 
-For a ULID alone, `beam down` uses `https://filebeam.io`, or the explicit `FILEBEAM_INSTANCE` override. Uploads also use the configured instance.
-
 ## Terminal experience
 
-Run `beam` for the full-screen Send / Receive workspace. The interface uses Filebeam's violet surfaces, gradient meter, file queue, and transfer receipts. Instance information loads in the background.
+Run `beam` for the full-screen Send / Receive workspace.
 
 - `Space`: select files; `Enter`: open a folder; `Backspace`: parent folder.
 - `/`: enter search mode, `Enter`: apply, `Esc`: clear.
 - `Tab` / `Shift+Tab`: move focus between browser, queue, and action (or receive fields).
 - `1` / `2`: Send / Receive; `u`: upload; `U`: update; `p`: native services; `?`: help.
-- `p` opens typed native forms for notes (including the built-in note editor), inbox list/download, recipient lookup, revoke/end-live, account login/register/profile/verification/recovery, and custody-key setup/import/export. Password fields are masked; the palette calls the Rust service client and transfer job directly, never a shell or browser.
-- In the Send action, `Enter` sends the normal encrypted HTTP transfer and
-  `Shift+Enter` starts Turbo Transfer. The two actions are displayed side by
-  side. Beam requests enhanced keyboard reporting only while its full-screen
-  UI is active and restores the terminal setting on exit. Older terminals that
-  do not report modified Enter use normal `Enter`; they cannot select Turbo by
-  hotkey, so use `beam up --turbo FILE`.
+- `p`: notes, inbox, accounts, key management, and transfer actions.
+- In Send, `Enter` uploads normally; `Shift+Enter` starts Turbo Transfer.
+  If the terminal cannot distinguish modified Enter, use `beam up --turbo FILE`.
 - `c`: request a copy of the complete result through the terminal clipboard (OSC 52).
 - `Ctrl+C`: cancel the active transfer; on an idle screen, exit. Cancellation is cooperative: an active HTTP request may need to finish or time out before stopping.
 
@@ -109,12 +103,8 @@ beam cancel JOB_ID
 
 ## Turbo and WebRTC uploads
 
-`beam up --turbo FILE...` creates a Turbo HTTP upload. It publishes the normal
-encrypted share link as soon as the authenticated early descriptor is ready,
-then recipients can progressively download and verify available chunks while
-the upload continues. `--turbo` is explicit and does not add a confirmation
-prompt. Password, retention, directory-mode, and security prompts retain their
-normal behavior.
+`beam up --turbo FILE...` publishes a share link while the HTTP upload is still
+running, allowing recipients to download and verify available chunks immediately.
 
 ```sh
 beam up --turbo --password --retention-hours 24 report.pdf
@@ -127,7 +117,7 @@ fails before a transfer starts. WebRTC remains a live peer transfer: direct
 connections retain the address-exposure consent prompt unless the receiver
 uses `--accept-peer-address-exposure` or `--webrtc-relay-only` is configured.
 
-Progress goes to stderr. Stdout contains the share URL or saved file paths, so `link=$(beam up file.zip)` works. Interactive share links carry an explicit OSC 8 target including the full key fragment; wrapping or a shortened TUI label does not shorten that target. Use the TUI's **Copy full link** action for a complete clipboard value.
+Progress goes to stderr; stdout contains the share URL or saved paths, so `link=$(beam up file.zip)` works. Use **Copy full link** in the TUI to copy the complete URL, including its key.
 
 Use `--plain` for output without terminal control sequences. Redirected stderr automatically receives concise text. `--no-color` / `NO_COLOR` disable colors, and `--reduced-motion` disables decorative animation and interpolation. These preferences can also be set in `config.toml`:
 

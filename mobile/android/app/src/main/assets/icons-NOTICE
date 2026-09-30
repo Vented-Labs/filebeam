@@ -3,3 +3,7 @@ the Iconsax Free License (proprietary), not the repository MIT license.
 
 Source: iconsax@0.1.1
 License: https://docs.iconsax.io/license-and-terms/license
+
+The HTTP server and WebRTC peer-to-peer icons are original Filebeam artwork,
+not Iconsax artwork, and are covered by the repository MIT license. Their
+canonical SVGs and source hashes are recorded in icons/approved.json.

@@ -1,0 +1,70 @@
+[package]
+name = "filebeam-desktop"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+default-run = "filebeam"
+description = "Filebeam native desktop client"
+build = "build.rs"
+
+[features]
+headless-acceptance = []
+visual-test = ["gpui/test-support"]
+
+[lib]
+name = "filebeam_desktop"
+path = "src/lib.rs"
+
+[[bin]]
+name = "filebeam"
+path = "src/main.rs"
+
+[[example]]
+name = "visual_studio"
+required-features = ["visual-test"]
+
+[dependencies]
+anyhow = "=1.0.104"
+base64 = "=0.22.1"
+env_logger = "=0.11.8"
+filebeam-client-config = { path = "../crates/client-config" }
+filebeam-client-core = { path = "../crates/client-core" }
+filebeam-client-updater = { path = "../crates/client-updater" }
+filebeam-transfer-native = { path = "../crates/transfer-native" }
+filebeam-transfer = { path = "../crates/transfer" }
+gpui = { package = "gpui-kit", version = "=0.6.1", default-features = false, features = ["component"] }
+gpui-base = "=0.6.1"
+gpui-component = { version = "=0.6.1", default-features = false, features = ["tree-sitter-css", "tree-sitter-html", "tree-sitter-javascript", "tree-sitter-markdown", "tree-sitter-php", "tree-sitter-typescript"] }
+fs2 = "=0.4.3"
+getrandom = "=0.2.16"
+log = "=0.4.34"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "=0.10.9"
+zeroize = "=1.8.2"
+url = "=2.5.8"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+image = { version = "=0.25.9", default-features = false, features = ["png"] }
+ksni = { version = "=0.3.6", default-features = false, features = ["async-io", "blocking"] }
+notify-rust = { version = "=4.11.7", default-features = false, features = ["z"] }
+
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+image = { version = "=0.25.9", default-features = false, features = ["png"] }
+notify-rust = "=4.11.7"
+tray-icon = "=0.21.2"
+
+[build-dependencies]
+embed-resource = "=3.0.11"
+
+[dev-dependencies]
+gpui = { package = "gpui-kit", version = "=0.6.1", default-features = false, features = ["component", "test-support"] }
+tempfile = "=3.24.0"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"

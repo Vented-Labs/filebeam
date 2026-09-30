@@ -184,7 +184,10 @@ class API(http.server.BaseHTTPRequestHandler):
         if transfer["mode"] == "upload-retry" and calls == 2: return self.json(503, {})
         transfer["chunks"][key] = value
         if transfer["mode"] == "upload-stall" and transfer["stalls"] == 0:
-            transfer["stalls"] += 1; transfer["gate"].set(); transfer["gate"].wait(30)
+            transfer["stalls"] += 1; transfer["gate"].set()
+            marker = getattr(STATE, "upload_stall_marker", None)
+            if marker: Path(marker).write_bytes(b"request-blocked")
+            transfer["gate"].wait(30)
         if transfer["mode"] == "upload-retry" and calls == 3:
             self.connection.shutdown(2); self.connection.close(); return
         return self.json(201, {})

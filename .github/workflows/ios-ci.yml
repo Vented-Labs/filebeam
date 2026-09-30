@@ -31,10 +31,10 @@ jobs:
           path: |-
             ~/.cargo/registry
             ~/.cargo/git
-            client-ffi/target/ios
+            crates/client-ffi/target/ios
             mobile/ios/.swiftpm
             .ios-tools
-          key: ios-${{ matrix.os }}-${{ env.IOS_TOOLCHAIN_ID }}-rust1.98.0-xcodegen2.41.0-${{ hashFiles('client-ffi/**', 'client-core/**', 'encryption/**', 'transfer/**', 'transfer-native/**', 'mobile/ios/**', 'scripts/ios/**') }}
+          key: ios-${{ matrix.os }}-${{ env.IOS_TOOLCHAIN_ID }}-rust1.98.0-xcodegen2.41.0-${{ hashFiles('crates/client-ffi/**', 'crates/client-core/**', 'crates/encryption/**', 'crates/transfer/**', 'crates/transfer-native/**', 'mobile/ios/**', 'scripts/ios/**') }}
       - name: Prepare requested iOS simulator
         run: bash scripts/ios/prepare-simulator.sh
       - name: Check Rust, domain package, iOS builds, and tests

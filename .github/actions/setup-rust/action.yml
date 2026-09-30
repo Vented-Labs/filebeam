@@ -17,12 +17,12 @@ runs:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
-          encryption/target
-          transfer/target
-          transfer-native/target
-          transfer-wasm/target
-        key: cargo-${{ runner.os }}-${{ runner.arch }}-1.98.0-wasm${{ inputs.wasm }}-${{ hashFiles('encryption/Cargo.lock', 'transfer/Cargo.lock', 'transfer-native/Cargo.lock', 'transfer-wasm/Cargo.lock') }}-${{ hashFiles('encryption/src/**', 'encryption/Cargo.toml', 'transfer/src/**', 'transfer/Cargo.toml', 'transfer-native/src/**', 'transfer-native/Cargo.toml', 'transfer-wasm/src/**', 'transfer-wasm/Cargo.toml') }}
-        restore-keys: cargo-${{ runner.os }}-${{ runner.arch }}-1.98.0-wasm${{ inputs.wasm }}-${{ hashFiles('encryption/Cargo.lock', 'transfer/Cargo.lock', 'transfer-native/Cargo.lock', 'transfer-wasm/Cargo.lock') }}-
+          crates/encryption/target
+          crates/transfer/target
+          crates/transfer-native/target
+          crates/transfer-wasm/target
+        key: cargo-${{ runner.os }}-${{ runner.arch }}-1.98.0-wasm${{ inputs.wasm }}-${{ hashFiles('crates/encryption/Cargo.lock', 'crates/transfer/Cargo.lock', 'crates/transfer-native/Cargo.lock', 'crates/transfer-wasm/Cargo.lock') }}-${{ hashFiles('crates/encryption/src/**', 'crates/encryption/Cargo.toml', 'crates/transfer/src/**', 'crates/transfer/Cargo.toml', 'crates/transfer-native/src/**', 'crates/transfer-native/Cargo.toml', 'crates/transfer-wasm/src/**', 'crates/transfer-wasm/Cargo.toml') }}
+        restore-keys: cargo-${{ runner.os }}-${{ runner.arch }}-1.98.0-wasm${{ inputs.wasm }}-${{ hashFiles('crates/encryption/Cargo.lock', 'crates/transfer/Cargo.lock', 'crates/transfer-native/Cargo.lock', 'crates/transfer-wasm/Cargo.lock') }}-
     - name: Cache wasm-pack
       if: inputs.wasm == 'true'
       id: wasm-pack

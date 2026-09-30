@@ -90,7 +90,7 @@ function hideOutgoing(element: Element): void {
                 :aria-label="item === 'http' ? 'HTTP (stored)' : 'WebRTC (live)'"
             >
                 <span class="transfer-method__icon" aria-hidden="true">
-                    <Icon :name="item === 'http' ? 'archive' : 'bolt'" :size="18" />
+                    <Icon :name="item === 'http' ? 'http-server' : 'webrtc-p2p'" :size="18" />
                 </span>
                 <span class="transfer-method__copy">
                     <strong>{{ item === 'http' ? 'HTTP' : 'WebRTC' }}</strong>

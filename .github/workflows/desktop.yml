@@ -1,0 +1,163 @@
+name: Filebeam Desktop
+
+on:
+  pull_request:
+  workflow_call:
+    inputs:
+      tag: {required: true, type: string}
+      commit: {required: true, type: string}
+      publish: {required: true, type: boolean}
+    outputs:
+      artifact_name: {value: '${{ jobs.publish.outputs.artifact_name }}'}
+      artifact_path: {value: '${{ jobs.publish.outputs.artifact_path }}'}
+  workflow_dispatch:
+    inputs:
+      tag: {description: 'Existing vX.Y.Z tag', required: true, type: string}
+      publish: {description: 'Produce signed release installers and publish the catalog', required: true, default: false, type: boolean}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: github.event_name != 'pull_request'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    outputs: {tag: '${{ steps.ref.outputs.tag }}', commit: '${{ steps.ref.outputs.commit }}'}
+    steps:
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+        with: {persist-credentials: false, ref: refs/heads/master, fetch-depth: 0, fetch-tags: true}
+      - id: ref
+        env: {TAG: '${{ inputs.tag || github.event.inputs.tag }}', COMMIT: '${{ inputs.commit }}'}
+        run: |
+          commit=$(bash scripts/release/validate-ref.sh "$TAG")
+          [[ -z "$COMMIT" || "$COMMIT" == "$commit" ]]
+          printf 'tag=%s\ncommit=%s\n' "$TAG" "$commit" >> "$GITHUB_OUTPUT"
+
+  changes:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    outputs: {relevant: '${{ steps.paths.outputs.relevant }}'}
+    steps:
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+        with: {persist-credentials: false, fetch-depth: 0}
+      - id: paths
+        env: {BASE: '${{ github.event.pull_request.base.sha }}'}
+        run: |
+          if [[ "${{ github.event_name }}" != pull_request ]]; then printf 'relevant=true\n' >> "$GITHUB_OUTPUT"; exit 0; fi
+          git diff --name-only "$BASE" HEAD | grep -Eq '^(desktop/|crates/(client-config|client-core|client-updater|transfer-native)/|icons/|docker/desktop/|scripts/desktop/|scripts/release/(desktop-|github-release)|\.github/workflows/(desktop|release)\.yml$)' && value=true || value=false
+          printf 'relevant=%s\n' "$value" >> "$GITHUB_OUTPUT"
+
+  targets:
+    needs: [validate, changes]
+    if: always() && needs.changes.outputs.relevant == 'true' && (github.event_name == 'pull_request' || needs.validate.result == 'success')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: blacksmith-4vcpu-ubuntu-2404, target: x86_64-unknown-linux-gnu, os: linux, arch: x86_64, suffix: ''}
+          - {runner: blacksmith-4vcpu-ubuntu-2404-arm, target: aarch64-unknown-linux-gnu, os: linux, arch: aarch64, suffix: ''}
+          - {runner: blacksmith-6vcpu-macos-15, target: aarch64-apple-darwin, os: macos, arch: aarch64, suffix: ''}
+          - {runner: blacksmith-6vcpu-macos-15, target: x86_64-apple-darwin, os: macos, arch: x86_64, suffix: ''}
+          - {runner: blacksmith-4vcpu-windows-2025, target: x86_64-pc-windows-msvc, os: windows, arch: x86_64, suffix: '.exe'}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      FILEBEAM_RELEASE_VERSION: ${{ needs.validate.outputs.tag || 'v0.1.0' }}
+      FILEBEAM_RELEASE_TAG: ${{ needs.validate.outputs.tag || 'v0.1.0' }}
+      FILEBEAM_RELEASE_SHA: ${{ needs.validate.outputs.commit || github.event.pull_request.head.sha }}
+      FILEBEAM_RELEASE_PUBLIC_KEY: ${{ secrets.RELEASE_PUBLIC_KEY }}
+      CARGO_BUILD_JOBS: '2'
+    steps:
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+        with: {persist-credentials: false, ref: '${{ needs.validate.outputs.commit || github.event.pull_request.head.sha }}'}
+      - name: Install Rust 1.98 and native build dependencies
+        if: runner.os != 'Linux'
+        shell: bash
+        run: |
+          rustup toolchain install 1.98.0 --profile minimal
+          rustup default 1.98.0
+          rustup component add rustfmt clippy
+          rustup target add '${{ matrix.target }}'
+          if [[ "$RUNNER_OS" == macOS ]]; then brew install pkg-config; fi
+          if [[ "$RUNNER_OS" == Windows ]]; then choco install llvm --no-progress --yes; fi
+      - name: Build and test in the bounded Linux container
+        if: runner.os == 'Linux'
+        run: bash scripts/desktop/run.sh bash scripts/desktop/ci-build.sh '${{ matrix.target }}' dist/desktop
+      - name: Build and test on the native runner
+        if: runner.os != 'Linux'
+        shell: bash
+        run: bash scripts/desktop/ci-build.sh '${{ matrix.target }}' dist/desktop
+        env:
+          FILEBEAM_BINARY_SUFFIX: ${{ matrix.suffix }}
+          FILEBEAM_DESKTOP_BUILD_ONLY: ${{ matrix.target == 'x86_64-apple-darwin' && '1' || '0' }}
+      - name: Make updater archive
+        shell: bash
+        run: |
+          if [[ '${{ matrix.os }}' == macos ]]; then
+            FILEBEAM_DESKTOP_UNSIGNED=1 ARCH='${{ matrix.arch }}' bash scripts/desktop/package-macos-installer.sh "dist/desktop/filebeam${{ matrix.suffix }}" "${{ needs.validate.outputs.tag || 'v0.1.0' }}" dist/desktop
+          else
+            bash scripts/desktop/package-update-payload.sh "${{ needs.validate.outputs.tag || 'v0.1.0' }}" '${{ matrix.os }}' '${{ matrix.arch }}' "dist/desktop/filebeam${{ matrix.suffix }}" dist/desktop
+          fi
+      - name: Make signed native installer
+        if: inputs.publish || github.event.inputs.publish == 'true'
+        shell: bash
+        env:
+          ARCH: ${{ matrix.arch }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_NOTARY_PROFILE: ${{ secrets.APPLE_NOTARY_PROFILE }}
+          WINDOWS_SIGNING_CERTIFICATE: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE }}
+          WINDOWS_SIGNING_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PASSWORD }}
+        run: |
+          case '${{ matrix.os }}' in
+            linux) sudo apt-get update && sudo apt-get install --yes appimagetool; bash scripts/desktop/package-linux-installer.sh dist/desktop/filebeam '${{ needs.validate.outputs.tag }}' dist/desktop ;;
+            macos) ARCH='${{ matrix.arch }}' bash scripts/desktop/package-macos-installer.sh dist/desktop/filebeam '${{ needs.validate.outputs.tag }}' dist/desktop ;;
+            windows) bash scripts/desktop/package-windows-installer.sh dist/desktop/filebeam.exe '${{ needs.validate.outputs.tag }}' dist/desktop ;;
+          esac
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-${{ matrix.os }}-${{ matrix.arch }}-${{ needs.validate.outputs.tag || github.event.pull_request.head.sha }}
+          path: dist/desktop/
+          if-no-files-found: error
+
+  publish:
+    if: inputs.publish || github.event.inputs.publish == 'true'
+    needs: [validate, targets]
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    environment: release
+    permissions: {contents: read}
+    outputs: {artifact_name: 'desktop-release-${{ needs.validate.outputs.tag }}', artifact_path: 'dist/desktop'}
+    steps:
+      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+        with: {persist-credentials: false, ref: '${{ needs.validate.outputs.commit }}'}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with: {pattern: 'desktop-*-*-${{ needs.validate.outputs.tag }}', path: dist/download, merge-multiple: true}
+      - name: Verify and publish the signed desktop catalog
+        run: |
+          php scripts/release/desktop-write-release.php "$RELEASE_TAG" dist/download dist/download/release.json
+          scripts/release/desktop-publish.sh "$RELEASE_TAG" dist/download
+        env:
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          RELEASE_PUBLIC_KEY: ${{ secrets.RELEASE_PUBLIC_KEY }}
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with: {name: 'desktop-release-${{ needs.validate.outputs.tag }}', path: dist/download/, if-no-files-found: error}
+
+  desktop:
+    needs: [validate, changes, targets, publish]
+    if: always()
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - env:
+          VALIDATE: ${{ needs.validate.result }}
+          RELEVANT: ${{ needs.changes.outputs.relevant }}
+          TARGETS: ${{ needs.targets.result }}
+          PUBLISH: ${{ needs.publish.result }}
+          REQUESTED_PUBLISH: ${{ inputs.publish || github.event.inputs.publish }}
+        run: |
+          [[ "$VALIDATE" == success || "${{ github.event_name }}" == pull_request ]]
+          [[ "$RELEVANT" == true || "$TARGETS" == skipped ]]
+          [[ "$TARGETS" == success || "$TARGETS" == skipped ]]
+          [[ "$REQUESTED_PUBLISH" != true || "$PUBLISH" == success ]]

@@ -111,6 +111,28 @@
             "note": "iconsax@0.1.1 serializes this Twotone artwork under a null key; the checker requires the Twotone opacity group."
         }
     },
+    "customIcons": {
+        "http-server": {
+            "path": "icons/custom/http-server.svg",
+            "sha256": "7f054eb3ca2134f1f338e857baeb4c85a2f59c618c1064bfed99b5780ac1e291",
+            "description": "Original Filebeam artwork: HTTP server transfer; not Iconsax artwork."
+        },
+        "webrtc-p2p": {
+            "path": "icons/custom/webrtc-p2p.svg",
+            "sha256": "5309f9f73409cc77b96d020933c3e83f157e201685ba0e3b7acf98f10f2bea2e",
+            "description": "Original Filebeam artwork: WebRTC peer-to-peer transfer; not Iconsax artwork."
+        },
+        "end-to-end-encrypted": {
+            "path": "icons/custom/end-to-end-encrypted.svg",
+            "sha256": "6e238cee4a724a72940b14e9fd5bf01ed3f44fbe62d978d50060a958845903b8",
+            "description": "Original Filebeam artwork: end-to-end encryption; not Iconsax artwork."
+        },
+        "fast-and-simple": {
+            "path": "icons/custom/fast-and-simple.svg",
+            "sha256": "d4c658b63d8eff92123777b31c3c8144e693b7a0927e0a74cf0fa79dd1e45863",
+            "description": "Original Filebeam artwork: fast and simple sharing; not Iconsax artwork."
+        }
+    },
     "brandIcons": {
         "os-linux": {
             "description": "Linux Tux identity mark, drawn for the CLI platform picker; not Iconsax artwork.",

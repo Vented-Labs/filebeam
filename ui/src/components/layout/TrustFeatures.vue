@@ -3,11 +3,15 @@ import Icon, { type IconName } from '../primitives/Icon.vue';
 
 const features: Array<{ icon: IconName; title: string; description: string }> = [
     {
-        icon: 'lock',
+        icon: 'end-to-end-encrypted',
         title: 'End-to-end encrypted',
         description: 'Files are encrypted in your browser before they leave your device.',
     },
-    { icon: 'bolt', title: 'Fast and simple', description: 'Share files and notes in seconds.' },
+    {
+        icon: 'fast-and-simple',
+        title: 'Fast and simple',
+        description: 'Share files and notes in seconds.',
+    },
     {
         icon: 'eye-off',
         title: 'Private by design',

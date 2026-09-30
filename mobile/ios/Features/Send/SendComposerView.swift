@@ -73,7 +73,31 @@ struct SendComposerView: View {
 
 struct TransportPicker: View {
     @Binding var transport: Transport
-    var body: some View { VStack(alignment: .leading) { Picker("Delivery method", selection: $transport) { Text("HTTP").tag(Transport.http); Text("WebRTC").tag(Transport.webRTC) }.pickerStyle(.segmented); Text(transport == .http ? "Download later." : "Keep Filebeam open.").font(.footnote).foregroundStyle(.secondary) } }
+    var body: some View {
+        VStack(alignment: .leading) {
+            HStack {
+                transportButton(.http, title: "HTTP", icon: .httpServer)
+                transportButton(.webRTC, title: "WebRTC", icon: .webrtcP2p)
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Delivery method")
+            Text(transport == .http ? "Download later." : "Keep Filebeam open.")
+                .font(.footnote).foregroundStyle(.secondary)
+        }
+    }
+
+    private func transportButton(_ value: Transport, title: String, icon: ApprovedCustomIcon) -> some View {
+        Button { transport = value } label: {
+            HStack {
+                CustomIcon(icon: icon)
+                Text(title)
+            }
+            .frame(maxWidth: .infinity, minHeight: 44)
+        }
+        .buttonStyle(.bordered)
+        .tint(transport == value ? Color.accentColor : Color.secondary)
+        .accessibilityAddTraits(transport == value ? .isSelected : [])
+    }
 }
 
 struct FileOptionsSheet: View {
@@ -93,5 +117,5 @@ struct NoteOptionsSheet: View {
     @State private var transaction: NoteOptionsTransaction
     @State private var passwordDraft: String
     init(options: Binding<NoteOptions>, password: Binding<String>) { _options = options; _password = password; _transaction = State(initialValue: .init(options: options.wrappedValue)); _passwordDraft = State(initialValue: password.wrappedValue) }
-    var body: some View { NavigationStack { Form { Section("Delivery") { Toggle("Live note", isOn: $transaction.draft.live) }; Section("Protection") { Toggle("Optional transfer password", isOn: $transaction.draft.passwordEnabled); if transaction.draft.passwordEnabled { SecureField("Transfer password", text: $passwordDraft) }; Toggle("Burn on read", isOn: $transaction.draft.burnOnRead) }; Section("Link sharing") { Toggle("Include key in link", isOn: $transaction.draft.includeKeyInLink) }; Section("Lifetime") { TextField("Hours", value: $transaction.draft.retentionHours, format: .number).keyboardType(.numberPad) } }.navigationTitle("Transfer options").toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("Done") { options = transaction.commit(); password = passwordDraft; dismiss() } } } } }
+    var body: some View { NavigationStack { Form { Section("Delivery") { TransportPicker(transport: Binding(get: { transaction.draft.live ? .webRTC : .http }, set: { transaction.draft.live = $0 == .webRTC })) }; Section("Protection") { Toggle("Optional transfer password", isOn: $transaction.draft.passwordEnabled); if transaction.draft.passwordEnabled { SecureField("Transfer password", text: $passwordDraft) }; Toggle("Burn on read", isOn: $transaction.draft.burnOnRead) }; Section("Link sharing") { Toggle("Include key in link", isOn: $transaction.draft.includeKeyInLink) }; Section("Lifetime") { TextField("Hours", value: $transaction.draft.retentionHours, format: .number).keyboardType(.numberPad) } }.navigationTitle("Transfer options").toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("Done") { options = transaction.commit(); password = passwordDraft; dismiss() } } } } }
 }

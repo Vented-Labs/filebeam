@@ -8,7 +8,7 @@ usage() {
 
 [[ $# -ge 1 && $# -le 2 ]] || usage
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
-[[ -f "$root/cli/Cargo.toml" && -f "$root/cli/Cargo.lock" ]] || { printf '%s\n' 'cli/Cargo.toml and cli/Cargo.lock are required' >&2; exit 1; }
+[[ -f "$root/crates/cli/Cargo.toml" && -f "$root/crates/cli/Cargo.lock" ]] || { printf '%s\n' 'crates/cli/Cargo.toml and crates/cli/Cargo.lock are required' >&2; exit 1; }
 tag=$1
 output_dir=${2:-dist/beam}
 mkdir -p "$output_dir"

@@ -10,10 +10,10 @@ export default defineConfig({
     resolve: {
         alias: {
             '@filebeam/encryption': fileURLToPath(
-                new URL('../encryption/pkg/filebeam_encryption.js', import.meta.url),
+                new URL('../crates/encryption/pkg/filebeam_encryption.js', import.meta.url),
             ),
             '@filebeam/transfer': fileURLToPath(
-                new URL('../transfer-wasm/pkg/filebeam_transfer_wasm.js', import.meta.url),
+                new URL('../crates/transfer-wasm/pkg/filebeam_transfer_wasm.js', import.meta.url),
             ),
         },
     },

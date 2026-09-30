@@ -21,8 +21,8 @@ esac
 export BEAM_RELEASE_VERSION="$version"
 source_date_epoch=$(git show -s --format=%ct HEAD)
 mkdir -p "$output_dir"
-cargo build --manifest-path cli/Cargo.toml --release --locked --target "$target"
-binary="cli/target/$target/release/$executable"
+cargo build --manifest-path crates/cli/Cargo.toml --release --locked --target "$target"
+binary="crates/cli/target/$target/release/$executable"
 [[ -f $binary ]] || { printf 'Expected executable %s.\n' "$binary" >&2; exit 1; }
 stage=$(mktemp -d "${TMPDIR:-/tmp}/beam-package.XXXXXX")
 trap 'rm -rf "$stage"' EXIT

@@ -85,7 +85,7 @@ export function buildDownloadCommand(target: string): string {
     const ulid = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/i;
     if (ulid.test(target)) return `beam down ${quoteShellArgument(target)}`;
     const url = webUrl(target);
-    // Match cli/src/protocol.rs: one ULID path, no query, and an unencoded v1 key.
+    // Match crates/cli/src/protocol.rs: one ULID path, no query, and an unencoded v1 key.
     if (url.search || !ulid.test(url.pathname.slice(1)))
         throw new Error('This link format is not supported by the CLI.');
     if (url.hash) {

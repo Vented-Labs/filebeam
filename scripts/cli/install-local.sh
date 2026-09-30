@@ -25,16 +25,21 @@ done
 }
 
 "$root/scripts/cli/build.sh"
-binary="$root/cli/target/release/beam"
+binary="$root/crates/cli/target/release/beam"
 [[ -x $binary ]] || { printf 'Expected %s after the Docker build.\n' "$binary" >&2; exit 1; }
 
 mkdir -p "$install_dir/bin" "$install_dir/cache"
-[[ -f $install_dir/config.toml ]] || : > "$install_dir/config.toml"
+if [[ ! -f $install_dir/config.toml ]]; then
+    cat > "$install_dir/config.toml" <<EOF
+schema_version = 1
+
+[server]
+url = "$instance"
+EOF
+fi
 install -m 0755 "$binary" "$install_dir/bin/beam-local"
 cat > "$install_dir/bin/beam" <<EOF
 #!/bin/sh
-FILEBEAM_INSTANCE='$instance'
-export FILEBEAM_INSTANCE
 exec "\$(dirname "\$0")/beam-local" "\$@"
 EOF
 chmod 0755 "$install_dir/bin/beam"

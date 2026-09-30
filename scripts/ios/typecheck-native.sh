@@ -4,11 +4,11 @@ set -euo pipefail
 
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 rust_version=1.98.0
-target_dir=${CARGO_TARGET_DIR:-"$root/client-ffi/target"}
+target_dir=${CARGO_TARGET_DIR:-"$root/crates/client-ffi/target"}
 output=$(mktemp -d)
 trap 'rm -rf "$output"' EXIT
 
-CARGO_TARGET_DIR="$target_dir" cargo "+$rust_version" build --manifest-path "$root/client-ffi/Cargo.toml" --locked --lib
+CARGO_TARGET_DIR="$target_dir" cargo "+$rust_version" build --manifest-path "$root/crates/client-ffi/Cargo.toml" --locked --lib
 python3 "$root/scripts/ios/generate-bindings.py" --library "$target_dir/debug/libfilebeam_client_ffi.so" --out-dir "$output/bindings"
 python3 "$root/scripts/ios/normalize-bindings.py" "$output/bindings"
 mkdir "$output/include"

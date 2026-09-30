@@ -8,11 +8,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import io.filebeam.android.R
 
-/** Approved Iconsax identities only. Vectors retain source two-tone alpha and take semantic tint. */
+/** Approved Iconsax and custom Filebeam artwork. Vectors retain two-tone alpha and semantic tint. */
 enum class ApprovedIcon(@DrawableRes val resource: Int) {
     Upload(R.drawable.ic_approved_upload), Archive(R.drawable.ic_approved_archive), Folder(R.drawable.ic_approved_folder), File(R.drawable.ic_approved_file),
     Download(R.drawable.ic_approved_download), Transfers(R.drawable.ic_approved_transfers), Shield(R.drawable.ic_approved_shield),
     Settings(R.drawable.ic_approved_settings), Storage(R.drawable.ic_approved_storage), Add(R.drawable.ic_approved_add),
+    HttpServer(R.drawable.ic_custom_http_server), WebRtcP2p(R.drawable.ic_custom_webrtc_p2p),
 }
 
 @Composable

@@ -53,7 +53,7 @@ FROM alpine:3.22 AS copied-context
 COPY package.json package-lock.json vite.config.ts LICENSE SECURITY.md /context/
 COPY docker/production /context/docker/production
 COPY icons /context/icons
-COPY scripts/check-icons.mjs scripts/generate-icons.mjs /context/scripts/
+COPY scripts/check-icons.mjs scripts/generate-icons.mjs scripts/custom-icons.mjs scripts/generate-mobile-icons.mjs /context/scripts/
 COPY scripts/og /context/scripts/og
 COPY scripts/prism-gallery /context/scripts/prism-gallery
 COPY backend/artisan backend/composer.json backend/composer.lock backend/package.json backend/vite.config.ts backend/tsconfig.json /context/backend/
@@ -69,9 +69,9 @@ COPY backend/public/brand /context/backend/public/brand
 COPY backend/public/fonts /context/backend/public/fonts
 COPY ui/package.json /context/ui/package.json
 COPY ui/src /context/ui/src
-COPY encryption /context/encryption
-COPY transfer /context/transfer
-COPY transfer-wasm /context/transfer-wasm
+COPY crates/encryption /context/crates/encryption
+COPY crates/transfer /context/crates/transfer
+COPY crates/transfer-wasm /context/crates/transfer-wasm
 COPY update.php /context/update.php
 COPY updater /context/updater
 RUN cd /context && find . -mindepth 1 -print | cut -c3- | LC_ALL=C sort > /manifest
@@ -97,8 +97,8 @@ mkdir -p "$sentinel_context/backend/app" "$sentinel_context/backend/database" \
     "$sentinel_context/backend/public/build" "$sentinel_context/backend/public/js/filament" \
     "$sentinel_context/backend/resources/js/actions" "$sentinel_context/backend/resources/js/routes" \
     "$sentinel_context/backend/resources/js/wayfinder" "$sentinel_context/backend/storage/logs" \
-    "$sentinel_context/encryption/pkg" "$sentinel_context/encryption/target" \
-    "$sentinel_context/transfer/target" "$sentinel_context/transfer-wasm/pkg" "$sentinel_context/transfer-wasm/target" \
+    "$sentinel_context/crates/encryption/pkg" "$sentinel_context/crates/encryption/target" \
+    "$sentinel_context/crates/transfer/target" "$sentinel_context/crates/transfer-wasm/pkg" "$sentinel_context/crates/transfer-wasm/target" \
     "$sentinel_context/node_modules" "$sentinel_context/.ai" "$sentinel_context/dist" \
     "$sentinel_context/tests" "$sentinel_context/mobile"
 touch "$sentinel_context/backend/app/.context-allowed.php" \
@@ -110,11 +110,11 @@ touch "$sentinel_context/backend/app/.context-allowed.php" \
     "$sentinel_context/backend/resources/js/routes/context-sentinel.ts" \
     "$sentinel_context/backend/resources/js/wayfinder/context-sentinel.ts" \
     "$sentinel_context/backend/storage/logs/context-sentinel.log" \
-    "$sentinel_context/encryption/pkg/context-sentinel.wasm" \
-    "$sentinel_context/encryption/target/context-sentinel" \
-    "$sentinel_context/transfer/target/context-sentinel" \
-    "$sentinel_context/transfer-wasm/pkg/context-sentinel.wasm" \
-    "$sentinel_context/transfer-wasm/target/context-sentinel" \
+    "$sentinel_context/crates/encryption/pkg/context-sentinel.wasm" \
+    "$sentinel_context/crates/encryption/target/context-sentinel" \
+    "$sentinel_context/crates/transfer/target/context-sentinel" \
+    "$sentinel_context/crates/transfer-wasm/pkg/context-sentinel.wasm" \
+    "$sentinel_context/crates/transfer-wasm/target/context-sentinel" \
     "$sentinel_context/node_modules/context-sentinel.js" \
     "$sentinel_context/.ai/context-sentinel" "$sentinel_context/dist/context-sentinel" \
     "$sentinel_context/tests/context-sentinel" "$sentinel_context/mobile/context-sentinel"
@@ -183,6 +183,11 @@ require_present 'icons/approved.json'
 require_present 'icons/dependency-inventory.json'
 require_present 'scripts/check-icons.mjs'
 require_present 'scripts/generate-icons.mjs'
+require_present 'scripts/custom-icons.mjs'
+require_present 'scripts/generate-mobile-icons.mjs'
+for icon in http-server webrtc-p2p end-to-end-encrypted fast-and-simple; do
+    require_present "icons/custom/$icon.svg"
+done
 require_prefix 'scripts/og'
 require_present 'scripts/prism-gallery/check-icons.mjs'
 require_present 'scripts/prism-gallery/Gallery.vue'
@@ -192,7 +197,7 @@ require_present 'backend/composer.lock'
 require_present 'backend/package.json'
 require_present 'backend/vite.config.ts'
 require_present 'backend/tsconfig.json'
-require_present 'encryption/Cargo.toml'
+require_present 'crates/encryption/Cargo.toml'
 require_present 'update.php'
 require_present 'updater/ActivityLock.php'
 require_present 'updater/PostgresBackup.php'
@@ -200,16 +205,16 @@ require_present 'updater/Updater.php'
 require_present 'backend/public/index.php'
 require_present 'backend/public/.htaccess'
 require_present 'backend/public/frankenphp-worker.php'
-if [[ -f "$root/encryption/Cargo.lock" ]]; then
-    require_present 'encryption/Cargo.lock'
+if [[ -f "$root/crates/encryption/Cargo.lock" ]]; then
+    require_present 'crates/encryption/Cargo.lock'
 fi
-require_present 'transfer/Cargo.toml'
-require_present 'transfer-wasm/Cargo.toml'
-if [[ -f "$root/transfer/Cargo.lock" ]]; then
-    require_present 'transfer/Cargo.lock'
+require_present 'crates/transfer/Cargo.toml'
+require_present 'crates/transfer-wasm/Cargo.toml'
+if [[ -f "$root/crates/transfer/Cargo.lock" ]]; then
+    require_present 'crates/transfer/Cargo.lock'
 fi
-if [[ -f "$root/transfer-wasm/Cargo.lock" ]]; then
-    require_present 'transfer-wasm/Cargo.lock'
+if [[ -f "$root/crates/transfer-wasm/Cargo.lock" ]]; then
+    require_present 'crates/transfer-wasm/Cargo.lock'
 fi
 require_prefix 'backend/app'
 require_prefix 'backend/bootstrap'
@@ -221,9 +226,9 @@ require_prefix 'backend/routes'
 require_prefix 'backend/public/brand'
 require_prefix 'backend/public/fonts'
 require_prefix 'ui/src'
-require_prefix 'encryption/src'
-require_prefix 'transfer/src'
-require_prefix 'transfer-wasm/src'
+require_prefix 'crates/encryption/src'
+require_prefix 'crates/transfer/src'
+require_prefix 'crates/transfer-wasm/src'
 require_prefix 'updater'
 require_sentinel_present 'backend/app/.context-allowed.php'
 
@@ -243,11 +248,11 @@ for excluded in \
     'backend/resources/js/routes/context-sentinel.ts' \
     'backend/resources/js/wayfinder/context-sentinel.ts' \
     'backend/storage/logs/context-sentinel.log' \
-    'encryption/pkg/context-sentinel.wasm' \
-    'encryption/target/context-sentinel' \
-    'transfer/target/context-sentinel' \
-    'transfer-wasm/pkg/context-sentinel.wasm' \
-    'transfer-wasm/target/context-sentinel' \
+    'crates/encryption/pkg/context-sentinel.wasm' \
+    'crates/encryption/target/context-sentinel' \
+    'crates/transfer/target/context-sentinel' \
+    'crates/transfer-wasm/pkg/context-sentinel.wasm' \
+    'crates/transfer-wasm/target/context-sentinel' \
     'node_modules/context-sentinel.js' \
     '.ai/context-sentinel' \
     'dist/context-sentinel' \

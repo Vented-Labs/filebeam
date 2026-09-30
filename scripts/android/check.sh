@@ -6,9 +6,9 @@ if [[ ${FILEBEAM_ANDROID_IN_CONTAINER:-} != 1 ]]; then
 fi
 
 for crate in client-core client-ffi; do
-    cargo fmt --manifest-path "$root/$crate/Cargo.toml" --check
-    cargo clippy --manifest-path "$root/$crate/Cargo.toml" --all-targets --locked -- -D warnings
-    cargo test --manifest-path "$root/$crate/Cargo.toml" --locked
+    cargo fmt --manifest-path "$root/crates/$crate/Cargo.toml" --check
+    cargo clippy --manifest-path "$root/crates/$crate/Cargo.toml" --all-targets --locked -- -D warnings
+    cargo test --manifest-path "$root/crates/$crate/Cargo.toml" --locked
 done
 "$root/mobile/android/gradlew" --project-dir "$root/mobile/android" --no-daemon \
     :app:lintDebug :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease :app:assembleDebugAndroidTest \

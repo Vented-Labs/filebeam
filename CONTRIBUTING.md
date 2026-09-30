@@ -7,7 +7,7 @@ Use Docker Engine and Docker Compose. Follow the local setup commands in the [RE
 ```sh
 ./sail test
 ./sail npm --prefix .. run check
-./sail run cargo test --manifest-path ../encryption/Cargo.toml
+./sail run cargo test --manifest-path ../crates/encryption/Cargo.toml
 ```
 
 Browser tests run on the host against an isolated application instance. Set `SAIL_APP_URL=http://127.0.0.1:8000` in `backend/.env`, then recreate the application container and use the same URL for Playwright so same-origin authentication stays within the Vue document:
@@ -78,7 +78,7 @@ The Android check builds real Rust libraries for ARM64, ARMv7, and x86_64,
 generates UniFFI bindings, runs Rust/Kotlin checks, builds debug and R8 release
 APKs, and verifies native-library 16 KiB alignment. See
 [`mobile/android/README.md`](mobile/android/README.md) for device instrumentation
-and the IDE setup. Changes to `client-core/` also require the CLI checks because
+and the IDE setup. Changes to `crates/client-core/` also require the CLI checks because
 the CLI shares its worker lifecycle. Keep generated bindings and build artifacts
 out of version control.
 
@@ -88,7 +88,7 @@ out of version control.
 - Keep storage private and keep changes compatible with SQLite, MySQL/MariaDB, and PostgreSQL unless a change explicitly documents otherwise.
 - We need to support traditional shared hosting as well as more modern (FrankenPHP/Docker) installations 100% on every feature.
 - Do not commit secrets, `.env` files, generated dependencies, build output, runtime state, or local tooling metadata.
-- Keep `docs/` and READMEs focused on durable usage, development, and operations. Put agent instructions, plans, progress reports, test-run results, and temporary issue notes in the ignored `.filebeam/` directory.
+- Keep tracked documentation concise and reader-facing. Plans, TODO lists, agent handoffs, reports, logs, screenshots from local reviews, and temporary validation scripts belong only in repository-root `.filebeam/`. Keep reusable build, CI, and development tools in `scripts/`; keep project conventions in `AGENTS.md`.
 
 Open a focused pull request with tests and documentation appropriate to the behavior changed.
 
@@ -97,6 +97,10 @@ Open a focused pull request with tests and documentation appropriate to the beha
 Use the Bug report or Feature request templates. Questions belong in [Discussions](https://github.com/Vented-Labs/filebeam/discussions). Report security issues through the [private vulnerability form](https://github.com/Vented-Labs/filebeam/security/advisories/new), not public issues.
 
 ## Release Packages
+
+Release publishing requires `R2_ENDPOINT_URL` to be the HTTPS Cloudflare R2 account
+API root (for example, `https://<account-id>.r2.cloudflarestorage.com`) and
+`R2_BUCKET` to be the bucket name. Public download URLs are not API endpoints.
 
 Maintainers create official packages from a Git commit:
 

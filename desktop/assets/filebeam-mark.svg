@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="280" viewBox="0 0 200 280" role="img" aria-label="Filebeam">
+  <title>Filebeam</title>
+  <desc>Filebeam folded F and outgoing beam. Transparent background.</desc>
+  <defs>
+    <linearGradient id="top" x1="24" y1="94" x2="166" y2="23" gradientUnits="userSpaceOnUse"><stop stop-color="#6421D8"/><stop offset=".52" stop-color="#8B35FF"/><stop offset="1" stop-color="#C75BFA"/></linearGradient>
+    <linearGradient id="fold" x1="0" y1="109" x2="81" y2="105" gradientUnits="userSpaceOnUse"><stop stop-color="#C568F5"/><stop offset="1" stop-color="#E7A1FF"/></linearGradient>
+  </defs>
+  <g transform="translate(16 18)">
+    <path fill="#8B35FF" d="M14 65 140 3c13-6 28 2 28 17v22c0 15-3 21-15 27l-72 36 64 29-66 32c11 5 14 12 14 25v34c0 14-9 23-23 17l-54-26C5 211 0 203 0 191V87c0-10 5-18 14-22Z"/>
+    <path fill="url(#fold)" d="M14 65C5 69 0 77 0 87v71c0-8 4-13 12-17l69-36-67-32c-6-3-6-5 0-8Z"/>
+    <path fill="url(#top)" d="M14 65 140 3c13-6 28 2 28 17v22c0 15-3 21-15 27l-72 36-67-32c-6-3-6-5 0-8Z"/>
+    <path fill="#7228E8" d="m12 141 69-36 64 29-66 32z"/>
+  </g>
+</svg>

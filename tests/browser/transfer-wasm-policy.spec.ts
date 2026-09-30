@@ -8,7 +8,7 @@ import {
     transferPolicy,
 } from '../../ui/src/lib/transfer';
 import { StageSession } from '../../ui/src/lib/transfer-wasm-policy';
-import fixture from '../../transfer/tests/fixtures/policy.json';
+import fixture from '../../crates/transfer/tests/fixtures/policy.json';
 
 test('WASM policy matches the native transfer trace for scheduling, retry, and staging', async () => {
     await initialiseTransferPolicy();

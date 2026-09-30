@@ -4,6 +4,8 @@ import { readdir, readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, extname, join, relative } from 'node:path';
 import { parse as parseSfc } from '@vue/compiler-sfc';
+import { customPaths, loadCustomIcons } from './custom-icons.mjs';
+import { generateMobileIcons, swiftPath } from './generate-mobile-icons.mjs';
 
 const require = createRequire(import.meta.url);
 const ts = require('typescript');
@@ -186,6 +188,9 @@ async function checkApprovedSource() {
         }
         entries.push([name, brand.markup]);
     }
+    const customIcons = await loadCustomIcons(manifest);
+    entries.push(...customIcons.map(({ name, markup }) => [name, markup]));
+    if (!process.argv.includes('--web-only')) await generateMobileIcons(customIcons, true);
     const digest = createHash('sha256').update(JSON.stringify(entries)).digest('hex');
     const vue = await readFile(join(root, 'ui/src/components/primitives/icons.generated.ts'), 'utf8');
     const php = await readFile(join(root, 'backend/app/Support/Icons/Iconsax.php'), 'utf8');
@@ -198,6 +203,19 @@ async function checkApprovedSource() {
 }
 
 async function selfTest() {
+    const customSvg = '<svg><g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><g opacity="0.4"><path d="M1 2H3V4C5 6 7 8 9 10Z"/></g></g></svg>';
+    assert.deepEqual(customPaths(customSvg), [{ d: 'M1 2H3V4C5 6 7 8 9 10Z', opacity: 0.4 }]);
+    assert.throws(() => customPaths(customSvg.replace('<path', '<image')));
+    assert.throws(() => customPaths(customSvg.replace('stroke-width="1.5"', 'stroke-width="2"')));
+    assert.throws(() => customPaths(customSvg.replace('M1 2', 'm1 2')));
+    assert.deepEqual(swiftPath('M1 2H3V4C5 6 7 8 9 10Z'), [
+        'path.move(to: CGPoint(x: 1, y: 2))',
+        'path.addLine(to: CGPoint(x: 3, y: 2))',
+        'path.addLine(to: CGPoint(x: 3, y: 4))',
+        'path.addCurve(to: CGPoint(x: 9, y: 10), control1: CGPoint(x: 5, y: 6), control2: CGPoint(x: 7, y: 8))',
+        'path.closeSubpath()',
+    ]);
+    assert.throws(() => swiftPath('M1'));
     const fixtures = [
         ['tests/icon-policy/foreign-catalog-import.ts', 'direct icon catalog import or re-export'],
         ['tests/icon-policy/dynamic-catalog-loader.ts', 'direct icon catalog import or re-export'],
