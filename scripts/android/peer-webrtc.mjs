@@ -11,7 +11,7 @@ import { promisify } from 'node:util';
 const baseURL = process.env.BASE_URL;
 const turnURL = process.env.TURN_URL;
 const results = process.env.RESULTS_DIR;
-const binary = new URL('../../cli/target/release/beam', import.meta.url).pathname;
+const binary = new URL('../../crates/cli/target/release/beam', import.meta.url).pathname;
 const selectedCases = new Set((process.env.PEER_WEBRTC_CASES ?? '').split(',').filter(Boolean));
 const largeBytes = Number(process.env.PEER_WEBRTC_LARGE_BYTES ?? 0);
 const scratchRoot = process.env.PEER_SCRATCH_ROOT ?? tmpdir();

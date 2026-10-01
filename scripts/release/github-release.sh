@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-usage() { printf 'Usage: %s TAG COMMIT RELEASE_DIRECTORY [CLI_RELEASE_DIRECTORY]\n' "$0" >&2; exit 64; }
-[[ $# -ge 3 && $# -le 4 ]] || usage
+usage() { printf 'Usage: %s TAG COMMIT RELEASE_DIRECTORY [CLI_RELEASE_DIRECTORY] [DESKTOP_RELEASE_DIRECTORY]\n' "$0" >&2; exit 64; }
+[[ $# -ge 3 && $# -le 5 ]] || usage
 tag=$1
 commit=$2
 release_dir=$3
 cli_dir=${4:-}
+desktop_dir=${5:-}
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { printf 'Invalid release tag: %s\n' "$tag" >&2; exit 64; }
 [[ $commit =~ ^[0-9a-f]{40}$ ]] || { printf 'Invalid release commit.\n' >&2; exit 64; }
@@ -55,6 +56,31 @@ if [[ -n $cli_dir ]]; then
     cli_manifest="$temporary/$cli_tag-release.json"
     cp "$cli_dir/release.json" "$cli_manifest"
     assets+=("${cli_assets[@]:0:10}" "$cli_manifest")
+fi
+
+if [[ -n $desktop_dir ]]; then
+    desktop_assets=(
+        "$desktop_dir/filebeam-desktop-$tag-linux-x86_64.tar.gz" "$desktop_dir/filebeam-desktop-$tag-linux-aarch64.tar.gz"
+        "$desktop_dir/filebeam-desktop-$tag-macos-x86_64.tar.gz" "$desktop_dir/filebeam-desktop-$tag-macos-aarch64.tar.gz"
+        "$desktop_dir/filebeam-desktop-$tag-windows-x86_64.zip"
+    )
+    [[ -f "$desktop_dir/release.json" ]] || { printf 'Missing desktop release metadata.\n' >&2; exit 1; }
+    for asset in "${desktop_assets[@]}"; do [[ -f $asset ]] || { printf 'Missing desktop release asset: %s\n' "$asset" >&2; exit 1; }; done
+    published_epoch=$(php -r '
+        $release = json_decode(file_get_contents($argv[1]), true, flags: JSON_THROW_ON_ERROR);
+        $published = $release["published_at"] ?? null;
+        if (!is_string($published)) exit(1);
+        $date = DateTimeImmutable::createFromFormat("!Y-m-d\\TH:i:s\\Z", $published, new DateTimeZone("UTC"));
+        if ($date === false || $date->format("Y-m-d\\TH:i:s\\Z") !== $published) exit(1);
+        echo $date->getTimestamp();
+    ' "$desktop_dir/release.json")
+    SOURCE_DATE_EPOCH="$published_epoch" php "$root/scripts/release/desktop-write-release.php" "$tag" "$desktop_dir" "$temporary/desktop-release.json"
+    cmp --silent "$temporary/desktop-release.json" "$desktop_dir/release.json" || { printf 'Desktop release manifest does not verify every archive.\n' >&2; exit 1; }
+    # Installer names do not collide with updater archives.
+    for asset in "$desktop_dir"/*.{AppImage,dmg,exe}; do [[ -e $asset ]] && desktop_assets+=("$asset"); done
+    desktop_manifest="$temporary/desktop-$tag-release.json"
+    cp "$desktop_dir/release.json" "$desktop_manifest"
+    assets+=("${desktop_assets[@]}" "$desktop_manifest")
 fi
 
 error="$temporary/error"

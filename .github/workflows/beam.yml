@@ -11,16 +11,20 @@ on:
         type: boolean
   pull_request:
     paths:
-      - 'cli/**'
-      - 'client-core/**'
-      - 'transfer/**'
-      - 'transfer-native/**'
-      - 'transfer-wasm/**'
+      - 'crates/cli/**'
+      - 'crates/client-config/**'
+      - 'crates/client-updater/**'
+      - 'crates/encryption/**'
+      - 'crates/client-core/**'
+      - 'crates/transfer/**'
+      - 'crates/transfer-native/**'
+      - 'crates/transfer-wasm/**'
       - 'docker/cli/**'
       - 'scripts/cli/**'
       - 'package.json'
       - 'scripts/release/cli-*'
       - '.github/workflows/beam.yml'
+      - '.github/workflows/release.yml'
   push:
     tags:
       - 'beam-v*.*.*'
@@ -53,7 +57,7 @@ jobs:
       commit: ${{ steps.verify.outputs.commit }}
       tag: ${{ steps.verify.outputs.tag }}
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: refs/heads/master
@@ -68,13 +72,13 @@ jobs:
           printf 'commit=%s\ntag=%s\n' "$commit" "$tag" >> "$GITHUB_OUTPUT"
   test:
     needs: validate-ref
-    if: always() && (github.event_name == 'pull_request' || github.event_name == 'schedule' || needs.validate-ref.result == 'success')
+    if: ${{ !cancelled() && (github.event_name == 'pull_request' || github.event_name == 'schedule' || needs.validate-ref.result == 'success') }}
     runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 30
     env:
       BEAM_DOCKER_BUILD: 'false'
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           # CLI containers need Git objects without the host's mirror mount.
@@ -89,13 +93,13 @@ jobs:
       - name: Locate CLI Cargo cache
         run: printf 'BEAM_CARGO_CACHE_DIR=%s/beam-cargo\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - name: Cache CLI Cargo state
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ${{ env.BEAM_CARGO_CACHE_DIR }}
-            cli/target
-          key: beam-cargo-${{ runner.os }}-${{ runner.arch }}-rust1.98.0-${{ hashFiles('docker/cli/Dockerfile', 'cli/Cargo.lock', 'transfer/Cargo.lock', 'transfer-native/Cargo.lock') }}-${{ hashFiles('cli/src/**', 'cli/tests/**', 'cli/build.rs', 'cli/Cargo.toml', 'transfer/src/**', 'transfer/Cargo.toml', 'transfer-native/src/**', 'transfer-native/Cargo.toml') }}
-          restore-keys: beam-cargo-${{ runner.os }}-${{ runner.arch }}-rust1.98.0-${{ hashFiles('docker/cli/Dockerfile', 'cli/Cargo.lock', 'transfer/Cargo.lock', 'transfer-native/Cargo.lock') }}-
+            crates/cli/target
+          key: beam-cargo-${{ runner.os }}-${{ runner.arch }}-rust1.98.0-${{ hashFiles('docker/cli/Dockerfile', 'crates/cli/Cargo.lock', 'crates/transfer/Cargo.lock', 'crates/transfer-native/Cargo.lock') }}-${{ hashFiles('crates/cli/src/**', 'crates/cli/tests/**', 'crates/cli/build.rs', 'crates/cli/Cargo.toml', 'crates/transfer/src/**', 'crates/transfer/Cargo.toml', 'crates/transfer-native/src/**', 'crates/transfer-native/Cargo.toml') }}
+          restore-keys: beam-cargo-${{ runner.os }}-${{ runner.arch }}-rust1.98.0-${{ hashFiles('docker/cli/Dockerfile', 'crates/cli/Cargo.lock', 'crates/transfer/Cargo.lock', 'crates/transfer-native/Cargo.lock') }}-
       - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240
         with:
           php-version: '8.5'
@@ -132,7 +136,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
       - name: Install Rust
@@ -142,22 +146,31 @@ jobs:
           rustup default 1.98.0
           rustup target add "${{ matrix.target }}"
       - name: Cache native CLI
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            cli/target
-          key: beam-check-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.98.0-${{ hashFiles('cli/Cargo.lock', 'transfer/Cargo.lock', 'transfer-native/Cargo.lock') }}-${{ hashFiles('cli/src/**', 'cli/build.rs', 'cli/Cargo.toml', 'transfer/src/**', 'transfer/Cargo.toml', 'transfer-native/src/**', 'transfer-native/Cargo.toml') }}
-          restore-keys: beam-check-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.98.0-${{ hashFiles('cli/Cargo.lock', 'transfer/Cargo.lock', 'transfer-native/Cargo.lock') }}-
+            crates/cli/target
+          key: beam-check-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.98.0-${{ hashFiles('crates/cli/Cargo.lock', 'crates/transfer/Cargo.lock', 'crates/transfer-native/Cargo.lock') }}-${{ hashFiles('crates/cli/src/**', 'crates/cli/build.rs', 'crates/cli/Cargo.toml', 'crates/transfer/src/**', 'crates/transfer/Cargo.toml', 'crates/transfer-native/src/**', 'crates/transfer-native/Cargo.toml') }}
+          restore-keys: beam-check-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.98.0-${{ hashFiles('crates/cli/Cargo.lock', 'crates/transfer/Cargo.lock', 'crates/transfer-native/Cargo.lock') }}-
       - name: Test native CLI
         if: matrix.test
         shell: bash
-        run: cargo test --manifest-path cli/Cargo.toml --locked --target "${{ matrix.target }}"
+        run: cargo test --manifest-path crates/cli/Cargo.toml --locked --target "${{ matrix.target }}"
       - name: Build cross-architecture CLI
         if: ${{ !matrix.test }}
         shell: bash
-        run: cargo build --manifest-path cli/Cargo.toml --locked --target "${{ matrix.target }}"
+        run: cargo build --manifest-path crates/cli/Cargo.toml --locked --target "${{ matrix.target }}"
+      - name: Package optimized CLI candidate
+        shell: bash
+        env:
+          BEAM_RELEASE_PUBLIC_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+        run: bash scripts/cli/package-target.sh beam-v0.0.0 '${{ runner.os == 'Windows' && 'windows' || 'macos' }}' '${{ matrix.target == 'aarch64-apple-darwin' && 'aarch64' || 'x86_64' }}' dist/beam
+      - name: Smoke test optimized CLI
+        if: matrix.test
+        shell: bash
+        run: crates/cli/target/${{ matrix.target }}/release/beam${{ runner.os == 'Windows' && '.exe' || '' }} --version
       - name: Validate PowerShell installer syntax
         if: runner.os == 'Windows'
         shell: pwsh
@@ -174,7 +187,7 @@ jobs:
       RELEASE_COMMIT: ${{ needs.validate-ref.outputs.commit }}
       BEAM_DOCKER_BUILD: 'false'
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           dissociate: true
@@ -241,7 +254,7 @@ jobs:
       RELEASE_TAG: ${{ needs.validate-ref.outputs.tag }}
       RELEASE_COMMIT: ${{ needs.validate-ref.outputs.commit }}
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: ${{ env.RELEASE_COMMIT }}
@@ -258,14 +271,14 @@ jobs:
           rustup default 1.98.0
           rustup target add "${{ matrix.target }}"
       - name: Cache CLI Cargo state
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            cli/target
-          key: beam-package-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.98.0-${{ hashFiles('cli/Cargo.lock', 'transfer/Cargo.lock', 'transfer-native/Cargo.lock') }}-${{ hashFiles('cli/src/**', 'cli/build.rs', 'cli/Cargo.toml', 'transfer/src/**', 'transfer/Cargo.toml', 'transfer-native/src/**', 'transfer-native/Cargo.toml') }}
-          restore-keys: beam-package-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.98.0-${{ hashFiles('cli/Cargo.lock', 'transfer/Cargo.lock', 'transfer-native/Cargo.lock') }}-
+            crates/cli/target
+          key: beam-package-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.98.0-${{ hashFiles('crates/cli/Cargo.lock', 'crates/transfer/Cargo.lock', 'crates/transfer-native/Cargo.lock') }}-${{ hashFiles('crates/cli/src/**', 'crates/cli/build.rs', 'crates/cli/Cargo.toml', 'crates/transfer/src/**', 'crates/transfer/Cargo.toml', 'crates/transfer-native/src/**', 'crates/transfer-native/Cargo.toml') }}
+          restore-keys: beam-package-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.98.0-${{ hashFiles('crates/cli/Cargo.lock', 'crates/transfer/Cargo.lock', 'crates/transfer-native/Cargo.lock') }}-
       - name: Derive canonical CLI public key
         shell: bash
         env:
@@ -278,7 +291,7 @@ jobs:
       - name: Smoke test native executable
         if: matrix.smoke
         shell: bash
-        run: cli/target/${{ matrix.target }}/release/beam${{ matrix.os == 'windows' && '.exe' || '' }} --version
+        run: crates/cli/target/${{ matrix.target }}/release/beam${{ matrix.os == 'windows' && '.exe' || '' }} --version
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: ${{ env.RELEASE_TAG }}-${{ matrix.os }}-${{ matrix.architecture }}
@@ -292,7 +305,7 @@ jobs:
     env:
       RELEASE_TAG: ${{ needs.validate-ref.outputs.tag }}
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: ${{ needs.validate-ref.outputs.commit }}
@@ -331,7 +344,7 @@ jobs:
       RELEASE_TAG: ${{ needs.validate-ref.outputs.tag }}
       RELEASE_COMMIT: ${{ needs.validate-ref.outputs.commit }}
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: ${{ env.RELEASE_COMMIT }}
@@ -355,7 +368,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           RELEASE_PUBLIC_KEY: ${{ secrets.RELEASE_PUBLIC_KEY }}
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
-      - name: Smoke test the public signed installer
+      - name: Smoke test the public CLI installer
         run: bash scripts/cli/smoke-install.sh "$RELEASE_TAG"
       - name: Create matching CLI release
         if: startsWith(inputs.tag || github.ref_name, 'beam-v')
@@ -369,7 +382,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     environment: release
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
       - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240

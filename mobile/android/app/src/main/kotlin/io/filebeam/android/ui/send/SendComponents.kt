@@ -92,7 +92,7 @@ private fun TransportCard(modifier: Modifier, transport: Transport, title: Strin
     ) {
         Column(Modifier.padding(FilebeamSpace.Small), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                ApprovedIcon(if (transport == Transport.HTTP) ApprovedIcon.Storage else ApprovedIcon.Upload, null)
+                ApprovedIcon(if (transport == Transport.HTTP) ApprovedIcon.HttpServer else ApprovedIcon.WebRtcP2p, null)
                 Text(title, Modifier.padding(start = FilebeamSpace.XSmall).weight(1f), style = MaterialTheme.typography.titleMedium)
                 if (selected) Text("✓", style = MaterialTheme.typography.titleMedium)
             }

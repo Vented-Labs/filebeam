@@ -23,6 +23,6 @@ updates:
     schedule:
       interval: weekly
   - package-ecosystem: cargo
-    directory: /encryption
+    directory: /crates/encryption
     schedule:
       interval: weekly

@@ -7,7 +7,7 @@ from pathlib import Path
 root = Path(__file__).resolve().parents[2]
 paths = set()
 for crate in ("client-ffi", "client-core", "encryption", "transfer", "transfer-native"):
-    directory = root / crate
+    directory = root / "crates" / crate
     paths.update(path for path in (directory / "src").rglob("*") if path.is_file())
     paths.update(directory / name for name in (
         "Cargo.toml", "Cargo.lock", "build.rs", "uniffi.toml", "rust-toolchain.toml",

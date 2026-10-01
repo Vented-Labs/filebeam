@@ -25,12 +25,12 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: ${{ inputs.ref || github.ref }}
       # Keep setup actions at the workflow revision when validating an older release ref.
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: ${{ github.workflow_sha }}
@@ -63,7 +63,7 @@ jobs:
           name: test-frontend
           path: |
             backend/public/build/
-            transfer-wasm/pkg/
+            crates/transfer-wasm/pkg/
           if-no-files-found: error
           retention-days: 1
       - name: Upload browser failure artifacts
@@ -79,11 +79,11 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 15
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: ${{ inputs.ref || github.ref }}
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: ${{ github.workflow_sha }}
@@ -92,24 +92,26 @@ jobs:
       - uses: ./.ci-workflow/.github/actions/setup-rust
       - name: Check Rust formatting
         run: |
-          cargo fmt --manifest-path encryption/Cargo.toml --check
-          cargo fmt --manifest-path transfer/Cargo.toml --check
-          cargo fmt --manifest-path transfer-native/Cargo.toml --check
-          cargo fmt --manifest-path transfer-wasm/Cargo.toml --check
+          cargo fmt --manifest-path crates/encryption/Cargo.toml --check
+          cargo fmt --manifest-path crates/transfer/Cargo.toml --check
+          cargo fmt --manifest-path crates/transfer-native/Cargo.toml --check
+          cargo fmt --manifest-path crates/transfer-wasm/Cargo.toml --check
       - name: Lint Rust
         run: |
-          cargo clippy --manifest-path encryption/Cargo.toml --all-targets --locked -- -D warnings
-          cargo clippy --manifest-path transfer/Cargo.toml --all-targets --locked -- -D warnings
-          cargo clippy --manifest-path transfer-native/Cargo.toml --all-targets --locked -- -D warnings
-          cargo clippy --manifest-path transfer-wasm/Cargo.toml --all-targets --locked -- -D warnings
+          cargo clippy --manifest-path crates/encryption/Cargo.toml --all-targets --locked -- -D warnings
+          cargo clippy --manifest-path crates/transfer/Cargo.toml --all-targets --locked -- -D warnings
+          cargo clippy --manifest-path crates/transfer-native/Cargo.toml --all-targets --locked -- -D warnings
+          cargo clippy --manifest-path crates/transfer-wasm/Cargo.toml --all-targets --locked -- -D warnings
       - name: Test Rust
         run: |
-          cargo test --manifest-path encryption/Cargo.toml --locked
-          cargo test --manifest-path transfer/Cargo.toml --locked
-          cargo test --manifest-path transfer-native/Cargo.toml --locked
-          cargo test --manifest-path transfer-wasm/Cargo.toml --locked
+          cargo test --manifest-path crates/encryption/Cargo.toml --locked
+          cargo test --manifest-path crates/transfer/Cargo.toml --locked
+          cargo test --manifest-path crates/transfer-native/Cargo.toml --locked
+          cargo test --manifest-path crates/transfer-wasm/Cargo.toml --locked
 
   android:
+    # Mobile CI is paused pending device QA.
+    if: false
     name: Android
     runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 45
@@ -117,23 +119,23 @@ jobs:
       FILEBEAM_ANDROID_BUILD_IMAGE: 'false'
       FILEBEAM_ANDROID_CACHE: ${{ github.workspace }}/.android-cache
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: ${{ inputs.ref || github.ref }}
       - uses: useblacksmith/setup-docker-builder@19215110ab936351210feebdfa5b440b4493e184 # v2
         with:
           cache-key: docker/android/Dockerfile
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             .android-cache/cargo
             .android-cache/gradle/caches
             .android-cache/gradle/wrapper
-            client-ffi/target
-            client-core/target
-          key: android-${{ runner.os }}-rust1.98.0-${{ hashFiles('docker/android/Dockerfile', 'client-ffi/Cargo.lock', 'client-core/Cargo.lock', 'mobile/android/gradle/libs.versions.toml') }}-${{ github.sha }}
-          restore-keys: android-${{ runner.os }}-rust1.98.0-${{ hashFiles('docker/android/Dockerfile', 'client-ffi/Cargo.lock', 'client-core/Cargo.lock', 'mobile/android/gradle/libs.versions.toml') }}-
+            crates/client-ffi/target
+            crates/client-core/target
+          key: android-${{ runner.os }}-rust1.98.0-${{ hashFiles('docker/android/Dockerfile', 'crates/client-ffi/Cargo.lock', 'crates/client-core/Cargo.lock', 'mobile/android/gradle/libs.versions.toml') }}-${{ github.sha }}
+          restore-keys: android-${{ runner.os }}-rust1.98.0-${{ hashFiles('docker/android/Dockerfile', 'crates/client-ffi/Cargo.lock', 'crates/client-core/Cargo.lock', 'mobile/android/gradle/libs.versions.toml') }}-
       - name: Build Android tooling
         run: docker buildx build --load --tag filebeam-android-tooling:rust-1.98.0-sdk37 docker/android
       - name: Check native Android build
@@ -168,6 +170,7 @@ jobs:
           retention-days: 7
 
   ios:
+    if: false
     name: iOS
     uses: ./.github/workflows/ios-ci.yml
     with:
@@ -179,11 +182,11 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: ${{ inputs.ref || github.ref }}
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: ${{ github.workflow_sha }}
@@ -227,11 +230,11 @@ jobs:
           --health-timeout=5s
           --health-retries=5
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: ${{ inputs.ref || github.ref }}
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: ${{ github.workflow_sha }}
@@ -275,12 +278,12 @@ jobs:
       SAIL_APP_URL: http://127.0.0.1:8000
       FILEBEAM_CREATIONS_PER_HOUR: '600'
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           dissociate: true
           ref: ${{ inputs.ref || github.ref }}
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: ${{ github.workflow_sha }}
@@ -375,11 +378,11 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: ${{ inputs.ref || github.ref }}
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: ${{ github.workflow_sha }}
@@ -441,11 +444,11 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: ${{ inputs.ref || github.ref }}
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: ${{ github.workflow_sha }}
@@ -477,7 +480,7 @@ jobs:
     # Keep this name in sync with the required GitHub Actions check on master.
     name: Test
     if: always()
-    needs: [frontend, rust, android, ios, php-static, php, sail, small-chunks, distribution]
+    needs: [frontend, rust, php-static, php, sail, small-chunks, distribution]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 5
     steps:

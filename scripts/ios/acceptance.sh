@@ -10,7 +10,7 @@ backend_url=$(bash "$root/scripts/ios/peer-backend.sh" start)
 cleanup() { bash "$root/scripts/ios/peer-backend.sh" stop; }
 trap cleanup EXIT
 native_ran=0
-if [[ -f $root/client-ffi/examples/background_acceptance.rs ]]; then
+if [[ -f $root/crates/client-ffi/examples/background_acceptance.rs ]]; then
     FILEBEAM_ACCEPTANCE_INSTANCE="$backend_url" bash "$root/scripts/ios/peer-native.sh" > "$evidence/native-background.log" 2>&1
     native_ran=1
 else

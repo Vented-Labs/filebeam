@@ -46,15 +46,30 @@ decode_base64() {
     if base64 --decode </dev/null >/dev/null 2>&1; then base64 --decode
     else base64 -D; fi
 }
+find_openssl() {
+    if openssl pkeyutl -help 2>&1 | grep -q -- '-rawin'; then
+        printf '%s\n' openssl
+        return
+    fi
+    if [ "$os" = macos ] && command -v brew >/dev/null 2>&1; then
+        prefix=$(brew --prefix openssl@3 2>/dev/null || true)
+        if [ -n "$prefix" ] && "$prefix/bin/openssl" pkeyutl -help 2>&1 | grep -q -- '-rawin'; then
+            printf '%s\n' "$prefix/bin/openssl"
+            return
+        fi
+    fi
+    printf '%s\n' 'OpenSSL 3 or newer is required to verify Filebeam releases.' >&2
+    if [ "$os" = macos ]; then
+        printf '%s\n' 'Install it with `brew install openssl@3`, then rerun this installer.' >&2
+    fi
+    return 1
+}
 verify_catalog() {
     [ "$has_release_key" = true ] || {
         printf '%s\n' 'This installer has no embedded release verification key.' >&2
         exit 1
     }
-    command -v openssl >/dev/null 2>&1 || {
-        printf '%s\n' 'openssl is required to verify Filebeam releases.' >&2
-        exit 1
-    }
+    openssl_command=$(find_openssl)
     signed=$(sed -n 's/.*"signed"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$1" | awk 'NR == 1 { print; exit }')
     signature=$(sed -n 's/.*"signature"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$1" | awk 'NR == 1 { print; exit }')
     [ -n "$signed" ] && [ -n "$signature" ] || {
@@ -67,11 +82,11 @@ verify_catalog() {
         printf '\060\052\060\005\006\003\053\145\160\003\041\000'
         printf '%s' "$release_public_key" | decode_base64
     } > "$tmp/public.der"
-    openssl pkey -pubin -inform DER -in "$tmp/public.der" -out "$tmp/public.pem" >/dev/null 2>&1 || {
+    "$openssl_command" pkey -pubin -inform DER -in "$tmp/public.der" -out "$tmp/public.pem" >/dev/null 2>&1 || {
         printf '%s\n' 'The embedded release verification key is invalid.' >&2
         exit 1
     }
-    openssl pkeyutl -verify -pubin -inkey "$tmp/public.pem" -rawin \
+    "$openssl_command" pkeyutl -verify -pubin -inkey "$tmp/public.pem" -rawin \
         -in "$tmp/index.json" -sigfile "$tmp/index.sig" >/dev/null 2>&1 || {
         printf '%s\n' 'Release catalog signature verification failed.' >&2
         exit 1

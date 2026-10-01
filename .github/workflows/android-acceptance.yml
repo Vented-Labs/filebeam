@@ -26,6 +26,8 @@ concurrency:
 
 jobs:
   acceptance:
+    # Mobile CI is paused pending device QA.
+    if: false
     name: Android acceptance (${{ inputs.system_image }})
     runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 90
@@ -34,22 +36,22 @@ jobs:
       FILEBEAM_ANDROID_CACHE: ${{ github.workspace }}/.android-cache
       FILEBEAM_ANDROID_EMULATOR_IMAGE: filebeam-android-emulator:acceptance
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
       - uses: useblacksmith/setup-docker-builder@19215110ab936351210feebdfa5b440b4493e184 # v2
         with:
           cache-key: docker/android/Dockerfile
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             .android-cache/cargo
             .android-cache/gradle/caches
             .android-cache/gradle/wrapper
-            client-ffi/target
-            client-core/target
-          key: android-acceptance-${{ runner.os }}-rust1.98.0-${{ inputs.system_image }}-${{ hashFiles('docker/android/Dockerfile', 'client-ffi/Cargo.lock', 'client-core/Cargo.lock', 'mobile/android/gradle/libs.versions.toml') }}-${{ github.sha }}
-          restore-keys: android-acceptance-${{ runner.os }}-rust1.98.0-${{ inputs.system_image }}-${{ hashFiles('docker/android/Dockerfile', 'client-ffi/Cargo.lock', 'client-core/Cargo.lock', 'mobile/android/gradle/libs.versions.toml') }}-
+            crates/client-ffi/target
+            crates/client-core/target
+          key: android-acceptance-${{ runner.os }}-rust1.98.0-${{ inputs.system_image }}-${{ hashFiles('docker/android/Dockerfile', 'crates/client-ffi/Cargo.lock', 'crates/client-core/Cargo.lock', 'mobile/android/gradle/libs.versions.toml') }}-${{ github.sha }}
+          restore-keys: android-acceptance-${{ runner.os }}-rust1.98.0-${{ inputs.system_image }}-${{ hashFiles('docker/android/Dockerfile', 'crates/client-ffi/Cargo.lock', 'crates/client-core/Cargo.lock', 'mobile/android/gradle/libs.versions.toml') }}-
       - name: Build pinned Android tooling
         run: docker buildx build --load --tag filebeam-android-tooling:rust-1.98.0-sdk37 docker/android
       - name: Build selected emulator image

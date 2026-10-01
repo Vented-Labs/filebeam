@@ -10,7 +10,7 @@ Filebeam encrypts and decrypts content in a browser worker. The service stores c
 
 This boundary does not protect against a compromised browser, frontend delivery path, dependency supply chain, endpoint, or browser extension. URL fragments are not sent in HTTP requests but can be disclosed through copying, syncing, screenshots, or compromised clients. Client-side encryption also does not hide existence, timing, sizes, or network metadata. No independent security audit has been completed.
 
-See the [encryption protocol](encryption/README.md) for the format and key-custody details. Filebeam cannot recover a lost self-held recipient key or a private key wrapped with a forgotten password. A password reset restores account access, not prior encrypted key bundles; key replacement applies to future deliveries only.
+See the [encryption protocol](crates/encryption/README.md) for the format and key-custody details. Filebeam cannot recover a lost self-held recipient key or a private key wrapped with a forgotten password. A password reset restores account access, not prior encrypted key bundles; key replacement applies to future deliveries only.
 
 ## Burn On Read
 

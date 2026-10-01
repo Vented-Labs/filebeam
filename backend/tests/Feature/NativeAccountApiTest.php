@@ -54,9 +54,12 @@ function nativeSessionCookies(string $email, string $password = 'password'): arr
 test('native session login uses the existing authenticated session boundary', function (): void {
     $user = User::factory()->create(['email' => 'native@example.test']);
 
-    $this->postJson('/api/native/v1/session', ['email' => 'NATIVE@EXAMPLE.TEST', 'password' => 'password'])
-        ->assertOk()->assertJsonPath('data.id', $user->id)->assertJsonPath('data.email', $user->email);
-    $this->getJson('/api/native/v1/session')->assertOk()->assertJsonPath('data.id', $user->id);
+    $session = $this->postJson('/api/native/v1/session', ['email' => 'NATIVE@EXAMPLE.TEST', 'password' => 'password'])
+        ->assertOk()->assertJsonPath('data.id', $user->id)->assertJsonPath('data.email', $user->email)
+        ->assertJsonPath('data.notificationChannel', 'mail')
+        ->assertHeader('Cache-Control', 'no-store, private')
+        ->json('data');
+    $this->getJson('/api/native/v1/session')->assertOk()->assertExactJson(['data' => $session]);
     $this->deleteJson('/api/native/v1/session')->assertNoContent();
     $this->getJson('/api/native/v1/session')->assertUnauthorized();
 });

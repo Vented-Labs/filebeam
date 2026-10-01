@@ -32,7 +32,7 @@ async function loadTransferWasm(): Promise<TransferWasm> {
     const { pathToFileURL } = (await import(/* @vite-ignore */ urlModule)) as {
         pathToFileURL: (path: string) => URL;
     };
-    const packagePath = `${root}/transfer-wasm/pkg`;
+    const packagePath = `${root}/crates/transfer-wasm/pkg`;
     const moduleUrl = pathToFileURL(`${packagePath}/filebeam_transfer_wasm.js`).href;
     const module = (await import(/* @vite-ignore */ moduleUrl)) as TransferWasm;
     const fsModule = 'node:fs/promises';

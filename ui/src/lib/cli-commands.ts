@@ -1,21 +1,14 @@
 import { decodeBase64Url, encodeBase64Url } from './base64url';
 import type { CliConfig } from '../types';
+export { detectDesktopPlatform } from './platform';
+export type { DesktopPlatform as CliPlatform, UserAgentDetails } from './platform';
+import type { DesktopPlatform as CliPlatform } from './platform';
 
 export const cliDefaults: CliConfig = {
     installer_url: 'https://releases.filebeam.io/cli/install.sh',
     windows_installer_url: 'https://releases.filebeam.io/cli/install.ps1',
     installer_interpreter: 'sh',
     executable: 'beam',
-};
-
-export type CliPlatform = 'linux' | 'macos' | 'windows';
-
-export type UserAgentDetails = {
-    userAgentDataPlatform?: string;
-    userAgentDataMobile?: boolean;
-    platform?: string;
-    userAgent?: string;
-    maxTouchPoints?: number;
 };
 
 export function quoteShellArgument(value: string): string {
@@ -61,31 +54,12 @@ export function buildInstallCommand(
     return url && `curl -fsSL ${quoteShellArgument(url)} | sh`;
 }
 
-export function detectDesktopPlatform({
-    userAgentDataPlatform,
-    userAgentDataMobile,
-    platform,
-    userAgent,
-    maxTouchPoints,
-}: UserAgentDetails): CliPlatform | undefined {
-    const agent = userAgent ?? '';
-    if (userAgentDataMobile || /\b(?:iPad|iPhone|iPod|Android|Mobile|Windows Phone)\b/i.test(agent))
-        return;
-    for (const value of [userAgentDataPlatform, platform, agent]) {
-        if (!value) continue;
-        if (/win/i.test(value)) return 'windows';
-        if (/linux/i.test(value)) return 'linux';
-        if (/mac/i.test(value) && !((platform ?? '').includes('MacIntel') && maxTouchPoints))
-            return 'macos';
-    }
-}
-
 export function buildDownloadCommand(target: string): string {
     quoteShellArgument(target);
     const ulid = /^[0-7][0-9A-HJKMNP-TV-Z]{25}$/i;
     if (ulid.test(target)) return `beam down ${quoteShellArgument(target)}`;
     const url = webUrl(target);
-    // Match cli/src/protocol.rs: one ULID path, no query, and an unencoded v1 key.
+    // Match crates/cli/src/protocol.rs: one ULID path, no query, and an unencoded v1 key.
     if (url.search || !ulid.test(url.pathname.slice(1)))
         throw new Error('This link format is not supported by the CLI.');
     if (url.hash) {

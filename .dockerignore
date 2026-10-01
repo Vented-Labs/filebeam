@@ -21,10 +21,14 @@
 !icons/NOTICE
 !icons/approved.json
 !icons/dependency-inventory.json
+!icons/custom/
+!icons/custom/*.svg
 
 !scripts/
 !scripts/check-icons.mjs
 !scripts/generate-icons.mjs
+!scripts/custom-icons.mjs
+!scripts/generate-mobile-icons.mjs
 !scripts/og/
 !scripts/og/**
 !scripts/prism-gallery/
@@ -73,22 +77,23 @@
 !ui/src/
 !ui/src/**
 
-!encryption/
-!encryption/Cargo.toml
-!encryption/Cargo.lock
-!encryption/src/
-!encryption/src/**
+!crates/
+!crates/encryption/
+!crates/encryption/Cargo.toml
+!crates/encryption/Cargo.lock
+!crates/encryption/src/
+!crates/encryption/src/**
 
-!transfer/
-!transfer/Cargo.toml
-!transfer/Cargo.lock
-!transfer/src/
-!transfer/src/**
-!transfer-wasm/
-!transfer-wasm/Cargo.toml
-!transfer-wasm/Cargo.lock
-!transfer-wasm/src/
-!transfer-wasm/src/**
+!crates/transfer/
+!crates/transfer/Cargo.toml
+!crates/transfer/Cargo.lock
+!crates/transfer/src/
+!crates/transfer/src/**
+!crates/transfer-wasm/
+!crates/transfer-wasm/Cargo.toml
+!crates/transfer-wasm/Cargo.lock
+!crates/transfer-wasm/src/
+!crates/transfer-wasm/src/**
 
 !update.php
 !updater/
@@ -150,6 +155,8 @@ backend/bootstrap/cache/**
 **/.agents/**
 **/.junie
 **/.junie/**
+**/.filebeam
+**/.filebeam/**
 **/.idea
 **/.idea/**
 **/.vscode

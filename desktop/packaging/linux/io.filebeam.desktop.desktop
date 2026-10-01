@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Filebeam
+Exec=filebeam %u
+Icon=io.filebeam.desktop
+StartupWMClass=io.filebeam.desktop
+MimeType=x-scheme-handler/filebeam;
+Categories=Network;

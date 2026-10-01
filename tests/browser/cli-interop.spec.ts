@@ -20,8 +20,11 @@ test('built CLI and browser exchange real encrypted files through the Laravel AP
     const directory = await mkdtemp(join(tmpdir(), 'filebeam-cli-interop-'));
     const home = join(directory, 'home');
     await mkdir(home);
-    await writeFile(join(home, 'config.toml'), 'check_updates = false\n');
-    const env = { ...process.env, FILEBEAM_INSTANCE: baseURL!, FILEBEAM_HOME: home };
+    await writeFile(
+        join(home, 'config.toml'),
+        `schema_version = 1\n[server]\nurl = ${JSON.stringify(baseURL!)}\n[updates]\nauto_update = false\nchannel = "stable"\n`,
+    );
+    const env = { ...process.env };
     const payload = Buffer.from('Real browser to CLI interoperability\n'.repeat(500));
     let created: { id: string; delete_token: string } | undefined;
     try {
@@ -44,15 +47,22 @@ test('built CLI and browser exchange real encrypted files through the Laravel AP
         created = (await (await creation).json()).data;
         await expect(page.locator('#share-link')).toBeVisible();
         const link = await page.locator('#share-link').inputValue();
-        await run(binary, ['--plain', 'down', link, '--output', join(directory, 'download')], {
-            env: { ...env, FILEBEAM_INSTANCE: 'https://filebeam.io' },
-            timeout: 60000,
-        });
+        await run(
+            binary,
+            ['--home', home, '--plain', 'down', link, '--output', join(directory, 'download')],
+            {
+                env,
+                timeout: 60000,
+            },
+        );
         expect(await readFile(join(directory, 'download/from-browser.txt'))).toEqual(payload);
 
         const source = join(directory, 'from-cli.txt');
         await writeFile(source, payload);
-        const result = await run(binary, ['--plain', 'up', source], { env, timeout: 60000 });
+        const result = await run(binary, ['--home', home, '--plain', 'up', source], {
+            env,
+            timeout: 60000,
+        });
         const cliLink = result.stdout.trim();
         expect(cliLink.startsWith(baseURL!)).toBe(true);
         await page.goto(cliLink);

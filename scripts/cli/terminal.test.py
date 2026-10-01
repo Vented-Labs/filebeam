@@ -57,7 +57,7 @@ class API(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/api/v1/info":
             self.respond(200, dict(name="Filebeam", chunk_bytes=CHUNK, file_retention_hours=24,
-                                   anonymous_uploads_enabled=True, enabled_drivers=["http"],
+                                   anonymous_uploads_enabled=True, enabled_drivers=["http"], default_driver="http",
                                    maximum_transfer_bytes=1024**3, maximum_file_count=20))
         elif self.path == f"/api/v1/transfers/{ID}" and "manifest" in STATE:
             self.respond(200, dict(id=ID, protocol_version=1, chunk_bytes=CHUNK,
@@ -140,7 +140,7 @@ class Terminal:
             os.setsid()
             fcntl.ioctl(self.slave, termios.TIOCSCTTY, 0)
 
-        self.process = subprocess.Popen([BINARY, *args], stdin=self.slave,
+        self.process = subprocess.Popen([BINARY, "--home", env["FILEBEAM_HOME"], *args], stdin=self.slave,
                                         stdout=subprocess.PIPE if stdout_pipe else self.slave,
                                         stderr=self.slave, cwd=cwd, env=env, preexec_fn=session)
         self.output = bytearray()
@@ -238,7 +238,7 @@ def main():
         assert b"cancelled" in ANSI.sub(b"", output).lower()
         print("PASS: cancellation cleans temporary download and cursor")
 
-        plain = subprocess.run([BINARY, "--plain", "down", link, "--output", str(root / "plain")],
+        plain = subprocess.run([BINARY, "--home", env["FILEBEAM_HOME"], "--plain", "down", link, "--output", str(root / "plain")],
                                cwd=root, env=env, capture_output=True, timeout=20)
         assert plain.returncode == 0, plain.stderr
         assert b"\x1b" not in plain.stdout + plain.stderr
@@ -309,7 +309,7 @@ def main():
         (bundle / "nested" / "cycle").symlink_to(bundle)
 
         def command(*args):
-            return subprocess.run([BINARY, "--plain", *map(str, args)], cwd=root, env=env,
+            return subprocess.run([BINARY, "--home", env["FILEBEAM_HOME"], "--plain", *map(str, args)], cwd=root, env=env,
                                   capture_output=True, stdin=subprocess.DEVNULL, timeout=20)
 
         missing = command("up", bundle)

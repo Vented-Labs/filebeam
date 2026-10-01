@@ -202,7 +202,6 @@ function setRetention(value: unknown): void {
                     >
                         <Icon name="lock" :size="16" />
                         Send encrypted <kbd aria-hidden="true">↵</kbd>
-                        <Icon name="arrow-right" :size="16" />
                     </Button>
                 </template>
             </div>

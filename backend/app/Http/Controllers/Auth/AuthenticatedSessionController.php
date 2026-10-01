@@ -6,9 +6,11 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Auth\LoginRequest;
+use App\Models\User;
 use App\Support\AuthIdentifier;
 use App\Support\Branding;
 use App\Support\InstanceSettings;
+use App\Support\NativeSession;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -61,7 +63,10 @@ class AuthenticatedSessionController extends Controller
         $this->recordPasswordHash($request);
 
         if ($request->expectsJson()) {
-            return response()->json(['data' => $this->session($request)]);
+            $user = $request->user();
+            assert($user instanceof User);
+
+            return response()->json(['data' => NativeSession::forUser($user)], 200, ['Cache-Control' => 'no-store, private']);
         }
 
         return to_route('account');
@@ -78,22 +83,6 @@ class AuthenticatedSessionController extends Controller
         }
 
         return to_route('home');
-    }
-
-    /** @return array<string, bool|int|string|null> */
-    private function session(Request $request): array
-    {
-        $user = $request->user();
-        assert($user !== null);
-
-        return [
-            'id' => $user->id,
-            'name' => $user->name,
-            'username' => $user->username,
-            'email' => $user->email,
-            'inboxEnabled' => $user->inbox_enabled,
-            'usernameRoutingEnabled' => app(InstanceSettings::class)->boolean('username_routing'),
-        ];
     }
 
     private function recordPasswordHash(Request $request): void

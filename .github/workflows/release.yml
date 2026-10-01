@@ -44,14 +44,23 @@ permissions:
 
 jobs:
   cli:
-    if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish && !inputs.metadata_only)) && needs.validate-ref.result == 'success'
+    if: github.event_name != 'schedule' && !(github.event_name == 'workflow_dispatch' && inputs.metadata_only) && needs.validate-ref.result == 'success'
     needs: [test, validate-ref]
     permissions:
       contents: write
     uses: ./.github/workflows/beam.yml
     with:
       tag: ${{ needs.validate-ref.outputs.tag }}
-      publish: true
+      publish: ${{ github.event_name == 'push' || inputs.publish }}
+    secrets: inherit
+  desktop:
+    if: github.event_name != 'schedule' && !(github.event_name == 'workflow_dispatch' && inputs.metadata_only) && needs.validate-ref.result == 'success'
+    needs: [test, validate-ref]
+    uses: ./.github/workflows/desktop.yml
+    with:
+      tag: ${{ needs.validate-ref.outputs.tag }}
+      commit: ${{ needs.validate-ref.outputs.commit }}
+      publish: ${{ github.event_name == 'push' || inputs.publish }}
     secrets: inherit
   test:
     if: github.event_name != 'schedule' && needs.validate-ref.result == 'success'
@@ -67,7 +76,7 @@ jobs:
       tag: ${{ steps.verify.outputs.tag }}
       commit: ${{ steps.verify.outputs.commit }}
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: refs/heads/master
@@ -90,7 +99,7 @@ jobs:
       RELEASE_TAG: ${{ needs.validate-ref.outputs.tag }}
       RELEASE_COMMIT: ${{ needs.validate-ref.outputs.commit }}
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: ${{ env.RELEASE_COMMIT }}
@@ -132,14 +141,14 @@ jobs:
 
   publish:
     if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.publish && !inputs.metadata_only)) && needs.validate-ref.result == 'success'
-    needs: [package, validate-ref]
+    needs: [package, validate-ref, cli, desktop]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     environment: release
     env:
       RELEASE_TAG: ${{ needs.validate-ref.outputs.tag }}
       RELEASE_COMMIT: ${{ needs.validate-ref.outputs.commit }}
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: refs/heads/master
@@ -175,7 +184,7 @@ jobs:
       WITHDRAWN: ${{ inputs.withdrawn }}
       NOTES_URL: ${{ inputs.notes_url }}
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: refs/heads/master
@@ -199,7 +208,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     environment: release
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: refs/heads/master
@@ -218,6 +227,24 @@ jobs:
           RELEASE_PUBLIC_KEY: ${{ secrets.RELEASE_PUBLIC_KEY }}
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
 
+  refresh-desktop-catalog:
+    if: github.event_name == 'schedule' && github.ref == 'refs/heads/master'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    environment: release
+    steps:
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
+        with: {persist-credentials: false, ref: refs/heads/master}
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240
+        with: {php-version: '8.5', extensions: sodium, coverage: none}
+      - run: scripts/release/desktop-publish.sh --refresh-index
+        env:
+          R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          RELEASE_PUBLIC_KEY: ${{ secrets.RELEASE_PUBLIC_KEY }}
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+
   docker-plan:
     if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.publish && !inputs.metadata_only)) && needs.validate-ref.result == 'success'
     needs: validate-ref
@@ -226,7 +253,7 @@ jobs:
       revision: ${{ steps.tags.outputs.revision }}
       advance_aliases: ${{ steps.tags.outputs.advance_aliases }}
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: refs/heads/master
@@ -285,7 +312,7 @@ jobs:
       IMAGE: ${{ matrix.image }}
       IMAGE_TAG: ${{ needs.docker-plan.outputs.revision }}-${{ matrix.arch }}
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           dissociate: true
@@ -338,7 +365,7 @@ jobs:
 
   docker-publish:
     if: needs.docker-build.result == 'success'
-    needs: [validate-ref, docker-plan, docker-build]
+    needs: [validate-ref, docker-plan, docker-build, cli, desktop]
     permissions:
       contents: read
       packages: write
@@ -351,7 +378,7 @@ jobs:
       REVISION: ${{ needs.docker-plan.outputs.revision }}
       ADVANCE_ALIASES: ${{ needs.docker-plan.outputs.advance_aliases }}
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: ${{ needs.validate-ref.outputs.commit }}
@@ -411,8 +438,8 @@ jobs:
           done
 
   github-release:
-    if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.publish && !inputs.metadata_only)) && needs.package.result == 'success' && needs.publish.result == 'success' && needs.docker-publish.result == 'success' && needs.cli.result == 'success' && needs.validate-ref.result == 'success'
-    needs: [package, publish, docker-publish, cli, validate-ref]
+    if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.publish && !inputs.metadata_only)) && needs.package.result == 'success' && needs.publish.result == 'success' && needs.docker-publish.result == 'success' && needs.cli.result == 'success' && needs.desktop.result == 'success' && needs.validate-ref.result == 'success'
+    needs: [package, publish, docker-publish, cli, desktop, validate-ref]
     permissions:
       contents: write
     environment: release
@@ -424,7 +451,7 @@ jobs:
       GH_REPO: ${{ github.repository }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: useblacksmith/checkout@0647fdbab2614a5eb86d2971070e325060d91056 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: ${{ env.RELEASE_COMMIT }}
@@ -438,10 +465,14 @@ jobs:
         with:
           name: beam-${{ env.RELEASE_TAG }}
           path: dist/beam
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: desktop-release-${{ env.RELEASE_TAG }}
+          path: dist/desktop
       - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240
         with:
           php-version: '8.5'
           coverage: none
       - name: Publish verified GitHub release
         run: |
-          scripts/release/github-release.sh "$RELEASE_TAG" "$RELEASE_COMMIT" dist/release dist/beam
+          scripts/release/github-release.sh "$RELEASE_TAG" "$RELEASE_COMMIT" dist/release dist/beam dist/desktop

@@ -3,6 +3,7 @@ import { nextTick, provide, ref } from 'vue';
 import type { CliConfig } from '../../types';
 import CliInstallDialog from './CliInstallDialog.vue';
 import { cliInstallKey } from './context';
+import { restoreDialogFocus } from '../../lib/dialog-focus';
 
 defineProps<{ config?: CliConfig }>();
 const open = ref(false);
@@ -15,13 +16,7 @@ provide(cliInstallKey, (event) => {
 
 function restoreFocus(event: Event): void {
     event.preventDefault();
-    void nextTick(() => {
-        const visible = (element: HTMLElement | null | undefined): element is HTMLElement =>
-            Boolean(element?.isConnected && element.getClientRects().length);
-        const fallback = document.querySelector<HTMLElement>('[data-app-install-entry]');
-        if (visible(trigger)) trigger.focus({ preventScroll: true });
-        else if (visible(fallback)) fallback.focus({ preventScroll: true });
-    });
+    void nextTick(() => restoreDialogFocus(trigger));
 }
 </script>
 

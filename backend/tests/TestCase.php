@@ -31,6 +31,8 @@ abstract class TestCase extends BaseTestCase
     public function createApplication(): Application
     {
         $app = parent::createApplication();
+        // PHP tests must not depend on a developer's running SSR process.
+        $app['config']->set('inertia.ssr.enabled', false);
         $connection = $app['config']->get('database.default');
         $database = $app['config']->get("database.connections.{$connection}.database");
 

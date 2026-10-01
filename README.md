@@ -2,6 +2,8 @@
 
 Filebeam is a self-hosted application for sharing encrypted files and notes. Content is encrypted in the browser before upload; the server stores ciphertext and the metadata needed to operate a transfer.
 
+**Alpha software:** Expect breaking changes as Filebeam develops. The mobile apps are in **pre-alpha**.
+
 Filebeam is free and open-source software by [Vented](https://vented.com), released under the [MIT License](LICENSE).
 
 ## Features
@@ -34,12 +36,13 @@ docker compose -f backend/compose.yaml run --rm --no-deps laravel.test bash -c '
 - [Deployment and recovery](docs/deployment.md)
 - [Docker deployment](docs/docker.md)
 - [Security policy and limitations](SECURITY.md)
-- [Encryption protocol](encryption/README.md)
+- [Encryption protocol](crates/encryption/README.md)
 - [Contributing](CONTRIBUTING.md)
 - [UI workspace](ui/README.md)
-- [Beam CLI](cli/README.md)
+- [Beam CLI](crates/cli/README.md)
 - [Adaptive transfers and production operation](docs/adaptive-transfers.md)
-- [Shared transfer policy](transfer/README.md)
-- [Native transfer runtime](transfer-native/README.md)
+- [Shared transfer policy](crates/transfer/README.md)
+- [Native transfer runtime](crates/transfer-native/README.md)
+- [Desktop development](docs/desktop.md)
 - [Native Android app](mobile/android/README.md)
 - [Native iOS app](mobile/ios/README.md)

@@ -23,7 +23,7 @@ Adaptive-upload staging is private local disk data, not ciphertext storage and n
 
 For split web, queue, and scheduler deployments, run the `migrate` role as a one-shot deployment step before starting the long-lived roles, then use `FILEBEAM_MIGRATE_ON_START=false`.
 
-Multiple web or queue nodes require a single shared staging directory at the same `FILEBEAM_STAGING_ROOT` path, with working cross-node `flock` semantics. The implementation has no owner routing; do not use node-local staging behind a load balancer. On shared hosting, use an ordinary private directory with correct runtime permissions, not a RAM mount or a web root.
+Multiple web or queue nodes require shared staging at the same `FILEBEAM_STAGING_ROOT` path, with working cross-node `flock`. Node-local staging behind a load balancer is unsupported.
 
 During initial setup, Filebeam uses regular PHP requests. Once setup completes, it switches to persistent FrankenPHP/Octane workers. The installation token is written only to Docker logs while installation is pending; it is removed from `/data/config/.env` on completion. Treat initial logs as sensitive. No application, database, cache, or storage passwords are passed as process arguments or written to logs.
 
@@ -72,7 +72,7 @@ The `omnibus` image starts its initializer and supervisor as root, then runs Fil
 
 ## Host And Verification
 
-Omnibus Valkey recommends `vm.overcommit_memory=1`. This remains the host administrator's decision: containers and local scripts do not change it. Set it through normal host configuration for production; ephemeral CI runners configure it before Omnibus checks. Warnings remain diagnostic; functional, health, shutdown, error, and fatal failures still fail the Docker tests. The Docker CI matrix builds and tests `light` and `omnibus` natively on AMD64 and ARM64.
+Omnibus Valkey recommends `vm.overcommit_memory=1`; configure it on the host. CI builds and tests both image variants on AMD64 and ARM64.
 
 From the repository root:
 

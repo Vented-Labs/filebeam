@@ -42,7 +42,7 @@ WebRTC creates a prehashed encrypted manifest before peer delivery. This reads e
 
 ## Consent And Failure
 
-Selecting a method updates its limits immediately without opening a connection or a warning. Starting a WebRTC upload, download, or note decryption first asks for consent in a modal. Acceptance sets the host-only `webRTCRiskAccepted=1` cookie for one year (`SameSite=Lax`, `Secure` on HTTPS). It is a browser preference for guests and signed-in users, not an authorization token; clearing it makes the warning appear again.
+Starting a WebRTC upload, download, or note decryption asks for consent. The browser remembers acceptance for one year in a host-only cookie (`webRTCRiskAccepted=1`); clearing it restores the prompt.
 
 There is no automatic HTTP fallback. The sender may explicitly restart as a new stored HTTP transfer, with a new link and key, only when HTTP is enabled and the content fits its limits. The original live share is then revoked.
 

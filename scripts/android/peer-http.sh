@@ -72,7 +72,7 @@ start() {
 run() {
     local mode=$1
     start
-    cargo build --manifest-path "$root/cli/Cargo.toml" --release > "$logs/cli-build.log" 2>&1
+    "$root/scripts/cli/build.sh" > "$logs/cli-build.log" 2>&1
     (
         while docker inspect "$container" >/dev/null 2>&1 && [ "$(docker inspect --format '{{.State.Running}}' "$container")" = true ]; do
             printf '%s\t%s\n' "$(date --iso-8601=seconds)" "$(docker stats --no-stream --format '{{.MemUsage}}' "$container")"
@@ -81,7 +81,7 @@ run() {
     ) > "$logs/backend-memory.tsv" &
     local sampler=$!
     trap 'kill "$sampler" 2>/dev/null || true' RETURN
-    BASE_URL="$url" BROWSER_TEST_CLI_BINARY="$root/cli/target/release/beam" PEER_RESULTS="$results" PEER_LARGE="$mode" \
+    BASE_URL="$url" BROWSER_TEST_CLI_BINARY="$root/crates/cli/target/release/beam" PEER_RESULTS="$results" PEER_LARGE="$mode" \
         npx playwright test --config "$root/scripts/android/peer-http.playwright.config.ts" > "$logs/playwright-$mode.log" 2>&1
     kill "$sampler" 2>/dev/null || true
     trap - RETURN

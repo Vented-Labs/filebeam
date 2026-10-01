@@ -19,7 +19,7 @@ def main():
             "--library", str(arguments.library.resolve()), "--language", "swift",
             "--out-dir", str(arguments.out_dir.resolve()), "--no-format",
         ],
-        cwd=root / "client-ffi",
+        cwd=root / "crates" / "client-ffi",
         check=True,
     )
 

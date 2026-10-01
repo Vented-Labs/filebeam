@@ -36,16 +36,16 @@ ARG CARGO_BUILD_JOBS=1
 RUN rustup target add wasm32-unknown-unknown \
     && cargo install wasm-pack --version 0.15.0 --locked
 WORKDIR /src
-COPY encryption encryption
-COPY transfer transfer
-COPY transfer-wasm transfer-wasm
+COPY crates/encryption crates/encryption
+COPY crates/transfer crates/transfer
+COPY crates/transfer-wasm crates/transfer-wasm
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/src/encryption/target \
-    --mount=type=cache,target=/src/transfer/target \
-    --mount=type=cache,target=/src/transfer-wasm/target \
-    wasm-pack build encryption --target web --release --no-opt \
-    && wasm-pack build transfer-wasm --target web --release --no-opt
+    --mount=type=cache,target=/src/crates/encryption/target \
+    --mount=type=cache,target=/src/crates/transfer/target \
+    --mount=type=cache,target=/src/crates/transfer-wasm/target \
+    wasm-pack build crates/encryption --target web --release --no-opt \
+    && wasm-pack build crates/transfer-wasm --target web --release --no-opt
 
 FROM node:24-trixie@sha256:f7d34e58713740f9eef9092c0bd6ff10369d132f7238399a4b270f16d47fa608 AS node
 
@@ -66,13 +66,14 @@ FROM frontend-dependencies AS frontend
 COPY --from=application /opt/filebeam /opt/filebeam
 COPY ui ui
 COPY icons icons
-COPY scripts/check-icons.mjs scripts/generate-icons.mjs scripts/
+COPY scripts/check-icons.mjs scripts/generate-icons.mjs scripts/custom-icons.mjs scripts/generate-mobile-icons.mjs scripts/
 COPY scripts/og scripts/og
 COPY scripts/prism-gallery scripts/prism-gallery
 COPY vite.config.ts ./
-COPY --from=wasm /src/encryption/pkg /opt/filebeam/encryption/pkg
-COPY --from=wasm /src/transfer-wasm/pkg /opt/filebeam/transfer-wasm/pkg
-RUN npm run check:icons \
+COPY --from=wasm /src/crates/encryption/pkg /opt/filebeam/crates/encryption/pkg
+COPY --from=wasm /src/crates/transfer-wasm/pkg /opt/filebeam/crates/transfer-wasm/pkg
+RUN node scripts/generate-icons.mjs --check --web-only \
+    && node scripts/prism-gallery/check-icons.mjs --web-only \
     && npm run build --workspace=backend
 
 FROM postgres:18.6-trixie@sha256:4ef4dbc939d61acea57712655ddb4b4ab27419c913f94cca0cd57cb3ea3c2280 AS postgres

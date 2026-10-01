@@ -8,8 +8,8 @@
             "@vue/compiler-sfc": "^3.5.42",
             "iconsax": "0.1.1",
             "typescript": "^6.0.3",
-            "vite": "^8.2.2",
-            "vite-plus": "^0.3.0",
+            "vite": "npm:@voidzero-dev/vite-plus-core@1.0.0",
+            "vite-plus": "1.0.0",
             "vue": "^3.5.42",
             "vue-tsc": "^3.3.11"
         },
@@ -27,8 +27,8 @@
             "concurrently": "^10.0.3",
             "laravel-vite-plugin": "^3.1",
             "tailwindcss": "^4.1.1",
-            "vite": "^8.0.0",
-            "vite-plus": "0.3.0",
+            "vite": "npm:@voidzero-dev/vite-plus-core@1.0.0",
+            "vite-plus": "1.0.0",
             "vue": "^3.5.13",
             "vue-tsc": "^3.3.11"
         },
@@ -73,12 +73,12 @@
         }
     },
     "npmResolved": {
-        "count": 366,
-        "sha256": "84f26953cc843045db2a8973a3a4acd6b563403c648fa4b48fa4dac7fea66317"
+        "count": 365,
+        "sha256": "f4cb3d22f411bbca77ddee5c0cee414e03bc81d778680d8fc63a6b29270cdef9"
     },
     "composerResolved": {
-        "count": 179,
-        "sha256": "1800dd18e9a5278033a2cd254ffdd33e42ba076ec9668e09c826b48535ca3a24",
+        "count": 181,
+        "sha256": "17fd2ace4bc98a4095682c3d608a893e95e72dc5648efad636fac17a60f1a8d6",
         "exceptions": {
             "blade-ui-kit/blade-heroicons": "2.7.0"
         }

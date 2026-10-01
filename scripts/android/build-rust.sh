@@ -7,7 +7,7 @@ abis=${2:-arm64-v8a,armeabi-v7a,x86_64}
 profile=${3:-release}
 [[ $profile == debug || $profile == release ]] || { printf '%s\n' 'rustProfile must be debug or release' >&2; exit 1; }
 export ANDROID_NDK_HOME=${ANDROID_NDK_HOME:-${ANDROID_HOME:?Set ANDROID_HOME}/ndk/28.2.13676358}
-export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$root/client-ffi/target}
+export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$root/crates/client-ffi/target}
 command -v cargo-ndk >/dev/null || { printf '%s\n' 'Install cargo-ndk 4.1.2 (see mobile/android/README.md)' >&2; exit 1; }
 
 targets=()
@@ -25,14 +25,14 @@ export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-Wl,-z,max-page-size=16384 -C link-
 (
     # cargo-ndk 4.x discovers its workspace from the current directory even when
     # --manifest-path is supplied. Keep this independent of the Gradle working dir.
-    cd "$root/client-ffi"
+    cd "$root/crates/client-ffi"
     cargo ndk "${targets[@]}" -P 26 -o "$output/jniLibs" build --lib --locked "${flags[@]}"
 )
 
 # Binding generation runs on the build host; it reads metadata from an Android ELF.
 unset RUSTFLAGS
 (
-    cd "$root/client-ffi"
+    cd "$root/crates/client-ffi"
     # UniFFI discovers the crate's uniffi.toml through Cargo metadata.
     cargo run --locked --features bindgen --bin uniffi-bindgen -- \
         generate --library "$output/jniLibs/${selected[0]}/libfilebeam_client_ffi.so" \

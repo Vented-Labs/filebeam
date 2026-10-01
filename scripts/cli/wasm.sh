@@ -19,11 +19,16 @@ cache_root=$(CDPATH='' cd -- "$cache_root" && pwd)
 docker build --pull --tag filebeam-wasm-tooling:rust-1.98.0 \
     --file "$root/docker/wasm/Dockerfile" "$root/docker/wasm"
 
-exec docker run --rm --init \
-    --memory "${BEAM_DOCKER_MEMORY:-512m}" \
-    --memory-swap "${BEAM_DOCKER_MEMORY_SWAP:-512m}" \
-    --cpus "${BEAM_DOCKER_CPUS:-1}" \
-    --env CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}" \
+limits=()
+cargo_env=()
+if [[ ${CI:-false} != true ]]; then
+    limits+=(--memory "${BEAM_DOCKER_MEMORY:-512m}" --memory-swap "${BEAM_DOCKER_MEMORY_SWAP:-512m}" --cpus "${BEAM_DOCKER_CPUS:-1}")
+    cargo_env+=(--env CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-1}")
+elif [[ -n ${CARGO_BUILD_JOBS:-} ]]; then
+    cargo_env+=(--env CARGO_BUILD_JOBS)
+fi
+
+exec docker run --rm --init "${limits[@]}" "${cargo_env[@]}" \
     --env HOME=/tmp \
     --user "$(id -u):$(id -g)" \
     --env CARGO_HOME=/cargo \
@@ -33,4 +38,4 @@ exec docker run --rm --init \
     --volume "$root:/workspace" \
     --workdir /workspace \
     filebeam-wasm-tooling:rust-1.98.0 \
-    wasm-pack build "$crate" --target web --release --no-opt
+    wasm-pack build "crates/$crate" --target web --release --no-opt

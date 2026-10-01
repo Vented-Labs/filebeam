@@ -149,7 +149,7 @@ for (const width of [360, 390]) {
             true,
         );
         await dialog.getByRole('button', { name: 'Done', exact: true }).click();
-        await expect(page.locator('[data-app-install-entry]')).toBeFocused();
+        await expect(page.getByRole('button', { name: 'Open navigation' })).toBeFocused();
         expect(requests).toEqual([]);
     });
 }

@@ -27,6 +27,7 @@ if ($release !== null && ! $found) {
 usort($releases, static fn (array $left, array $right): int => version_compare((string) $right['version'], (string) $left['version']));
 echo json_encode([
     'schema' => 1,
+    'product' => 'cli',
     'generation' => (int) ($current['generation'] ?? 0) + 1,
     'published_at' => gmdate('Y-m-d\TH:i:s\Z'),
     'expires_at' => gmdate('Y-m-d\TH:i:s\Z', time() + 7 * 24 * 60 * 60),

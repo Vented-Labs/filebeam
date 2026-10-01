@@ -7,8 +7,6 @@ import {
     DialogPortal,
     DialogRoot,
     DialogTitle,
-    RadioGroupItem,
-    RadioGroupRoot,
 } from 'reka-ui';
 import { computed, onMounted, ref } from 'vue';
 import type { CliConfig } from '../../types';
@@ -20,19 +18,15 @@ import {
 } from '../../lib/cli-commands';
 import Button from '../primitives/Button.vue';
 import Icon from '../primitives/Icon.vue';
-import Tooltip from '../primitives/Tooltip.vue';
+import PlatformSelect from '../primitives/PlatformSelect.vue';
 import CliCommandField from './CliCommandField.vue';
+import { browserPlatformDetails } from '../../lib/platform';
 
 const props = defineProps<{ config?: CliConfig }>();
 const open = defineModel<boolean>('open', { default: false });
 const emit = defineEmits<{ closeAutoFocus: [event: Event] }>();
 const selectedPlatform = ref<CliPlatform>();
 const dialogTitle = ref<HTMLElement>();
-const platforms = [
-    { value: 'linux', label: 'Linux' },
-    { value: 'macos', label: 'macOS' },
-    { value: 'windows', label: 'Windows' },
-] as const;
 const installCommand = computed(() => {
     if (!selectedPlatform.value) return;
     try {
@@ -42,27 +36,8 @@ const installCommand = computed(() => {
     }
 });
 onMounted(() => {
-    const navigatorWithUserAgentData = navigator as Navigator & {
-        userAgentData?: { platform?: string; mobile?: boolean };
-    };
-    selectedPlatform.value = detectDesktopPlatform({
-        userAgentDataPlatform: navigatorWithUserAgentData.userAgentData?.platform,
-        userAgentDataMobile: navigatorWithUserAgentData.userAgentData?.mobile,
-        platform: navigator.platform,
-        userAgent: navigator.userAgent,
-        maxTouchPoints: navigator.maxTouchPoints,
-    });
+    selectedPlatform.value = detectDesktopPlatform(browserPlatformDetails());
 });
-function selectPlatformWithKeyboard(event: KeyboardEvent): void {
-    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
-    const current = Math.max(
-        0,
-        platforms.findIndex((platform) => platform.value === selectedPlatform.value),
-    );
-    const forward = event.key === 'ArrowRight' || event.key === 'ArrowDown';
-    const next = (current + (forward ? 1 : -1) + platforms.length) % platforms.length;
-    selectedPlatform.value = platforms[next]!.value;
-}
 const examples = [
     { command: 'beam', description: 'Interactive TUI' },
     { command: 'beam up <files...>', description: 'Send HTTP, Turbo, or live WebRTC files' },
@@ -93,30 +68,7 @@ const examples = [
                 >
                 <section class="cli-install-dialog__installer">
                     <h2><span>01</span>Choose your platform</h2>
-                    <RadioGroupRoot
-                        v-model="selectedPlatform"
-                        class="cli-install-dialog__platforms"
-                        orientation="horizontal"
-                        aria-label="Platform"
-                        @keydown="selectPlatformWithKeyboard"
-                    >
-                        <Tooltip
-                            v-for="platform in platforms"
-                            :key="platform.value"
-                            :content="platform.label"
-                            :delay="150"
-                            inline
-                            @escape-key-down="open = false"
-                        >
-                            <RadioGroupItem
-                                :value="platform.value"
-                                class="cli-install-dialog__platform"
-                                :aria-label="platform.label"
-                            >
-                                <Icon :name="`os-${platform.value}`" :size="26" />
-                            </RadioGroupItem>
-                        </Tooltip>
-                    </RadioGroupRoot>
+                    <PlatformSelect v-model="selectedPlatform" @escape-key-down="open = false" />
                     <h2><span>02</span>Run the installer</h2>
                     <CliCommandField
                         v-if="installCommand"
@@ -214,56 +166,6 @@ const examples = [
 .cli-install-dialog__unavailable {
     color: var(--fb-text-muted);
     font-size: 0.875rem;
-}
-.cli-install-dialog__platforms {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0.375rem;
-    margin-bottom: 1rem;
-    padding: 0.3rem;
-    border: 1px solid var(--fb-border);
-    border-radius: 0.75rem;
-    background: var(--fb-surface-sunken);
-    box-shadow: inset 0 1px 2px #0003;
-}
-.cli-install-dialog__platform {
-    position: relative;
-    display: grid;
-    min-width: 0;
-    height: 3.25rem;
-    place-items: center;
-    border: 1px solid transparent;
-    border-radius: 0.55rem;
-    background: transparent;
-    color: var(--fb-text-subtle);
-    cursor: pointer;
-    transition:
-        border-color var(--fb-duration-control) ease,
-        background var(--fb-duration-control) ease,
-        color var(--fb-duration-control) ease,
-        transform var(--fb-duration-control) var(--fb-ease);
-}
-.cli-install-dialog__platform:hover {
-    background: #ffffff06;
-    color: var(--fb-text);
-}
-.cli-install-dialog__platform:active {
-    transform: scale(0.97);
-}
-.cli-install-dialog__platform:focus-visible {
-    outline: 2px solid var(--fb-focus);
-    outline-offset: 2px;
-}
-.cli-install-dialog__platform[aria-checked='true'] {
-    border-color: #806191;
-    background: #32253f;
-    color: #d4b3fa;
-    box-shadow: inset 0 1px 0 #ffffff0a;
-}
-@media (prefers-reduced-motion: reduce) {
-    .cli-install-dialog__platform {
-        transition: none;
-    }
 }
 .cli-install-dialog__note {
     margin: 0.75rem 0 0;

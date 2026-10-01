@@ -1,3 +1,5 @@
+import { createAccountCryptoWorker } from './crypto-workers';
+
 export type AccountKeyBundle = {
     id: number;
     user_id: number;
@@ -36,13 +38,7 @@ function requireString(result: WorkerResult, name: string): string {
 
 function request(message: Record<string, unknown>): Promise<WorkerResult> {
     return new Promise((resolve, reject) => {
-        const worker = new Worker(
-            new URL(
-                '../../../backend/resources/js/workers/account-crypto.worker.ts',
-                import.meta.url,
-            ),
-            { type: 'module' },
-        );
+        const worker = createAccountCryptoWorker();
         const pending = waitForWorkerMessage<WorkerResult>(
             worker,
             (result): result is WorkerResult => 'ok' in result,
