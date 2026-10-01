@@ -368,7 +368,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           RELEASE_PUBLIC_KEY: ${{ secrets.RELEASE_PUBLIC_KEY }}
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
-      - name: Smoke test the public signed installer
+      - name: Smoke test the public CLI installer
         run: bash scripts/cli/smoke-install.sh "$RELEASE_TAG"
       - name: Create matching CLI release
         if: startsWith(inputs.tag || github.ref_name, 'beam-v')

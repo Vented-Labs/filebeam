@@ -19,6 +19,13 @@ use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 
+/** @return array<string, bool|int|string> */
+function cronBatchTestOptions(): array
+{
+    // These workers share PHPUnit's process and its 512 MiB memory budget.
+    return ['connection' => 'database', '--stop-when-empty' => true, '--max-time' => 50, '--max-jobs' => 25, '--sleep' => 0, '--timeout' => 60, '--tries' => 5, '--memory' => 512];
+}
+
 test('cron registers short database batches with an overlap lock', function (): void {
     $event = collect(app(Schedule::class)->events())->first(fn (Event $event): bool => $event->description === 'filebeam:process-background-work');
 
@@ -131,7 +138,7 @@ test('a short database batch performs queued ciphertext deletion and exits when 
     Queue::connection('database')->push(new DeleteTransfer($transfer->id));
     expect(DB::table('jobs')->count())->toBe(1);
 
-    expect(Artisan::call('queue:work', ['connection' => 'database', '--stop-when-empty' => true, '--max-time' => 50, '--max-jobs' => 25, '--sleep' => 0, '--timeout' => 60, '--tries' => 5]))->toBe(0);
+    expect(Artisan::call('queue:work', cronBatchTestOptions()))->toBe(0);
 
     expect(DB::table('jobs')->count())->toBe(0);
     expect(Transfer::query()->find($transfer->id))->toBeNull();
@@ -145,7 +152,7 @@ test('a database batch leaves excess work for the next cron invocation', functio
         Queue::connection('database')->push(new DeleteTransfer($transfer->id));
     }
 
-    expect(Artisan::call('queue:work', ['connection' => 'database', '--stop-when-empty' => true, '--max-time' => 50, '--max-jobs' => 25, '--sleep' => 0, '--timeout' => 60, '--tries' => 5]))->toBe(0);
+    expect(Artisan::call('queue:work', cronBatchTestOptions()))->toBe(0);
 
     expect(DB::table('jobs')->count())->toBe(1);
     expect(DB::table('jobs')->value('reserved_at'))->toBeNull();
@@ -163,7 +170,7 @@ test('failed cleanup remains queued for a later cron batch and can recover', fun
     $disk->shouldReceive('delete')->with([$location->storage_path])->twice()->andReturn(false, true);
     $this->mock(FilestoreRegistry::class)->shouldReceive('disk')->andReturn($disk);
     Queue::connection('database')->push(new DeleteTransfer($transfer->id));
-    $options = ['connection' => 'database', '--stop-when-empty' => true, '--max-time' => 50, '--max-jobs' => 25, '--sleep' => 0, '--timeout' => 60, '--tries' => 5];
+    $options = cronBatchTestOptions();
 
     expect(Artisan::call('queue:work', $options))->toBe(0);
 

@@ -1,5 +1,13 @@
 # Desktop release packaging
 
-The signed `desktop` catalog is independent of `cli`: `/desktop/index.json` is a schema-v1 Ed25519 envelope and immutable update payloads live under `/desktop/versions/vX.Y.Z`. Every updater payload is a platform archive containing exactly `filebeam/filebeam` (or `filebeam/filebeam.exe`), which is the layout enforced by `filebeam-client-updater`.
+The signed `desktop` catalog is independent of `cli`: `/desktop/index.json` is a
+schema-v1 Ed25519 envelope. Immutable update payloads live under
+`/desktop/versions/vX.Y.Z`. Linux archives contain the AppImage at
+`filebeam/filebeam`, Windows archives contain `filebeam/filebeam.exe`, and macOS
+archives contain `Filebeam.app`.
 
-Consumer installers are distinct from those updater payloads: Linux AppImage integration, signed/notarized macOS DMG, and signed per-user Windows NSIS setup must be built by their native release runners. Do not describe an unsigned artifact as signed. Required signing inputs are `APPLE_SIGNING_IDENTITY`, `APPLE_NOTARY_PROFILE`, `WINDOWS_SIGNING_CERTIFICATE`, and `WINDOWS_SIGNING_PASSWORD`; catalog publication additionally requires the existing `RELEASE_SIGNING_KEY` and R2 credentials.
+Native runners also produce AppImage, DMG, and per-user NSIS installers. Windows
+installers have no Authenticode signature. macOS bundles use an ad-hoc signature,
+without Developer ID signing or notarization. No platform-signing credentials are
+required; catalog publication uses the existing Ed25519 release key and R2
+credentials.

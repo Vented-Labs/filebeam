@@ -80,3 +80,4 @@ PATH="$tmp/bin:$PATH" MOCK_DOCKER_LOG="$tmp/docker.log" MOCK_IMAGE_EXISTS=1 \
 grep -Fxq -- 'build' "$tmp/docker.log"
 
 bash "$root/scripts/desktop/ci-build.test.sh"
+bash "$root/scripts/desktop/windows-package.test.sh"

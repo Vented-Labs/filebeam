@@ -517,11 +517,17 @@ impl Updater {
         self.update_dir().join("state.json")
     }
     fn load_state(&self) -> Result<State> {
-        match fs::read(self.state_path()) {
+        let mut state: State = match fs::read(self.state_path()) {
             Ok(v) => serde_json::from_slice(&v).context("parse update state"),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(State::default()),
             Err(e) => Err(e.into()),
+        }?;
+        if let Ok(generation) = fs::read_to_string(self.options.home.join("cache/catalog-generation"))
+            && let Ok(generation) = generation.trim().parse::<u64>()
+        {
+            state.cli.generation = state.cli.generation.max(generation);
         }
+        Ok(state)
     }
     fn save_state(&self, state: &State) -> Result<()> {
         fs::create_dir_all(self.update_dir())?;
@@ -624,6 +630,7 @@ struct Catalog {
     generation: u64,
     published_at: String,
     expires_at: String,
+    #[serde(default = "legacy_cli_product")]
     product: String,
     releases: Vec<Release>,
 }
@@ -636,12 +643,17 @@ struct Release {
 }
 #[derive(Clone, Deserialize)]
 struct Asset {
+    #[serde(default)]
     os: String,
     architecture: String,
     path: String,
     sha256: String,
     size: u64,
+    #[serde(default)]
     kind: String,
+}
+fn legacy_cli_product() -> String {
+    "cli".into()
 }
 enum PayloadKind {
     App,
@@ -677,7 +689,7 @@ fn verify_catalog(bytes: &[u8], key: &VerifyingKey, product: Product) -> Result<
     .context("release catalog signature is invalid")?;
     key.verify(&signed, &signature)
         .context("release catalog signature verification failed")?;
-    let c: Catalog =
+    let mut c: Catalog =
         serde_json::from_slice(&signed).context("signed release catalog payload is invalid")?;
     let expires = OffsetDateTime::parse(&c.expires_at, &Rfc3339)
         .context("signed release catalog expiry is invalid")?;
@@ -688,6 +700,17 @@ fn verify_catalog(bytes: &[u8], key: &VerifyingKey, product: Product) -> Result<
         || c.product != product.catalog()
     {
         bail!("signed release catalog is expired, unsupported, or for another product");
+    }
+    if product == Product::Cli {
+        for asset in c.releases.iter_mut().flat_map(|release| &mut release.assets) {
+            // Original CLI catalogs used implicit Linux assets and archive extensions.
+            if asset.os.is_empty() {
+                asset.os = "linux".into();
+            }
+            if asset.kind.is_empty() {
+                asset.kind = if asset.os == "windows" { "zip-exe" } else { "tar-gz" }.into();
+            }
+        }
     }
     Ok(c)
 }
@@ -743,12 +766,8 @@ fn stage_payload(
     root: &Path,
     version: &Version,
 ) -> Result<PathBuf> {
-    let target = root.join(format!(
-        "{}-{}{}",
-        version,
-        Uuid::new_v4(),
-        executable_suffix()
-    ));
+    let suffix = if kind == "app-tar-gz" { ".app" } else { executable_suffix() };
+    let target = root.join(format!("{}-{}{}", version, Uuid::new_v4(), suffix));
     if kind == "app-tar-gz" {
         extract_bundle(bytes, &target)?;
         return Ok(target);
@@ -1151,8 +1170,8 @@ mod tests {
             )
             .unwrap();
         let bytes = archive.into_inner().unwrap().finish().unwrap();
-        let target = directory.0.join("staged.app");
-        extract_bundle(&bytes, &target).unwrap();
+        let target = stage_payload(&bytes, "app-tar-gz", Product::Desktop, &directory.0, &Version::parse("0.3.0").unwrap()).unwrap();
+        assert_eq!(target.extension().unwrap(), "app");
         assert_eq!(
             fs::metadata(target.join("Contents/MacOS/filebeam"))
                 .unwrap()
@@ -1184,6 +1203,37 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn existing_cli_catalogs_keep_their_legacy_wire_contract() {
+        let signing = SigningKey::from_bytes(&[7; 32]);
+        let payload = serde_json::json!({
+            "schema": 1, "generation": 4, "published_at": "2026-01-01T00:00:00Z",
+            "expires_at": "2999-01-01T00:00:00Z", "releases": [{"version": "0.2.0", "assets": [
+                {"architecture": "x86_64", "path": "versions/v0.2.0/beam.tar.gz", "sha256": "a".repeat(64), "size": 1},
+                {"os": "windows", "architecture": "x86_64", "path": "versions/v0.2.0/beam.zip", "sha256": "a".repeat(64), "size": 1}
+            ]}]
+        });
+        let bytes = envelope(&payload.to_string(), &signing);
+        let catalog = verify_catalog(&bytes, &signing.verifying_key(), Product::Cli).unwrap();
+        assert_eq!(catalog.releases[0].assets[0].os, "linux");
+        assert_eq!(catalog.releases[0].assets[0].kind, "tar-gz");
+        assert_eq!(catalog.releases[0].assets[1].kind, "zip-exe");
+        assert!(verify_catalog(&bytes, &signing.verifying_key(), Product::Desktop).is_err());
+    }
+
+    #[test]
+    fn cli_upgrade_preserves_the_previous_catalog_rollback_floor() {
+        let directory = TestDirectory::new();
+        fs::create_dir(directory.0.join("cache")).unwrap();
+        fs::write(directory.0.join("cache/catalog-generation"), "42\n").unwrap();
+        let updater = Updater::new(Options::for_product(directory.0.clone(), Product::Cli, "0.3.0", "").unwrap());
+        assert_eq!(updater.load_state().unwrap().cli.generation, 42);
+        let mut state = updater.load_state().unwrap();
+        state.cli.generation = 43;
+        updater.save_state(&state).unwrap();
+        assert_eq!(updater.load_state().unwrap().cli.generation, 43);
     }
     #[test]
     fn archive_rejects_traversal_duplicate_and_link_escape() {
@@ -1246,12 +1296,24 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn php_catalog_round_trip_stages_only_the_update_payload() {
+        php_catalog_round_trip(Product::Desktop);
+    }
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn php_cli_catalog_round_trip_stages_the_published_cli_payload() {
+        php_catalog_round_trip(Product::Cli);
+    }
+    #[cfg(target_os = "linux")]
+    fn php_catalog_round_trip(product: Product) {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let fixture = env::temp_dir().join(format!("filebeam-updater-{}", Uuid::new_v4()));
         fs::create_dir_all(&fixture).unwrap();
         let tag = "v9.8.7";
+        let namespace = product.catalog();
+        let writer_tag = if product == Product::Cli { format!("beam-{tag}") } else { tag.into() };
+        let prefix = if product == Product::Cli { format!("beam-{tag}") } else { format!("filebeam-desktop-{tag}") };
         let selected = fixture.join(format!(
-            "filebeam-desktop-{tag}-linux-{}.tar.gz",
+            "{prefix}-linux-{}.tar.gz",
             arch().unwrap()
         ));
         let mut archive = Vec::new();
@@ -1262,7 +1324,7 @@ mod tests {
             header.set_size(7);
             header.set_mode(0o755);
             header.set_cksum();
-            tar.append_data(&mut header, "filebeam/filebeam", &b"updated"[..])
+            tar.append_data(&mut header, format!("{0}/{0}", product.binary()), &b"updated"[..])
                 .unwrap();
             tar.finish().unwrap();
         }
@@ -1274,16 +1336,16 @@ mod tests {
             "macos-aarch64.tar.gz",
             "windows-x86_64.zip",
         ] {
-            let path = fixture.join(format!("filebeam-desktop-{tag}-{suffix}"));
+            let path = fixture.join(format!("{prefix}-{suffix}"));
             if path != selected {
                 fs::write(path, b"installer").unwrap();
             }
         }
         assert!(
             Command::new("php")
-                .arg(root.join("scripts/release/desktop-write-release.php"))
+                .arg(root.join(format!("scripts/release/{namespace}-write-release.php")))
                 .args([
-                    tag,
+                    &writer_tag,
                     fixture.to_str().unwrap(),
                     fixture.join("release.json").to_str().unwrap()
                 ])
@@ -1293,7 +1355,7 @@ mod tests {
         );
         assert!(
             Command::new("php")
-                .arg(root.join("scripts/release/desktop-update-index.php"))
+                .arg(root.join(format!("scripts/release/{namespace}-update-index.php")))
                 .args(["/dev/null", fixture.join("release.json").to_str().unwrap()])
                 .stdout(fs::File::create(fixture.join("index.json")).unwrap())
                 .status()
@@ -1323,20 +1385,20 @@ mod tests {
             .unwrap();
         let envelope = signer.wait_with_output().unwrap();
         assert!(envelope.status.success());
-        let catalog_url = "https://releases.filebeam.io/desktop/index.json";
+        let catalog_url = format!("https://releases.filebeam.io/{namespace}/index.json");
         let asset_url = format!(
-            "https://releases.filebeam.io/desktop/versions/{tag}/{}",
+            "https://releases.filebeam.io/{namespace}/versions/{tag}/{}",
             selected.file_name().unwrap().to_string_lossy()
         );
         let fetcher = FixtureFetcher {
-            responses: HashMap::from([(catalog_url.into(), envelope.stdout), (asset_url, archive)]),
+            responses: HashMap::from([(catalog_url, envelope.stdout), (asset_url, archive)]),
             calls: AtomicUsize::new(0),
             gate: Mutex::new(()),
         };
         let home = fixture.join("managed");
         let updater = Updater::new(Options {
             home,
-            product: Product::Desktop,
+            product,
             version: "9.8.6".into(),
             public_key: STANDARD.encode(signing.verifying_key().to_bytes()),
             executable: env::current_exe().unwrap(),
@@ -1345,12 +1407,12 @@ mod tests {
             updater
                 .run_with_at(true, &fetcher, 1_800_000_000)
                 .unwrap()
-                .contains("staged filebeam 9.8.7")
+                .contains(&format!("staged {} 9.8.7", product.binary()))
         );
         assert_eq!(fetcher.calls.load(Ordering::SeqCst), 2);
         assert_eq!(updater.activate_staged(|| false).unwrap(), Activation::None);
         let state = updater.load_state().unwrap();
-        let staged = state.desktop.staged.unwrap();
+        let staged = state.entry(product).staged.clone().unwrap();
         fs::write(&staged.path, b"tampered").unwrap();
         assert!(updater.activate_staged(|| true).is_err());
         fs::remove_dir_all(fixture).unwrap();

@@ -90,19 +90,14 @@ host target directory. Cargo caches are saved after failed checks as well as
 successful runs so a later job can reuse compiled dependencies.
 
 The `vX.Y.Z` release workflow publishes Desktop and CLI alongside the server.
-Signed desktop releases require these GitHub `release` environment secrets:
-
-- `RELEASE_SIGNING_KEY` and `RELEASE_PUBLIC_KEY`: matching Ed25519 catalog keys.
-- `APPLE_CERTIFICATE_BASE64`, `APPLE_CERTIFICATE_PASSWORD`, and
-  `APPLE_SIGNING_IDENTITY`: exported Developer ID Application certificate and key.
-- `APPLE_NOTARY_KEY_BASE64`, `APPLE_NOTARY_KEY_ID`, and `APPLE_NOTARY_ISSUER`:
-  App Store Connect API key for notarization.
-- `WINDOWS_CERTIFICATE_BASE64` and `WINDOWS_SIGNING_PASSWORD`: exported Authenticode
-  signing certificate and key.
-
-Certificate and API key files are Base64-encoded. CI imports them into temporary
-storage and removes them after packaging. It notarizes the macOS app before
-archiving it for updates, and signs both the Windows executable and installer.
+A manual release run with `publish: false` builds the server, CLI, and unsigned
+desktop installers without publishing catalogs or a GitHub release.
+Signed update catalogs require the matching `RELEASE_SIGNING_KEY` and
+`RELEASE_PUBLIC_KEY` GitHub secrets. Windows installers have no Authenticode
+signature. macOS bundles use an ad-hoc signature for executable and bundle
+validation, without Developer ID signing or notarization. Releases require no
+Apple or Microsoft signing account. macOS may require **Privacy & Security →
+Open Anyway** on first launch; Windows may show a SmartScreen prompt.
 Linux update archives contain the complete AppImage, including bundled libraries.
 Both clients share `~/.filebeam/config.toml`, while their managed executables,
 update state, and backups remain product-specific.

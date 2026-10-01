@@ -61,9 +61,13 @@ fi
 if [[ -n $desktop_dir ]]; then
     desktop_assets=(
         "$desktop_dir/filebeam-desktop-$tag-linux-x86_64.tar.gz" "$desktop_dir/filebeam-desktop-$tag-linux-aarch64.tar.gz"
-        "$desktop_dir/filebeam-desktop-$tag-macos-x86_64.tar.gz" "$desktop_dir/filebeam-desktop-$tag-macos-aarch64.tar.gz"
-        "$desktop_dir/filebeam-desktop-$tag-windows-x86_64.zip" "$desktop_dir/release.json"
+        "$desktop_dir/filebeam-desktop-$tag-windows-x86_64.zip"
     )
+    for arch in x86_64 aarch64; do
+        asset="$desktop_dir/filebeam-desktop-$tag-macos-$arch.tar.gz"
+        [[ ! -f $asset ]] || desktop_assets+=("$asset")
+    done
+    [[ -f "$desktop_dir/release.json" ]] || { printf 'Missing desktop release metadata.\n' >&2; exit 1; }
     for asset in "${desktop_assets[@]}"; do [[ -f $asset ]] || { printf 'Missing desktop release asset: %s\n' "$asset" >&2; exit 1; }; done
     published_epoch=$(php -r '
         $release = json_decode(file_get_contents($argv[1]), true, flags: JSON_THROW_ON_ERROR);
@@ -75,11 +79,11 @@ if [[ -n $desktop_dir ]]; then
     ' "$desktop_dir/release.json")
     SOURCE_DATE_EPOCH="$published_epoch" php "$root/scripts/release/desktop-write-release.php" "$tag" "$desktop_dir" "$temporary/desktop-release.json"
     cmp --silent "$temporary/desktop-release.json" "$desktop_dir/release.json" || { printf 'Desktop release manifest does not verify every archive.\n' >&2; exit 1; }
-    # Installer names do not collide with updater archives and are independently signed.
+    # Installer names do not collide with updater archives.
     for asset in "$desktop_dir"/*.{AppImage,dmg,exe}; do [[ -e $asset ]] && desktop_assets+=("$asset"); done
     desktop_manifest="$temporary/desktop-$tag-release.json"
     cp "$desktop_dir/release.json" "$desktop_manifest"
-    assets+=("${desktop_assets[@]:0:5}" "$desktop_manifest" "${desktop_assets[@]:6}")
+    assets+=("${desktop_assets[@]}" "$desktop_manifest")
 fi
 
 error="$temporary/error"

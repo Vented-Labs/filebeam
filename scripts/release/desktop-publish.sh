@@ -19,7 +19,8 @@ if [[ $refresh == true ]]; then
     exit 0
 fi
 SOURCE_DATE_EPOCH=$(git -C "$root" show -s --format=%ct HEAD) php "$root/scripts/release/desktop-write-release.php" "$tag" "$out" "$tmp/release.json"
-for suffix in linux-x86_64.tar.gz linux-aarch64.tar.gz macos-x86_64.tar.gz macos-aarch64.tar.gz windows-x86_64.zip; do put "desktop/versions/$tag/filebeam-desktop-$tag-$suffix" "$out/filebeam-desktop-$tag-$suffix"; done
+mapfile -t asset_paths < <(php -r '$release=json_decode(file_get_contents($argv[1]),true,flags:JSON_THROW_ON_ERROR); foreach ($release["assets"] as $asset) echo $asset["path"]."\n";' "$tmp/release.json")
+for path in "${asset_paths[@]}"; do put "desktop/$path" "$out/${path##*/}"; done
 put "desktop/versions/$tag/release.json" "$tmp/release.json"
 etag=''; if head desktop/index.json "$tmp/head-index"; then etag=$(php -r '$x=json_decode(file_get_contents($argv[1]),true);echo $x["ETag"];' "$tmp/head-index"); "${api[@]}" get-object --bucket "$R2_BUCKET" --key desktop/index.json "$tmp/envelope" >/dev/null; php "$root/scripts/release/cli-verify-index.php" <"$tmp/envelope" >"$tmp/current.json"; else printf '{"schema":1,"product":"desktop","generation":0,"releases":[]}\n' >"$tmp/current.json"; fi
 php "$root/scripts/release/desktop-update-index.php" "$tmp/current.json" "$tmp/release.json" >"$tmp/index.json"; php "$root/scripts/release/sign-index.php" <"$tmp/index.json" >"$tmp/envelope"

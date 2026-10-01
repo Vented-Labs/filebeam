@@ -30,6 +30,7 @@ foreach ($targets as [$os, $architecture, $extension]) {
     $assets[] = [
         'architecture' => $architecture,
         'os' => $os,
+        'kind' => $os === 'windows' ? 'zip-exe' : 'tar-gz',
         'path' => "versions/v{$matches[1]}.{$matches[2]}.{$matches[3]}/{$name}",
         'sha256' => hash_file('sha256', $path),
         'size' => filesize($path),

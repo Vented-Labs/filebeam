@@ -44,23 +44,23 @@ permissions:
 
 jobs:
   cli:
-    if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish && !inputs.metadata_only)) && needs.validate-ref.result == 'success'
+    if: github.event_name != 'schedule' && !(github.event_name == 'workflow_dispatch' && inputs.metadata_only) && needs.validate-ref.result == 'success'
     needs: [test, validate-ref]
     permissions:
       contents: write
     uses: ./.github/workflows/beam.yml
     with:
       tag: ${{ needs.validate-ref.outputs.tag }}
-      publish: true
+      publish: ${{ github.event_name == 'push' || inputs.publish }}
     secrets: inherit
   desktop:
-    if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish && !inputs.metadata_only)) && needs.validate-ref.result == 'success'
+    if: github.event_name != 'schedule' && !(github.event_name == 'workflow_dispatch' && inputs.metadata_only) && needs.validate-ref.result == 'success'
     needs: [test, validate-ref]
     uses: ./.github/workflows/desktop.yml
     with:
       tag: ${{ needs.validate-ref.outputs.tag }}
       commit: ${{ needs.validate-ref.outputs.commit }}
-      publish: true
+      publish: ${{ github.event_name == 'push' || inputs.publish }}
     secrets: inherit
   test:
     if: github.event_name != 'schedule' && needs.validate-ref.result == 'success'
@@ -365,7 +365,7 @@ jobs:
 
   docker-publish:
     if: needs.docker-build.result == 'success'
-    needs: [validate-ref, docker-plan, docker-build]
+    needs: [validate-ref, docker-plan, docker-build, cli, desktop]
     permissions:
       contents: read
       packages: write

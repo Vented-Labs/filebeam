@@ -61,6 +61,7 @@ const instructions = computed(() => {
         return [
             'Download the Windows installer.',
             'Run the downloaded setup file and follow the installation steps.',
+            'If Windows SmartScreen shows an unrecognized-app prompt, select More info → Run anyway.',
             'Open Filebeam from the Start menu.',
         ];
     if (platform.value === 'macos')
@@ -68,6 +69,7 @@ const instructions = computed(() => {
             'Download and open the disk image (.dmg).',
             'Drag Filebeam into your Applications folder.',
             'Open Filebeam from Applications.',
+            'If macOS blocks the first launch, use System Settings → Privacy & Security → Open Anyway.',
         ];
     return [
         'Download the AppImage to a folder you want to keep.',
