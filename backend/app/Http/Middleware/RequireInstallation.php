@@ -6,6 +6,7 @@ namespace App\Http\Middleware;
 
 use App\Support\Installation\InstallationState;
 use Closure;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -25,7 +26,7 @@ readonly class RequireInstallation
         }
         if ($this->state->requiresSetup() && ! $request->is('up')) {
             if ($request->isMethod('GET') && ! $request->is('api/*') && ! $request->expectsJson()) {
-                return redirect('/install');
+                return new RedirectResponse('/install');
             }
 
             return response()->json(['message' => 'Filebeam installation is not complete.'], 503);

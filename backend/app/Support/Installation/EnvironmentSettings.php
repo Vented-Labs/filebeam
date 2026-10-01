@@ -8,7 +8,7 @@ final class EnvironmentSettings
 {
     /** @var list<string> */
     private const FileSecretKeys = [
-        'APP_KEY', 'DB_PASSWORD', 'REDIS_PASSWORD', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'MAIL_PASSWORD',
+        'APP_KEY', 'DB_PASSWORD', 'REDIS_PASSWORD', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'MAIL_PASSWORD', 'FILEBEAM_SETUP_TOKEN',
     ];
 
     /** @var list<string> */

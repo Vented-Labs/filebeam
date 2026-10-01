@@ -2,6 +2,9 @@
     admin 127.0.0.1:2019
     skip_install_trust
     persist_config off
+    # IP-address clients omit SNI; select the configured site's certificate.
+    default_sni {$FILEBEAM_TLS_SERVER_NAME:localhost}
+    grace_period {$FILEBEAM_SHUTDOWN_TIMEOUT:90}s
     {$FILEBEAM_AUTO_HTTPS}
     http_port 8080
     https_port 8443

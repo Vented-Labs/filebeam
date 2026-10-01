@@ -29,6 +29,8 @@ During initial setup, Filebeam uses regular PHP requests. Once setup completes, 
 
 Set `FILEBEAM_BOOTSTRAP_ON_START=true` to initialize pending setup locally before the web server starts. This is useful for orchestrators and trusted TLS proxies. The default is `false`. Bootstrap preserves pending and completed installations, including their application keys; it refuses inconsistent state or an existing SQLite database without its matching configuration. It does not create an administrator or complete installation.
 
+Set `FILEBEAM_SETUP_TOKEN`, or mount a secret at `FILEBEAM_SETUP_TOKEN_FILE`, to choose the initial setup token instead of retrieving a generated token from logs. Use 32–128 printable ASCII characters without spaces. Enter that same secret in `/install`; configured tokens are not logged. This only applies to a fresh bootstrap: changing the deployment value does not replace a pending token, regenerate `APP_KEY`, or reopen a completed installation.
+
 ## TLS And Health
 
 Choose a TLS mode:
@@ -59,6 +61,7 @@ Set these environment variables to size the runtime:
 - `FILEBEAM_PG_SHARED_BUFFERS` (Omnibus, default `128MB`) and `FILEBEAM_PG_MAX_CONNECTIONS` (default `100`).
 - `FILEBEAM_VALKEY_MAXMEMORY` (Omnibus, default `256mb`).
 - `FILEBEAM_WORKERS` (default `2`), `FILEBEAM_THREADS` (default `4`), and `MAX_REQUESTS` (default `500`).
+- `FILEBEAM_SHUTDOWN_TIMEOUT` bounds application draining and process shutdown (default `90` seconds, range `1`–`300`). Configure it below the orchestrator's stop grace period. For TrueNAS's 60-second Docker shutdown limit, use `50` seconds with a 60-second container grace period.
 - `CHUNK_MAX_SIZE`, up to 25,000,000 encrypted bytes.
 - `FILEBEAM_MAX_REQUEST_BYTES` configures Caddy's request-body limit and defaults to `25000000`.
 
