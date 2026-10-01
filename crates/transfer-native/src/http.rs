@@ -135,12 +135,13 @@ pub async fn get_range(
     }
     let range = header(headers, CONTENT_RANGE)?;
     validate_content_range(range, request.start, request.end, request.ciphertext_total)?;
-    let length: u64 = header(headers, CONTENT_LENGTH)?
-        .parse()
-        .context("invalid range Content-Length")?;
-    if length != expected {
-        bail!("range Content-Length mismatch");
-    }
+    validate_content_length(
+        headers
+            .get(CONTENT_LENGTH)
+            .map(|v| v.to_str())
+            .transpose()?,
+        expected,
+    )?;
 
     let mut response = response;
     let mut body = Vec::with_capacity(expected.try_into().unwrap_or(0));
@@ -148,15 +149,32 @@ pub async fn get_range(
         _ = cancelled.cancelled() => bail!("transfer cancelled"),
         chunk = time::timeout(request.idle_timeout, response.chunk()) => chunk.context("range body became idle")??,
     } {
-        body.extend_from_slice(&chunk);
-        if body.len() as u64 > expected {
-            bail!("range response exceeds Content-Length");
+        if chunk.len() as u64 > expected - body.len() as u64 {
+            bail!("range response exceeds expected ciphertext length");
         }
+        body.extend_from_slice(&chunk);
     }
     if body.len() as u64 != expected {
         bail!("range response is truncated");
     }
     Ok(body)
+}
+
+/// HTTP framing may omit Content-Length. The authenticated layout remains the
+/// authority for body bounds, with a supplied header serving as an extra check.
+pub(crate) fn validate_content_length(value: Option<&str>, expected: u64) -> Result<()> {
+    if let Some(value) = value {
+        if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+            bail!("invalid chunk Content-Length");
+        }
+        let length = value
+            .parse::<u64>()
+            .context("invalid chunk Content-Length")?;
+        if length != expected {
+            bail!("chunk Content-Length mismatch");
+        }
+    }
+    Ok(())
 }
 
 fn header(headers: &reqwest::header::HeaderMap, name: reqwest::header::HeaderName) -> Result<&str> {
@@ -193,7 +211,8 @@ mod tests {
         thread,
     };
 
-    fn server(response: &'static str) -> String {
+    fn server(response: impl Into<String>) -> String {
+        let response = response.into();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         thread::spawn(move || {
@@ -211,6 +230,56 @@ mod tests {
         assert!(validate_content_range("bytes 10-20/21", 10, 19, 20).is_err());
         assert!(validate_content_range("bytes 10-19/*", 10, 19, 20).is_err());
         assert!(validate_content_range("items 10-19/20", 10, 19, 20).is_err());
+    }
+
+    #[tokio::test]
+    async fn range_body_size_is_enforced_without_content_length() {
+        let client = client(Duration::from_secs(1)).unwrap();
+        let cancel = CancellationToken::new();
+        for (headers, body, error) in [
+            ("", "abc", None),
+            (
+                "Transfer-Encoding: chunked\r\n",
+                "1\r\na\r\n2\r\nbc\r\n0\r\n\r\n",
+                None,
+            ),
+            ("Content-Length: 3\r\n", "abc", None),
+            (
+                "Content-Length: 4\r\n",
+                "abcd",
+                Some("Content-Length mismatch"),
+            ),
+            ("", "ab", Some("truncated")),
+            ("", "abcd", Some("exceeds expected ciphertext length")),
+            (
+                "Transfer-Encoding: chunked\r\n",
+                "4\r\nabcd\r\n0\r\n\r\n",
+                Some("exceeds expected ciphertext length"),
+            ),
+        ] {
+            let url = server(format!(
+                "HTTP/1.1 206 Partial Content\r\nETag: \"sum\"\r\nAccept-Ranges: bytes\r\nContent-Range: bytes 1-3/4\r\nConnection: close\r\n{headers}\r\n{body}"
+            ));
+            let result = get_range(
+                &client,
+                &RangeRequest {
+                    url: &url,
+                    start: 1,
+                    end: 3,
+                    ciphertext_total: 4,
+                    expected_etag: "\"sum\"",
+                    headers_timeout: Duration::from_secs(1),
+                    idle_timeout: Duration::from_secs(1),
+                },
+                &cancel,
+            )
+            .await;
+            if let Some(error) = error {
+                assert!(result.unwrap_err().to_string().contains(error));
+            } else {
+                assert_eq!(result.unwrap(), b"abc");
+            }
+        }
     }
 
     #[tokio::test]

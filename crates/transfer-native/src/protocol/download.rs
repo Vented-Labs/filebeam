@@ -12,7 +12,7 @@ use std::{
 };
 
 use crate::checkpoint::Store;
-use crate::http::{ResponseLimits, read_limited};
+use crate::http::{ResponseLimits, read_limited, validate_content_length};
 use crate::webrtc::{
     NativePeer, ReceiverSession, Signaling, connect_receiver_with_ice_override, request_chunk,
 };
@@ -682,16 +682,13 @@ pub(super) fn ingest_background_completion(
         return Ok(());
     }
     let expected = plaintext_len(job.items[item_index].size, job.chunk_bytes, index) + TAG_BYTES;
-    let length = response_headers
-        .iter()
-        .find(|header| header.name.eq_ignore_ascii_case("content-length"))
-        .context("background download response lacks Content-Length")?
-        .value
-        .parse::<u64>()
-        .context("invalid background Content-Length")?;
-    if length != expected {
-        bail!("background download Content-Length mismatch");
-    }
+    validate_content_length(
+        response_headers
+            .iter()
+            .find(|header| header.name.eq_ignore_ascii_case("content-length"))
+            .map(|header| header.value.as_str()),
+        expected,
+    )?;
     let etag = response_headers
         .iter()
         .find(|header| header.name.eq_ignore_ascii_case("etag"))
@@ -1820,23 +1817,21 @@ async fn fetch_chunk(request: FetchChunkRequest<'_>) -> Result<Vec<u8>> {
             let (done, item_done) = receiving.lock().unwrap().restart(item, chunk);
             control.item(item_name.to_owned(), item + 1, item_size);
             control.advance(done, item_done, 0);
+            existing = 0;
         }
-        let length: u64 = response
-            .headers()
-            .get(CONTENT_LENGTH)
-            .context("chunk response lacks Content-Length")?
-            .to_str()?
-            .parse()
-            .context("invalid chunk Content-Length")?;
-        if length
-            != if append {
-                expected - existing
-            } else {
-                expected
-            }
-        {
-            bail!("chunk Content-Length mismatch");
-        }
+        let length = if append {
+            expected - existing
+        } else {
+            expected
+        };
+        validate_content_length(
+            response
+                .headers()
+                .get(CONTENT_LENGTH)
+                .map(|v| v.to_str())
+                .transpose()?,
+            length,
+        )?;
         if !append {
             let tag = response
                 .headers()
@@ -1890,6 +1885,9 @@ async fn fetch_chunk(request: FetchChunkRequest<'_>) -> Result<Vec<u8>> {
                 }
             };
             let byte_len = bytes.len() as u64;
+            if byte_len > length - received {
+                bail!("chunk response exceeds expected ciphertext length");
+            }
             out = fs_blocking(move || {
                 out.write_all(&bytes)?;
                 Ok(out)
@@ -1913,9 +1911,6 @@ async fn fetch_chunk(request: FetchChunkRequest<'_>) -> Result<Vec<u8>> {
                 .unwrap()
                 .observe(byte_len, elapsed.max(1), now_ms());
             body_sample = Instant::now();
-            if received > length {
-                bail!("chunk response exceeds Content-Length");
-            }
         }
         fs_blocking(move || {
             out.sync_all()?;
@@ -2764,6 +2759,48 @@ mod tests {
         let response_path = home.path().join("response");
         fs::write(&response_path, response.bytes().unwrap()).unwrap();
         server.join().unwrap();
+        let without_length = &headers[1..];
+        for invalid in [
+            &cipher[..cipher.len() - 1],
+            &[cipher.as_slice(), b"extra"].concat(),
+        ] {
+            fs::write(&response_path, invalid).unwrap();
+            assert!(
+                ingest_background_completion(
+                    &store,
+                    &work[0].operation_id,
+                    200,
+                    without_length,
+                    &response_path
+                )
+                .unwrap_err()
+                .to_string()
+                .contains("file length mismatch")
+            );
+        }
+        fs::write(&response_path, &cipher).unwrap();
+        for value in ["0", "invalid", "+1", "18446744073709551616"] {
+            let mut invalid = headers.clone();
+            invalid[0].value = value.into();
+            assert!(
+                ingest_background_completion(
+                    &store,
+                    &work[0].operation_id,
+                    200,
+                    &invalid,
+                    &response_path
+                )
+                .is_err()
+            );
+        }
+        ingest_background_completion(
+            &store,
+            &work[0].operation_id,
+            200,
+            without_length,
+            &response_path,
+        )
+        .unwrap();
         ingest_background_completion(&store, &work[0].operation_id, 200, &headers, &response_path)
             .unwrap();
         assert!(background_work(&store, None).unwrap().is_empty());
