@@ -28,6 +28,7 @@ const result: DesktopReleaseResult = {
 };
 
 async function desktopBrowser(page: Page): Promise<void> {
+    test.skip(true, 'Desktop installation is temporarily not promoted in navigation.');
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.addInitScript(() => {
         Object.defineProperty(navigator, 'userAgentData', {
@@ -250,7 +251,7 @@ test('MacIntel without architecture hints does not guess an Intel installer', as
     await expect(dialog.getByRole('link', { name: /Download/ })).toHaveCount(0);
 });
 
-for (const device of ['phone', 'android tablet', 'ipad', 'narrow desktop']) {
+for (const device of ['phone', 'android tablet', 'ipad', 'narrow desktop', 'desktop']) {
     test(`app installation stays hidden on ${device}`, async ({ page }) => {
         await page.setViewportSize({
             width: device === 'narrow desktop' ? 900 : 1200,

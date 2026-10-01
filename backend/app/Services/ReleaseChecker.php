@@ -132,12 +132,24 @@ class ReleaseChecker
      */
     public function state(): array
     {
-        return $this->read('release-check.json') ?? [
+        $state = $this->read('release-check.json') ?? [
             'state' => 'unchecked',
             'checked_at' => null,
             'latest' => null,
             'error' => null,
         ];
+        $latest = $state['latest'] ?? null;
+        $installed = Semver::parseTag((string) config('version.version'), true);
+        $available = is_array($latest) && is_string($latest['tag'] ?? null) ? Semver::parseTag($latest['tag'], true) : null;
+        if (is_array($latest) && $installed !== null && $available !== null && Semver::compare($available, $installed) <= 0) {
+            $latest['upgradeable'] = false;
+            $state['latest'] = $latest;
+            if (($state['state'] ?? null) === 'available') {
+                $state['state'] = 'current';
+            }
+        }
+
+        return $state;
     }
 
     /**
@@ -268,6 +280,10 @@ class ReleaseChecker
 
         if ($requireCron && ! $this->cronIsReady()) {
             $reasons[] = 'The scheduler-managed updater has not reported a heartbeat in the last 24 hours.';
+        }
+
+        if (is_file($this->path('journal.json'))) {
+            $reasons[] = 'An interrupted update requires recovery before another update can run. Check the updater status and run php update.php --recover only if migrations have not begun.';
         }
 
         if ($reasons === []

@@ -16,7 +16,9 @@ use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Exceptions;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Schedule as ScheduleFacade;
 use Illuminate\Support\Facades\Storage;
 
 /** @return array<string, bool|int|string> */
@@ -58,6 +60,42 @@ test('scheduler processes package updates without a separate system cron', funct
 
     config()->set('version.distribution', 'source');
     expect($event->filtersPass(app()))->toBeFalse();
+});
+
+test('the registered scheduler launches the real updater from a path containing spaces and quotes', function (): void {
+    if (is_file('/.dockerenv')) {
+        $this->markTestSkipped('Package updates require a non-container environment.');
+    }
+    $base = base_path();
+    $originalSchedule = app(Schedule::class);
+    $root = storage_path("framework/testing/scheduled updater's ".bin2hex(random_bytes(4)));
+    File::ensureDirectoryExists($root.'/backend/config');
+    File::ensureDirectoryExists($root.'/updater');
+    File::copy($base.'/../update.php', $root.'/update.php');
+    foreach (['Updater.php', 'ActivityLock.php'] as $file) {
+        File::copy($base.'/../updater/'.$file, $root.'/updater/'.$file);
+    }
+    File::put($root.'/backend/config/version.php', '<?php return '.var_export([
+        'version' => '1.0.0', 'distribution' => 'package', 'update_public_key' => base64_encode(str_repeat('k', 32)),
+    ], true).';');
+
+    try {
+        app()->setBasePath($root.'/backend');
+        ScheduleFacade::swap(new Schedule);
+        require $base.'/routes/console.php';
+        $event = collect(app(Schedule::class)->events())->first(fn (Event $event): bool => $event->description === 'filebeam:process-updates');
+        $event->run(app());
+
+        expect($event->exitCode)->toBe(0);
+        $heartbeat = json_decode(File::get($root.'/.filebeam/heartbeat.json'), true, flags: JSON_THROW_ON_ERROR);
+        expect($heartbeat['state'])->toBe('idle')
+            ->and(strtotime($heartbeat['at']))->toBeGreaterThanOrEqual(time() - 30)
+            ->and($heartbeat)->toHaveKey('finished_at');
+    } finally {
+        app()->setBasePath($base);
+        ScheduleFacade::swap($originalSchedule);
+        File::deleteDirectory($root);
+    }
 });
 
 test('cron maintains SQLite nightly without overlapping', function (): void {

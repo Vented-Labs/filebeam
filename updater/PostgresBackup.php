@@ -74,6 +74,43 @@ final class PostgresBackup
                 throw new RuntimeException('PostgreSQL client tools must match the server major version.');
             }
         }
+
+        $this->checkDumpAccess();
+    }
+
+    private function checkDumpAccess(): void
+    {
+        $this->ensurePrivateDirectory();
+        $probe = $this->directory.'/.preflight-'.bin2hex(random_bytes(8));
+        $passfile = $probe.'.pgpass';
+        try {
+            $this->createPrivateFile($probe);
+            $this->writePassfile($passfile);
+            $environment = $this->environment($passfile);
+            $this->run([...$this->dumpCommand($probe), '--schema-only'], $environment, self::COMMAND_TIMEOUT, 'pg_dump authentication preflight');
+            $this->run([$this->restoreBinary, '--list', $probe], $environment, self::COMMAND_TIMEOUT, 'pg_restore preflight validation');
+        } finally {
+            foreach ([$probe, $passfile] as $path) {
+                if (is_file($path) || is_link($path)) {
+                    @unlink($path);
+                }
+            }
+        }
+    }
+
+    /** @return list<string> */
+    private function dumpCommand(string $target): array
+    {
+        return [
+            $this->dumpBinary,
+            '--format=custom',
+            '--no-password',
+            '--file='.$target,
+            '--host='.$this->settings['host'],
+            '--port='.$this->settings['port'],
+            '--username='.$this->settings['username'],
+            '--dbname='.$this->settings['database'],
+        ];
     }
 
     public function backup(): string
@@ -90,16 +127,7 @@ final class PostgresBackup
             $partialCreated = true;
             $this->writePassfile($passfile);
             $environment = $this->environment($passfile);
-            $this->run([
-                $this->dumpBinary,
-                '--format=custom',
-                '--no-password',
-                '--file='.$partial,
-                '--host='.$this->settings['host'],
-                '--port='.$this->settings['port'],
-                '--username='.$this->settings['username'],
-                '--dbname='.$this->settings['database'],
-            ], $environment, $this->timeout, 'pg_dump backup');
+            $this->run($this->dumpCommand($partial), $environment, $this->timeout, 'pg_dump backup');
 
             $header = file_get_contents($partial, false, null, 0, 5);
             if ($header !== 'PGDMP') {
@@ -221,6 +249,7 @@ final class PostgresBackup
             $environment['PGPASSFILE'] = $passfile;
         }
         $environment['PGSSLMODE'] = $this->settings['sslmode'];
+        $environment['PGCONNECT_TIMEOUT'] = '10';
         foreach (['sslrootcert' => 'PGSSLROOTCERT', 'sslcert' => 'PGSSLCERT', 'sslkey' => 'PGSSLKEY', 'application_name' => 'PGAPPNAME'] as $setting => $variable) {
             if ($this->settings[$setting] !== null) {
                 $environment[$variable] = $this->settings[$setting];

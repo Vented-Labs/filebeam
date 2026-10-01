@@ -85,7 +85,7 @@ Schedule::call(fn (): array => app(ReleaseChecker::class)->checkAndInstallAutoma
     ->withoutOverlapping();
 
 $php = (new PhpExecutableFinder)->find(false) ?: 'php';
-Schedule::exec(escapeshellarg($php), [escapeshellarg(dirname(base_path()).'/update.php'), '--cron'])
+Schedule::exec(escapeshellarg($php), [dirname(base_path()).'/update.php', '--cron'])
     ->name('filebeam:process-updates')
     ->everyMinute()
     ->when(fn (): bool => config('version.distribution') === 'package')

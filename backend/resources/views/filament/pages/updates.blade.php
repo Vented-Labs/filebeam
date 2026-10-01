@@ -38,9 +38,13 @@
             <x-slot name="heading">Updater</x-slot>
 
             <p>Status: {{ $updaterStatus['state'] ?? 'idle' }}</p>
-            <p class="mt-2">Scheduler updater heartbeat: {{ $updaterHeartbeat['at'] ?? 'Not reported' }}</p>
+            <p class="mt-2">Updater subprocess heartbeat: {{ $updaterHeartbeat['at'] ?? 'Not reported' }}</p>
+            <p class="text-sm text-gray-500">Recorded by update.php --cron, launched by Laravel's every-minute scheduler.</p>
+            @if ($updaterHeartbeat['state'] ?? null)<p class="mt-2">Last updater run: {{ $updaterHeartbeat['state'] }}</p>@endif
             @if ($updaterStatus['tag'] ?? null)<p class="mt-2">Release: {{ $updaterStatus['tag'] }}</p>@endif
             @if ($updaterStatus['error'] ?? null)<p class="mt-2 text-sm text-danger-600">{{ $updaterStatus['error'] }}</p>@endif
+            @if ($updaterStatus['recovered'] ?? false)<p class="mt-2">The update stopped before replacing application files. Service was restored.</p>@endif
+            @if ($updaterStatus['recovery_error'] ?? null)<p class="mt-2 text-sm text-danger-600">Recovery failed: {{ $updaterStatus['recovery_error'] }}</p>@endif
             @unless ($availability['available'] ?? false)
                 @foreach ($availability['reasons'] as $reason)
                     <p class="mt-2 text-sm text-warning-600">{{ $reason }}</p>

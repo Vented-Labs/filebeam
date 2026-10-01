@@ -45,6 +45,43 @@ test('recovery rolls back a pre-migration update while preserving its database b
         ->and(File::exists($state->path('journal.json')))->toBeFalse();
 })->with(['maintenance', 'draining']);
 
+test('recovery before replacement leaves existing files intact and verifies service before clearing the journal', function (): void {
+    $state = new State($this->updateRoot);
+    $backup = $state->path('backups/before-replacement');
+    File::ensureDirectoryExists($backup);
+    File::put($this->updateRoot.'/backend/introduced.php', 'existing local content');
+    $state->write('journal.json', [
+        'schema' => 1, 'phase' => 'backing_up', 'backup' => $backup,
+        'replacement_started' => false, 'database_backup' => null,
+        'old_files' => [], 'new_files' => ['backend/introduced.php'],
+    ]);
+    $verified = false;
+
+    (new Recovery($this->updateRoot, $state))->run(function () use ($state, &$verified): void {
+        expect($state->read('journal.json'))->not->toBeNull();
+        $verified = true;
+    });
+
+    expect($verified)->toBeTrue()
+        ->and(File::get($this->updateRoot.'/backend/introduced.php'))->toBe('existing local content')
+        ->and($state->read('journal.json'))->toBeNull();
+});
+
+test('failed service verification retains the recovery journal', function (): void {
+    $state = new State($this->updateRoot);
+    $backup = $state->path('backups/verification');
+    File::ensureDirectoryExists($backup);
+    $state->write('journal.json', [
+        'schema' => 1, 'phase' => 'backing_up', 'backup' => $backup,
+        'replacement_started' => false, 'old_files' => [], 'new_files' => [],
+    ]);
+
+    expect(fn () => (new Recovery($this->updateRoot, $state))->run(function (): void {
+        throw new RuntimeException('Web verification failed');
+    }))->toThrow(RuntimeException::class, 'Web verification failed')
+        ->and($state->read('journal.json'))->not->toBeNull();
+});
+
 test('standalone recovery starts when replacement stopped before new helper files arrived', function (): void {
     $state = new State($this->updateRoot);
     $backup = $state->path('backups/interrupted');
@@ -128,7 +165,7 @@ test('state limits reject oversized writes without replacing existing state and 
     expect(fn () => $state->read($name))->toThrow(RuntimeException::class, 'exceeds the '.$limit.' byte size limit');
 })->with([['status.json', 1048576], ['journal.json', 33554432]]);
 
-test('blocked retries preserve the original failure status', function (bool $oversized): void {
+test('blocked retries preserve the original failure status', function (bool $oversized, bool $cron): void {
     if (is_file('/.dockerenv')) {
         $this->markTestSkipped('Package updates require a non-container environment.');
     }
@@ -141,11 +178,37 @@ test('blocked retries preserve the original failure status', function (bool $ove
     $state->write('status.json', $status);
     File::put($state->path('journal.json'), $oversized ? str_repeat('x', 33554433) : '{"phase":"draining"}');
     $result = Process::run([PHP_BINARY, '-r',
-        'require $argv[1]; exit(\Filebeam\Updater\Command::run(["update.php"], $argv[2]));',
-        base_path('../updater/Updater.php'), $this->updateRoot,
+        'require $argv[1]; exit(\Filebeam\Updater\Command::run($argv[3] === "cron" ? ["update.php", "--cron"] : ["update.php"], $argv[2]));',
+        base_path('../updater/Updater.php'), $this->updateRoot, $cron ? 'cron' : 'manual',
     ]);
 
     expect($result->exitCode())->toBe(1)
         ->and($result->errorOutput())->toContain($oversized ? 'exceeds the' : 'An interrupted update journal exists')
         ->and($state->read('status.json'))->toBe($status);
-})->with([false, true]);
+    if ($cron) {
+        expect($state->read('heartbeat.json')['state'])->toBe($oversized ? 'failed' : 'blocked')
+            ->and(strtotime($state->read('heartbeat.json')['at']))->toBeGreaterThanOrEqual(time() - 30);
+    }
+})->with([[false, false], [false, true], [true, false], [true, true]]);
+
+test('cron consumes an already installed pending release without downloading or replacing anything', function (): void {
+    if (is_file('/.dockerenv')) {
+        $this->markTestSkipped('Package updates require a non-container environment.');
+    }
+    File::ensureDirectoryExists($this->updateRoot.'/backend/config');
+    File::put($this->updateRoot.'/backend/config/version.php', '<?php return '.var_export([
+        'version' => '1.0.0', 'distribution' => 'package', 'update_public_key' => base64_encode(str_repeat('k', 32)),
+    ], true).';');
+    $state = new State($this->updateRoot);
+    $state->write('pending.json', ['tag' => 'v1.0.0']);
+    $result = Process::run([PHP_BINARY, '-r',
+        'require $argv[1]; exit(\Filebeam\Updater\Command::run(["update.php", "--cron"], $argv[2]));',
+        base_path('../updater/Updater.php'), $this->updateRoot,
+    ]);
+
+    expect($result->exitCode())->toBe(0)
+        ->and($state->read('pending.json'))->toBeNull()
+        ->and($state->read('journal.json'))->toBeNull()
+        ->and($state->read('heartbeat.json')['state'])->toBe('idle')
+        ->and(File::isDirectory($this->updateRoot.'/.filebeam/downloads'))->toBeFalse();
+});
