@@ -106,13 +106,40 @@ class API(http.server.BaseHTTPRequestHandler):
         start = 0; range_header = self.headers.get("Range")
         if range_header:
             transfer["ranges"].append(range_header)
+        if range_header and transfer["mode"] != "stream-reset-full":
             start = int(range_header.split("=")[1].split("-")[0])
-            if transfer["mode"] == "bad-etag": etag = '"changed"'
+            if transfer["mode"] in ("bad-etag", "stream-bad-etag"): etag = '"changed"'
             else: etag = '"cipher-v1"'
             payload = body[start:]
-            self.send_response(206); self.send_header("Content-Range", f"bytes {start + (1 if transfer['mode'] == 'bad-range' else 0)}-{len(body)-1}/{len(body)}")
+            self.send_response(206); self.send_header("Content-Range", f"bytes {start + (1 if transfer['mode'] in ('bad-range', 'stream-bad-range') else 0)}-{len(body)-1}/{len(body)}")
         else:
             etag = '"cipher-v1"'; payload = body; self.send_response(200)
+        if transfer["mode"].startswith("stream-"):
+            self.send_header("ETag", etag)
+            close_delimited = transfer["mode"] == "stream-close"
+            self.send_header("Connection", "close")
+            self.close_connection = True
+            if not close_delimited: self.send_header("Transfer-Encoding", "chunked")
+            self.end_headers()
+            if transfer["mode"] == "stream-excess": payload += b"excess"
+            if transfer["mode"] == "stream-corrupt": payload = bytes([payload[0] ^ 1]) + payload[1:]
+            interrupt = transfer["mode"] in ("stream-reset", "stream-short", "stream-reset-full", "stream-bad-etag", "stream-bad-range") and calls == 1
+            if interrupt: payload = payload[:max(1, len(payload)//2)]
+            try:
+                for offset in range(0, len(payload), 4096):
+                    part = payload[offset:offset + 4096]
+                    self.wfile.write(part if close_delimited else f"{len(part):x}\r\n".encode() + part + b"\r\n")
+                if not close_delimited and (not interrupt or transfer["mode"] == "stream-short"):
+                    self.wfile.write(b"0\r\n\r\n")
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError): pass
+            return
+        if transfer["mode"] in ("length-mismatch", "length-invalid"):
+            self.send_header("ETag", etag)
+            self.send_header("Content-Length", "invalid" if transfer["mode"] == "length-invalid" else str(len(payload) + 1))
+            self.send_header("Connection", "close")
+            self.end_headers(); self.close_connection = True
+            return
         self.send_header("ETag", etag); self.send_header("Content-Length", str(len(payload)))
         self.end_headers()
         if transfer["mode"] == "download-stall" and calls == 1:
@@ -277,6 +304,30 @@ def main():
         def bad_range():
             source=root/"bad-range.bin"; source.write_bytes(os.urandom(CHUNK+9)); link=upload(root,env,[source])
             transfer_for(link)["mode"]="bad-range"; download(root,env,link,"bad-range-out",False)
+        def streamed(mode, ok=True):
+            source=root/(mode+".bin"); source.write_bytes(os.urandom(CHUNK+9))
+            zero=root/(mode+"-empty"); zero.write_bytes(b"")
+            link=upload(root,env,[source,zero]); transfer=transfer_for(link); transfer["mode"]=mode
+            before={line.split("\t",1)[0] for line in run(["transfers"],env,root).stdout.decode().splitlines() if line}
+            output=mode+"-out"; result=download(root,env,link,output,ok)
+            if ok:
+                assert (root/output/source.name).read_bytes()==source.read_bytes()
+                assert (root/output/zero.name).read_bytes()==b""
+                if mode in ("stream-reset", "stream-short", "stream-reset-full"):
+                    assert transfer["ranges"], "streamed ciphertext was not resumed"
+            else:
+                assert not list((root/output).glob("*")), "invalid streamed ciphertext published output"
+                expected_errors={"stream-excess":"exceeds expected ciphertext length",
+                    "stream-corrupt":"could not authenticate downloaded chunk",
+                    "stream-bad-etag":"range ETag changed", "stream-bad-range":"Content-Range",
+                    "length-mismatch":"Content-Length mismatch", "length-invalid":"chunk retry window exhausted"}
+                assert expected_errors[mode] in result.stderr.decode(), result.stderr.decode()
+                if mode == "stream-excess":
+                    checkpoint=home/"transfers"/saved_id(env,root,before)
+                    for path in checkpoint.glob("cipher-*"):
+                        _, item, position=path.name.split("-")
+                        expected=len(transfer["chunks"][(transfer["items"][int(item)]["id"],position)])
+                        assert path.stat().st_size <= expected, "oversized response persisted excess bytes"
         def completion_lost_ack():
             source=root/"complete.bin"; source.write_bytes(os.urandom(CHUNK+1)); link=upload(root,env,[source],"complete-lost-ack")
             assert transfer_for(link)["complete_calls"] >= 2, "completion acknowledgement was not reconciled"
@@ -327,6 +378,10 @@ def main():
         case("reset GET resumes with authenticated Range/ETag", range_reset)
         case("changed ETag continuation is rejected without publication", bad_etag)
         case("malformed Content-Range is rejected without publication", bad_range)
+        for mode in ("stream-chunked", "stream-close", "stream-reset", "stream-short", "stream-reset-full"):
+            case(mode, lambda mode=mode: streamed(mode))
+        for mode in ("stream-excess", "stream-corrupt", "stream-bad-etag", "stream-bad-range", "length-mismatch", "length-invalid"):
+            case(mode, lambda mode=mode: streamed(mode, False))
         case("lost completion acknowledgement is idempotently reconciled", completion_lost_ack)
         case("SIGKILL upload checkpoint resumes with one completed receipt", killed_upload_resume)
         case("SIGKILL download retains original key and resumes", killed_download_resume_and_lock)

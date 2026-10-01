@@ -327,8 +327,8 @@ impl BackgroundTransfer {
         ))
     }
 
-    /// The response headers are copied from URLSession. Rust requires the
-    /// exact v1 Content-Length and a strong ETag before retaining ciphertext.
+    /// The response headers are copied from URLSession. Rust checks the exact
+    /// v1 ciphertext size, any supplied Content-Length, and a strong ETag.
     pub fn ingest_download_completion(
         &self,
         transfer_id: String,
