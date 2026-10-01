@@ -293,6 +293,20 @@ test('source installations cannot queue self-updates', function () {
         ->and(app(ReleaseChecker::class)->availability()['reasons'])->toContain('Self-updates are available only for package installations.');
 });
 
+test('a live but blocked updater reports recovery rather than a missing scheduler heartbeat', function () {
+    $keypair = sodium_crypto_sign_keypair();
+    config()->set('version', [...config('version'), 'distribution' => 'package', 'update_public_key' => base64_encode(sodium_crypto_sign_publickey($keypair))]);
+    $statePath = config('filebeam.updates.state_path');
+    File::ensureDirectoryExists($statePath);
+    File::put($statePath.'/heartbeat.json', json_encode(['at' => now('UTC')->toIso8601String(), 'state' => 'blocked'], JSON_THROW_ON_ERROR));
+    File::put($statePath.'/journal.json', '{"phase":"migrating"}');
+    $availability = app(ReleaseChecker::class)->availability();
+
+    expect($availability['available'])->toBeFalse()
+        ->and(implode(' ', $availability['reasons']))->toContain('An interrupted update requires recovery')
+        ->not->toContain('has not reported a heartbeat');
+});
+
 test('upgrade queue is atomically written only when the updater is available', function () {
     $keypair = sodium_crypto_sign_keypair();
     config()->set('version', [...config('version'), 'distribution' => 'package', 'update_public_key' => base64_encode(sodium_crypto_sign_publickey($keypair))]);
@@ -330,6 +344,19 @@ test('stale release-check state cannot queue an upgrade', function () {
 
     expect(fn (): mixed => $checker->queue('v0.2.0', 'admin@example.test'))
         ->toThrow(RuntimeException::class, 'Run a successful release check');
+});
+
+test('cached release availability is reconciled after a manual upgrade', function () {
+    config()->set('version.version', '0.3.0');
+    $statePath = config('filebeam.updates.state_path');
+    File::ensureDirectoryExists($statePath);
+    File::put($statePath.'/release-check.json', json_encode([
+        'state' => 'available', 'latest' => ['tag' => 'v0.3.0', 'upgradeable' => true], 'generation' => 42,
+    ], JSON_THROW_ON_ERROR));
+
+    expect(app(ReleaseChecker::class)->state())->toMatchArray([
+        'state' => 'current', 'latest' => ['tag' => 'v0.3.0', 'upgradeable' => false], 'generation' => 42,
+    ]);
 });
 
 /** @param array<string, mixed> $overrides

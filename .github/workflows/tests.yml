@@ -442,7 +442,7 @@ jobs:
     name: Distribution and harnesses
     needs: frontend
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
@@ -475,6 +475,18 @@ jobs:
         run: |
           bash scripts/release/package.sh v0.0.0 "$RUNNER_TEMP/filebeam-package" --skip-build --allow-unsigned-local
           bash scripts/release/smoke.sh "$RUNNER_TEMP/filebeam-package/filebeam-v0.0.0.zip"
+      - name: Download the published upgrade baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download v0.3.0 --repo Vented-Labs/filebeam --pattern filebeam-v0.3.0.zip --output "$RUNNER_TEMP/filebeam-upgrade-baseline.zip"
+          printf '%s  %s\n' a26c3dc85e6ca826d74b6c4b71ede5310a14a1ad09d0fcab98c88b3370f89ba4 "$RUNNER_TEMP/filebeam-upgrade-baseline.zip" | sha256sum --check
+      - name: Test published-package upgrades and PostgreSQL recovery
+        run: php tests/updater/postgres.php
+        env:
+          FILEBEAM_POSTGRES_BACKUP_INTEGRATION: '1'
+          FILEBEAM_UPGRADE_BASELINE: ${{ runner.temp }}/filebeam-upgrade-baseline.zip
+          FILEBEAM_UPGRADE_CANDIDATE: ${{ runner.temp }}/filebeam-package/filebeam-v0.0.0.zip
 
   test:
     # Keep this name in sync with the required GitHub Actions check on master.

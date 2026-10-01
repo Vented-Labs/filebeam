@@ -16,7 +16,6 @@ import {
 import BrandLogo from '../brand/BrandLogo.vue';
 import AppLink from '../primitives/AppLink.vue';
 import AuthLink from '../auth/AuthLink.vue';
-import AppInstallButton from './AppInstallButton.vue';
 import CliFooterLauncher from '../cli/CliFooterLauncher.vue';
 import Icon, { type IconName } from '../primitives/Icon.vue';
 import { computed, nextTick, ref } from 'vue';
@@ -145,7 +144,6 @@ function goHome(event: MouseEvent): void {
                     ><span>GitHub</span><Icon name="arrow-up-right" :size="14"
                 /></a>
             </nav>
-            <AppInstallButton class="fb-header__app" />
             <div class="fb-header__actions">
                 <AppLink
                     v-if="user?.unread_inbox_notifications"

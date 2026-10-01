@@ -78,7 +78,7 @@ try {
         '--env', 'POSTGRES_INITDB_ARGS=--auth-local=scram-sha-256 --auth-host=scram-sha-256',
         '--volume', $socket.':/var/run/postgresql',
         '--volume', $root.':'.$root,
-        'postgres:16-alpine',
+        'postgres:16-bookworm',
     ]);
 
     $pdo = null;
@@ -104,7 +104,7 @@ try {
     $statement->execute(['{"name":"filebeam","nested":{"answer":42}}']);
 
     $wrapper = $root.'/pg-tool';
-    file_put_contents($wrapper, "#!/bin/sh\nexec docker exec --user 0 --env PGPASSFILE --env PGSSLMODE --env PGSSLROOTCERT --env PGSSLCERT --env PGSSLKEY --env PGAPPNAME ".escapeshellarg($container)." /usr/local/bin/\$(basename \"\$0\") \"\$@\"\n");
+    file_put_contents($wrapper, "#!/bin/sh\nexec docker exec --user 0 --env PGPASSFILE --env PGSSLMODE --env PGSSLROOTCERT --env PGSSLCERT --env PGSSLKEY --env PGAPPNAME ".escapeshellarg($container)." \$(basename \"\$0\") \"\$@\"\n");
     chmod($wrapper, 0700);
     $dump = $root.'/pg_dump';
     $restore = $root.'/pg_restore';
@@ -138,6 +138,31 @@ try {
     $archive = $helper->backup();
     if (file_get_contents($archive, false, null, 0, 5) !== 'PGDMP' || (fileperms($archive) & 0777) !== 0600) {
         throw new RuntimeException('Helper did not produce a private custom PostgreSQL archive.');
+    }
+
+    // Client tools run inside the container: exercise its actual default socket
+    // directory as well as the custom host-mounted socket used by PDO above.
+    foreach (['default-socket' => '/var/run/postgresql', 'tcp' => '127.0.0.1'] as $name => $host) {
+        $connection = array_replace($configuration, ['socket' => null, 'host' => $host]);
+        $file = (new PostgresBackup($connection, $backup.'/'.$name, $dump, $restore, 30))->backup();
+        if (file_get_contents($file, false, null, 0, 5) !== 'PGDMP') {
+            throw new RuntimeException('PostgreSQL '.$name.' backup authentication failed.');
+        }
+    }
+
+    $withoutCredentials = $root.'/without-credentials';
+    file_put_contents($withoutCredentials, "#!/bin/sh\nunset PGPASSFILE\nexec ".escapeshellarg($dump)." \"\$@\"\n");
+    chmod($withoutCredentials, 0700);
+    try {
+        (new PostgresBackup($configuration, $backup.'/rejected', $withoutCredentials, $restore, 30))->preflight();
+        throw new RuntimeException('Backup preflight accepted missing pg_dump credentials.');
+    } catch (RuntimeException $exception) {
+        if (! str_contains($exception->getMessage(), 'pg_dump authentication preflight') || str_contains($exception->getMessage(), $password)) {
+            throw $exception;
+        }
+    }
+    if (glob($backup.'/rejected/.preflight-*') !== []) {
+        throw new RuntimeException('Backup preflight retained credentials or a partial archive.');
     }
 
     $passfile = $root.'/.pgpass';
@@ -229,6 +254,12 @@ try {
         }
     }
 
+    $baseline = getenv('FILEBEAM_UPGRADE_BASELINE');
+    $candidate = getenv('FILEBEAM_UPGRADE_CANDIDATE');
+    if (is_string($baseline) && $baseline !== '' && is_string($candidate) && $candidate !== '') {
+        require_once __DIR__.'/package-upgrade.php';
+        testPublishedPackageUpgrade($root, $baseline, $candidate, $configuration, $dump, $restore);
+    }
     fwrite(STDOUT, "PostgreSQL 16 isolated backup, restore, and native preflight integration passed.\n");
 } finally {
     try {

@@ -97,18 +97,35 @@ final class Command
         $activity = new ActivityLock($this->root.'/backend/storage/app/update-activity.lock');
         $exclusive = null;
         $started = false;
+        $wasInMaintenance = is_file($this->root.'/backend/storage/framework/down');
+        $heartbeat = ['at' => gmdate('c'), 'pid' => getmypid(), 'state' => 'running'];
         try {
+            if ($fromCron) {
+                $this->state->write('heartbeat.json', $heartbeat);
+            }
             if ($this->state->read('journal.json') !== null) {
+                $heartbeat['state'] = 'blocked';
                 throw new RuntimeException('An interrupted update journal exists. Run php update.php --recover or complete the documented manual recovery before another update.');
             }
             $started = true;
             if ($fromCron) {
-                $this->state->write('heartbeat.json', ['at' => gmdate('c'), 'pid' => getmypid()]);
                 $pending = $this->state->read('pending.json');
                 if ($pending === null) {
+                    $heartbeat['state'] = 'idle';
+
                     return;
                 }
                 $requestedTag = $pending['tag'] ?? throw new RuntimeException('Pending update has no tag.');
+                $pendingVersion = is_string($requestedTag) ? Semver::parseTag($requestedTag, true) : null;
+                if ($pendingVersion === null) {
+                    throw new RuntimeException('Pending update tag is invalid.');
+                }
+                if (Semver::compare($pendingVersion, (string) $version['version']) <= 0) {
+                    $this->state->remove('pending.json');
+                    $heartbeat['state'] = 'idle';
+
+                    return;
+                }
             }
             $this->state->write('status.json', ['state' => 'checking', 'at' => gmdate('c')]);
             $catalog = $this->catalog($key);
@@ -135,6 +152,7 @@ final class Command
                 'started_at' => gmdate('c'),
                 'backup' => $backup,
                 'database_backup' => null,
+                'replacement_started' => false,
                 'old_files' => array_merge(array_keys($old['files']), is_file($this->root.'/package-files.json') ? ['package-files.json'] : []),
                 'new_files' => array_merge(array_keys($manifest['files']), ['package-files.json']),
             ];
@@ -147,7 +165,11 @@ final class Command
             $this->state->write('journal.json', $journal);
             $exclusive = $activity->acquireExclusive(120);
             $this->clearBootstrapCaches();
+            $journal['phase'] = 'backing_up';
+            $this->state->write('journal.json', $journal);
             $journal['database_backup'] = $this->backupDatabase($database);
+            $journal['phase'] = 'replacing';
+            $journal['replacement_started'] = true;
             $this->state->write('journal.json', $journal);
             $this->replace($stage, $manifest, $old, $backup);
             if (Env::database($this->root.'/backend/.env') !== $database) {
@@ -160,30 +182,57 @@ final class Command
             $this->verifyWeb($release, $probe, true);
             $this->artisan(['up']);
             $this->verifyWeb($release, $probe);
-            if ($fromCron) {
+            $pending = $this->state->read('pending.json');
+            $pendingVersion = is_string($pending['tag'] ?? null) ? Semver::parseTag($pending['tag'], true) : null;
+            if ($pendingVersion !== null && Semver::compare($pendingVersion, (string) $release['version']) <= 0) {
                 $this->state->remove('pending.json');
             }
             $this->state->remove('journal.json');
             $this->state->remove('probe.json');
+            $this->state->remove('release-check.json');
             $this->state->write('status.json', ['state' => 'complete', 'tag' => $release['tag'], 'at' => gmdate('c')]);
+            $heartbeat['state'] = 'complete';
             self::write('Updated to '.$release['tag'].'.');
         } catch (\Throwable $e) {
-            if (isset($journal) && in_array($journal['phase'], ['migrating', 'maintenance', 'draining'], true)) {
+            $recovered = false;
+            $recoveryError = null;
+            if (! $wasInMaintenance && isset($journal, $probe) && $journal['replacement_started'] === false) {
+                try {
+                    (new Recovery($this->root, $this->state))->run(fn () => $this->verifyWeb($version, $probe));
+                    $recovered = true;
+                } catch (\Throwable $recovery) {
+                    $recoveryError = $recovery->getMessage();
+                }
+            }
+            if (! $recovered && isset($journal)) {
                 try {
                     $this->artisan(['down', '--retry=60', '--secret='.($probe['token'] ?? bin2hex(random_bytes(32)))]);
                 } catch (\Throwable) {
                 }
             }
             if ($started) {
-                $this->state->write('status.json', ['state' => 'failed', 'error' => $e->getMessage(), 'at' => gmdate('c')]);
+                if ($fromCron && isset($pending)) {
+                    $this->state->write('failed-request.json', ['request' => $pending, 'error' => $e->getMessage(), 'at' => gmdate('c')]);
+                    $this->state->remove('pending.json');
+                }
+                $this->state->write('status.json', ['state' => 'failed', 'tag' => $release['tag'] ?? $requestedTag, 'phase' => $journal['phase'] ?? 'preparing', 'error' => $e->getMessage(), 'recovered' => $recovered, 'recovery_error' => $recoveryError, 'at' => gmdate('c')]);
+            }
+            if ($heartbeat['state'] !== 'blocked') {
+                $heartbeat['state'] = 'failed';
             }
             throw $e;
         } finally {
             if (is_resource($exclusive)) {
                 $activity->release($exclusive);
             }
-            flock($lock, LOCK_UN);
-            fclose($lock);
+            try {
+                if ($fromCron) {
+                    $this->state->write('heartbeat.json', [...$heartbeat, 'finished_at' => gmdate('c')]);
+                }
+            } finally {
+                flock($lock, LOCK_UN);
+                fclose($lock);
+            }
         }
     }
 
@@ -503,7 +552,7 @@ final class Command
 
     private static function help(): void
     {
-        self::write("Usage: php update.php [TAG|--cron|--status|--recover|--check-backup]\n\nTAG installs that release; no tag installs the latest stable release. --cron processes .filebeam/pending.json and records a heartbeat. --check-backup verifies database backup prerequisites without dumping or migrating. --recover restores pre-migration code from a journal backup; it refuses after migrations begin.");
+        self::write("Usage: php update.php [TAG|--cron|--status|--recover|--check-backup]\n\nTAG installs that release; no tag installs the latest stable release. --cron processes .filebeam/pending.json and records a heartbeat. --check-backup verifies database backup prerequisites, including a temporary PostgreSQL schema dump, without backing up table data or migrating. --recover restores pre-migration code from a journal backup; it refuses after migrations begin.");
     }
 }
 
@@ -607,14 +656,14 @@ final class Recovery
 {
     public function __construct(private string $root, private State $state) {}
 
-    public function run(): void
+    public function run(?callable $verify = null): void
     {
         $journal = $this->state->read('journal.json') ?? throw new RuntimeException('No interrupted update journal exists.');
         if (($journal['schema'] ?? null) !== 1) {
             throw new RuntimeException('Interrupted update journal has an unsupported schema.');
         }
         $phase = $journal['phase'] ?? null;
-        if (! in_array($phase, ['prepared', 'maintenance', 'draining'], true)) {
+        if (! in_array($phase, ['prepared', 'maintenance', 'draining', 'backing_up', 'replacing'], true)) {
             if ($phase === 'migrating') {
                 throw new RuntimeException('Recovery refuses code rollback after migrations began. Restore the database backup at '.($journal['database_backup'] ?? 'the recorded backup').' and deploy manually.');
             }
@@ -631,8 +680,12 @@ final class Recovery
                 throw new RuntimeException('Interrupted update journal has an unsafe file path.');
             }
         }
+        $replacementStarted = $journal['replacement_started'] ?? true;
+        if (! is_bool($replacementStarted)) {
+            throw new RuntimeException('Interrupted update journal has an invalid replacement state.');
+        }
         $oldFileSet = array_fill_keys($oldFiles, true);
-        foreach ($newFiles as $relative) {
+        foreach ($replacementStarted ? $newFiles : [] as $relative) {
             if (! isset($oldFileSet[$relative])) {
                 $target = $this->root.'/'.$relative;
                 if ((is_file($target) || is_link($target)) && ! unlink($target)) {
@@ -641,7 +694,7 @@ final class Recovery
             }
         }
         $iterator = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($backup, \FilesystemIterator::SKIP_DOTS));
-        foreach ($iterator as $file) {
+        foreach ($replacementStarted ? $iterator : [] as $file) {
             if (! $file->isFile()) {
                 continue;
             }
@@ -658,6 +711,9 @@ final class Recovery
             }
         }
         $this->artisanUp();
+        if ($verify !== null) {
+            $verify();
+        }
         $this->state->remove('probe.json');
         $this->state->remove('journal.json');
     }

@@ -32,7 +32,7 @@ The scheduler performs transfer cleanup, checks releases, invokes the package up
 
 The processing budget is checked between jobs, so a single slow job may take longer. The 60-second per-job timeout requires PHP's PCNTL extension and must remain shorter than the database queue's `retry_after` (90 seconds by default). Allow enough CLI runtime on the hosting plan for mail and storage operations. If the host forcibly terminates a scheduler, its batch lock expires after ten minutes; `php artisan schedule:clear-cache` clears a stale lock after confirming no batch is still running.
 
-The admin panel can flag a missing scheduler or scheduler-managed updater heartbeat; restore the single scheduler cron entry before expecting background work or queued upgrades to catch up. Configure mail separately if the deployment needs account emails or notifications. Failed jobs can be inspected with `php artisan queue:failed` and retried with `php artisan queue:retry <id>`.
+The admin panel reports the Laravel scheduler and updater subprocess heartbeats separately. A healthy scheduler heartbeat does not prove that `update.php --cron` launched successfully. The updater records whether its last run was idle, complete, failed, or blocked by an interrupted update. Inspect its status and the scheduled command when only the updater heartbeat is stale. Configure mail separately if the deployment needs account emails or notifications. Failed jobs can be inspected with `php artisan queue:failed` and retried with `php artisan queue:retry <id>`.
 
 Dedicated servers may optionally run a persistent `php artisan queue:work` instead. Set `FILEBEAM_CRON_QUEUE_ENABLED=false` and rebuild configuration with `php artisan optimize` when doing so. The cron processor does not consume Redis or other queue connections; those deployments retain their own worker setup.
 
@@ -73,13 +73,20 @@ php update.php --check-backup
 php update.php --recover
 ```
 
-`php update.php --check-backup` does not run migrations or modify the database. Use it before enabling automatic updates to verify connectivity and matching PostgreSQL client versions. Backup creation still fails closed if dumping, archive validation, or storage operations fail. Configure PostgreSQL TLS through `DB_SSLMODE` and, when required, `DB_SSLROOTCERT`, `DB_SSLCERT`, and `DB_SSLKEY`; Laravel and the updater use the same settings.
+`php update.php --check-backup` does not run migrations or modify the database. It verifies connectivity, matching PostgreSQL client versions, and an actual schema-only dump using the same private credential file as the full backup. The temporary schema archive and credentials are removed after the check. Use it before enabling automatic updates. Configure PostgreSQL TLS through `DB_SSLMODE` and, when required, `DB_SSLROOTCERT`, `DB_SSLCERT`, and `DB_SSLKEY`; Laravel and the updater use the same settings.
 
 Before changing code or running migrations, the updater enters maintenance mode, signals queue workers to finish, and obtains an exclusive activity gate. It waits up to 120 seconds for web requests, cron activity, and jobs holding shared locks to finish, then creates the database backup. It only proceeds to code replacement and migrations after that backup succeeds. Restart persistent workers after deploying updater changes so every writer participates in the activity gate. Do not run external database writers or manual maintenance commands during an update.
 
 For PostgreSQL, each updater backup is a native custom-format archive at `.filebeam/database-backups/database-*.dump`. The updater creates the backup directory with mode `0700` and archives with mode `0600`. It validates the PostgreSQL custom archive (`PGDMP` header), runs `pg_restore --list`, and fully parses it with `pg_restore --file=/dev/null` before continuing. Database credentials are provided through a private, ephemeral `PGPASSFILE`; passwords are never placed on the command line.
 
 Use `--recover` only for an interrupted update before migrations begin. Once migrations begin, `--recover` refuses to continue: restore the database backup and deploy manually. The updater never automatically performs a destructive restore.
+
+If an update fails before application files are replaced, the updater restores
+service and verifies the original web build when the site was previously online.
+Failures after replacement begins remain in maintenance mode for explicit recovery.
+A failed queued request is retained in `.filebeam/failed-request.json` instead of
+being retried every minute; retry after addressing the recorded error. Stale requests
+for an already-installed version are discarded without starting another update.
 
 ### PostgreSQL Manual Restore
 
