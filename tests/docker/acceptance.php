@@ -2,7 +2,19 @@
 
 declare(strict_types=1);
 
-const BASE_URL = 'http://localhost:8080';
+define('BASE_URL', getenv('FILEBEAM_ACCEPTANCE_BASE_URL') ?: 'http://localhost:8080');
+
+/** @param array<string, mixed> $http */
+function requestContext(array $http): mixed
+{
+    $options = ['http' => $http];
+    $ca = getenv('FILEBEAM_ACCEPTANCE_CA_FILE');
+    if (is_string($ca) && $ca !== '') {
+        $options['ssl'] = ['cafile' => $ca];
+    }
+
+    return stream_context_create($options);
+}
 
 function fail(string $message): never
 {
@@ -13,12 +25,12 @@ function fail(string $message): never
 /** @param list<string> $headers */
 function request(string $method, string $path, ?string $body = null, array $headers = []): string
 {
-    $context = stream_context_create(['http' => [
+    $context = requestContext([
         'method' => $method,
         'ignore_errors' => true,
         'header' => array_merge(['Accept: application/json', 'Origin: '.BASE_URL], $headers),
         'content' => $body ?? '',
-    ]]);
+    ]);
     $response = @file_get_contents(BASE_URL.$path, false, $context);
     preg_match('~\s(\d{3})\s~', $http_response_header[0] ?? '', $match);
     $status = (int) ($match[1] ?? 0);
@@ -88,13 +100,13 @@ match ($mode) {
     'status' => (function (): void {
         $path = $GLOBALS['argv'][2] ?? '';
         $expected = (int) ($GLOBALS['argv'][3] ?? 0);
-        @file_get_contents(BASE_URL.$path);
+        @file_get_contents(BASE_URL.$path, false, requestContext([]));
         preg_match('~\s(\d{3})\s~', $http_response_header[0] ?? '', $match);
         ((int) ($match[1] ?? 0) === $expected) || fail("{$path} did not return HTTP {$expected}");
     })(),
     'status-protected' => (function (): void {
         $path = $GLOBALS['argv'][2] ?? '';
-        @file_get_contents(BASE_URL.$path);
+        @file_get_contents(BASE_URL.$path, false, requestContext([]));
         preg_match('~\s(\d{3})\s~', $http_response_header[0] ?? '', $match);
         in_array((int) ($match[1] ?? 0), [403, 404], true) || fail("{$path} was not protected");
     })(),

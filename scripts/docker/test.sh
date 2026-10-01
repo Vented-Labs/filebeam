@@ -151,6 +151,7 @@ run_variant() {
         run_browser
         FILEBEAM_IMAGE="$current_image" FILEBEAM_TEST_VARIANT="$current_variant" bash "$root/tests/docker/worker.sh"
         if [[ $current_variant == light ]]; then
+            FILEBEAM_IMAGE="$current_image" bash "$root/tests/docker/tls.sh"
             FILEBEAM_IMAGE="$current_image" bash "$root/tests/docker/services.sh"
         fi
     fi

@@ -164,16 +164,17 @@ class InstallationState
         if (file_exists($this->environmentPath()) || is_link($this->environmentPath())) {
             return false;
         }
+        // A pending marker does not authorize replacing a lost application key.
+        $sqlite = (string) config('installation.sqlite_directory').'/database.sqlite';
+        if (is_file($sqlite) && filesize($sqlite) > 0) {
+            return false;
+        }
         $state = $this->read();
         if ($state !== null) {
             return ($state['status'] ?? null) === 'pending';
         }
 
-        // Missing configuration is not evidence of a new deployment when local data remains.
-        $sqlite = (string) config('installation.sqlite_directory').'/database.sqlite';
-
         return (! config('installation.container') || ! app()->configurationIsCached())
-            && ! (is_file($sqlite) && filesize($sqlite) > 0)
             && (config('installation.container') || ! (app('installation.external_environment')['APP_KEY'] ?? null));
     }
 
