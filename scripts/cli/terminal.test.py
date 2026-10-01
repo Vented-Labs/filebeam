@@ -23,7 +23,8 @@ import zipfile
 BINARY = str(Path(sys.argv[1]).resolve())
 ID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 CHUNK = 24_999_984
-STATE = {"upload_started": threading.Event()}
+STATE = {"upload_started": threading.Event(), "release_upload": threading.Event()}
+STATE["release_upload"].set()
 ANSI = re.compile(rb"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
 
 
@@ -112,6 +113,7 @@ class API(http.server.BaseHTTPRequestHandler):
                           chunk_count=item["chunk_count"]) for i, item in enumerate(data["items"])]
             STATE.update(items=items, chunks={})
             STATE.pop("manifest", None)
+            STATE.pop("descriptor", None)
             self.respond(201, dict(id=ID, share_url=f"/{ID}", driver="http", chunk_bytes=CHUNK,
                                    items=items, upload_token="test-upload-token",
                                    delete_token="test-delete-token"))
@@ -122,12 +124,27 @@ class API(http.server.BaseHTTPRequestHandler):
             self.respond(404, {})
 
     def do_PUT(self):
+        if self.path.endswith("/descriptor"):
+            descriptor = json.loads(self.body())["encrypted_descriptor"]
+            if STATE.get("reject_descriptor"):
+                self.respond(400, {})
+                return
+            STATE["descriptor"] = descriptor
+            self.respond(200, {})
+            return
         STATE["upload_started"].set()
         STATE["chunks"][self.path] = self.body(slow=True)
+        STATE["release_upload"].wait(20)
         try:
             self.respond(201, {})
         except (BrokenPipeError, ConnectionResetError):
             pass
+
+    def do_PATCH(self):
+        self.body()
+        self.send_response(204)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
 
 class Terminal:
@@ -272,11 +289,11 @@ def main():
         screen = Terminal([], env, root, size=(80, 24))
         screen.until(b"Choose what to share")
         screen.send(b"d")
-        screen.until(b"A link is all you need")
+        screen.until(b"Receive files")
         screen.send(b"\x1b[200~" + link.encode() + b"\x1b[201~")
         screen.send(b"\r\x15" + str(root / "tui-download").encode() + b"\r")
         # The preceding upload replaced the fixture, with its own encryption key.
-        screen.until(b"attention")
+        screen.until(b"Transfer failed")
         screen.send(b"q")
         code, output = screen.finish()
         assert code == 0, output
@@ -285,7 +302,7 @@ def main():
         receiver = Terminal([], env, root, size=(80, 24))
         receiver.until(b"Choose what to share")
         receiver.send(b"d")
-        receiver.until(b"A link is all you need")
+        receiver.until(b"Receive files")
         receiver.send(b"\x1b[200~" + tui_link + b"\x1b[201~")
         receiver.send(b"\r\x15" + str(root / "tui-good").encode() + b"\r")
         receiver.until(b"Downloaded and verified")
@@ -360,6 +377,90 @@ def main():
         assert targets and b"#k=v1." in targets[-1]
         assert len(targets[-1]) > 60, "Fixture should exercise a wrapped link"
         print("PASS: wrapped inline link carries its complete click target")
+
+        navigation = Terminal([], env, root)
+        navigation.until(b"Choose what to share")
+        navigation.send(b"3")
+        navigation.until(b"Saved transfers")
+        navigation.send(b"2")
+        navigation.until(b"Download securely")
+        navigation.send(b"\x1b")
+        time.sleep(0.1)
+        navigation.pump(0.1)
+        navigation.send(b"3?")
+        navigation.until(b"Keyboard shortcuts")
+        navigation.send(b"\r")
+        navigation.send(b"q")
+        code, output = navigation.finish()
+        assert code == 0, output
+        print("PASS: Transfers page navigation, help and exit")
+
+        def early_stdout(terminal):
+            deadline = time.monotonic() + 10
+            while not select.select([terminal.process.stdout], [], [], 0.05)[0]:
+                terminal.pump(0.01)
+                assert terminal.process.poll() is None, bytes(terminal.output)
+                assert time.monotonic() < deadline, "Link was not printed while upload was blocked"
+            value = terminal.process.stdout.readline().strip()
+            assert b"#k=v1." in value and b"\x1b" not in value
+            assert "descriptor" in STATE and "manifest" not in STATE
+            assert terminal.process.poll() is None
+            return value
+
+        turbo_env = {**env, "FILEBEAM_HOME": str(root / "turbo-home")}
+        STATE["release_upload"].clear()
+        turbo = Terminal(["--plain", "up", "--turbo", str(source)], turbo_env, root, stdout_pipe=True)
+        turbo_link = early_stdout(turbo)
+        turbo.process.send_signal(signal.SIGINT)
+        code, output = turbo.finish()
+        assert code != 0 and b"cancelled" in output.lower(), output
+        jobs = subprocess.run([BINARY, "--home", turbo_env["FILEBEAM_HOME"], "--plain", "transfers"],
+                              env=turbo_env, capture_output=True, check=True, timeout=10)
+        job_id = jobs.stdout.decode().splitlines()[0].split("\t")[0]
+        resumed = Terminal(["--plain", "resume", job_id], turbo_env, root, stdout_pipe=True)
+        assert early_stdout(resumed) == turbo_link
+        STATE["release_upload"].set()
+        code, output = resumed.finish()
+        assert code == 0, output
+        assert resumed.process.stdout.read() == b"", "Link was printed twice"
+        print("PASS: Turbo link before completion, cancellation, resume and stdout deduplication")
+
+        STATE["release_upload"].clear()
+        live_screen = Terminal([], env, root, size=(80, 24))
+        live_screen.until(b"Choose what to share")
+        live_screen.send(b"/.bin\r ")
+        live_screen.send(b"\x1b[13;2u")
+        live_screen.until(b"Download link ready")
+        assert "descriptor" in STATE and "manifest" not in STATE
+        assert live_screen.process.poll() is None
+        live_screen.send(b"c")
+        live_screen.until(b"Copy requested")
+        targets = re.findall(rb"\x1b]8;;(http[^\x1b]+)\x1b\\", live_screen.output)
+        clipboard = re.search(rb"\x1b]52;c;([^\x07]+)\x07", live_screen.output)
+        assert targets and clipboard and base64.b64decode(clipboard[1]) == targets[-1]
+        assert b"#k=v1." in targets[-1]
+        STATE["release_upload"].set()
+        live_screen.until(b"Your encrypted link is ready")
+        live_screen.send(b"q")
+        code, output = live_screen.finish()
+        assert code == 0, output
+        assert b"final verification before completion" not in ANSI.sub(b"", output)
+        print("PASS: Turbo TUI link and clipboard while uploading, then completion")
+
+        tiny = root / "tiny.txt"
+        tiny.write_bytes(b"fast Turbo upload")
+        for flags in [[], ["--plain"]]:
+            fast = Terminal([*flags, "up", "--turbo", str(tiny)], env, root, stdout_pipe=True)
+            code, output = fast.finish()
+            assert code == 0, output
+            links = fast.process.stdout.read().splitlines()
+            assert len(links) == 1 and b"#k=v1." in links[0], links
+        STATE["reject_descriptor"] = True
+        rejected = command("up", "--turbo", tiny)
+        STATE["reject_descriptor"] = False
+        assert rejected.returncode != 0 and rejected.stdout == b""
+        assert b"could not publish Turbo descriptor" in rejected.stderr
+        print("PASS: fast Turbo uploads print one link; rejected descriptors print none")
     server.shutdown()
 
 

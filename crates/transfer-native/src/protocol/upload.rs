@@ -966,6 +966,8 @@ async fn continue_job(mut job: UploadJob, store: Arc<Store>, control: &Control) 
         }
         publish_turbo_descriptor(&mut job, &client, &transfer, &token, control).await?;
         store.save(&job)?;
+    }
+    if job.turbo && job.descriptor_published {
         control.emit(TransferEvent::ShareReady(crate::control::ShareReady {
             share_url: receipt(&job)?,
         }));
