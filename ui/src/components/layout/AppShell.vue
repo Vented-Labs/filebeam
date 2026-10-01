@@ -372,10 +372,6 @@ function goHome(event: MouseEvent): void {
     .fb-header {
         gap: 0.5rem;
     }
-    .fb-header__app {
-        margin-left: auto;
-    }
-
     .fb-header .fb-header__actions {
         margin-left: auto;
     }
@@ -402,6 +398,9 @@ function goHome(event: MouseEvent): void {
     }
 }
 @media (max-width: 560px) {
+    .fb-header .fb-mobile-nav {
+        margin-inline-start: auto;
+    }
     .fb-header .fb-header__actions {
         display: none;
     }
