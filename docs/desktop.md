@@ -107,3 +107,13 @@ application bundle. The installation location must be writable by the user.
 retains its original meaning: a parent directory containing `.filebeam`. Flat CLI
 settings migrate in place, preserving private state and the update opt-out; a
 legacy `FILEBEAM_INSTANCE` is imported only before the configuration is migrated.
+
+### Catalog maintenance
+
+Release publishers verify catalog signatures before renewing expired metadata;
+clients continue to reject expired catalogs. To manually renew the CLI catalog
+from the trusted `master` workflow without building a release:
+
+```sh
+gh workflow run beam.yml --ref master -f refresh_catalog=true
+```

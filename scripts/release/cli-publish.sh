@@ -63,7 +63,7 @@ etag=''
 if head_object cli/index.json "$tmp/head-index.json"; then
     etag=$(php -r '$h=json_decode(file_get_contents($argv[1]), true, 512, JSON_THROW_ON_ERROR); echo $h["ETag"];' "$tmp/head-index.json")
     "${aws_r2[@]}" get-object --bucket "$R2_BUCKET" --key cli/index.json "$tmp/current-envelope.json" >/dev/null
-    php "$root/scripts/release/cli-verify-index.php" < "$tmp/current-envelope.json" > "$tmp/current-index.json"
+    php "$root/scripts/release/cli-verify-index.php" --allow-expired < "$tmp/current-envelope.json" > "$tmp/current-index.json"
 else
     [[ $? -eq 1 ]] || exit 1
     printf '{"schema":1,"generation":0,"releases":[]}\n' > "$tmp/current-index.json"

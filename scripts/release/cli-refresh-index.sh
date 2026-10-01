@@ -21,7 +21,7 @@ aws_r2=(aws --endpoint-url "$R2_ENDPOINT_URL" s3api)
 "${aws_r2[@]}" head-object --bucket "$R2_BUCKET" --key cli/index.json > "$tmp/head.json"
 etag=$(php -r '$h=json_decode(file_get_contents($argv[1]), true, 512, JSON_THROW_ON_ERROR); echo $h["ETag"];' "$tmp/head.json")
 "${aws_r2[@]}" get-object --bucket "$R2_BUCKET" --key cli/index.json "$tmp/current-envelope.json" >/dev/null
-php "$root/scripts/release/cli-verify-index.php" < "$tmp/current-envelope.json" > "$tmp/current-index.json"
+php "$root/scripts/release/cli-verify-index.php" --allow-expired < "$tmp/current-envelope.json" > "$tmp/current-index.json"
 php "$root/scripts/release/cli-update-index.php" "$tmp/current-index.json" > "$tmp/index-payload.json"
 php "$root/scripts/release/sign-index.php" < "$tmp/index-payload.json" > "$tmp/index-envelope.json"
 "${aws_r2[@]}" put-object \

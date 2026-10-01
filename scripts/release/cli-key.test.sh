@@ -121,6 +121,51 @@ RELEASE_PUBLIC_KEY='' bash "$root/scripts/release/cli-publish.sh" beam-v0.2.0 "$
 RELEASE_PUBLIC_KEY='' bash "$root/scripts/release/cli-refresh-index.sh" >/dev/null
 RELEASE_PUBLIC_KEY=$canonical_public php "$root/scripts/release/cli-verify-index.php" < "$AWS_OBJECTS/cli/index.json" > /dev/null
 
+for operation in refresh publish; do
+    php -r '
+        $envelope = json_decode(file_get_contents($argv[1]), true, flags: JSON_THROW_ON_ERROR);
+        $index = json_decode(base64_decode($envelope["signed"]), true, flags: JSON_THROW_ON_ERROR);
+        $index["expires_at"] = "2000-01-01T00:00:00Z";
+        echo json_encode($index, JSON_THROW_ON_ERROR);
+    ' "$AWS_OBJECTS/cli/index.json" > "$tmp/expired-payload.json"
+    php "$root/scripts/release/sign-index.php" < "$tmp/expired-payload.json" > "$AWS_OBJECTS/cli/index.json"
+    reject php -d display_errors=stderr "$root/scripts/release/cli-verify-index.php" < "$AWS_OBJECTS/cli/index.json"
+    php "$root/scripts/release/cli-verify-index.php" --allow-expired < "$AWS_OBJECTS/cli/index.json" > "$tmp/prior-index.json"
+    if [[ $operation == refresh ]]; then
+        bash "$root/scripts/release/cli-refresh-index.sh" >/dev/null
+    else
+        bash "$root/scripts/release/cli-publish.sh" beam-v0.2.0 "$tmp/package" >/dev/null
+    fi
+    php "$root/scripts/release/cli-verify-index.php" < "$AWS_OBJECTS/cli/index.json" > "$tmp/renewed-index.json"
+    php -r '
+        $before = json_decode(file_get_contents($argv[1]), true, flags: JSON_THROW_ON_ERROR);
+        $after = json_decode(file_get_contents($argv[2]), true, flags: JSON_THROW_ON_ERROR);
+        if ($after["generation"] !== $before["generation"] + 1 || $after["releases"] !== $before["releases"]) exit(1);
+    ' "$tmp/prior-index.json" "$tmp/renewed-index.json"
+done
+
+php -r '
+    $index = json_decode(file_get_contents($argv[1]), true, flags: JSON_THROW_ON_ERROR);
+    $index["expires_at"] = "not a date";
+    echo json_encode($index, JSON_THROW_ON_ERROR);
+' "$tmp/renewed-index.json" > "$tmp/invalid-payload.json"
+php "$root/scripts/release/sign-index.php" < "$tmp/invalid-payload.json" > "$tmp/invalid-envelope.json"
+reject php -d display_errors=stderr "$root/scripts/release/cli-verify-index.php" --allow-expired < "$tmp/invalid-envelope.json"
+
+php -r '
+    $envelope = json_decode(file_get_contents($argv[1]), true, flags: JSON_THROW_ON_ERROR);
+    $envelope["signature"] = base64_encode(str_repeat("x", 64));
+    file_put_contents($argv[1], json_encode($envelope, JSON_THROW_ON_ERROR));
+' "$AWS_OBJECTS/cli/index.json"
+reject php -d display_errors=stderr "$root/scripts/release/cli-verify-index.php" --allow-expired < "$AWS_OBJECTS/cli/index.json"
+: > "$AWS_LOG"
+if bash "$root/scripts/release/cli-refresh-index.sh" > "$tmp/refresh-error" 2>&1; then
+    printf '%s\n' 'Catalog renewal accepted an invalid signature.' >&2
+    exit 1
+fi
+grep -Fq get-object "$AWS_LOG"
+! grep -Fq put-object "$AWS_LOG"
+
 : > "$AWS_LOG"
 reject env RELEASE_PUBLIC_KEY="$other_public" bash "$root/scripts/release/cli-publish.sh" beam-v0.2.0 "$tmp/package"
 [[ ! -s "$AWS_LOG" ]]
