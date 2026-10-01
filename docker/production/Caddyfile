@@ -29,6 +29,7 @@
 {$FILEBEAM_HTTP_REDIRECT}
 
 {$FILEBEAM_SITE} {
+    import /run/filebeam/tls.caddy
     root * /opt/filebeam/backend/public
     encode zstd gzip
     request_body {

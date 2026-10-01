@@ -27,22 +27,30 @@ Multiple web or queue nodes require shared staging at the same `FILEBEAM_STAGING
 
 During initial setup, Filebeam uses regular PHP requests. Once setup completes, it switches to persistent FrankenPHP/Octane workers. The installation token is written only to Docker logs while installation is pending; it is removed from `/data/config/.env` on completion. Treat initial logs as sensitive. No application, database, cache, or storage passwords are passed as process arguments or written to logs.
 
+Set `FILEBEAM_BOOTSTRAP_ON_START=true` to initialize pending setup locally before the web server starts. This is useful for orchestrators and trusted TLS proxies. The default is `false`. Bootstrap preserves pending and completed installations, including their application keys; it refuses inconsistent state or an existing SQLite database without its matching configuration. It does not create an administrator or complete installation.
+
 ## TLS And Health
 
-Set `FILEBEAM_TLS=proxy` (default) behind a trusted TLS proxy, or `FILEBEAM_TLS=auto` with `FILEBEAM_SERVER_NAME` or `APP_URL` for built-in Caddy TLS. With `auto`, HTTP on port 8080 serves `/up` and redirects other requests to HTTPS on 8443.
+Choose a TLS mode:
 
-Before the first bootstrap, forwarded headers are deliberately ignored because `/data/config/.env` does not yet exist. Reach `/install` over direct HTTPS that securely reaches PHP, or over a loopback-only listener such as an SSH localhost tunnel; do not expose first-run setup through a TLS proxy. After bootstrap creates the environment file, configure `FILEBEAM_TRUSTED_PROXIES` with the proxy's IP address or CIDR and restart the container before using the proxy for setup.
+- `FILEBEAM_TLS=proxy` (default): HTTP on container port 8080 behind a trusted HTTPS proxy. Set `FILEBEAM_TRUSTED_PROXIES` to the proxy's address or CIDR.
+- `FILEBEAM_TLS=certificate`: direct HTTPS on container port 8443 using mounted PEM files at `FILEBEAM_TLS_CERT_FILE` and `FILEBEAM_TLS_KEY_FILE`. Include intermediate certificates in the certificate file. Both files must be readable by UID/GID `10001:10001`. Replace the mounted files and restart the container to renew them.
+- `FILEBEAM_TLS=auto`: direct HTTPS on container port 8443 with Caddy-managed certificates. Public certificate issuance requires DNS and ACME challenge traffic on external ports 80/443 to reach Caddy's corresponding container listeners. High published ports alone do not satisfy ACME challenges.
+
+For direct HTTPS, set `APP_URL` to the root HTTPS URL users reach, including any non-default published port. Its hostname must match `FILEBEAM_SERVER_NAME` when that variable is supplied. HTTP on container port 8080 serves `/up` and redirects other requests to the complete `APP_URL`. The HTTP listener need not be published when using a supplied certificate.
+
+Before the first bootstrap, forwarded headers are deliberately ignored because `/data/config/.env` does not yet exist. For proxy deployments, set `FILEBEAM_BOOTSTRAP_ON_START=true` and the explicit `FILEBEAM_TRUSTED_PROXIES` before starting the container, then read the installation token from its logs and complete `/install` through the HTTPS proxy. Without startup bootstrap, use direct HTTPS or a loopback-only listener such as an SSH localhost tunnel for the first bootstrap.
 
 If direct HTTPS or loopback access is unavailable, the container owner can create the pending environment and token without a browser request:
 
 ```sh
-docker exec --user 10001:10001 <container> php -r 'require "/opt/filebeam/backend/vendor/autoload.php"; $app = require "/opt/filebeam/backend/bootstrap/app.php"; $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap(); $app->make(App\Support\Installation\InstallationState::class)->bootstrap($app->make(App\Support\Installation\EnvironmentWriter::class));'
+docker exec --user 10001:10001 <container> php artisan filebeam:installation:bootstrap --no-interaction
 docker logs <container>
 ```
 
 Read the installation token from the supervisor logs, configure the trusted proxy address or CIDR, restart the container, and complete setup through that proxy. Treat the token and initial logs as sensitive.
 
-The health check verifies HTTP and, when automatic TLS is enabled, HTTPS with certificate validation. It also checks the selected role, database, cache, and scheduler state as applicable. Caddy's control API is loopback-only at `127.0.0.1:2019`, is not a public service, and logs only control errors; normal shutdown warnings are suppressed.
+The health check verifies HTTP and, in direct TLS modes, HTTPS with certificate validation. Supplied certificates are added to its trust bundle; set `FILEBEAM_TLS_CA_FILE` to a separate PEM CA bundle when needed. It also checks the selected role, database, cache, and scheduler state as applicable. Caddy's control API is loopback-only at `127.0.0.1:2019`, is not a public service, and logs only control errors; normal shutdown warnings are suppressed.
 
 ## Resource Controls
 

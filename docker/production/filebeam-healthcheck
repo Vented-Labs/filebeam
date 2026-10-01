@@ -22,16 +22,22 @@ app_php() {
 dotenv_value() {
     app_php -r 'require "/opt/filebeam/backend/vendor/autoload.php"; $v = Dotenv\Dotenv::parse(file_get_contents($argv[1])); echo $v[$argv[2]] ?? "";' "$1" "$2"
 }
-if [ -z "${FILEBEAM_SERVER_NAME:-}" ] && [ -f "$environment" ]; then
+if [ -z "${FILEBEAM_SERVER_NAME:-}" ] && [ -n "${APP_URL:-}" ]; then
+    host=$(app_php -r 'echo parse_url($argv[1], PHP_URL_HOST) ?: "localhost";' "$APP_URL")
+elif [ -z "${FILEBEAM_SERVER_NAME:-}" ] && [ -f "$environment" ]; then
     app_url=$(dotenv_value "$environment" APP_URL 2>/dev/null || true)
-    [ -n "$app_url" ] && host=${app_url#*://} && host=${host%%/*} && host=${host%%:*}
+    [ -n "$app_url" ] && host=$(app_php -r 'echo parse_url($argv[1], PHP_URL_HOST) ?: "localhost";' "$app_url")
 fi
 
 if [ "$role" = all ] || [ "$role" = web ]; then
     curl --silent --show-error --max-time 5 -H "Host: $host" -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/up | grep -qx 200
-    if [ "${FILEBEAM_TLS:-proxy}" = auto ]; then
+    if [ "${FILEBEAM_TLS:-proxy}" = auto ] || [ "${FILEBEAM_TLS:-proxy}" = certificate ]; then
         ca=/etc/ssl/certs/ca-certificates.crt
         local_ca="$data/caddy/pki/authorities/local/root.crt"
+        if [ "${FILEBEAM_TLS:-proxy}" = certificate ]; then
+            local_ca=${FILEBEAM_TLS_CA_FILE:-${FILEBEAM_TLS_CERT_FILE:-}}
+            [ -f "$local_ca" ] && [ -r "$local_ca" ] || exit 1
+        fi
         if [ -f "$local_ca" ]; then
             ca=/run/filebeam/cache/health-ca.pem
             if [ ! -f "$ca" ] || [ "$local_ca" -nt "$ca" ]; then
