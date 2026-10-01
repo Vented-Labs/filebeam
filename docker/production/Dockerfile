@@ -126,7 +126,8 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     && groupadd --gid 10003 filebeamvalkey \
     && useradd --uid 10003 --gid filebeamvalkey --home-dir /nonexistent --no-create-home --shell /usr/sbin/nologin filebeamvalkey \
     && usermod -aG filebeamvalkey filebeam \
-    && mkdir -p /data/app /data/config /data/database /data/caddy /data/postgresql/18/docker /data/valkey /storage /run/filebeam/cache /run/filebeam/views /run/filebeam/postgresql /run/filebeam/valkey /tmp \
+    && mkdir -p /certs /data/app /data/config /data/database /data/caddy /data/postgresql/18/docker /data/valkey /storage /run/filebeam/cache /run/filebeam/views /run/filebeam/postgresql /run/filebeam/valkey /tmp \
+    && touch /certs/tls.crt /certs/tls.key \
     && chmod 1777 /tmp \
     && chmod 755 /usr/local/bin/filebeam-init /usr/local/bin/filebeam-supervisor /usr/local/bin/filebeam-healthcheck \
     && (setcap -r /usr/local/bin/frankenphp 2>/dev/null || true) \

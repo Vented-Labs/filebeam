@@ -97,7 +97,7 @@ class OptimizeInstallation
     {
         $environment = array_filter(getenv(), is_string(...));
 
-        foreach ([...EnvironmentSettings::outputKeys(), ...EnvironmentSettings::cachePathKeys()] as $key) {
+        foreach ([...EnvironmentSettings::outputKeys(), ...EnvironmentSettings::cachePathKeys(), 'FILEBEAM_SETUP_TOKEN', 'FILEBEAM_SETUP_TOKEN_FILE'] as $key) {
             $environment[$key] = false;
         }
 

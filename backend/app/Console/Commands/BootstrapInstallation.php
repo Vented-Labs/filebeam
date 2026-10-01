@@ -33,7 +33,9 @@ class BootstrapInstallation extends Command
         }
 
         $state->bootstrap($writer);
-        $this->info('Web setup initialized. The container supervisor logs the installation token while setup is pending.');
+        $this->info(($state->read()['token_source'] ?? null) === 'operator'
+            ? 'Web setup initialized. Use the configured setup token.'
+            : 'Web setup initialized. The container supervisor logs the installation token while setup is pending.');
 
         return self::SUCCESS;
     }

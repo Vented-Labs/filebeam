@@ -125,6 +125,9 @@ write_app_environment() {
 emit_installation_token() {
     [ -f "$data/app/installation/state.json" ] || return 0
     checkpoint >/dev/null 2>&1 && return 0
+    if /usr/local/bin/php -r '$s = json_decode(file_get_contents($argv[1]), true); exit(($s["token_source"] ?? null) === "operator" ? 0 : 1);' "$data/app/installation/state.json"; then
+        return 0
+    fi
     [ -f "$data/config/.env" ] || return 0
     token=$(dotenv_value "$data/config/.env" FILEBEAM_INSTALL_TOKEN 2>/dev/null || true)
     [ "${#token}" -eq 64 ] || return 0
@@ -136,14 +139,14 @@ emit_installation_token() {
 
 stop_applications() {
     [ -n "$app_pids" ] || return 0
+    deadline=$(( $(date +%s) + ${FILEBEAM_SHUTDOWN_TIMEOUT:-90} ))
+    for pid in "$queue_pid" "$scheduler_pid"; do
+        [ -z "$pid" ] || kill -TERM "$pid" 2>/dev/null || true
+    done
     # Caddy's control endpoint drains HTTP without its SIGTERM warning banner.
     if [ -n "$web_pid" ] && kill -0 "$web_pid" 2>/dev/null; then
         run_filebeam /usr/local/bin/frankenphp stop --address 127.0.0.1:2019 >/dev/null 2>&1 || kill -TERM "$web_pid" 2>/dev/null || true
     fi
-    for pid in "$queue_pid" "$scheduler_pid"; do
-        [ -z "$pid" ] || kill -TERM "$pid" 2>/dev/null || true
-    done
-    deadline=$(( $(date +%s) + 90 ))
     for pid in $app_pids; do
         while kill -0 "$pid" 2>/dev/null && [ "$(date +%s)" -lt "$deadline" ]; do sleep 1; done
         kill -KILL "$pid" 2>/dev/null || true

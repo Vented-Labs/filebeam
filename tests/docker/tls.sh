@@ -70,7 +70,7 @@ start_app() {
         --tmpfs /run:rw,nosuid,nodev,uid=10001,gid=10001,mode=0755,size=64m \
         --tmpfs /tmp:rw,nosuid,nodev,uid=10001,gid=10001,mode=1777,size=64m \
         -v "$data:/data" -v "$storage:/storage" -v "$certs:/certs:ro" \
-        -e FILEBEAM_BOOTSTRAP_ON_START=true "$@" "$image" >/dev/null
+        -e FILEBEAM_BOOTSTRAP_ON_START=true -e FILEBEAM_SHUTDOWN_TIMEOUT=5 "$@" "$image" >/dev/null
     wait_healthy
 }
 
@@ -96,7 +96,7 @@ done
 # Test-only keys are generated in an owned Docker volume, never stored in the repository.
 docker run --rm --user 0:0 --entrypoint sh -v "$certs:/certs" "$image" -ec '
     openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=filebeam.test \
-        -addext subjectAltName=DNS:filebeam.test -keyout /certs/tls.key -out /certs/tls.crt >/dev/null 2>&1
+        -addext subjectAltName=DNS:filebeam.test,IP:192.0.2.10 -keyout /certs/tls.key -out /certs/tls.crt >/dev/null 2>&1
     chown 10001:10001 /certs/tls.key
     chmod 0600 /certs/tls.key
     chmod 0644 /certs/tls.crt
@@ -117,7 +117,7 @@ assert_bootstrap_preserved
 old_cert=$(docker exec "$app" sha256sum /certs/tls.crt)
 docker run --rm --user 0:0 --entrypoint sh -v "$certs:/certs" "$image" -ec '
     openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=filebeam.test \
-        -addext subjectAltName=DNS:filebeam.test -keyout /certs/tls.key -out /certs/tls.crt >/dev/null 2>&1
+        -addext subjectAltName=DNS:filebeam.test,IP:192.0.2.10 -keyout /certs/tls.key -out /certs/tls.crt >/dev/null 2>&1
     chown 10001:10001 /certs/tls.key
     chmod 0600 /certs/tls.key
 '
@@ -126,6 +126,19 @@ wait_healthy
 [[ $(docker exec "$app" sha256sum /certs/tls.crt) != "$old_cert" ]]
 acceptance status /install/ 404
 stop_after_runtime_log_check 120 "$app"
+docker rm "$app" >/dev/null
+
+# IP clients omit SNI, and Docker's listener address differs from the public IP.
+start_app -e FILEBEAM_TLS=certificate -e APP_URL=https://192.0.2.10:30443 \
+    -e FILEBEAM_TLS_CERT_FILE=/certs/tls.crt -e FILEBEAM_TLS_KEY_FILE=/certs/tls.key
+docker exec "$app" curl --fail --silent --show-error --cacert /certs/tls.crt \
+    --resolve 192.0.2.10:8443:127.0.0.1 https://192.0.2.10:8443/up >/dev/null
+# A stopped queue worker cannot process SIGTERM; shutdown must still honor its budget.
+queue_pid=$(docker exec "$app" pgrep -o -f 'artisan queue:work')
+docker exec "$app" kill -STOP "$queue_pid"
+stop_started=$SECONDS
+stop_after_runtime_log_check 120 "$app"
+((SECONDS - stop_started < 15))
 docker rm "$app" >/dev/null
 
 # A key that only root can read must fail before the server is started.
@@ -183,5 +196,32 @@ acceptance status /install/ 200
 acceptance complete
 wait_worker_ready "$app"
 acceptance status /install/ 404
+stop_after_runtime_log_check 120 "$app"
+# Configured first-run credentials must not appear in supervisor logs or survive in runtime env.
+docker rm "$app" >/dev/null
+docker volume rm "$data" "$storage" >/dev/null
+docker volume create --label com.filebeam.test="$prefix" "$data" >/dev/null
+docker volume create --label com.filebeam.test="$prefix" "$storage" >/dev/null
+prepare_storage
+docker run --rm --user 0:0 --entrypoint sh -v "$certs:/certs" "$image" -ec '
+    php -r '\''file_put_contents("/certs/setup-token", bin2hex(random_bytes(32)));'\''
+    chown 10001:10001 /certs/setup-token
+    chmod 0600 /certs/setup-token
+'
+start_app -e FILEBEAM_TLS=proxy -e FILEBEAM_SETUP_TOKEN_FILE=/certs/setup-token
+docker exec --user 10001:10001 "$app" php -r '
+    require "/opt/filebeam/backend/vendor/autoload.php";
+    $env = Dotenv\Dotenv::parse(file_get_contents("/data/config/.env"));
+    exit(hash_equals(file_get_contents("/certs/setup-token"), $env["FILEBEAM_INSTALL_TOKEN"] ?? "") ? 0 : 1);
+'
+if docker logs "$app" 2>&1 | grep -q '^Filebeam installation token:'; then
+    printf '%s\n' 'Configured setup token was logged' >&2
+    exit 1
+fi
+supervisor_pid=$(docker exec "$app" pgrep -o -f '^/bin/sh /usr/local/bin/filebeam-supervisor')
+docker exec "$app" php -r '
+    $env = file_get_contents("/proc/".$argv[1]."/environ");
+    exit(str_contains($env, "FILEBEAM_SETUP_TOKEN=") || str_contains($env, "FILEBEAM_SETUP_TOKEN_FILE=") ? 1 : 0);
+' "$supervisor_pid"
 stop_after_runtime_log_check 120 "$app"
 printf '%s\n' 'rootless TLS and bootstrap: passed'

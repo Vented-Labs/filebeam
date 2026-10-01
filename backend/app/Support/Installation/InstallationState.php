@@ -129,8 +129,13 @@ class InstallationState
                 return;
             }
             abort_unless($this->canBootstrap(), 404);
-            $token = bin2hex(random_bytes(32));
-            $this->write(['id' => (string) Str::uuid(), 'status' => 'pending', 'token_hash' => hash('sha256', $token)]);
+            $configuredToken = getenv('FILEBEAM_SETUP_TOKEN');
+            if ($configuredToken !== false && $configuredToken !== '' && preg_match('/\A[!-~]{32,128}\z/', $configuredToken) !== 1) {
+                throw new \InvalidArgumentException('FILEBEAM_SETUP_TOKEN must contain 32 to 128 printable ASCII characters without spaces.');
+            }
+            $configured = is_string($configuredToken) && $configuredToken !== '';
+            $token = $configured ? $configuredToken : bin2hex(random_bytes(32));
+            $this->write(['id' => (string) Str::uuid(), 'status' => 'pending', 'token_hash' => hash('sha256', $token), 'token_source' => $configured ? 'operator' : 'generated']);
             $writer->write([
                 'APP_ENV' => 'production',
                 'APP_DEBUG' => 'false',

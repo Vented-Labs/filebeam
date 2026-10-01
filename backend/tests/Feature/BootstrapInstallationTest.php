@@ -2,11 +2,14 @@
 
 declare(strict_types=1);
 
+use App\Support\Installation\EnvironmentWriter;
 use App\Support\Installation\InstallationState;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
 
 beforeEach(function (): void {
+    $this->previousSetupToken = getenv('FILEBEAM_SETUP_TOKEN');
+    putenv('FILEBEAM_SETUP_TOKEN');
     $this->bootstrapDirectory = storage_path('framework/testing/bootstrap-'.Str::uuid());
     File::ensureDirectoryExists($this->bootstrapDirectory.'/database');
     config()->set([
@@ -20,8 +23,37 @@ beforeEach(function (): void {
 });
 
 afterEach(function (): void {
+    putenv('FILEBEAM_SETUP_TOKEN'.($this->previousSetupToken === false ? '' : '='.$this->previousSetupToken));
     File::deleteDirectory($this->bootstrapDirectory);
 });
+
+test('operator supplied bootstrap token is persisted without being printed', function (): void {
+    $token = 'a-private-operator-setup-token-123456';
+    putenv('FILEBEAM_SETUP_TOKEN='.$token);
+    $this->artisan('filebeam:installation:bootstrap')
+        ->expectsOutput('Web setup initialized. Use the configured setup token.')
+        ->assertSuccessful();
+
+    $state = app(InstallationState::class);
+    $environment = Dotenv\Dotenv::createArrayBacked($this->bootstrapDirectory.'/config')->load();
+    expect($environment['FILEBEAM_INSTALL_TOKEN'])->toBe($token);
+    expect($state->read())->toMatchArray(['token_source' => 'operator', 'token_hash' => hash('sha256', $token)]);
+    expect($environment)->not->toHaveKey('FILEBEAM_SETUP_TOKEN');
+
+    $key = $environment['APP_KEY'];
+    putenv('FILEBEAM_SETUP_TOKEN=a-different-operator-setup-token-1234');
+    $this->artisan('filebeam:installation:bootstrap')->assertSuccessful();
+    $environment = Dotenv\Dotenv::createArrayBacked($this->bootstrapDirectory.'/config')->load();
+    expect($environment['FILEBEAM_INSTALL_TOKEN'])->toBe($token)->and($environment['APP_KEY'])->toBe($key);
+});
+
+test('invalid operator tokens do not create pending configuration', function (string $token): void {
+    putenv('FILEBEAM_SETUP_TOKEN='.$token);
+    expect(fn () => app(InstallationState::class)->bootstrap(app(EnvironmentWriter::class)))
+        ->toThrow(InvalidArgumentException::class);
+    expect(file_exists(app(InstallationState::class)->environmentPath()))->toBeFalse();
+    expect(app(InstallationState::class)->read())->toBeNull();
+})->with(['too-short', str_repeat('a', 129), str_repeat('a', 31).' ', str_repeat('a', 32)."\n"]);
 
 test('local bootstrap creates pending setup without printing its credentials', function (): void {
     $this->artisan('filebeam:installation:bootstrap')

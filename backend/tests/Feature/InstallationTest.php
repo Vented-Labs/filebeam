@@ -256,6 +256,14 @@ test('forwarded HTTPS is accepted only from explicitly trusted proxies', functio
     }
 });
 
+test('pending setup redirects remain relative before proxy trust middleware runs', function (): void {
+    $this->withHeader('X-Forwarded-Proto', 'https')
+        ->withServerVariables(['REMOTE_ADDR' => '10.10.0.5'])
+        ->get('http://setup.example.test/')
+        ->assertStatus(302)
+        ->assertHeader('Location', '/install');
+});
+
 test('proxy trust stays disabled until the environment file exists', function (): void {
     $environmentPath = app()->environmentPath();
     $proxies = getenv('FILEBEAM_TRUSTED_PROXIES');

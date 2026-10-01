@@ -6,6 +6,7 @@ data=${FILEBEAM_DATA_DIR:-/data}
 tls=${FILEBEAM_TLS:-proxy}
 name=${FILEBEAM_SERVER_NAME:-}
 bootstrap=${FILEBEAM_BOOTSTRAP_ON_START:-false}
+shutdown_timeout=${FILEBEAM_SHUTDOWN_TIMEOUT:-90}
 
 run_filebeam() {
     if [ "$(id -u)" = 0 ]; then
@@ -42,6 +43,11 @@ if [ -z "$name" ] && [ -n "${APP_URL:-}" ]; then
     name=$(/usr/local/bin/php -r 'echo parse_url($argv[1], PHP_URL_HOST) ?: "";' "$APP_URL")
 fi
 case "$bootstrap" in true|false) ;; *) printf '%s\n' 'FILEBEAM_BOOTSTRAP_ON_START must be true or false.' >&2; exit 64 ;; esac
+case "$shutdown_timeout" in ''|*[!0-9]*) printf '%s\n' 'FILEBEAM_SHUTDOWN_TIMEOUT must be an integer from 1 to 300.' >&2; exit 64 ;; esac
+if [ "$shutdown_timeout" -lt 1 ] || [ "$shutdown_timeout" -gt 300 ]; then
+    printf '%s\n' 'FILEBEAM_SHUTDOWN_TIMEOUT must be an integer from 1 to 300.' >&2
+    exit 64
+fi
 case "$tls" in
     proxy) auto_https='    auto_https off'; redirect='' ;;
     auto|certificate)
@@ -107,6 +113,7 @@ fi
 
 if [ "$bootstrap" = true ]; then
     run_filebeam /usr/local/bin/php /opt/filebeam/backend/artisan filebeam:installation:bootstrap --no-interaction
+    unset FILEBEAM_SETUP_TOKEN FILEBEAM_SETUP_TOKEN_FILE
 fi
 
 site="https://$name:8443"
@@ -121,7 +128,10 @@ if [ "$tls" = certificate ]; then
 else
     printf '%s\n' '# TLS certificates are managed by Caddy when enabled.' >/run/filebeam/tls.caddy
 fi
-export FILEBEAM_AUTO_HTTPS="$auto_https" FILEBEAM_HTTP_REDIRECT="$redirect" FILEBEAM_SITE="$site" FILEBEAM_CADDY_STORAGE="$data/caddy"
+tls_server_name=${name:-localhost}
+tls_server_name=${tls_server_name#\[}
+tls_server_name=${tls_server_name%\]}
+export FILEBEAM_AUTO_HTTPS="$auto_https" FILEBEAM_HTTP_REDIRECT="$redirect" FILEBEAM_SITE="$site" FILEBEAM_CADDY_STORAGE="$data/caddy" FILEBEAM_TLS_SERVER_NAME="$tls_server_name" FILEBEAM_SHUTDOWN_TIMEOUT="$shutdown_timeout"
 cp /etc/filebeam/Caddyfile /run/filebeam/Caddyfile
 /usr/local/bin/frankenphp fmt --overwrite /run/filebeam/Caddyfile
 exec "$@"
