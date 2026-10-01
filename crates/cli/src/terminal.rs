@@ -20,6 +20,7 @@ use crossterm::{
 static RAW: AtomicBool = AtomicBool::new(false);
 static FULLSCREEN: AtomicBool = AtomicBool::new(false);
 static CONTROLS: AtomicBool = AtomicBool::new(false);
+static BRACKETED_PASTE: AtomicBool = AtomicBool::new(false);
 static ENHANCED_KEYBOARD: AtomicBool = AtomicBool::new(false);
 static HOOK: Once = Once::new();
 static INTERRUPT_FLAGS: OnceLock<Mutex<Vec<Weak<AtomicBool>>>> = OnceLock::new();
@@ -87,30 +88,48 @@ impl Session {
                 previous(info);
             }));
         });
-        enable_raw_mode()?;
-        RAW.store(true, Ordering::Relaxed);
-        CONTROLS.store(controls, Ordering::Relaxed);
         let interrupted = Arc::new(AtomicBool::new(false));
         let guard = Self {
             _interrupt: watch_interrupt(interrupted.clone())?,
             interrupted,
         };
+        enable_raw_mode()?;
+        RAW.store(true, Ordering::Relaxed);
+        CONTROLS.store(controls, Ordering::Relaxed);
         if fullscreen {
             FULLSCREEN.store(true, Ordering::Relaxed);
             execute!(io::stdout(), EnterAlternateScreen)?;
         }
         if controls {
-            execute!(
-                io::stderr(),
-                EnableBracketedPaste,
-                PushKeyboardEnhancementFlags(
-                    KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
-                        | KeyboardEnhancementFlags::REPORT_EVENT_TYPES,
+            enable_optional(&BRACKETED_PASTE, || {
+                execute!(io::stderr(), EnableBracketedPaste)
+            })?;
+            enable_optional(&ENHANCED_KEYBOARD, || {
+                execute!(
+                    io::stderr(),
+                    PushKeyboardEnhancementFlags(
+                        KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                            | KeyboardEnhancementFlags::REPORT_EVENT_TYPES,
+                    )
                 )
-            )?;
-            ENHANCED_KEYBOARD.store(true, Ordering::Relaxed);
+            })?;
         }
         Ok(guard)
+    }
+}
+
+fn enable_optional(
+    enabled: &AtomicBool,
+    enable: impl FnOnce() -> io::Result<()>,
+) -> io::Result<()> {
+    match enable() {
+        Ok(()) => {
+            enabled.store(true, Ordering::Relaxed);
+            Ok(())
+        }
+        // Legacy Windows consoles lack these protocols; ordinary key events still work.
+        Err(error) if error.kind() == io::ErrorKind::Unsupported => Ok(()),
+        Err(error) => Err(error),
     }
 }
 
@@ -127,10 +146,61 @@ fn restore() {
             if ENHANCED_KEYBOARD.swap(false, Ordering::Relaxed) {
                 let _ = execute!(io::stderr(), PopKeyboardEnhancementFlags);
             }
-            let _ = execute!(io::stderr(), DisableBracketedPaste, ResetColor, Show);
+            if BRACKETED_PASTE.swap(false, Ordering::Relaxed) {
+                let _ = execute!(io::stderr(), DisableBracketedPaste);
+            }
+            let _ = execute!(io::stderr(), ResetColor, Show);
         }
     }
     if FULLSCREEN.swap(false, Ordering::Relaxed) {
         let _ = execute!(io::stdout(), LeaveAlternateScreen, ResetColor, Show);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn optional_controls_track_success_and_allow_unsupported_protocols() {
+        let paste = AtomicBool::new(false);
+        let keyboard = AtomicBool::new(false);
+        enable_optional(&paste, || Ok(())).unwrap();
+        enable_optional(&keyboard, || Err(io::ErrorKind::Unsupported.into())).unwrap();
+        assert!(paste.load(Ordering::Relaxed));
+        assert!(!keyboard.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn optional_controls_preserve_io_failures() {
+        let enabled = AtomicBool::new(false);
+        let error =
+            enable_optional(&enabled, || Err(io::ErrorKind::BrokenPipe.into())).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
+        assert!(!enabled.load(Ordering::Relaxed));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn legacy_windows_bracketed_paste_does_not_abort_startup() {
+        use crossterm::Command;
+
+        let enabled = AtomicBool::new(false);
+        enable_optional(&enabled, || EnableBracketedPaste.execute_winapi()).unwrap();
+        assert!(!enabled.load(Ordering::Relaxed));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_keyboard_enhancement_does_not_abort_startup() {
+        let enabled = AtomicBool::new(false);
+        enable_optional(&enabled, || {
+            execute!(
+                io::sink(),
+                PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+            )
+        })
+        .unwrap();
+        assert!(!enabled.load(Ordering::Relaxed));
     }
 }
