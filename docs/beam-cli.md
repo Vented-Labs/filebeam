@@ -2,6 +2,10 @@
 
 `beam` is the Linux, macOS, and Windows CLI for Filebeam.
 
+The Linux and macOS installer requires OpenSSL 3 or newer for release signature
+verification. On macOS, install it with `brew install openssl@3`; the installer
+automatically finds Homebrew's OpenSSL when the system provides LibreSSL.
+
 Install the latest release with:
 
 ```sh

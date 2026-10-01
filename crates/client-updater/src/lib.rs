@@ -522,7 +522,8 @@ impl Updater {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(State::default()),
             Err(e) => Err(e.into()),
         }?;
-        if let Ok(generation) = fs::read_to_string(self.options.home.join("cache/catalog-generation"))
+        if let Ok(generation) =
+            fs::read_to_string(self.options.home.join("cache/catalog-generation"))
             && let Ok(generation) = generation.trim().parse::<u64>()
         {
             state.cli.generation = state.cli.generation.max(generation);
@@ -702,13 +703,22 @@ fn verify_catalog(bytes: &[u8], key: &VerifyingKey, product: Product) -> Result<
         bail!("signed release catalog is expired, unsupported, or for another product");
     }
     if product == Product::Cli {
-        for asset in c.releases.iter_mut().flat_map(|release| &mut release.assets) {
+        for asset in c
+            .releases
+            .iter_mut()
+            .flat_map(|release| &mut release.assets)
+        {
             // Original CLI catalogs used implicit Linux assets and archive extensions.
             if asset.os.is_empty() {
                 asset.os = "linux".into();
             }
             if asset.kind.is_empty() {
-                asset.kind = if asset.os == "windows" { "zip-exe" } else { "tar-gz" }.into();
+                asset.kind = if asset.os == "windows" {
+                    "zip-exe"
+                } else {
+                    "tar-gz"
+                }
+                .into();
             }
         }
     }
@@ -766,7 +776,11 @@ fn stage_payload(
     root: &Path,
     version: &Version,
 ) -> Result<PathBuf> {
-    let suffix = if kind == "app-tar-gz" { ".app" } else { executable_suffix() };
+    let suffix = if kind == "app-tar-gz" {
+        ".app"
+    } else {
+        executable_suffix()
+    };
     let target = root.join(format!("{}-{}{}", version, Uuid::new_v4(), suffix));
     if kind == "app-tar-gz" {
         extract_bundle(bytes, &target)?;
@@ -1170,7 +1184,14 @@ mod tests {
             )
             .unwrap();
         let bytes = archive.into_inner().unwrap().finish().unwrap();
-        let target = stage_payload(&bytes, "app-tar-gz", Product::Desktop, &directory.0, &Version::parse("0.3.0").unwrap()).unwrap();
+        let target = stage_payload(
+            &bytes,
+            "app-tar-gz",
+            Product::Desktop,
+            &directory.0,
+            &Version::parse("0.3.0").unwrap(),
+        )
+        .unwrap();
         assert_eq!(target.extension().unwrap(), "app");
         assert_eq!(
             fs::metadata(target.join("Contents/MacOS/filebeam"))
@@ -1228,7 +1249,9 @@ mod tests {
         let directory = TestDirectory::new();
         fs::create_dir(directory.0.join("cache")).unwrap();
         fs::write(directory.0.join("cache/catalog-generation"), "42\n").unwrap();
-        let updater = Updater::new(Options::for_product(directory.0.clone(), Product::Cli, "0.3.0", "").unwrap());
+        let updater = Updater::new(
+            Options::for_product(directory.0.clone(), Product::Cli, "0.3.0", "").unwrap(),
+        );
         assert_eq!(updater.load_state().unwrap().cli.generation, 42);
         let mut state = updater.load_state().unwrap();
         state.cli.generation = 43;
@@ -1310,12 +1333,17 @@ mod tests {
         fs::create_dir_all(&fixture).unwrap();
         let tag = "v9.8.7";
         let namespace = product.catalog();
-        let writer_tag = if product == Product::Cli { format!("beam-{tag}") } else { tag.into() };
-        let prefix = if product == Product::Cli { format!("beam-{tag}") } else { format!("filebeam-desktop-{tag}") };
-        let selected = fixture.join(format!(
-            "{prefix}-linux-{}.tar.gz",
-            arch().unwrap()
-        ));
+        let writer_tag = if product == Product::Cli {
+            format!("beam-{tag}")
+        } else {
+            tag.into()
+        };
+        let prefix = if product == Product::Cli {
+            format!("beam-{tag}")
+        } else {
+            format!("filebeam-desktop-{tag}")
+        };
+        let selected = fixture.join(format!("{prefix}-linux-{}.tar.gz", arch().unwrap()));
         let mut archive = Vec::new();
         {
             let encoder = flate2::write::GzEncoder::new(&mut archive, flate2::Compression::fast());
@@ -1324,8 +1352,12 @@ mod tests {
             header.set_size(7);
             header.set_mode(0o755);
             header.set_cksum();
-            tar.append_data(&mut header, format!("{0}/{0}", product.binary()), &b"updated"[..])
-                .unwrap();
+            tar.append_data(
+                &mut header,
+                format!("{0}/{0}", product.binary()),
+                &b"updated"[..],
+            )
+            .unwrap();
             tar.finish().unwrap();
         }
         fs::write(&selected, &archive).unwrap();

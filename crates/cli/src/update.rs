@@ -38,7 +38,10 @@ pub fn apply_staged_update() -> Result<bool> {
     let _ = arguments.next();
     let command = arguments.next();
     if command.as_deref() == Some(std::ffi::OsStr::new("--beam-apply-update")) {
-        let destination = arguments.next().map(PathBuf::from).context("legacy update helper is missing destination")?;
+        let destination = arguments
+            .next()
+            .map(PathBuf::from)
+            .context("legacy update helper is missing destination")?;
         if arguments.next().is_some() {
             bail!("legacy update helper received unexpected arguments");
         }
@@ -112,13 +115,29 @@ pub fn activate_staged(config: &Config) -> Result<Activation> {
 }
 
 #[cfg(any(windows, test))]
-fn validate_legacy_update_paths(candidate: &std::path::Path, destination: &std::path::Path) -> Result<()> {
-    let name = candidate.file_name().and_then(|name| name.to_str()).context("invalid legacy candidate")?;
-    let pid = name.strip_prefix(".beam-update-").and_then(|name| name.strip_suffix(".exe")).context("invalid legacy candidate name")?;
-    if pid.is_empty() || !pid.bytes().all(|byte| byte.is_ascii_digit())
+fn validate_legacy_update_paths(
+    candidate: &std::path::Path,
+    destination: &std::path::Path,
+) -> Result<()> {
+    let name = candidate
+        .file_name()
+        .and_then(|name| name.to_str())
+        .context("invalid legacy candidate")?;
+    let pid = name
+        .strip_prefix(".beam-update-")
+        .and_then(|name| name.strip_suffix(".exe"))
+        .context("invalid legacy candidate name")?;
+    if pid.is_empty()
+        || !pid.bytes().all(|byte| byte.is_ascii_digit())
         || destination.file_name() != Some(std::ffi::OsStr::new("beam.exe"))
-        || candidate.parent().context("candidate has no directory")?.canonicalize()?
-            != destination.parent().context("destination has no directory")?.canonicalize()?
+        || candidate
+            .parent()
+            .context("candidate has no directory")?
+            .canonicalize()?
+            != destination
+                .parent()
+                .context("destination has no directory")?
+                .canonicalize()?
     {
         bail!("legacy update destination is invalid");
     }
@@ -156,7 +175,10 @@ pub fn report_staged_update_error() {
         let path = executable.with_file_name("beam.update-error");
         if let Ok(error) = std::fs::read_to_string(&path) {
             let _ = std::fs::remove_file(path);
-            eprintln!("beam update failed: {}; run `beam update` to retry", error.trim());
+            eprintln!(
+                "beam update failed: {}; run `beam update` to retry",
+                error.trim()
+            );
         }
     }
 }
@@ -172,7 +194,15 @@ mod tests {
         let candidate = root.path().join(".beam-update-123.exe");
         assert!(validate_legacy_update_paths(&candidate, &root.path().join("beam.exe")).is_ok());
         assert!(validate_legacy_update_paths(&candidate, &other.path().join("beam.exe")).is_err());
-        assert!(validate_legacy_update_paths(&candidate, &root.path().join("filebeam.exe")).is_err());
-        assert!(validate_legacy_update_paths(&root.path().join("beam.exe"), &root.path().join("beam.exe")).is_err());
+        assert!(
+            validate_legacy_update_paths(&candidate, &root.path().join("filebeam.exe")).is_err()
+        );
+        assert!(
+            validate_legacy_update_paths(
+                &root.path().join("beam.exe"),
+                &root.path().join("beam.exe")
+            )
+            .is_err()
+        );
     }
 }

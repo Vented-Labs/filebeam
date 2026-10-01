@@ -23,7 +23,7 @@ target=$4
 case "$url" in
     */index.json) cp "$BEAM_TEST_RELEASE/envelope.json" "$target" ;;
     */checksums.txt) cp "$BEAM_TEST_RELEASE/checksums.txt" "$target" ;;
-    */beam-v1.2.3-linux-x86_64.tar.gz) cp "$BEAM_TEST_RELEASE/beam-v1.2.3-linux-x86_64.tar.gz" "$target" ;;
+    */beam-v1.2.3-*.tar.gz) cp "$BEAM_TEST_RELEASE/${url##*/}" "$target" ;;
     *) exit 1 ;;
 esac
 EOF
@@ -67,5 +67,29 @@ test -x "$hostile/bin/beam"
 
 sh "$1/signed-install.sh" --dir "$HOME/latest"
 test -x "$HOME/latest/bin/beam"
+
+mkdir -p "$1/openssl with spaces/bin"
+ln -s "$(command -v openssl)" "$1/openssl with spaces/bin/openssl"
+printf "#!/bin/sh\nexit 1\n" > "$1/bin/openssl"
+printf "#!/bin/sh\nprintf '\''%%s\\n'\'' '\''%s'\''\n" "$1/openssl with spaces" > "$1/bin/brew"
+printf "#!/bin/sh\ncase \$1 in -s) printf Darwin;; -m) printf arm64;; *) exit 1;; esac\n" > "$1/bin/uname"
+chmod +x "$1/bin/openssl" "$1/bin/brew" "$1/bin/uname"
+sh "$1/signed-install.sh" --dir "$HOME/macos"
+test -x "$HOME/macos/bin/beam"
+
+php -r '\''$envelope=json_decode(file_get_contents($argv[1]),true,flags:JSON_THROW_ON_ERROR); $envelope["signature"]=base64_encode(str_repeat("x",64)); file_put_contents($argv[1],json_encode($envelope,JSON_THROW_ON_ERROR));'\'' "$1/release/envelope.json"
+if sh "$1/signed-install.sh" --dir "$HOME/tampered" > "$1/error" 2>&1; then
+    printf "%s\n" "Installer accepted a tampered catalog through Homebrew OpenSSL." >&2
+    exit 1
+fi
+grep -Fq "Release catalog signature verification failed." "$1/error"
+test ! -e "$HOME/tampered/bin/beam"
+
+printf "#!/bin/sh\nexit 1\n" > "$1/bin/brew"
+if sh "$1/signed-install.sh" --dir "$HOME/missing-openssl" > "$1/error" 2>&1; then
+    printf "%s\n" "Installer succeeded without a compatible OpenSSL." >&2
+    exit 1
+fi
+grep -Fq "brew install openssl@3" "$1/error"
 ' bash "$container_tmp"
 printf 'CLI installer test passed.\n'

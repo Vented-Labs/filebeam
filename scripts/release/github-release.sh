@@ -61,12 +61,9 @@ fi
 if [[ -n $desktop_dir ]]; then
     desktop_assets=(
         "$desktop_dir/filebeam-desktop-$tag-linux-x86_64.tar.gz" "$desktop_dir/filebeam-desktop-$tag-linux-aarch64.tar.gz"
+        "$desktop_dir/filebeam-desktop-$tag-macos-x86_64.tar.gz" "$desktop_dir/filebeam-desktop-$tag-macos-aarch64.tar.gz"
         "$desktop_dir/filebeam-desktop-$tag-windows-x86_64.zip"
     )
-    for arch in x86_64 aarch64; do
-        asset="$desktop_dir/filebeam-desktop-$tag-macos-$arch.tar.gz"
-        [[ ! -f $asset ]] || desktop_assets+=("$asset")
-    done
     [[ -f "$desktop_dir/release.json" ]] || { printf 'Missing desktop release metadata.\n' >&2; exit 1; }
     for asset in "${desktop_assets[@]}"; do [[ -f $asset ]] || { printf 'Missing desktop release asset: %s\n' "$asset" >&2; exit 1; }; done
     published_epoch=$(php -r '
