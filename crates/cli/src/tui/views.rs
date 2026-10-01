@@ -126,10 +126,7 @@ fn header(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme, spacious
                 1,
             ),
             buffer,
-            Line::styled(
-                "Good things are worth sharing.",
-                theme.strong().fg(theme.accent()),
-            ),
+            Line::styled("Send and receive files", theme.strong().fg(theme.accent())),
         );
         paint::line(
             at(
@@ -194,9 +191,9 @@ fn header(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme, spacious
 fn navigation(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) {
     let mut spans = Vec::new();
     for (mode, label) in [
-        (Mode::Send, " 1  Send files "),
-        (Mode::Receive, " 2  Receive "),
-        (Mode::Transfers, " 3  Transfers "),
+        (Mode::Send, " 1 Send "),
+        (Mode::Receive, " 2 Receive "),
+        (Mode::Transfers, " 3 Transfers "),
     ] {
         let style = if state.mode == mode {
             theme.strong().fg(theme.accent()).bg(theme.selected())
@@ -402,7 +399,7 @@ fn browser(
             buffer,
             Line::styled(
                 if selected_only {
-                    "Your next transfer starts with a file."
+                    "No files selected. Press Space to add a file."
                 } else {
                     "No files match. Try another search or folder."
                 },
@@ -509,17 +506,17 @@ fn queue(area: Rect, buffer: &mut Buffer, state: &mut State, theme: Theme) {
         paint::line(
             at(queue_area, 1, 1),
             buffer,
-            Line::styled("A little privacy.", theme.strong().fg(theme.accent())),
+            Line::styled("No files selected", theme.strong()),
         );
         paint::line(
             at(queue_area, 2, 1),
             buffer,
-            Line::styled("A lot of possibilities.", theme.strong()),
+            Line::styled("Select files with Space", theme.dim()),
         );
         paint::line(
             at(queue_area, 4, 1),
             buffer,
-            Line::styled("Space to add a file", theme.dim()),
+            Line::styled("Tab to review your selection", theme.dim()),
         );
     } else {
         let capacity = queue_area.height as usize / 2;
@@ -581,11 +578,26 @@ fn queue(area: Rect, buffer: &mut Buffer, state: &mut State, theme: Theme) {
     paint::line(
         at(inner, inner.height.saturating_sub(1), 1),
         buffer,
-        Line::styled("Only your link can unlock it.", theme.dim()),
+        Line::styled("Share the link with your recipient.", theme.dim()),
     );
 }
 
 fn send_actions(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) {
+    if area.width < 54 && area.height >= 2 {
+        for (row, label) in [
+            (0, "Send Encrypted  ↵"),
+            (area.height - 1, "Turbo Transfer  Shift+↵"),
+        ] {
+            paint::button(
+                at(area, row, 1),
+                buffer,
+                theme,
+                label,
+                state.focus == Focus::Action,
+            );
+        }
+        return;
+    }
     let gap = u16::from(area.width >= 54);
     let left_width = (area.width.saturating_sub(gap)) / 2;
     paint::button(
@@ -658,14 +670,14 @@ fn receive(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) -> Opti
     paint::line(
         at(inner, 0, 1),
         buffer,
-        Line::styled("A link is all you need.", theme.strong().fg(theme.accent())),
+        Line::styled("Receive files", theme.strong().fg(theme.accent())),
     );
     if !compact {
         paint::line(
             at(inner, 1, 1),
             buffer,
             Line::styled(
-                "Paste a Filebeam link. We will decrypt and verify it on this device.",
+                "Paste a Filebeam link to download and decrypt its files.",
                 theme.dim(),
             ),
         );
@@ -806,7 +818,7 @@ fn transfer(area: Rect, buffer: &mut Buffer, state: &mut State, theme: Theme) {
                 theme.success(),
             ),
             Err(_) if receipt.cancelled => ("Transfer cancelled", theme.warning()),
-            Err(_) => ("This transfer needs your attention", theme.danger()),
+            Err(_) => ("Transfer failed", theme.danger()),
         };
         paint::line(
             at(inner, 0, 1),
@@ -912,15 +924,49 @@ fn transfer(area: Rect, buffer: &mut Buffer, state: &mut State, theme: Theme) {
         );
         return;
     }
+    let inner = if let Some(link) = &view.share_link {
+        paint::line(
+            at(inner, 0, 1),
+            buffer,
+            Line::styled("Download link ready", theme.strong().fg(theme.accent())),
+        );
+        let row = at(inner, 1, 1);
+        Block::default()
+            .style(Style::default().bg(theme.selected()))
+            .render(row, buffer);
+        state.hyperlink = crate::output::Hyperlink::new(row, link);
+        paint::line(
+            row,
+            buffer,
+            Line::styled(
+                clip(link, row.width),
+                theme.strong().fg(theme.accent()).bg(theme.selected()),
+            ),
+        );
+        if inner.height >= 10 {
+            paint::line(
+                at(inner, 2, 1),
+                buffer,
+                Line::styled("Keep Beam running to continue this transfer.", theme.dim()),
+            );
+        }
+        let offset = if inner.height >= 10 { 4 } else { 2 };
+        at(inner, offset, inner.height.saturating_sub(offset))
+    } else {
+        inner
+    };
     let context = if view.progress.name.is_empty() {
         view.phase_label().into()
-    } else {
+    } else if view.progress.files > 1 {
         format!(
-            "{} · {} of {}",
+            "{} · {} · {} of {}",
+            view.phase_label(),
             clean(&view.progress.name),
             view.progress.index,
             view.progress.files
         )
+    } else {
+        format!("{} · {}", view.phase_label(), clean(&view.progress.name))
     };
     paint::line(
         at(inner, 0, 1),
@@ -953,7 +999,7 @@ fn transfer(area: Rect, buffer: &mut Buffer, state: &mut State, theme: Theme) {
         .progress
         .total
         .map(|total| format!("{} / {}", bytes(view.progress.done), bytes(total)))
-        .unwrap_or_else(|| "End-to-end encrypted".into());
+        .unwrap_or_default();
     paint::line(
         at(inner, bar_row + 1, 1),
         buffer,
@@ -962,28 +1008,19 @@ fn transfer(area: Rect, buffer: &mut Buffer, state: &mut State, theme: Theme) {
             Span::styled(amounts, theme.dim()),
         ]),
     );
-    paint::line(
-        at(inner, bar_row + 3, 1),
-        buffer,
-        Line::styled(view.phase_label(), theme.dim()),
-    );
-    if inner.height >= 10 {
-        let stats = format!(
-            "{}  elapsed     {}     {}",
-            duration(view.elapsed),
-            if view.stalled() || view.rate < 1.0 {
-                "Measuring speed".into()
-            } else {
-                format!("{}/s", bytes(view.rate as u64))
-            },
-            view.eta()
-                .map(|eta| format!("{} remaining", duration(eta)))
-                .unwrap_or_default()
-        );
+    if inner.height > bar_row + 3 {
+        let transferring = matches!(view.progress.phase, Phase::Sending | Phase::Receiving);
+        let mut stats = vec![format!("{} elapsed", duration(view.elapsed))];
+        if transferring && !view.stalled() && view.rate >= 1.0 {
+            stats.push(format!("{}/s", bytes(view.rate as u64)));
+        }
+        if let Some(eta) = view.eta() {
+            stats.push(format!("{} remaining", duration(eta)));
+        }
         paint::line(
-            at(inner, bar_row + 5, 1),
+            at(inner, bar_row + 3, 1),
             buffer,
-            Line::styled(stats, theme.dim()),
+            Line::styled(stats.join(" · "), theme.dim()),
         );
     }
     if inner.height >= 15 {
@@ -991,24 +1028,7 @@ fn transfer(area: Rect, buffer: &mut Buffer, state: &mut State, theme: Theme) {
         Sparkline::default()
             .data(&data)
             .style(Style::default().fg(theme.gradient(0.2)))
-            .render(at(inner, 10, 2), buffer);
-    }
-    if inner.height >= 18 {
-        let acknowledged = match view.direction {
-            Direction::Upload => "Acknowledged",
-            _ => "Authenticated",
-        };
-        paint::line(
-            at(inner, inner.height - 1, 1),
-            buffer,
-            Line::styled(
-                format!(
-                    "{acknowledged} {} · final verification before completion",
-                    bytes(view.progress.committed)
-                ),
-                theme.dim(),
-            ),
-        );
+            .render(at(inner, bar_row + 5, 2), buffer);
     }
 }
 
@@ -1027,44 +1047,76 @@ fn footer_view(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) {
     let hints: Vec<(&str, &str)> = if state.prompt.is_some() {
         vec![("Enter", "unlock"), ("Esc", "cancel")]
     } else if state.transfer.is_some() && state.receipt.is_none() {
-        vec![("Ctrl+C", "cancel transfer"), ("?", "help")]
+        let mut hints = Vec::new();
+        if state
+            .transfer
+            .as_ref()
+            .is_some_and(|view| view.share_link.is_some())
+        {
+            hints.push(("c", "copy link"));
+        }
+        hints.extend([("Ctrl+C", "cancel"), ("?", "help")]);
+        hints
     } else if state.receipt.is_some() {
-        vec![
-            ("c", "copy"),
-            ("Enter", "new transfer"),
-            ("↑↓", "scroll"),
-            ("q", "finish"),
-        ]
+        let mut hints = Vec::new();
+        if state
+            .receipt
+            .as_ref()
+            .is_some_and(|receipt| receipt.result.is_ok())
+        {
+            hints.push(("c", "copy"));
+        }
+        hints.extend([("Enter", "new transfer"), ("↑↓", "scroll"), ("q", "finish")]);
+        hints
     } else if state.palette {
         vec![
-            ("↑↓", "choose native action"),
+            ("↑↓", "choose action"),
             ("Enter", "open form"),
             ("Esc", "close"),
         ]
     } else if state.native.is_some() {
         vec![
             ("Tab", "next field"),
-            ("Enter", "run native action"),
+            ("Enter", "continue"),
             ("Esc", "cancel"),
         ]
     } else if state.searching {
         vec![("Enter", "apply search"), ("Esc", "clear")]
+    } else if state.mode == Mode::Receive && state.focus == Focus::Action {
+        vec![
+            ("1/2/3", "switch page"),
+            ("Enter", "download"),
+            ("Tab", "edit fields"),
+        ]
     } else if state.mode == Mode::Receive {
         vec![
             ("Tab", "next field"),
             ("Enter", "continue"),
-            ("Esc", "actions"),
+            ("Esc", "leave field"),
         ]
     } else if state.mode == Mode::Transfers {
-        vec![("Enter", "resume"), ("x", "discard"), ("↑↓", "choose")]
+        vec![
+            ("1/2/3", "switch page"),
+            ("Enter", "resume"),
+            ("x", "discard"),
+            ("↑↓", "choose"),
+            ("q", "quit"),
+        ]
     } else {
         vec![
             ("Space", "select"),
-            ("Enter", "send encrypted"),
+            (
+                "Enter",
+                if state.focus == Focus::Browser {
+                    "open/select"
+                } else {
+                    "send"
+                },
+            ),
             ("Shift+Enter", "Turbo transfer"),
             ("Tab", "focus"),
             ("/", "search"),
-            ("p", "native services"),
+            ("p", "more actions"),
             ("?", "help"),
         ]
     };
@@ -1103,16 +1155,14 @@ fn dim(area: Rect, buffer: &mut Buffer, theme: Theme) {
 }
 
 fn help(area: Rect, buffer: &mut Buffer, theme: Theme) {
-    let inner = paint::card(centered(area, 76, 18), buffer, theme, true);
+    let inner = paint::card(centered(area, 76, 20), buffer, theme, true);
     let items = [
-        ("Your keyboard, a little more powerful.", ""),
+        ("Keyboard shortcuts", ""),
         ("", ""),
         ("1 / 2 / 3", "Send files / receive a link / saved transfers"),
-        (
-            "p",
-            "Native notes, account, inbox, recipient, end and revoke",
-        ),
+        ("p", "Notes, account, inbox and transfer actions"),
         ("Tab / Shift+Tab", "Move between panels or form fields"),
+        ("Esc in a field", "Leave input to use page shortcuts"),
         ("↑↓ / j k", "Move through files"),
         ("Space", "Add or remove a file"),
         ("Enter / Backspace", "Open folder / go to parent"),
@@ -1123,7 +1173,7 @@ fn help(area: Rect, buffer: &mut Buffer, theme: Theme) {
             "Send encrypted / Turbo transfer (supported terminals)",
         ),
         ("u / U", "Send selected files / update beam"),
-        ("c", "Copy a completed result via terminal clipboard"),
+        ("c", "Copy an available link or completed result"),
         ("Ctrl+C", "Cancel active transfer, or exit when idle"),
         ("Esc / Enter", "Close this help"),
     ];
@@ -1144,15 +1194,12 @@ fn palette(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) -> Opti
     paint::line(
         at(inner, 0, 1),
         buffer,
-        Line::styled("Native services", theme.strong().fg(theme.accent())),
+        Line::styled("More actions", theme.strong().fg(theme.accent())),
     );
     paint::line(
         at(inner, 1, 1),
         buffer,
-        Line::styled(
-            "Typed Filebeam actions. Nothing is passed to a shell or browser.",
-            theme.dim(),
-        ),
+        Line::styled("Select an action and press Enter.", theme.dim()),
     );
     let capacity = inner.height.saturating_sub(4) as usize;
     let start = state
@@ -1205,9 +1252,9 @@ fn native_form(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) -> 
             buffer,
             input,
             theme,
-            masked,
-            "",
             active,
+            "",
+            masked,
         );
         if active {
             cursor = field_cursor;
@@ -1217,7 +1264,7 @@ fn native_form(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) -> 
         at(inner, inner.height.saturating_sub(1), 1),
         buffer,
         Line::styled(
-            "Enter runs when on the last field. Passwords are masked and never logged.",
+            "Tab moves between fields. Enter on the last field submits.",
             theme.dim(),
         ),
     );
@@ -1252,10 +1299,7 @@ fn secret(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) -> Optio
     paint::line(
         at(inner, 0, 1),
         buffer,
-        Line::styled(
-            "Only you can unlock this.",
-            theme.strong().fg(theme.accent()),
-        ),
+        Line::styled("Unlock transfer", theme.strong().fg(theme.accent())),
     );
     paint::line(
         at(inner, 2, 1),
@@ -1287,6 +1331,61 @@ mod tests {
         app::{Progress, TransferView},
         config::Config,
     };
+
+    #[test]
+    fn active_share_keeps_its_full_link_and_copy_hint_at_supported_sizes() {
+        let directory = tempfile::tempdir().unwrap();
+        let config = Config::default();
+        let link = "https://example.test/01ARZ3NDEKTSV4RRFFQ69G5FAV#k=v1.entire-decryption-key";
+        for (width, height) in [(40, 14), (60, 20), (80, 24), (120, 36)] {
+            let mut state =
+                State::new(&config, "https://example.test", directory.path().into()).unwrap();
+            let mut view = TransferView::new(Direction::Upload);
+            view.share_link = Some(link.into());
+            view.progress.phase = Phase::Sending;
+            view.progress.total = Some(100);
+            view.progress.done = 25;
+            state.transfer = Some(view);
+            let mut buffer = Buffer::empty(Rect::new(0, 0, width, height));
+            render(buffer.area, &mut buffer, &mut state, Theme::fixture());
+            let text: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+            assert!(
+                text.contains("Download link ready"),
+                "{width}x{height}: {text}"
+            );
+            assert!(text.contains("copy link"));
+            assert!(text.contains("Uploading"));
+            assert!(!text.contains("verification before completion"));
+            assert_eq!(state.hyperlink.as_ref().unwrap().target, link);
+        }
+    }
+
+    #[test]
+    fn password_masking_is_independent_of_form_focus() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut state = State::new(
+            &Config::default(),
+            "https://example.test",
+            directory.path().into(),
+        )
+        .unwrap();
+        for focus in [0, 1] {
+            state.native = Some(super::super::state::NativeForm {
+                action: NativeAction::Login,
+                fields: vec![
+                    Input::new("person@example.test".into()),
+                    Input::new("secret-password".into()),
+                ],
+                field: focus,
+            });
+            let mut buffer = Buffer::empty(Rect::new(0, 0, 100, 30));
+            let cursor = render(buffer.area, &mut buffer, &mut state, Theme::fixture());
+            let text: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+            assert!(cursor.is_some());
+            assert!(text.contains("person@example.test"));
+            assert!(!text.contains("secret-password"));
+        }
+    }
 
     #[test]
     fn every_view_renders_at_small_and_large_sizes() {
@@ -1359,12 +1458,13 @@ mod tests {
         let mut state =
             State::new(&config, "http://localhost:8000", directory.path().into()).unwrap();
         state.focus = Focus::Action;
-        let mut buffer = Buffer::empty(Rect::new(0, 0, 120, 36));
-        render(buffer.area, &mut buffer, &mut state, Theme::fixture());
-        let text: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
-        assert!(text.contains("Send Encrypted"));
-        assert!(text.contains("Turbo Transfer"));
-        assert!(text.contains("Shift+"));
+        for (width, height) in [(40, 14), (80, 24), (120, 36)] {
+            let mut buffer = Buffer::empty(Rect::new(0, 0, width, height));
+            render(buffer.area, &mut buffer, &mut state, Theme::fixture());
+            let text: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+            assert!(text.contains("Send Encrypted  ↵"));
+            assert!(text.contains("Turbo Transfer  Shift+↵"));
+        }
     }
 
     #[test]
@@ -1431,7 +1531,7 @@ mod tests {
             }
         }
         for (width, height) in [(80, 24), (120, 36)] {
-            for screen in ["send", "receive", "transfer", "receipt", "error"] {
+            for screen in ["send", "receive", "transfer", "turbo", "receipt", "error"] {
                 let config = Config::default();
                 let mut state =
                     State::new(&config, "http://localhost:8000", directory.path().into()).unwrap();
@@ -1449,7 +1549,7 @@ mod tests {
                     state.mode = Mode::Receive;
                     state.focus = Focus::Link;
                 }
-                if matches!(screen, "transfer" | "receipt" | "error") {
+                if matches!(screen, "transfer" | "turbo" | "receipt" | "error") {
                     let mut view = TransferView::new(Direction::Upload);
                     view.progress = Progress {
                         name: "Product brief.pdf".into(),
@@ -1468,6 +1568,9 @@ mod tests {
                     view.history = (0..48)
                         .map(|i| 500_000 + ((i as f64 / 3.0).sin().abs() * 2_000_000.0) as u64)
                         .collect();
+                    if screen == "turbo" {
+                        view.share_link = Some("https://example.test/01ARZ3NDEKTSV4RRFFQ69G5FAV#k=v1.full-decryption-key".into());
+                    }
                     state.transfer = Some(view);
                 }
                 if screen == "receipt" {

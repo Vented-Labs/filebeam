@@ -138,6 +138,7 @@ impl Job {
 
 pub struct TransferView {
     pub direction: Direction,
+    pub share_link: Option<String>,
     pub progress: Progress,
     pub started: Instant,
     pub elapsed: Duration,
@@ -158,6 +159,7 @@ impl TransferView {
         let now = Instant::now();
         Self {
             direction,
+            share_link: None,
             progress: Progress::default(),
             started: now,
             elapsed: Duration::ZERO,
@@ -253,6 +255,10 @@ impl TransferView {
             "Cancelling · waiting for the active request"
         } else if self.stalled() {
             "Waiting for the connection"
+        } else if self.progress.phase == Phase::Finalizing && self.direction == Direction::Upload {
+            "Finishing upload"
+        } else if self.progress.phase == Phase::Storing {
+            "Saving transfer state"
         } else {
             self.progress.phase.label()
         }
@@ -284,6 +290,17 @@ mod tests {
 
     fn control() -> Control {
         Control::test_factory()
+    }
+
+    #[test]
+    fn upload_finalization_does_not_claim_to_create_an_existing_link() {
+        let mut view = TransferView::new(Direction::Upload);
+        view.share_link = Some("https://example.test/share#k=key".into());
+        view.progress.phase = Phase::Finalizing;
+        assert_eq!(view.phase_label(), "Finishing upload");
+        assert!(!view.finished);
+        view.progress.phase = Phase::Storing;
+        assert_eq!(view.phase_label(), "Saving transfer state");
     }
 
     #[test]

@@ -71,7 +71,18 @@ pub fn run(
     loop {
         view.tick(job.control.snapshot(), !theme.motion, Instant::now());
         view.cancelling = job.control.cancelled.load(Ordering::Relaxed);
-        if let Some(outcome) = job.poll() {
+        let outcome = job.poll();
+        while let Ok(event) = job.events.try_recv() {
+            if let TransferEvent::ShareReady(share) = event
+                && !announced_links.contains(&share.share_url)
+            {
+                surface.clear()?;
+                crate::output::result(&share.share_url, plain)?;
+                view.share_link = Some(share.share_url.clone());
+                announced_links.push(share.share_url);
+            }
+        }
+        if let Some(outcome) = outcome {
             view.tick(job.control.snapshot(), true, Instant::now());
             view.finish(outcome.is_ok());
             surface.clear()?;
@@ -113,16 +124,6 @@ pub fn run(
                 .into_iter()
                 .filter(|value| !announced_links.contains(value))
                 .collect());
-        }
-        while let Ok(event) = job.events.try_recv() {
-            match event {
-                TransferEvent::ShareReady(share) => {
-                    surface.clear()?;
-                    crate::output::result(&share.share_url, plain)?;
-                    announced_links.push(share.share_url);
-                }
-                TransferEvent::PeerConsent(_) | TransferEvent::PeerFailed(_) => {}
-            }
         }
         if let Ok(prompt) = job.prompts.try_recv() {
             surface.clear()?;
@@ -228,7 +229,11 @@ pub fn render(buffer: &mut Buffer, theme: Theme, view: &TransferView, fallback: 
     {
         stats.push_str(&format!("  {}/{}", bytes(view.progress.done), bytes(total)));
     }
-    if area.width >= 76 && view.rate >= 1.0 && !view.stalled() {
+    if area.width >= 76
+        && view.rate >= 1.0
+        && !view.stalled()
+        && matches!(view.progress.phase, Phase::Sending | Phase::Receiving)
+    {
         stats.push_str(&format!("  {}/s", bytes(view.rate as u64)));
     }
     if area.width >= 90

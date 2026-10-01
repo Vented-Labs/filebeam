@@ -8,6 +8,16 @@ progressively receive verified chunks while the sender is still uploading, with:
 beam up --turbo report.pdf
 ```
 
+The download link appears as soon as the server accepts the encrypted transfer
+descriptor, while the upload continues. Keep Beam running until uploading
+finishes. In the full-screen interface, press `c` to copy the link during upload.
+With `beam up --turbo`, the link is printed once to stdout, including when stdout
+is redirected. Resuming a Turbo upload makes the same link available again.
+
+In the full-screen interface, use `1`, `2`, and `3` to switch between Send,
+Receive, and Transfers. When editing a field, press `Esc` first to return to
+page shortcuts.
+
 Turbo is HTTP-only and cannot be combined with `--transport webrtc`. Use native
 live WebRTC for a file send with:
 
@@ -40,8 +50,3 @@ Native WebRTC supports file links only. Notes, burn-on-read notes, and
 account-key inbox delivery are unsupported. In particular, the native download
 path requires ordinary manifest items and cannot currently turn an itemless
 note payload into a synthetic item.
-
-Earlier native and browser verification runs applied only to the source and
-artifacts tested then. They do not certify the current changed source or any
-artifact with a different SHA-256. A temporary benchmark of roughly 3% is not
-robust enough to claim a production performance improvement.

@@ -13,7 +13,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use zeroize::Zeroizing;
 
 use crate::{
-    app::{Cancelled, Job, Prompt, PromptKind, Request, TransferView, subsequence},
+    app::{Cancelled, Job, Prompt, PromptKind, Request, TransferEvent, TransferView, subsequence},
     config::Config,
     input::Input,
     presentation::{Theme, clean},
@@ -68,7 +68,7 @@ impl NativeAction {
     ];
     pub fn label(self) -> &'static str {
         match self {
-            Self::NoteCreate => "Note: create (native editor)",
+            Self::NoteCreate => "Note: create",
             Self::NoteOpen => "Note: open",
             Self::InboxList => "Inbox: list",
             Self::InboxDownload => "Inbox: download",
@@ -96,11 +96,12 @@ impl NativeAction {
                 ("language", false),
                 ("note text", false),
                 ("password (optional)", true),
-                ("flags: burn live", false),
+                ("options: burn / live (space-separated)", false),
             ],
             Self::NoteOpen => &[("link", false), ("password (optional)", true)],
             Self::InboxDownload => &[("delivery id", false), ("output folder", false)],
-            Self::Recipient | Self::Revoke | Self::EndLive => &[("username or transfer id", false)],
+            Self::Recipient => &[("username", false)],
+            Self::Revoke | Self::EndLive => &[("transfer id", false)],
             Self::Login => &[("email", false), ("password", true)],
             Self::Register => &[
                 ("username", false),
@@ -126,6 +127,29 @@ impl NativeAction {
             ],
             Self::KeyExport => &[("type EXPORT to reveal the key", false)],
             _ => &[],
+        }
+    }
+
+    fn completed(self) -> &'static str {
+        match self {
+            Self::NoteCreate => "Note created",
+            Self::NoteOpen => "Note opened",
+            Self::InboxList => "Inbox loaded",
+            Self::InboxDownload => "Delivery downloaded",
+            Self::Recipient => "Recipient found",
+            Self::Revoke => "Transfer revoked",
+            Self::EndLive => "Live transfer ended",
+            Self::Login => "Signed in",
+            Self::Register => "Account created",
+            Self::Logout => "Signed out",
+            Self::Profile => "Profile loaded",
+            Self::ResendVerification => "Verification email requested",
+            Self::Verify => "Email verified",
+            Self::RecoveryRequest => "Recovery email requested",
+            Self::RecoveryReset => "Password reset",
+            Self::KeySelf | Self::KeyPassword => "Receiving key created",
+            Self::KeyImport => "Receiving key imported",
+            Self::KeyExport => "Receiving key exported",
         }
     }
 }
@@ -226,6 +250,7 @@ pub struct State {
     pub palette_cursor: usize,
     pub native: Option<NativeForm>,
     pub service_result: Option<mpsc::Receiver<Result<Vec<String>, String>>>,
+    service_notice: Option<&'static str>,
 }
 
 impl State {
@@ -267,6 +292,7 @@ impl State {
             palette_cursor: 0,
             native: None,
             service_result: None,
+            service_notice: None,
         };
         state.refresh()?;
         Ok(state)
@@ -478,13 +504,23 @@ impl State {
             match result {
                 Ok(values) => {
                     self.results.extend(values);
-                    self.toast("Native service action completed");
+                    let notice = self.service_notice.take().unwrap_or("Action completed");
+                    self.toast(format!("{notice}. Results will be printed on exit."));
                 }
                 Err(error) => self.toast(error),
             }
             self.service_result = None;
+            self.service_notice = None;
         }
         if let Some(job) = &self.job {
+            let result = job.poll();
+            while let Ok(event) = job.events.try_recv() {
+                if let TransferEvent::ShareReady(share) = event
+                    && let Some(view) = &mut self.transfer
+                {
+                    view.share_link = Some(share.share_url);
+                }
+            }
             if let Some(view) = &mut self.transfer {
                 view.tick(job.control.snapshot(), !theme.motion, Instant::now());
                 view.cancelling = job.control.cancelled.load(Ordering::Relaxed);
@@ -493,7 +529,7 @@ impl State {
                 self.prompt = Some(prompt);
                 self.secret = Input::default();
             }
-            if let Some(result) = job.poll() {
+            if let Some(result) = result {
                 if let Some(view) = &mut self.transfer {
                     view.tick(job.control.snapshot(), true, Instant::now());
                     view.finish(result.is_ok());
@@ -518,7 +554,9 @@ impl State {
 
     pub fn paste(&mut self, value: &str) {
         if let Some(form) = &mut self.native {
-            form.fields[form.field].insert(value);
+            if let Some(field) = form.fields.get_mut(form.field) {
+                field.insert(value);
+            }
             return;
         }
         if self.prompt.is_some() {
@@ -603,8 +641,10 @@ impl State {
             return Ok(false);
         }
         if self.job.is_some() {
-            if key.code == KeyCode::Char('?') {
-                self.help = true;
+            match key.code {
+                KeyCode::Char('?') => self.help = true,
+                KeyCode::Char('c') => self.copy_result()?,
+                _ => {}
             }
             return Ok(false);
         }
@@ -622,11 +662,7 @@ impl State {
                     self.receipt = None;
                     self.transfer = None;
                     self.selected.clear();
-                    self.focus = if self.mode == Mode::Send {
-                        Focus::Browser
-                    } else {
-                        Focus::Link
-                    };
+                    self.switch_mode(self.mode);
                     if let Err(error) = self.refresh() {
                         self.toast(format!("Cannot refresh folder: {error}"));
                     }
@@ -648,23 +684,6 @@ impl State {
                     self.cursor = 0;
                     self.refilter();
                 }
-            }
-            return Ok(false);
-        }
-        if self.mode == Mode::Transfers {
-            match key.code {
-                KeyCode::Down | KeyCode::Char('j') => {
-                    self.queue_cursor =
-                        (self.queue_cursor + 1).min(self.saved_transfers.len().saturating_sub(1));
-                }
-                KeyCode::Up | KeyCode::Char('k') => {
-                    self.queue_cursor = self.queue_cursor.saturating_sub(1);
-                }
-                KeyCode::Enter => self.resume_selected(),
-                KeyCode::Delete | KeyCode::Backspace | KeyCode::Char('x') => {
-                    self.discard_selected()
-                }
-                _ => {}
             }
             return Ok(false);
         }
@@ -703,22 +722,13 @@ impl State {
             KeyCode::Char('?') => self.help = true,
             KeyCode::Char('p') => self.palette = true,
             KeyCode::Char('1') | KeyCode::Char('s') => {
-                self.mode = Mode::Send;
-                self.focus = Focus::Browser;
+                self.switch_mode(Mode::Send);
             }
             KeyCode::Char('2') | KeyCode::Char('d') => {
-                self.mode = Mode::Receive;
-                self.focus = Focus::Link;
+                self.switch_mode(Mode::Receive);
             }
             KeyCode::Char('3') | KeyCode::Char('r') => {
-                self.mode = Mode::Transfers;
-                self.focus = Focus::Jobs;
-                self.saved_transfers =
-                    protocol::saved_transfers(&self.config.home.join("transfers"))
-                        .unwrap_or_default();
-                self.queue_cursor = self
-                    .queue_cursor
-                    .min(self.saved_transfers.len().saturating_sub(1));
+                self.switch_mode(Mode::Transfers);
             }
             KeyCode::Tab => self.next_focus(false),
             KeyCode::BackTab => self.next_focus(true),
@@ -726,10 +736,46 @@ impl State {
             KeyCode::Char('u') if self.mode == Mode::Send => self.start(),
             KeyCode::Enter if self.mode == Mode::Transfers => self.resume_selected(),
             KeyCode::Enter if self.focus == Focus::Action => self.start(),
+            _ if self.mode == Mode::Transfers => self.transfers_key(key),
             _ if self.mode == Mode::Send => self.browser_key(key),
             _ => {}
         }
         Ok(false)
+    }
+
+    fn switch_mode(&mut self, mode: Mode) {
+        self.mode = mode;
+        self.focus = match mode {
+            Mode::Send => {
+                self.queue_cursor = self.queue_cursor.min(self.selected.len().saturating_sub(1));
+                Focus::Browser
+            }
+            Mode::Receive => Focus::Link,
+            Mode::Transfers => {
+                self.saved_transfers =
+                    protocol::saved_transfers(&self.config.home.join("transfers"))
+                        .unwrap_or_default();
+                self.queue_cursor = self
+                    .queue_cursor
+                    .min(self.saved_transfers.len().saturating_sub(1));
+                Focus::Jobs
+            }
+        };
+        self.queue_scroll = 0;
+    }
+
+    fn transfers_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.queue_cursor =
+                    (self.queue_cursor + 1).min(self.saved_transfers.len().saturating_sub(1));
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.queue_cursor = self.queue_cursor.saturating_sub(1)
+            }
+            KeyCode::Delete | KeyCode::Backspace | KeyCode::Char('x') => self.discard_selected(),
+            _ => {}
+        }
     }
 
     fn native_key(&mut self, key: KeyEvent) -> Result<()> {
@@ -825,6 +871,7 @@ impl State {
         let instance = self.instance.clone();
         let (send, receive) = mpsc::channel();
         self.service_result = Some(receive);
+        self.service_notice = Some(form.action.completed());
         std::thread::spawn(move || {
             let result = native_action(form.action, &config, &instance, values)
                 .map_err(|error| format!("{error:#}"));
@@ -909,15 +956,22 @@ impl State {
     }
 
     fn copy_result(&mut self) -> Result<()> {
-        if let Some(Receipt {
-            result: Ok(values), ..
-        }) = &self.receipt
-        {
-            let value = STANDARD.encode(values.join("\n"));
+        let value = match &self.receipt {
+            Some(Receipt {
+                result: Ok(values), ..
+            }) => Some(values.join("\n")),
+            None => self
+                .transfer
+                .as_ref()
+                .and_then(|view| view.share_link.clone()),
+            _ => None,
+        };
+        if let Some(value) = value {
+            let value = STANDARD.encode(value);
             let mut output = io::stdout();
             write!(output, "\x1b]52;c;{value}\x07")?;
             output.flush()?;
-            self.toast("Copy requested · your terminal must support clipboard access. Links are also printed on exit.");
+            self.toast("Copy requested. Requires terminal clipboard support.");
         }
         Ok(())
     }
@@ -1062,6 +1116,60 @@ fn native_action(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transfers_page_allows_navigation_help_and_exit() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = Config::default();
+        config.home = dir.path().join("home");
+        let mut state = State::new(&config, "http://localhost:8000", dir.path().into()).unwrap();
+        for populated in [false, true] {
+            state.key(KeyCode::Char('3').into()).unwrap();
+            if populated {
+                state.saved_transfers.push(SavedTransfer {
+                    id: "job".into(),
+                    direction: "upload".into(),
+                    state: "sending".into(),
+                    done: 1,
+                    total: 10,
+                });
+            }
+            state.key(KeyCode::Char('?').into()).unwrap();
+            assert!(state.help);
+            state.key(KeyCode::Esc.into()).unwrap();
+            state.key(KeyCode::Char('1').into()).unwrap();
+            assert!(state.mode == Mode::Send && state.focus == Focus::Browser);
+            state.key(KeyCode::Char('3').into()).unwrap();
+            state.key(KeyCode::Char('2').into()).unwrap();
+            assert!(state.mode == Mode::Receive && state.focus == Focus::Link);
+            for digit in "123".chars() {
+                state.key(KeyCode::Char(digit).into()).unwrap();
+            }
+            assert_eq!(state.link.take(), "123");
+            state.key(KeyCode::Esc.into()).unwrap();
+            state.key(KeyCode::Char('3').into()).unwrap();
+            assert!(state.mode == Mode::Transfers && state.focus == Focus::Jobs);
+            assert!(state.key(KeyCode::Char('q').into()).unwrap());
+            assert!(state.key(KeyCode::Esc.into()).unwrap());
+        }
+    }
+
+    #[test]
+    fn new_transfer_after_resume_restores_the_jobs_focus() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = Config::default();
+        config.home = dir.path().join("home");
+        let mut state = State::new(&config, "http://localhost:8000", dir.path().into()).unwrap();
+        state.mode = Mode::Transfers;
+        state.transfer = Some(TransferView::new(crate::app::Direction::Upload));
+        state.receipt = Some(Receipt {
+            result: Ok(vec![]),
+            cancelled: false,
+        });
+        state.key(KeyCode::Enter.into()).unwrap();
+        assert!(state.focus == Focus::Jobs);
+        assert!(state.transfer.is_none());
+    }
     #[test]
     fn search_input_does_not_trigger_transfer_shortcuts() {
         let dir = tempfile::tempdir().unwrap();

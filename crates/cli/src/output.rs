@@ -48,9 +48,11 @@ pub fn result(value: &str, plain: bool) -> io::Result<()> {
         && std::env::var("TERM").unwrap_or_default() != "dumb"
         && let Some(link) = sequence(value, value)
     {
-        return writeln!(stdout, "{link}");
+        writeln!(stdout, "{link}")?;
+    } else {
+        writeln!(stdout, "{value}")?;
     }
-    writeln!(stdout, "{value}")
+    stdout.flush()
 }
 
 pub fn screen_link(output: &mut impl Write, link: &Hyperlink, theme: Theme) -> io::Result<()> {
