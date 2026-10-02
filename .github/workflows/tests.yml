@@ -521,7 +521,7 @@ jobs:
       - uses: ./.ci-workflow/.github/actions/setup-node
         if: matrix.gd == 'true'
         with:
-          browser: 'true'
+          browser: ${{ hashFiles('scripts/themes/reference-browser.sh') == '' }}
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: test-frontend
@@ -537,7 +537,12 @@ jobs:
         run: vendor/bin/pest tests/Unit/FeatureAvailabilityTest.php tests/Unit/ThemePaletteTest.php tests/Feature/ThemeSettingsTest.php tests/Feature/ThemeAssetsTest.php tests/Feature/AppearancePreferencesTest.php tests/Feature/BrandingTest.php tests/Feature/BrandedMailTest.php tests/Feature/BrandedErrorPagesTest.php
       - name: Test runtime theme changes against an isolated application
         if: matrix.gd == 'true' && hashFiles('scripts/themes/test.sh') != ''
-        run: npm run test:theme
+        run: |
+          if [ -f scripts/themes/reference-browser.sh ]; then
+            npm run test:theme:reference
+          else
+            npm run test:theme
+          fi
       - name: Test explicit theme adapters
         if: hashFiles('backend/tests/Unit/ThemeEffectsTest.php') != ''
         working-directory: backend

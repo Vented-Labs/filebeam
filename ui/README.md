@@ -53,7 +53,11 @@ authenticated preferences are saved under `users.settings.appearance`. Preset ID
 are defined by `ThemePreset`; public palettes and instance branding use separate
 resolvers. The component gallery uses the same PHP palette generator.
 
-After building, `npm run test:theme` checks an isolated application and
-`npm run test:prism` checks production component fixtures and the editor. Both
-include visual regressions. Use `THEME_CAPTURE=1` to retain review images, inspect
-them, then explicitly pass `-- --update-snapshots` for intentional baseline changes.
+After building, `npm run test:theme:reference` checks an isolated application using
+the matching Playwright Ubuntu browser image (Docker with host networking).
+This pins native font fallbacks for keyboard hints and standalone error pages.
+`npm run test:theme` uses the locally installed browser for development; its native
+fonts may differ from the reference screenshots. `npm run test:prism` checks the
+production component fixtures and editor. Use `THEME_CAPTURE=1` to retain review
+images, inspect them, then explicitly pass `-- --update-snapshots` for intentional
+baseline changes.

@@ -120,6 +120,71 @@ test('progress keeps numeric ARIA across invalid, fractional and decreasing valu
     ).toHaveAttribute('aria-valuetext', 'Progress 0.4: <1%');
 });
 
+test('filled buttons keep an opaque background throughout hover and press transitions', async ({
+    page,
+}) => {
+    test.setTimeout(120_000);
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await page.goto('/?theme');
+    for (const preset of presets)
+        for (const mode of ['dark', 'light'] as const) {
+            await page.mouse.move(0, 0);
+            await page.evaluate(
+                ({ preset, mode }) => {
+                    window.filebeamAppearance!.set(mode);
+                    window.filebeamAppearance!.setPreset(preset);
+                },
+                { preset, mode },
+            );
+            for (const variant of ['primary', 'secondary']) {
+                const button =
+                    variant === 'primary'
+                        ? page.getByTestId('primary')
+                        : page.getByRole('button', { name: 'Secondary action', exact: true });
+                await button.evaluate(async (node) => {
+                    getComputedStyle(node).getPropertyValue('background-color');
+                    await Promise.all(
+                        node.getAnimations().map((animation) => animation.finished.catch(() => {})),
+                    );
+                });
+                for (const action of ['hover', 'press', 'leave']) {
+                    const sampling = button.evaluate(async (node) => {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = canvas.height = 1;
+                        const context = canvas.getContext('2d')!;
+                        const samples: Array<{ image: string; color: string; alpha: number }> = [];
+                        for (let frame = 0; frame < 16; frame++) {
+                            await new Promise(requestAnimationFrame);
+                            const style = getComputedStyle(node);
+                            context.clearRect(0, 0, 1, 1);
+                            context.fillStyle = style.backgroundColor;
+                            context.fillRect(0, 0, 1, 1);
+                            samples.push({
+                                image: style.backgroundImage,
+                                color: style.backgroundColor,
+                                alpha: context.getImageData(0, 0, 1, 1).data[3],
+                            });
+                        }
+                        return samples;
+                    });
+                    if (action === 'hover') await button.hover();
+                    else if (action === 'press') await page.mouse.down();
+                    else {
+                        await page.mouse.up();
+                        await page.mouse.move(0, 0);
+                    }
+                    const frames = await sampling;
+                    for (const frame of frames.filter((frame) => frame.image === 'none')) {
+                        expect(
+                            frame.alpha,
+                            `${preset}/${mode}/${variant}/${action}: ${frame.color}`,
+                        ).toBe(255);
+                    }
+                }
+            }
+        }
+});
+
 test('forced colors and 200 percent zoom retain solid control boundaries and content', async ({
     page,
 }) => {

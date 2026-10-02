@@ -19,6 +19,9 @@ export default defineConfig({
     snapshotPathTemplate: '{testDir}/snapshots/{testFilePath}/{arg}{ext}',
     use: {
         baseURL,
+        connectOptions: process.env.THEME_BROWSER_WS
+            ? { wsEndpoint: process.env.THEME_BROWSER_WS }
+            : undefined,
         locale: 'en-US',
         timezoneId: 'UTC',
         deviceScaleFactor: 1,

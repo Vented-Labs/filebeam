@@ -580,7 +580,7 @@ onBeforeUnmount(() => {
 .inbox-settings__state-height {
     position: relative;
     margin-top: 1.375rem;
-    overflow-clip-margin: 0.25rem;
+    overflow-clip-margin: 0.3125rem;
 }
 .inbox-settings__state {
     min-height: 13rem;

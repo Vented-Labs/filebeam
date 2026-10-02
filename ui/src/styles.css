@@ -147,7 +147,7 @@ body {
     transition:
         color var(--fb-duration-control) ease,
         border-color var(--fb-duration-control) ease,
-        background var(--fb-duration-control) ease,
+        background-color var(--fb-duration-control) ease,
         transform var(--fb-duration-control) var(--fb-ease),
         box-shadow var(--fb-duration-control) ease;
 }
@@ -164,6 +164,8 @@ body {
 }
 .fb-button--primary {
     background: var(--fb-action-bg);
+    /* Hover removes the gradient image, so the underlying fill must remain opaque. */
+    background-color: var(--fb-action);
     color: var(--fb-on-action);
     border-color: var(--fb-action-border);
     box-shadow: var(--fb-action-shadow);

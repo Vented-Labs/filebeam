@@ -25,6 +25,7 @@
         "format": "npm run check:fix --workspace=backend && vp check --fix ui/src tests/browser tests/theme scripts/og scripts/prism-gallery playwright.config.ts playwright.theme.config.ts vite.config.ts",
         "test:browser": "playwright test",
         "test:theme": "bash scripts/themes/test.sh",
+        "test:theme:reference": "bash scripts/themes/reference-browser.sh",
         "dev": "npm run dev --workspace=backend",
         "test:encryption": "scripts/cli/run.sh cargo test --manifest-path crates/encryption/Cargo.toml --locked",
         "test:transfer": "scripts/cli/run.sh bash -ceu 'cargo test --manifest-path crates/transfer/Cargo.toml --locked && cargo test --manifest-path crates/transfer-native/Cargo.toml --locked && cargo test --manifest-path crates/transfer-wasm/Cargo.toml --locked'"
