@@ -29,6 +29,7 @@ class InstanceSettingValue
             'text' => self::text($value),
             'year' => self::year($value),
             'url' => self::url($value),
+            'color' => self::color($value),
             'community_links' => self::communityLinks($value),
             default => throw new InvalidArgumentException("Unknown instance setting type [{$type}]."),
         };
@@ -49,6 +50,19 @@ class InstanceSettingValue
         }
 
         throw new InvalidArgumentException('Select Enabled, Disabled, or Inherit.');
+    }
+
+    public static function color(mixed $value): string
+    {
+        if (! is_string($value) || preg_match('/\A#(?:[0-9a-f]{3}|[0-9a-f]{6})\z/i', trim($value)) !== 1) {
+            throw new InvalidArgumentException('Enter a hexadecimal color, for example #8b35ff.');
+        }
+
+        $color = strtolower(trim($value));
+
+        return strlen($color) === 4
+            ? '#'.$color[1].$color[1].$color[2].$color[2].$color[3].$color[3]
+            : $color;
     }
 
     /** @return list<string> */

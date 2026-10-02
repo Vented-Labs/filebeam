@@ -4,6 +4,7 @@ import type { Compartment, EditorState, Extension } from '@codemirror/state';
 import type { StringStream } from '@codemirror/language';
 import type { EditorView, ViewUpdate } from '@codemirror/view';
 import { normalizeNoteLanguage } from '../../lib/note-languages';
+import { useAppearance } from '../../composables/useAppearance';
 
 const props = withDefaults(
     defineProps<{
@@ -15,6 +16,7 @@ const props = withDefaults(
     { readOnly: false, wrap: true },
 );
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>();
+const { mode } = useAppearance();
 
 const editorHost = ref<HTMLElement>();
 const fallback = ref(props.modelValue);
@@ -37,6 +39,8 @@ let view: EditorView | undefined;
 let languageCompartment: Compartment | undefined;
 let readOnlyCompartment: Compartment | undefined;
 let wrapCompartment: Compartment | undefined;
+let appearanceCompartment: Compartment | undefined;
+let appearanceExtension: ((dark: boolean) => Extension) | undefined;
 let readOnlyExtension: ((readOnly: boolean) => Extension) | undefined;
 let lineWrappingExtension: Extension | undefined;
 let destroyed = false;
@@ -97,15 +101,13 @@ async function mountEditor(): Promise<void> {
         const [
             { basicSetup, EditorView },
             { EditorState, Compartment },
-            { HighlightStyle, syntaxHighlighting },
-            { tags },
+            { filebeamEditorChrome, filebeamHighlighting },
             { indentWithTab },
             { keymap },
         ] = await Promise.all([
             import('codemirror'),
             import('@codemirror/state'),
-            import('@codemirror/language'),
-            import('@lezer/highlight'),
+            import('../../lib/editor-theme'),
             import('@codemirror/commands'),
             import('@codemirror/view'),
         ]);
@@ -113,6 +115,8 @@ async function mountEditor(): Promise<void> {
         languageCompartment = new Compartment();
         readOnlyCompartment = new Compartment();
         wrapCompartment = new Compartment();
+        appearanceCompartment = new Compartment();
+        appearanceExtension = (dark: boolean) => EditorView.darkTheme.of(dark);
         lineWrappingExtension = EditorView.lineWrapping;
         readOnlyExtension = (readOnly: boolean) => [
             EditorState.readOnly.of(readOnly),
@@ -134,59 +138,11 @@ async function mountEditor(): Promise<void> {
         );
         if (destroyed || !editorHost.value) return;
         const extensions = [
+            appearanceCompartment.of(appearanceExtension(mode.value === 'dark')),
             basicSetup,
             keymap.of([indentWithTab]),
-            EditorView.theme(
-                {
-                    '&': {
-                        height: '100%',
-                        backgroundColor: 'var(--fb-editor-bg)',
-                        color: 'var(--fb-text)',
-                        fontFamily: 'var(--fb-font-code)',
-                        fontSize: 'var(--fb-font-code-size)',
-                        fontVariantLigatures: 'none',
-                        fontFeatureSettings: '"liga" 0, "calt" 0',
-                    },
-                    '.cm-scroller': {
-                        fontFamily: 'var(--fb-font-code)',
-                        fontSize: 'var(--fb-font-code-size)',
-                        lineHeight: 'var(--fb-line-code)',
-                        fontVariantLigatures: 'none',
-                        fontFeatureSettings: '"liga" 0, "calt" 0',
-                    },
-                    '.cm-gutters': {
-                        backgroundColor: 'var(--fb-surface)',
-                        color: 'var(--fb-text-muted)',
-                        borderRight: '1px solid var(--fb-border)',
-                    },
-                    // CodeMirror draws selection behind the active line; keep this translucent.
-                    '.cm-activeLine': { backgroundColor: 'rgba(192, 132, 252, 0.08)' },
-                    '.cm-activeLineGutter': {
-                        backgroundColor: 'var(--fb-selected-surface)',
-                        color: 'var(--fb-accent-text)',
-                    },
-                    '.cm-selectionBackground, &.cm-focused .cm-selectionBackground': {
-                        backgroundColor: 'var(--fb-selection)',
-                    },
-                    '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--fb-focus)' },
-                    '.cm-matchingBracket': {
-                        backgroundColor: 'var(--fb-selected-surface)',
-                        outline: '1px solid var(--fb-focus)',
-                    },
-                    '.cm-content': { caretColor: 'var(--fb-focus)', padding: '16px 0' },
-                },
-                { dark: true },
-            ),
-            syntaxHighlighting(
-                HighlightStyle.define([
-                    { tag: tags.keyword, color: 'var(--fb-accent-text)' },
-                    { tag: tags.string, color: 'var(--fb-success)' },
-                    { tag: tags.number, color: 'var(--fb-warning)' },
-                    { tag: tags.comment, color: 'var(--fb-text-muted)', fontStyle: 'italic' },
-                    { tag: tags.propertyName, color: 'var(--fb-info)' },
-                    { tag: tags.heading, color: 'var(--fb-brand-fold)', fontWeight: '700' },
-                ]),
-            ),
+            filebeamEditorChrome,
+            filebeamHighlighting,
             EditorView.contentAttributes.of({ 'aria-label': 'Secure note editor' }),
             languageCompartment.of(
                 initialModel.length <= expensiveFeatureLimit ? initialLanguageExtension : [],
@@ -210,6 +166,14 @@ async function mountEditor(): Promise<void> {
     }
 }
 
+watch(mode, (value) => {
+    if (view && appearanceCompartment && appearanceExtension) {
+        view.dispatch({
+            effects: appearanceCompartment.reconfigure(appearanceExtension(value === 'dark')),
+        });
+    }
+});
+
 watch(
     () => props.modelValue,
     (value) => {
@@ -219,14 +183,16 @@ watch(
     },
 );
 watch(
-    () => props.language,
-    async (language) => {
+    [() => props.language, () => props.modelValue.length > expensiveFeatureLimit],
+    async ([language, large]) => {
         if (!view || !languageCompartment) return;
-        const extension =
-            view.state.doc.length <= expensiveFeatureLimit
-                ? await safeLanguageExtension(language)
-                : [];
-        if (!destroyed && view && props.language === language)
+        const extension = large ? [] : await safeLanguageExtension(language);
+        if (
+            !destroyed &&
+            view &&
+            props.language === language &&
+            view.state.doc.length > expensiveFeatureLimit === large
+        )
             view.dispatch({ effects: languageCompartment.reconfigure(extension) });
     },
 );
@@ -270,7 +236,7 @@ onBeforeUnmount(() => {
             :value="fallback"
             :readonly="readOnly"
             aria-label="Secure note editor"
-            class="fb-code h-full min-h-72 w-full resize-y bg-[var(--fb-editor-bg)] px-4 py-4 text-[var(--fb-text)] outline-none placeholder:text-[var(--fb-text-muted)]"
+            class="fb-code fb-editor-fallback h-full min-h-72 w-full resize-y bg-[var(--fb-editor-bg)] px-4 py-4 text-[var(--fb-editor-fg)] outline-none placeholder:text-[var(--fb-editor-comment)]"
             placeholder="Write a private note..."
             @input="updateFallback"
         />
@@ -284,6 +250,13 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.fb-editor-fallback {
+    caret-color: var(--fb-editor-caret);
+    transition-property: none;
+}
+.fb-editor-fallback::selection {
+    background: var(--fb-editor-selection);
+}
 @media (pointer: coarse) {
     .fb-code,
     :deep(.cm-editor),

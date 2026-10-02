@@ -16,7 +16,7 @@
 }
 
 :root {
-    color-scheme: dark;
+    color-scheme: var(--fb-color-scheme);
     font-synthesis: none;
 }
 

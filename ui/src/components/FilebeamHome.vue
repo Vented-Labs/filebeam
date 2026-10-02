@@ -442,7 +442,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <section class="prism-page mx-auto w-full px-5 pb-14 pt-7 sm:px-8">
+    <section class="prism-page mx-auto w-full px-5 sm:px-8">
         <section v-if="!transfersAvailable" class="prism-gate">
             <h1>Stored transfers unavailable</h1>
             <p>
@@ -564,7 +564,6 @@ onBeforeUnmount(() => {
                                             :compact="filesUpload.entries.value.length > 0"
                                             @choose="chooseFiles"
                                             @files="addFiles"
-                                            @paste="acceptPaste"
                                         >
                                             <FileQueue
                                                 :entries="filesUpload.entries.value"
@@ -689,6 +688,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .prism-page {
     max-width: 74.5rem;
+    padding-block: 1rem;
 }
 .prism-gate {
     max-width: 36rem;
@@ -808,16 +808,16 @@ onBeforeUnmount(() => {
     gap: 0.75rem;
     margin: 0 1.5rem 0.9375rem;
     padding: 0.75rem;
-    border: 1px solid #ffffff08;
+    border: 1px solid var(--fb-line-soft);
     border-radius: 0.625rem;
     color: var(--fb-text-muted);
-    background: #ffffff03;
+    background: var(--fb-wash-03);
     font-size: 0.75rem;
 }
 .prism-inline-status--error {
-    border-color: #ad71813d;
+    border-color: var(--fb-alert-border);
     color: var(--fb-danger);
-    background: #38252b55;
+    background: var(--fb-alert-surface);
 }
 .prism-inline-status > span {
     min-width: 0;
@@ -837,8 +837,8 @@ onBeforeUnmount(() => {
     margin: 0 0 0.5rem;
 }
 .prism-trust {
-    margin-top: 1.75rem;
-    padding: 0 0.375rem 1.6875rem;
+    margin-top: 1rem;
+    padding: 0 0.375rem;
 }
 .prism-card-enter-active,
 .prism-card-leave-active,
@@ -893,6 +893,22 @@ button:disabled {
         align-items: flex-start;
         flex-wrap: wrap;
         margin-inline: 1.0625rem;
+    }
+}
+@media (min-width: 901px) and (max-height: 1000px) {
+    .prism-page {
+        padding-block: 0.5rem;
+    }
+    .prism-trust {
+        margin-top: 0.75rem;
+    }
+    .prism-trust :deep(p) {
+        line-height: 1.5;
+    }
+}
+@media (min-width: 901px) and (max-height: 760px) {
+    .prism-trust {
+        margin-top: 0.5rem;
     }
 }
 </style>

@@ -135,8 +135,8 @@ function hideOutgoing(element: Element): void {
     gap: 1.25rem;
     min-width: 0;
     padding: 1.25rem 1.5rem;
-    border-bottom: 1px solid #ffffff08;
-    background: #ffffff01;
+    border-bottom: 1px solid var(--fb-line-soft);
+    background: var(--fb-wash-01);
 }
 .transfer-method__choices {
     --driver-gap: 0.25rem;
@@ -148,10 +148,10 @@ function hideOutgoing(element: Element): void {
     width: min(27.75rem, 100%);
     flex: none;
     padding: 0.25rem;
-    border: 1px solid #322c3d;
+    border: 1px solid var(--fb-rail-border);
     border-radius: 0.9375rem;
     background: var(--fb-surface-sunken);
-    box-shadow: inset 0 1px 2px #0002;
+    box-shadow: inset 0 1px 2px var(--fb-shadow-soft);
 }
 .transfer-method__choices--single {
     grid-template-columns: minmax(0, 1fr);
@@ -165,10 +165,10 @@ function hideOutgoing(element: Element): void {
     width: calc(
         (100% - 0.5rem - (var(--driver-count) - 1) * var(--driver-gap)) / var(--driver-count)
     );
-    border: 1px solid #806191;
+    border: 1px solid var(--fb-choice-border);
     border-radius: 0.6875rem;
-    background: #32253f;
-    box-shadow: inset 0 1px 0 #ffffff0a;
+    background: var(--fb-choice-surface);
+    box-shadow: inset 0 1px 0 var(--fb-shadow-highlight-soft);
     pointer-events: none;
     transform: translateX(calc(var(--driver-index) * (100% + var(--driver-gap))));
     transition: transform var(--fb-duration-selection) var(--fb-ease);
@@ -190,23 +190,24 @@ function hideOutgoing(element: Element): void {
         background var(--fb-duration-control) ease,
         transform var(--fb-duration-control) var(--fb-ease);
 }
-.transfer-method__card:hover:not([data-disabled]) {
-    background: #ffffff05;
+.transfer-method__card:hover:not([data-disabled]):not([aria-disabled='true']) {
+    background: var(--fb-wash-05);
 }
-.transfer-method__card:active:not([data-disabled]) {
-    background: #0002;
+.transfer-method__card:active:not([data-disabled]):not([aria-disabled='true']) {
+    background: var(--fb-surface-active);
     transform: translateY(1px) scale(0.982);
 }
 .transfer-method__card:focus-visible {
     outline: 2px solid var(--fb-focus);
-    outline-offset: 2px;
+    outline-offset: 3px;
 }
 .transfer-method__card[data-state='checked'] {
     color: var(--fb-text);
 }
 .transfer-method__card[data-disabled] {
     cursor: not-allowed;
-    opacity: 0.45;
+    color: var(--fb-disabled-text);
+    background: var(--fb-disabled-surface);
 }
 .transfer-method__icon {
     display: grid;
@@ -215,15 +216,15 @@ function hideOutgoing(element: Element): void {
     flex: none;
     place-items: center;
     border-radius: 0.5rem;
-    color: #9e90af;
-    background: #ffffff04;
+    color: var(--fb-pill-text);
+    background: var(--fb-wash-04);
     transition:
         color var(--fb-duration-control) ease,
         background var(--fb-duration-control) ease;
 }
 .transfer-method__card[data-state='checked'] .transfer-method__icon {
-    color: #d4b3fa;
-    background: #b18ac116;
+    color: var(--fb-choice-text);
+    background: var(--fb-choice-wash);
 }
 .transfer-method__copy {
     display: flex;
@@ -260,7 +261,7 @@ function hideOutgoing(element: Element): void {
     align-items: center;
     justify-content: flex-end;
     gap: 0.375rem;
-    color: #cfc3df;
+    color: var(--fb-rail-text);
     font-size: 0.75rem;
     font-weight: 500;
     text-align: right;
@@ -350,6 +351,19 @@ function hideOutgoing(element: Element): void {
     }
     .transfer-method__card:active:not([data-disabled]) {
         transform: none;
+    }
+}
+@media (min-width: 901px) and (max-height: 1000px) {
+    .transfer-method {
+        padding-block: 0.5rem;
+    }
+    .transfer-method__card {
+        height: 3rem;
+    }
+}
+@media (min-width: 901px) and (max-height: 760px) {
+    .transfer-method__card {
+        height: 2.75rem;
     }
 }
 </style>

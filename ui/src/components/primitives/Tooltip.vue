@@ -66,7 +66,7 @@ const attrs = useAttrs();
     padding: 0.5rem 0.75rem;
     font-size: 0.75rem;
     line-height: 1.5;
-    box-shadow: 0 8px 24px rgb(0 0 0 / 20%);
+    box-shadow: 0 8px 24px var(--fb-shadow-tooltip);
     animation: fb-tooltip-in var(--fb-duration-fast) ease;
 }
 .fb-tooltip[data-state='closed'] {

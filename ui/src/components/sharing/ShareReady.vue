@@ -192,10 +192,10 @@ const emit = defineEmits<{ reset: []; delete: []; cancel: []; restartHttp: [] }>
     width: 3.8125rem;
     height: 3.8125rem;
     place-items: center;
-    border: 1px solid #78598666;
+    border: 1px solid var(--fb-card-border);
     border-radius: 999px;
-    color: #d4b6f3;
-    background: radial-gradient(circle at 30% 0%, #a679ff28, #342740);
+    color: var(--fb-share-mark-text);
+    background: var(--fb-share-mark-surface);
 }
 .share-ready__eyebrow {
     margin: 0.875rem 0 0;
@@ -253,7 +253,7 @@ const emit = defineEmits<{ reset: []; delete: []; cancel: []; restartHttp: [] }>
     gap: 0.5rem;
     margin-top: 0.75rem;
     padding: 0.375rem 0.375rem 0.375rem 0.875rem;
-    border: 1px solid #554060;
+    border: 1px solid var(--fb-share-border);
     border-radius: 0.75rem;
     color: var(--fb-text-subtle);
     background: var(--fb-surface-sunken);
@@ -308,7 +308,7 @@ const emit = defineEmits<{ reset: []; delete: []; cancel: []; restartHttp: [] }>
     width: min(39.375rem, 100%);
     margin-top: 1.25rem;
     padding-top: 1rem;
-    border-top: 1px solid #ffffff08;
+    border-top: 1px solid var(--fb-line-soft);
     text-align: left;
 }
 .share-ready__recipients h2 {
@@ -336,7 +336,7 @@ const emit = defineEmits<{ reset: []; delete: []; cancel: []; restartHttp: [] }>
     gap: 0.625rem;
     min-height: 3rem;
     padding: 0.5rem 0.75rem;
-    border: 1px solid #ffffff08;
+    border: 1px solid var(--fb-line-soft);
     border-radius: 0.625rem;
     color: var(--fb-text-muted);
     background: var(--fb-surface-sunken);

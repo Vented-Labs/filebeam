@@ -18,7 +18,7 @@ for (const variant of ['home', 'receive', 'transfer']) {
         if (variant === 'home') {
             const words = page.locator('h1 span');
             await expect(words).toHaveText(['Share files', 'privately']);
-            await expect(words.nth(1)).toHaveCSS('color', 'rgb(231, 161, 255)');
+            await expect(words.nth(1)).toHaveCSS('color', 'rgb(196, 166, 238)');
             const first = await words.nth(0).boundingBox();
             const second = await words.nth(1).boundingBox();
             expect(second?.y).toBe(first?.y);

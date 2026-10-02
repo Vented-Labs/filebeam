@@ -60,69 +60,18 @@ test('generic paste preserves notes, selects files once, and leaves fields alone
     await expect(page.getByText('paste-0.png', { exact: true })).toBeVisible();
 });
 
-test('denied clipboard opens native paste fallback and does not intercept unrelated dialogs', async ({
+test('paste-anywhere has no dedicated button or modal and leaves other popups alone', async ({
     page,
 }) => {
-    await page.addInitScript(() => {
-        Object.defineProperty(navigator, 'clipboard', {
-            value: {
-                read: async () => {
-                    throw new DOMException('Denied', 'NotAllowedError');
-                },
-            },
-        });
-    });
     await page.goto('/');
-    await page.getByRole('button', { name: 'Paste', exact: true }).click();
-    await expect(page.getByRole('dialog')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Paste', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('dialog', { name: 'Paste from your clipboard' })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Appearance', exact: true }).click();
     expect(await paste(page, 'ignore outside dialog')).toBe(false);
-    await paste(page, 'fallback note', 0, 'textarea[aria-label="Paste text or images here"]');
-    await expect(page.getByRole('dialog')).toHaveCount(0);
-    await expect.poll(() => noteText(page)).toBe('fallback note');
-    await expect(
-        page.getByRole('textbox', { name: 'Secure note editor', exact: true }),
-    ).toBeFocused();
-});
-
-test('explicit clipboard read prefers images over alternate text', async ({ page }) => {
-    await page.addInitScript(() => {
-        Object.defineProperty(navigator, 'clipboard', {
-            value: {
-                read: async () => [
-                    {
-                        types: ['text/plain', 'image/png'],
-                        getType: async (type: string) =>
-                            new Blob([type === 'text/plain' ? 'alternate' : 'image'], { type }),
-                    },
-                ],
-            },
-        });
-    });
-    await page.goto('/');
-    await page.getByRole('button', { name: 'Paste', exact: true }).click();
-    await expect(page.getByRole('heading', { name: 'Your files', exact: true })).toBeVisible();
-    await expect(page.getByText(/pasted-image-.*\.png/)).toHaveCount(1);
-    await page.getByRole('tab', { name: 'Notes' }).click();
-    await expect.poll(() => noteText(page)).toBe('');
-});
-
-test('dropzone long press and keyboard menu offer Paste; movement cancels long press', async ({
-    page,
-}) => {
-    await page.goto('/');
-    const pond = page.getByTestId('file-pond');
-    await pond.dispatchEvent('pointerdown', { pointerType: 'touch', clientX: 160, clientY: 300 });
-    await expect(page.getByRole('menuitem', { name: 'Paste', exact: true })).toBeVisible();
     await page.keyboard.press('Escape');
-    await pond.dispatchEvent('pointerup', { pointerType: 'touch' });
-    await pond.dispatchEvent('pointerdown', { pointerType: 'touch' });
-    await pond.dispatchEvent('pointermove', { pointerType: 'touch' });
-    await page.waitForTimeout(900);
-    await expect(page.getByRole('menuitem', { name: 'Paste', exact: true })).toHaveCount(0);
-    const trigger = page.getByLabel('File input and paste menu');
-    await trigger.focus();
-    await trigger.press('Shift+F10');
-    await expect(page.getByRole('menuitem', { name: 'Paste', exact: true })).toBeVisible();
+    await expect(page.locator('[role="dialog"]')).toHaveCount(0);
+    await paste(page, 'ordinary page paste');
+    await expect.poll(() => noteText(page)).toBe('ordinary page paste');
 });
 
 test('empty and HTML-only paste preserve the draft', async ({ page }) => {
@@ -195,8 +144,9 @@ test('real browser clipboard image round-trips as an encrypted file', async ({
         const clipboardImage = await item.getType('image/png');
         return Array.from(new Uint8Array(await clipboardImage.arrayBuffer()));
     });
-    await page.getByRole('button', { name: 'Paste', exact: true }).click();
-    await expect(page.getByText(/pasted-image-.*\.png/)).toBeVisible();
+    await page.getByRole('heading', { name: 'Drop your files here' }).click();
+    await page.keyboard.press('ControlOrMeta+v');
+    await expect(page.getByTestId('prism-file-row')).toHaveCount(1);
     const creation = page.waitForResponse(
         (response) =>
             response.request().method() === 'POST' && response.url().endsWith('/api/v1/transfers'),

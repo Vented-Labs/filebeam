@@ -1,6 +1,7 @@
 import { createApp } from 'vue';
 import '@fontsource-variable/inter';
 import '../../ui/src/filebeam-tokens.css';
+import '../../backend/resources/themes/appearance.js';
 import OgCard from '../../ui/src/components/brand/OgCard.vue';
 import './preview.css';
 

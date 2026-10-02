@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Support;
 
+use App\Support\Theming\Assets;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -68,7 +69,7 @@ class SocialPreview
             return null;
         }
 
-        return asset('build/og/'.$filename);
+        return app(Assets::class)->url('social-'.$card.'.png');
     }
 
     private function isHttpUrl(string $url): bool

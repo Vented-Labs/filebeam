@@ -61,7 +61,7 @@ function selectWithKeyboard(event: KeyboardEvent): void {
     border: 1px solid var(--fb-border);
     border-radius: 0.75rem;
     background: var(--fb-surface-sunken);
-    box-shadow: inset 0 1px 2px #0003;
+    box-shadow: inset 0 1px 2px var(--fb-shadow-medium);
 }
 .fb-platform-select__item {
     position: relative;
@@ -81,7 +81,7 @@ function selectWithKeyboard(event: KeyboardEvent): void {
         transform var(--fb-duration-control) var(--fb-ease);
 }
 .fb-platform-select__item:hover {
-    background: #ffffff06;
+    background: var(--fb-wash-06);
     color: var(--fb-text);
 }
 .fb-platform-select__item:active {
@@ -89,13 +89,13 @@ function selectWithKeyboard(event: KeyboardEvent): void {
 }
 .fb-platform-select__item:focus-visible {
     outline: 2px solid var(--fb-focus);
-    outline-offset: 2px;
+    outline-offset: 3px;
 }
 .fb-platform-select__item[aria-checked='true'] {
-    border-color: #806191;
-    background: #32253f;
-    color: #d4b3fa;
-    box-shadow: inset 0 1px 0 #ffffff0a;
+    border-color: var(--fb-choice-border);
+    background: var(--fb-choice-surface);
+    color: var(--fb-choice-text);
+    box-shadow: inset 0 1px 0 var(--fb-shadow-highlight-soft);
 }
 @media (prefers-reduced-motion: reduce) {
     .fb-platform-select__item {

@@ -5,19 +5,13 @@ for (const width of [320, 390, 768, 900, 901, 1023, 1024, 1440]) {
         await page.setViewportSize({ width, height: 900 });
         await page.goto('/?placement');
         const app = page.locator('header [data-app-install-entry]');
-        await expect(app).toHaveCount(1);
-        await expect(app).toHaveAccessibleName(
-            width > 900 ? 'Install Desktop App' : 'Install Mobile App',
-        );
-        await expect(app).toBeVisible();
+        await expect(app).toHaveCount(0);
         const logo = (await page.locator('.fb-footer__identity .fb-brand').boundingBox())!;
         const version = (await page.locator('.fb-footer__version').boundingBox())!;
         expect(Math.abs(logo.y + logo.height / 2 - (version.y + version.height / 2))).toBeLessThan(
             1,
         );
         expect(version.x).toBeGreaterThanOrEqual(logo.x + logo.width);
-        await expect(app).toHaveAttribute('aria-disabled', 'true');
-        await app.dispatchEvent('click');
         await expect(page.getByRole('dialog')).toHaveCount(0);
         const footer = page.locator('.cli-footer-launcher');
         if (width > 900) {
@@ -80,7 +74,7 @@ for (const reducedMotion of ['reduce', 'no-preference'] as const) {
         await footer.click();
         await page.setViewportSize({ width: 390, height: 844 });
         await dialog.getByRole('button', { name: 'Done', exact: true }).click();
-        await expect(page.locator('header [data-app-install-entry]')).toBeFocused();
+        await expect(page.getByRole('button', { name: 'Open navigation' })).toBeFocused();
         await expect(footer).toBeHidden();
         await page.getByRole('button', { name: 'Install CLI', exact: true }).click();
         await expect(dialog).toBeVisible();

@@ -133,7 +133,7 @@ async function copy(): Promise<void> {
 }
 .cli-command__value:focus-visible {
     outline: 2px solid var(--fb-focus);
-    outline-offset: 2px;
+    outline-offset: 3px;
 }
 .cli-command__copy {
     display: inline-grid;

@@ -66,7 +66,8 @@ test('uses the default favicon assets and theme color in the application shell',
         ->assertSee('href="'.asset('favicon-16x16.png').'"', false)
         ->assertSee('href="'.asset('favicon.svg').'"', false)
         ->assertSee('href="'.asset('apple-touch-icon.png').'"', false)
-        ->assertSee('<meta name="theme-color" content="#0B0914">', false);
+        ->assertSee('<meta name="theme-color" content="#0b0914"', false)
+        ->assertSee('data-fb-dark="#0b0914"', false);
 });
 
 test('uses only the configured favicon and brand name in the application shell', function () {
@@ -76,8 +77,8 @@ test('uses only the configured favicon and brand name in the application shell',
     $this->get('/')
         ->assertOk()
         ->assertSee('href="/images/acme-favicon.svg"', false)
-        ->assertDontSee('favicon-32x32.png', false)
-        ->assertDontSee('apple-touch-icon.png', false)
+        ->assertDontSee('href="'.asset('favicon-32x32.png').'"', false)
+        ->assertDontSee('rel="apple-touch-icon"', false)
         ->assertSee('<title>Acme Share</title>', false);
 });
 

@@ -10,6 +10,7 @@ $branding = [
     'name' => env('FILEBEAM_NAME', 'Filebeam'),
     'logo_url' => env('FILEBEAM_LOGO_URL') ?: null,
     'favicon_url' => env('FILEBEAM_FAVICON_URL') ?: (env('FILEBEAM_LOGO_URL') ?: null),
+    'primary_color' => '#8b35ff',
     'version' => $version['version'],
     // PHP fallbacks for the admin-editable branding resolved by App\Support\Branding.
     'copyright_holder' => 'Vented',
@@ -139,6 +140,7 @@ $settingEnvironmentNames = [
     'copyright_url' => ['FILEBEAM_COPYRIGHT_URL', 'url'],
     'github_url' => ['FILEBEAM_GITHUB_URL', 'url'],
     'community_links' => ['FILEBEAM_COMMUNITY_LINKS', 'community_links'],
+    'primary_color' => ['FILEBEAM_PRIMARY_COLOR', 'color'],
 ];
 $settingEnvironment = ['enabled_drivers' => $transportDrivers, 'default_driver' => $transportDefaultDriver];
 
@@ -209,6 +211,12 @@ return [
         'environment' => $settingEnvironment,
         // Every admin-editable setting: its type drives validation, the fallback is a config path.
         'definitions' => [
+            'primary_color' => [
+                'label' => 'Primary color',
+                'description' => 'Generates the application palette and built-in artwork. Requires PHP GD.',
+                'type' => 'color',
+                'fallback' => 'filebeam.branding.primary_color',
+            ],
             'registration' => [
                 'label' => 'Registration',
                 'description' => 'Allow new accounts to be registered.',

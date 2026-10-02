@@ -124,15 +124,15 @@ const emit = defineEmits<{ logout: [] }>();
 }
 .account-panel__identity {
     padding: 1.75rem;
-    border-right: 1px solid #ffffff0a;
-    background: #17131e;
+    border-right: 1px solid var(--fb-line-strong);
+    background: var(--fb-account-rail);
 }
 .account-panel__avatar {
     display: grid;
     width: 3.5rem;
     height: 3.5rem;
     place-items: center;
-    border: 1px solid #78598666;
+    border: 1px solid var(--fb-card-border);
     border-radius: 1rem;
     color: var(--fb-accent-text);
     background: var(--fb-selected-surface);
@@ -151,7 +151,7 @@ const emit = defineEmits<{ logout: [] }>();
     gap: 0.875rem;
     margin: 1.5rem 0;
     padding-block: 1.25rem;
-    border-block: 1px solid #ffffff08;
+    border-block: 1px solid var(--fb-line-soft);
 }
 .account-panel__identity dt,
 .account-panel__profile-link label {
@@ -196,7 +196,7 @@ const emit = defineEmits<{ logout: [] }>();
     }
     .account-panel__identity {
         border-right: 0;
-        border-bottom: 1px solid #ffffff0a;
+        border-bottom: 1px solid var(--fb-line-strong);
     }
 }
 @media (max-width: 460px) {

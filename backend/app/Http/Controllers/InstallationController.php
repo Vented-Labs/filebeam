@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Enums\Feature;
+use App\Support\FeatureAvailability;
 use App\Support\Installation\CacheConfiguration;
 use App\Support\Installation\ChunkSize;
 use App\Support\Installation\CompleteInstallation;
@@ -12,6 +14,8 @@ use App\Support\Installation\EnvironmentWriter;
 use App\Support\Installation\InstallationConfiguration;
 use App\Support\Installation\InstallationState;
 use App\Support\SmtpSettings;
+use App\Support\Theming\Assets;
+use App\Support\Theming\Theme;
 use Illuminate\Cache\FileStore;
 use Illuminate\Cache\RateLimiter;
 use Illuminate\Cache\Repository;
@@ -34,6 +38,7 @@ class InstallationController extends Controller
             'bootstrapRequired' => $bootstrap,
             'challenge' => $bootstrap ? $state->challenge() : null,
             'unavailableReason' => null,
+            'branding' => [...config('filebeam.branding'), ...app(Assets::class)->branding(app(Theme::class)->palette(false))],
         ]);
     }
 
@@ -51,7 +56,8 @@ class InstallationController extends Controller
 
         return response()->json([
             'databaseDrivers' => $drivers,
-            'redisAvailable' => extension_loaded('redis'),
+            'redisAvailable' => app(FeatureAvailability::class)->available(Feature::RedisCache),
+            'capabilities' => app(FeatureAvailability::class)->all(),
             'defaults' => [
                 'cache' => array_replace($containerDefaults['cache'], ['prefix' => $containerDefaults['cache']['prefix'] === 'filebeam:' ? 'filebeam:'.substr((string) ($state->read()['id'] ?? 'instance'), 0, 12).':' : $containerDefaults['cache']['prefix']]),
                 'database' => $container->enabled() ? $containerDefaults['database'] : ['driver' => $drivers[0] ?? 'sqlite', 'transport' => 'tcp', 'socket' => '', 'host' => '127.0.0.1', 'port' => 3306, 'database' => (string) config('installation.sqlite_directory').'/database.sqlite', 'username' => '', 'password' => '', 'sslmode' => 'prefer'],

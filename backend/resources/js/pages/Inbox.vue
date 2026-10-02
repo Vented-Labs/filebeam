@@ -171,7 +171,7 @@ async function remove(id: string): Promise<void> {
     width: 3.75rem;
     height: 3.75rem;
     place-items: center;
-    border: 1px solid #78598666;
+    border: 1px solid var(--fb-card-border);
     border-radius: 1rem;
     color: var(--fb-accent-text);
     background: var(--fb-selected-surface);

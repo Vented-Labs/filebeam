@@ -55,6 +55,9 @@ jobs:
           php scripts/release/validate-og.php backend/public/build/og
       - name: Test social card rendering
         run: npm run test:og -- --workers=2
+      - name: Test theme components and editor
+        if: hashFiles('scripts/prism-gallery/theme.spec.ts') != ''
+        run: npm run test:prism -- --workers=2
       - name: Check JavaScript
         run: npm run check
       - name: Share compiled frontend
@@ -71,7 +74,11 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: playwright-frontend
-          path: test-results/
+          path: |
+            test-results/
+            .filebeam/test-results/prism-gallery/
+            .filebeam/test-results/og/
+          include-hidden-files: true
           if-no-files-found: ignore
 
   rust:
@@ -488,11 +495,71 @@ jobs:
           FILEBEAM_UPGRADE_BASELINE: ${{ runner.temp }}/filebeam-upgrade-baseline.zip
           FILEBEAM_UPGRADE_CANDIDATE: ${{ runner.temp }}/filebeam-package/filebeam-v0.0.0.zip
 
+  themes:
+    name: Themes (GD ${{ matrix.gd }})
+    needs: frontend
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        gd: ['true', 'false']
+    steps:
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
+        with:
+          persist-credentials: false
+          ref: ${{ github.workflow_sha }}
+          path: .ci-workflow
+          sparse-checkout: .github/actions
+      - uses: ./.ci-workflow/.github/actions/setup-php
+        with:
+          gd: ${{ matrix.gd }}
+      - uses: ./.ci-workflow/.github/actions/setup-node
+        if: matrix.gd == 'true'
+        with:
+          browser: ${{ hashFiles('scripts/themes/reference-browser.sh') == '' }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: test-frontend
+          path: .
+      - name: Verify actual runtime capability
+        env:
+          EXPECT_GD: ${{ matrix.gd }}
+        run: |
+          php -r 'exit(extension_loaded("gd") === (getenv("EXPECT_GD") === "true") ? 0 : 1);'
+      - name: Test theme capabilities and rendering
+        if: hashFiles('backend/tests/Feature/ThemeAssetsTest.php') != ''
+        working-directory: backend
+        run: vendor/bin/pest tests/Unit/FeatureAvailabilityTest.php tests/Unit/ThemePaletteTest.php tests/Feature/ThemeSettingsTest.php tests/Feature/ThemeAssetsTest.php tests/Feature/AppearancePreferencesTest.php tests/Feature/BrandingTest.php tests/Feature/BrandedMailTest.php tests/Feature/BrandedErrorPagesTest.php
+      - name: Test runtime theme changes against an isolated application
+        if: matrix.gd == 'true' && hashFiles('scripts/themes/test.sh') != ''
+        run: |
+          if [ -f scripts/themes/reference-browser.sh ]; then
+            npm run test:theme:reference
+          else
+            npm run test:theme
+          fi
+      - name: Test explicit theme adapters
+        if: hashFiles('backend/tests/Unit/ThemeEffectsTest.php') != ''
+        working-directory: backend
+        run: vendor/bin/pest tests/Unit/BrandArtworkTest.php tests/Unit/MailThemeTest.php tests/Unit/ThemeEffectsTest.php
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: failure()
+        with:
+          name: themes-gd-${{ matrix.gd }}
+          path: .filebeam/test-results/themes/
+          include-hidden-files: true
+          if-no-files-found: ignore
+
   test:
     # Keep this name in sync with the required GitHub Actions check on master.
     name: Test
     if: always()
-    needs: [frontend, rust, php-static, php, sail, small-chunks, distribution]
+    needs: [frontend, rust, php-static, php, sail, small-chunks, distribution, themes]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 5
     steps:

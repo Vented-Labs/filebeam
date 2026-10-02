@@ -76,7 +76,7 @@ test('icons retain fixed artwork attributes while inheriting visual classes', as
             color: getComputedStyle(icon).color,
             shrink: getComputedStyle(icon).flexShrink,
         })),
-    ).toEqual({ color: 'rgb(178, 168, 194)', shrink: '0' });
+    ).toEqual({ color: 'rgb(181, 171, 191)', shrink: '0' });
 
     const chooseIcon = page
         .getByRole('button', { name: 'Choose files' })

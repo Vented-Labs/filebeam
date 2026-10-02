@@ -133,7 +133,7 @@ async function remove(entry: UploadEntry): Promise<void> {
     margin-top: 0.875rem;
     padding: 1px;
     overflow-y: auto;
-    scrollbar-color: #53455f transparent;
+    scrollbar-color: var(--fb-scrollbar) transparent;
     scrollbar-width: thin;
 }
 .file-queue__entry {
@@ -141,17 +141,17 @@ async function remove(entry: UploadEntry): Promise<void> {
     min-height: 3.8125rem;
     box-sizing: border-box;
     padding: 0.625rem 0.75rem;
-    border: 1px solid #ffffff07;
+    border: 1px solid var(--fb-line-faint);
     border-radius: 0.75rem;
-    background: #110e1880;
+    background: var(--fb-row-surface);
     transition:
         background var(--fb-duration-control) ease,
         border-color var(--fb-duration-control) ease,
         transform var(--fb-duration-control) var(--fb-ease);
 }
 .file-queue__entry:hover {
-    border-color: #6b527144;
-    background: #252030;
+    border-color: var(--fb-row-hover-border);
+    background: var(--fb-row-hover-surface);
 }
 .file-queue__progress {
     height: 0.25rem;
@@ -173,10 +173,10 @@ async function remove(entry: UploadEntry): Promise<void> {
     height: 2.25rem;
     flex: none;
     place-items: center;
-    border: 1px solid #6651722a;
+    border: 1px solid var(--fb-file-mark-border);
     border-radius: 0.5625rem;
     color: var(--fb-accent-text);
-    background: #33263f;
+    background: var(--fb-disabled-surface);
 }
 .queue-enter-active,
 .queue-leave-active {

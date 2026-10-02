@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Head } from '@inertiajs/vue3';
-import { Icon } from '@filebeam/ui';
+import { Icon, BrandLogo } from '@filebeam/ui';
 import InstallationField from '@/components/InstallationField.vue';
 import {
     bootstrap as bootstrapAction,
@@ -460,7 +460,9 @@ async function json<T>(url: string, body: unknown, withToken = true): Promise<T>
             errors:
                 payload.errors ??
                 (response.status === 401
-                    ? { token: [payload.message || 'Enter a valid installation token.'] }
+                    ? {
+                          token: [payload.message || 'Enter a valid installation token.'],
+                      }
                     : {}),
         });
     }
@@ -825,13 +827,7 @@ watch(
         <Head title="Install Filebeam" />
 
         <header class="fb-header">
-            <div class="fb-brand">
-                <img
-                    src="/brand/filebeam-logo-header.svg"
-                    alt="Filebeam"
-                    class="fb-brand__lockup"
-                />
-            </div>
+            <BrandLogo />
         </header>
 
         <main class="installer-content">
@@ -843,7 +839,9 @@ watch(
                 role="alert"
             >
                 <p class="font-semibold">Installation is unavailable</p>
-                <p class="mt-1 text-[var(--fb-warning)]">{{ unavailableReason }}</p>
+                <p class="mt-1 text-[var(--fb-warning)]">
+                    {{ unavailableReason }}
+                </p>
             </div>
 
             <template v-else>
@@ -1061,7 +1059,7 @@ watch(
                     </p>
                     <fieldset
                         :disabled="managed.database"
-                        class="mt-6 grid gap-4 sm:grid-cols-2 disabled:opacity-70"
+                        class="mt-6 grid gap-4 disabled:opacity-70 sm:grid-cols-2"
                     >
                         <InstallationField
                             v-model="form.database.driver"
@@ -1221,7 +1219,7 @@ watch(
                         </p>
                         <fieldset
                             :disabled="managed.cache"
-                            class="mt-4 grid gap-4 sm:grid-cols-2 disabled:opacity-70"
+                            class="mt-4 grid gap-4 disabled:opacity-70 sm:grid-cols-2"
                         >
                             <InstallationField
                                 v-model="form.cache.driver"

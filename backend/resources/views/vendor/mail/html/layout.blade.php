@@ -28,16 +28,17 @@ width: 100% !important;
 </style>
 {!! $head ?? '' !!}
 </head>
-<body style="background-color: #0b0914;">
-<table class="wrapper" width="100%" cellpadding="0" cellspacing="0" role="presentation" bgcolor="#0b0914">
+@php($mailSlots = \App\Support\Theming\MailTheme::slots(app(\App\Support\Theming\Theme::class)->palette()))
+<body style="background-color: {{ $mailSlots['SHELL_BG'] }};">
+<table class="wrapper" width="100%" cellpadding="0" cellspacing="0" role="presentation" bgcolor="{{ $mailSlots['SHELL_BG'] }}">
 <tr>
 <td align="center">
 <table class="content" width="100%" cellpadding="0" cellspacing="0" role="presentation">
 {!! $header ?? '' !!}
 
 <tr>
-<td class="body" width="100%" cellpadding="0" cellspacing="0" style="border: hidden !important;" bgcolor="#0b0914">
-<table class="inner-body" align="center" width="600" cellpadding="0" cellspacing="0" role="presentation" bgcolor="#ffffff">
+<td class="body" width="100%" cellpadding="0" cellspacing="0" style="border: hidden !important;" bgcolor="{{ $mailSlots['SHELL_BG'] }}">
+<table class="inner-body" align="center" width="600" cellpadding="0" cellspacing="0" role="presentation" bgcolor="{{ $mailSlots['CARD_BG'] }}">
 <tr>
 <td class="content-cell">
 {!! Illuminate\Mail\Markdown::parse($slot) !!}

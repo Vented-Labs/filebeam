@@ -17,6 +17,10 @@ readonly class RequireInstallation
     /** @param Closure(Request): Response $next */
     public function handle(Request $request, Closure $next): Response
     {
+        if ($request->is('_theme/*') && $request->isMethod('GET')) {
+            // Asset routes validate their signature and do not use sessions or database settings.
+            return $next($request);
+        }
         if ($request->is('install', 'install/*')) {
             // Do this before database, host, session, and request-size middleware.
             abort_unless($this->state->isPending() || $this->state->canBootstrap(), 404);

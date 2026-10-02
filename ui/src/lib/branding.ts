@@ -1,10 +1,12 @@
 import { usePage } from '@inertiajs/vue3';
 import { computed } from 'vue';
+import { useAppearance } from '../composables/useAppearance';
 
 export type Branding = {
     name: string;
     logo_url: string | null;
     default_logo_url: string;
+    default_light_logo_url: string;
     default_mark_url: string;
     favicon_url: string | null;
     version: string;
@@ -18,6 +20,7 @@ const defaultBranding: Branding = {
     name: 'Filebeam',
     logo_url: null,
     default_logo_url: '/brand/filebeam-logo-header.svg',
+    default_light_logo_url: '/brand/filebeam-logo-header-on-light.svg',
     default_mark_url: '/brand/filebeam-mark.svg',
     favicon_url: null,
     version: '0.1.0',
@@ -29,6 +32,11 @@ const defaultBranding: Branding = {
 
 export function useBranding() {
     const page = usePage<{ branding?: Partial<Branding> }>();
+    const { palette } = useAppearance();
 
-    return computed<Branding>(() => ({ ...defaultBranding, ...page.props.branding }));
+    return computed<Branding>(() => ({
+        ...defaultBranding,
+        ...page.props.branding,
+        ...palette.value?.branding,
+    }));
 }

@@ -5,11 +5,10 @@
     $configuredLogoUrl = config('filebeam.branding.logo_url');
     $hasConfiguredLogo = is_string($configuredLogoUrl) && $configuredLogoUrl !== '';
     $hasCustomIdentity = $hasConfiguredLogo || $brandName !== 'Filebeam';
+    $themeAssets = app(\App\Support\Theming\Assets::class);
     $logoUrl = $hasConfiguredLogo
         ? $configuredLogoUrl
-        : asset($hasCustomIdentity
-            ? 'brand/filebeam-mark.svg'
-            : ($dark ? 'brand/filebeam-logo-header.svg' : 'brand/filebeam-logo-header-on-light.svg'));
+        : $themeAssets->url($hasCustomIdentity ? 'mark.svg' : 'logo.svg', mode: $dark ? 'dark' : 'light');
 @endphp
 
 <span class="fb-admin-brand">
@@ -22,7 +21,7 @@
     @if (! $hasCustomIdentity)
         <img
             class="fb-admin-brand__collapsed-mark"
-            src="{{ asset('brand/filebeam-mark.svg') }}"
+            src="{{ $themeAssets->url('mark.svg') }}"
             alt=""
         >
     @else

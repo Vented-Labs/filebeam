@@ -14,7 +14,7 @@
     gap: 1.5rem;
     padding: 0 2rem;
     border-bottom: 1px solid var(--fb-border);
-    background: rgb(16 14 22 / 94%);
+    background: var(--fb-bg);
     backdrop-filter: blur(14px);
 }
 .gallery-header__brand,
@@ -48,10 +48,10 @@
 }
 .gallery-development-badge {
     padding: 0.35rem 0.55rem;
-    border: 1px solid #76588c;
+    border: 1px solid var(--fb-choice-border);
     border-radius: 999px;
     color: var(--fb-accent-text);
-    background: #35234688;
+    background: var(--fb-accent-surface);
     font-size: 0.625rem;
     font-weight: 650;
     letter-spacing: 0.1em;
@@ -80,7 +80,7 @@
     box-sizing: border-box;
     padding: 1.5rem 1rem;
     border-right: 1px solid var(--fb-border);
-    background: #14111a;
+    background: var(--fb-footer-surface);
 }
 .gallery-sidebar > p {
     margin: 0 0 0.75rem;
@@ -111,14 +111,14 @@
 }
 .gallery-sidebar button:hover {
     color: var(--fb-text);
-    background: #ffffff05;
+    background: var(--fb-surface-hover);
 }
 .gallery-sidebar button:focus-visible {
     outline: 2px solid var(--fb-focus);
-    outline-offset: 2px;
+    outline-offset: 3px;
 }
 .gallery-sidebar__item--active {
-    border-color: #5d476b !important;
+    border-color: var(--fb-choice-border) !important;
     color: var(--fb-text) !important;
     background: var(--fb-selected-surface) !important;
 }
@@ -204,7 +204,7 @@
 .gallery-password-card,
 .gallery-notification-card {
     padding: 1.25rem;
-    border: 1px solid #ffffff0a;
+    border: 1px solid var(--fb-border);
     border-radius: 1rem;
     background: var(--fb-surface-sunken);
 }
@@ -239,21 +239,19 @@
     font-size: 0.625rem;
 }
 .gallery-force-hover .fb-button--primary {
-    border-color: #be8aef55;
-    background: var(--fb-action-hover);
-    box-shadow:
-        inset 0 1px 0 #ffffff25,
-        0 5px 10px #0003;
+    border-color: var(--fb-action-border);
+    background: var(--fb-action-hover-bg);
+    box-shadow: var(--fb-action-hover-shadow);
     transform: translateY(-1px);
 }
 .gallery-force-press .fb-button--primary {
-    background: var(--fb-action-active);
-    box-shadow: inset 0 2px 3px #0003;
+    background: var(--fb-action-active-bg);
+    box-shadow: var(--fb-action-active-shadow);
     transform: translateY(1px) scale(0.985);
 }
 .gallery-force-focus .fb-button {
     outline: 2px solid var(--fb-focus);
-    outline-offset: 2px;
+    outline-offset: 3px;
 }
 .gallery-form-grid {
     display: grid;
@@ -342,10 +340,10 @@
 .gallery-transfer-error {
     margin: 0 2rem 1.5rem;
     padding: 0.75rem;
-    border: 1px solid #ad71813d;
+    border: 1px solid var(--fb-danger-border);
     border-radius: 0.625rem;
     color: var(--fb-danger);
-    background: #38252b55;
+    background: var(--fb-danger-surface);
     font-size: 0.75rem;
     text-align: center;
 }
@@ -431,7 +429,7 @@
     width: 3.5rem;
     height: 3.5rem;
     place-items: center;
-    border: 1px solid #78598666;
+    border: 1px solid var(--fb-border);
     border-radius: 1rem;
     color: var(--fb-accent-text);
     background: var(--fb-selected-surface);
@@ -458,10 +456,10 @@
 .gallery-motion-detail {
     margin-top: 1rem;
     padding: 1rem;
-    border: 1px solid #ffffff0a;
+    border: 1px solid var(--fb-border);
     border-radius: 0.75rem;
     color: var(--fb-accent-text);
-    background: #ffffff04;
+    background: var(--fb-accent-surface);
     font-size: 0.75rem;
 }
 .gallery-token-list {
@@ -474,9 +472,9 @@
     display: flex;
     gap: 0.4rem;
     padding: 0.4rem 0.55rem;
-    border: 1px solid #ffffff0a;
+    border: 1px solid var(--fb-border);
     border-radius: 0.5rem;
-    background: #ffffff03;
+    background: var(--fb-surface-hover);
     font-family: var(--fb-font-code);
     font-size: 0.625rem;
 }

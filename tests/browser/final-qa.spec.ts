@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test('radial surfaces and dropzone icon hover match the prototype and respect reduced motion', async ({
+test('gradient surfaces retain dropzone icon motion and respect reduced motion', async ({
     page,
 }) => {
     await page.goto('/');

@@ -205,7 +205,7 @@ test('renders the Filebeam installer shell and accessible desktop progress', asy
     await expect(page.getByText(/This installer keeps/i)).toHaveCount(0);
     await expect(page.getByRole('img', { name: 'Filebeam' })).toHaveAttribute(
         'src',
-        '/brand/filebeam-logo-header.svg',
+        /\/brand\/filebeam-logo-header\.svg$/,
     );
     const progress = page.getByRole('navigation', { name: 'Installation progress' });
     await expect(progress.getByRole('button', { name: 'Access' })).toHaveAttribute(

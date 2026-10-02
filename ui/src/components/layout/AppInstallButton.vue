@@ -52,7 +52,7 @@ function restoreFocus(event: Event): void {
     font-size: 0.75rem;
 }
 .app-install-entry :deep(.fb-icon) {
-    color: var(--fb-accent);
+    color: var(--fb-text);
 }
 @media (max-width: 900px) {
     .app-install-entry {

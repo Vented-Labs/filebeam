@@ -17,24 +17,3 @@ export function pastedContent(data: DataTransfer): PasteContent {
     const files = originals.map((file) => namedFile(file, file.name));
     return { files, text: files.length ? '' : data.getData('text/plain') };
 }
-
-export async function readClipboard(): Promise<PasteContent> {
-    if (navigator.clipboard?.read) {
-        const items = await navigator.clipboard.read();
-        const files: File[] = [];
-        for (const item of items) {
-            const type = item.types.find((type) => type.startsWith('image/'));
-            if (type) files.push(namedFile(await item.getType(type)));
-        }
-        if (files.length) return { files, text: '' };
-        const texts = await Promise.all(
-            items
-                .filter((item) => item.types.includes('text/plain'))
-                .map(async (item) => (await item.getType('text/plain')).text()),
-        );
-        return { files: [], text: texts.join('\n') };
-    }
-    if (navigator.clipboard?.readText)
-        return { files: [], text: await navigator.clipboard.readText() };
-    throw new Error('Clipboard reading is unavailable.');
-}

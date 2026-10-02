@@ -14,6 +14,7 @@ import {
     DropdownMenuTrigger,
 } from 'reka-ui';
 import BrandLogo from '../brand/BrandLogo.vue';
+import AppearancePopover from './AppearancePopover.vue';
 import AppLink from '../primitives/AppLink.vue';
 import AuthLink from '../auth/AuthLink.vue';
 import CliFooterLauncher from '../cli/CliFooterLauncher.vue';
@@ -252,8 +253,11 @@ function goHome(event: MouseEvent): void {
         <main class="fb-shell__content"><slot /></main>
         <footer class="fb-footer">
             <div class="fb-footer__identity flex items-center gap-3">
-                <BrandLogo /><span
+                <BrandLogo />
+                <AppearancePopover />
+                <span
                     class="fb-footer__version text-xs font-normal text-[var(--fb-text-muted)]"
+                    :title="`v${branding.version}`"
                     >v{{ branding.version }}</span
                 >
             </div>
@@ -340,10 +344,36 @@ function goHome(event: MouseEvent): void {
     max-width: 100%;
     height: auto;
 }
+.fb-footer__identity :deep(.fb-brand__glyph) {
+    flex: none;
+}
+.fb-footer__identity :deep(.fb-brand__wordmark) {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 .fb-footer__version {
-    flex: 0 1 auto;
-    white-space: normal;
-    overflow-wrap: anywhere;
+    flex: none;
+    min-width: 0;
+    max-width: min(12rem, 25vw);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+@media (min-width: 1200px) and (max-width: 1350px) {
+    .fb-footer {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 400px) minmax(0, 1fr);
+    }
+}
+@media (min-width: 901px) and (max-width: 1199px) {
+    .fb-footer {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 220px) minmax(0, 1fr);
+    }
+    .fb-footer :deep(.cli-footer-launcher code),
+    .fb-footer :deep(.cli-footer-divider) {
+        display: none;
+    }
 }
 @media (min-width: 901px) and (max-width: 1100px) {
     .fb-header {
@@ -355,9 +385,6 @@ function goHome(event: MouseEvent): void {
     }
     .fb-nav-link {
         padding-inline: 0.4rem;
-    }
-    .fb-footer {
-        grid-template-columns: minmax(0, 1fr) minmax(0, 460px) minmax(0, 1fr);
     }
 }
 
@@ -391,10 +418,10 @@ function goHome(event: MouseEvent): void {
         flex: none;
     }
     .fb-footer {
-        grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+        grid-template-columns: minmax(18rem, 1fr) minmax(0, 1fr);
     }
     .fb-footer__right {
-        display: contents;
+        flex-wrap: wrap;
     }
 }
 @media (max-width: 560px) {
@@ -429,5 +456,21 @@ function goHome(event: MouseEvent): void {
 .fb-mobile-nav__item:hover,
 .fb-mobile-nav__item[data-highlighted] {
     color: var(--fb-text);
+}
+@media (min-width: 901px) and (max-height: 1000px) {
+    .fb-header {
+        min-height: 4.5rem;
+    }
+    .fb-footer {
+        min-height: 4rem;
+    }
+}
+@media (min-width: 901px) and (max-height: 760px) {
+    .fb-header {
+        min-height: 4rem;
+    }
+    .fb-footer {
+        min-height: 3.5rem;
+    }
 }
 </style>

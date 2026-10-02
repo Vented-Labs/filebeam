@@ -88,6 +88,7 @@
         "strikethrough": "text-block",
         "link": "link",
         "color": "color-swatch",
+        "brush": "paint-brush",
         "quote": "quote-down",
         "list": "textalign-left",
         "ordered-list": "text",

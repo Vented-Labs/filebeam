@@ -2,10 +2,14 @@
 
 declare(strict_types=1);
 
+use App\Models\InstanceSetting;
 use App\Models\User;
 use App\Models\UserInvitation;
 use App\Notifications\InboxTransferCompleted;
 use App\Notifications\UserInvitationNotification;
+use App\Support\FeatureAvailability;
+use App\Support\Theming\Palette;
+use App\Support\Theming\ThemeDefinition;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Auth\Notifications\VerifyEmail;
 use Illuminate\Mail\Markdown;
@@ -83,3 +87,18 @@ test('application notification copy uses configured branding and keeps action ur
         ->and($invitationMessage->introLines)->toContain('Use this link to create your account. It expires in 72 hours and can be used once.')
         ->and($invitationMessage->actionUrl)->toBe(route('invitations.accept', ['token' => 'single-use-token']));
 });
+
+test('rendered mail uses instance action ink and ignores personal appearance', function (string $seed) {
+    app()->instance(FeatureAvailability::class, new FeatureAvailability(['gd']));
+    InstanceSetting::query()->create(['key' => 'primary_color', 'value' => $seed]);
+    $user = User::factory()->create(['settings' => ['appearance' => ['mode' => 'light', 'preset' => 'rose']]]);
+    $this->actingAs($user);
+    $html = (string) (new InboxTransferCompleted)->toMail($user)->render();
+    $doc = new DOMDocument;
+    @$doc->loadHTML($html);
+    $xpath = new DOMXPath($doc);
+    $style = $xpath->evaluate('string(//a[contains(@class,"button-primary")]/@style)');
+    $t = (new Palette($seed))->tokens('light');
+    expect($style)->toContain('color: '.$t['--fb-on-action'], 'background-color: '.$t['--fb-action'])
+        ->and($html)->not->toContain('{{FB_MAIL_', 'var(--fb-', 'color-mix(', 'oklch(');
+})->with(array_values(ThemeDefinition::SEEDS));

@@ -25,7 +25,7 @@ const mode = defineModel<'files' | 'note'>({ required: true });
     display: block;
     width: fit-content;
     margin-right: auto;
-    margin-bottom: 1.375rem;
+    margin-bottom: 1rem;
     margin-left: auto;
 }
 .prism-mode__list {
@@ -39,8 +39,8 @@ const mode = defineModel<'files' | 'note'>({ required: true });
     padding: 0.3125rem;
     border: 1px solid var(--fb-border);
     border-radius: 1rem;
-    background: #16131d;
-    box-shadow: inset 0 1px 2px #0002;
+    background: var(--fb-tabs-surface);
+    box-shadow: inset 0 1px 2px var(--fb-shadow-soft);
 }
 .prism-mode__indicator {
     position: absolute;
@@ -49,10 +49,10 @@ const mode = defineModel<'files' | 'note'>({ required: true });
     left: 0.3125rem;
     width: calc(50% - 0.3125rem);
     height: 2.25rem;
-    border: 1px solid #70518d80;
+    border: 1px solid var(--fb-tabs-border);
     border-radius: 0.6875rem;
     background: var(--fb-selected-surface);
-    box-shadow: inset 0 1px 0 #ffffff0d;
+    box-shadow: inset 0 1px 0 var(--fb-shadow-highlight);
     pointer-events: none;
     transition: transform var(--fb-duration-selection) var(--fb-ease);
 }
@@ -77,10 +77,10 @@ const mode = defineModel<'files' | 'note'>({ required: true });
         background var(--fb-duration-control) ease;
 }
 .prism-mode__trigger:hover:not(:disabled) {
-    background: #ffffff05;
+    background: var(--fb-wash-05);
 }
 .prism-mode__trigger[data-state='active'] {
-    color: #f5ecff;
+    color: var(--fb-tabs-text);
 }
 @media (max-width: 730px) {
     .prism-mode {
@@ -96,6 +96,11 @@ const mode = defineModel<'files' | 'note'>({ required: true });
 @media (prefers-reduced-motion: reduce) {
     .prism-mode__indicator {
         transition: none;
+    }
+}
+@media (min-width: 901px) and (max-height: 1000px) {
+    .prism-mode {
+        margin-bottom: 0.5rem;
     }
 }
 </style>

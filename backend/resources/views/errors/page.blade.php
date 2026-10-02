@@ -3,26 +3,29 @@
     $configuredLogoUrl = config('filebeam.branding.logo_url');
     $hasConfiguredLogo = is_string($configuredLogoUrl) && $configuredLogoUrl !== '';
     $hasCustomIdentity = $hasConfiguredLogo || $brandName !== 'Filebeam';
+    $themeAssets = app(\App\Support\Theming\Assets::class);
+    $themePalette = app(\App\Support\Theming\Appearance::class)->palette(request(), false);
     $logoUrl = $hasConfiguredLogo
         ? $configuredLogoUrl
-        : asset($hasCustomIdentity ? 'brand/filebeam-mark.svg' : 'brand/filebeam-logo-header.svg');
-    $faviconUrl = config('filebeam.branding.favicon_url') ?: asset('favicon.svg');
+        : $themeAssets->url($hasCustomIdentity ? 'mark.svg' : 'logo.svg', $themePalette);
+    $lightLogoUrl = $hasConfiguredLogo ? $configuredLogoUrl : $themeAssets->url($hasCustomIdentity ? 'mark.svg' : 'logo.svg', $themePalette, 'light');
+    $faviconUrl = config('filebeam.branding.favicon_url') ?: $themeAssets->url('favicon.svg', $themePalette);
 @endphp
 <!DOCTYPE html>
-<html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
+<html lang="{{ str_replace('_', '-', app()->getLocale()) }}" data-fb-preset="{{ app(\App\Support\Theming\Appearance::class)->preset(request(), false) }}">
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <meta name="theme-color" content="#100e16">
+        <x-theme-head :database="false" chrome="--fb-bg" :personal="true" />
         <meta name="robots" content="noindex">
         <link rel="icon" href="{{ $faviconUrl }}">
         <title>{{ $title }} - {{ $brandName }}</title>
         <style>
             :root {
-                color-scheme: dark;
+                color-scheme: var(--fb-color-scheme);
                 font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-                color: #f7f5ff;
-                background: #100e16;
+                color: var(--fb-error-text);
+                background: var(--fb-bg);
             }
 
             * { box-sizing: border-box; }
@@ -31,7 +34,7 @@
                 min-width: 320px;
                 min-height: 100svh;
                 margin: 0;
-                background: #100e16;
+                background: var(--fb-bg);
             }
 
             .shell {
@@ -49,7 +52,7 @@
                 min-height: 5.35rem;
                 display: flex;
                 align-items: center;
-                border-bottom: 1px solid #ffffff0a;
+                border-bottom: 1px solid var(--fb-line-strong);
             }
 
             .brand {
@@ -61,6 +64,13 @@
             }
 
             .brand img { display: block; object-fit: contain; }
+            .brand .brand-logo--light { display: none; }
+            :root[data-fb-theme="light"] .brand-logo--dark { display: none; }
+            :root[data-fb-theme="light"] .brand-logo--light { display: block; }
+            @media (prefers-color-scheme: light) {
+                :root:not([data-fb-theme]) .brand-logo--dark { display: none; }
+                :root:not([data-fb-theme]) .brand-logo--light { display: block; }
+            }
             .brand-lockup { width: auto; height: 2rem; }
             .brand-glyph { width: 2.25rem; height: 2.25rem; }
 
@@ -89,9 +99,9 @@
                 display: grid;
                 place-items: center;
                 margin: 0 auto 2rem;
-                border: 1px solid #554060;
+                border: 1px solid var(--fb-share-border);
                 border-radius: 999px;
-                background: #211a2b;
+                background: var(--fb-error-surface);
                 overflow: hidden;
             }
 
@@ -100,7 +110,7 @@
                 position: absolute;
                 width: 6rem;
                 height: 1px;
-                background: linear-gradient(90deg, transparent, #b992d6, transparent);
+                background: linear-gradient(90deg, transparent, var(--fb-error-signal), transparent);
                 transform: rotate(-32deg);
             }
 
@@ -110,10 +120,10 @@
                 position: relative;
                 z-index: 1;
                 padding: .34rem .55rem;
-                border: 1px solid #746184;
+                border: 1px solid var(--fb-danger-border);
                 border-radius: .5rem;
-                color: #f7f5ff;
-                background: #17131e;
+                color: var(--fb-danger);
+                background: var(--fb-danger-surface);
                 font-family: "JetBrains Mono", ui-monospace, monospace;
                 font-size: .875rem;
                 font-weight: 600;
@@ -130,7 +140,7 @@
             .description {
                 max-width: 34rem;
                 margin: 1rem auto 0;
-                color: #aaa0c0;
+                color: var(--fb-error-muted);
                 font-size: 1rem;
                 line-height: 1.65;
             }
@@ -143,10 +153,10 @@
                 gap: .55rem;
                 margin-top: 2rem;
                 padding: .625rem 1rem;
-                border: 1px solid #554060;
+                border: 1px solid var(--fb-control-border);
                 border-radius: .75rem;
-                color: #f7f5ff;
-                background: #211a2b;
+                color: var(--fb-error-text);
+                background: var(--fb-error-surface);
                 font-size: .9rem;
                 font-weight: 600;
                 line-height: 1.2;
@@ -154,8 +164,8 @@
                 transition: background-color 150ms ease, border-color 150ms ease;
             }
 
-            .action:hover { border-color: #785986; background: #292133; }
-            .action:focus-visible { outline: 3px solid #b992d6; outline-offset: 3px; }
+            .action:hover { border-color: var(--fb-error-hover-border); background: var(--fb-error-hover-surface); }
+            .action:focus-visible { outline: 2px solid var(--fb-focus); outline-offset: 3px; }
             .action svg { width: 1rem; height: 1rem; }
 
             .footer {
@@ -163,8 +173,8 @@
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                border-top: 1px solid #ffffff0a;
-                color: #aaa0c0;
+                border-top: 1px solid var(--fb-line-strong);
+                color: var(--fb-error-muted);
                 font-size: .8125rem;
             }
 
@@ -178,8 +188,15 @@
             <header class="header">
                 <a class="brand" href="{{ url('/') }}" aria-label="{{ $brandName }} home">
                     <img
-                        class="{{ $hasCustomIdentity ? 'brand-glyph' : 'brand-lockup' }}"
+                        class="{{ $hasCustomIdentity ? 'brand-glyph' : 'brand-lockup' }} brand-logo--dark"
                         src="{{ $logoUrl }}"
+                        data-fb-brand="{{ $hasConfiguredLogo ? '' : ($hasCustomIdentity ? 'default_mark_url' : 'default_logo_url') }}"
+                        alt="{{ $hasCustomIdentity ? '' : $brandName }}"
+                    >
+                    <img
+                        class="{{ $hasCustomIdentity ? 'brand-glyph' : 'brand-lockup' }} brand-logo--light"
+                        src="{{ $lightLogoUrl }}"
+                        data-fb-brand="{{ $hasConfiguredLogo ? '' : ($hasCustomIdentity ? 'default_mark_url' : 'default_light_logo_url') }}"
                         alt="{{ $hasCustomIdentity ? '' : $brandName }}"
                     >
                     @if ($hasCustomIdentity)

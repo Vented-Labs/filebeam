@@ -1,6 +1,17 @@
 <script setup lang="ts">
 import Icon from '../primitives/Icon.vue';
+import { computed } from 'vue';
+import { useAppearance } from '../../composables/useAppearance';
 defineProps<{ variant: 'home' | 'receive' | 'transfer' }>();
+
+const { mode, palette } = useAppearance();
+const logo = computed(() =>
+    mode.value === 'light'
+        ? (palette.value?.branding.default_light_logo_url ??
+          '/brand/filebeam-logo-header-on-light.svg')
+        : (palette.value?.branding.default_logo_url ?? '/brand/filebeam-logo-header.svg'),
+);
+const mark = computed(() => palette.value?.branding.default_mark_url ?? '/brand/filebeam-mark.svg');
 
 const copy = {
     home: { lines: ['Share files', 'privately'] },
@@ -13,14 +24,14 @@ const copy = {
     <article class="og-card" :aria-label="copy[variant].lines.join(' ')">
         <div class="og-orbit og-orbit-outer" aria-hidden="true"></div>
         <div class="og-orbit og-orbit-inner" aria-hidden="true"></div>
-        <img class="og-logo" src="/brand/filebeam-logo-header.svg" alt="Filebeam" />
+        <img class="og-logo" :src="logo" alt="Filebeam" />
         <div class="og-copy">
             <h1 :class="{ 'og-headline-single': variant === 'home' }">
                 <span v-for="line in copy[variant].lines" :key="line">{{ line }}</span>
             </h1>
             <p class="og-description">Securely send files and notes to others</p>
         </div>
-        <img class="og-mark" src="/brand/filebeam-mark.svg" alt="" />
+        <img class="og-mark" :src="mark" alt="" />
         <footer class="og-footer">
             <span class="og-lock" aria-hidden="true">
                 <Icon name="lock" :size="22" />
@@ -38,7 +49,7 @@ const copy = {
     height: 630px;
     overflow: hidden;
     background:
-        radial-gradient(ellipse at 88% 43%, rgb(139 53 255 / 24%), transparent 48%), var(--fb-bg);
+        radial-gradient(ellipse at 88% 43%, var(--fb-og-glow), transparent 48%), var(--fb-bg);
     color: var(--fb-text);
     font-family: var(--fb-font-ui);
     -webkit-font-smoothing: antialiased;
@@ -67,7 +78,7 @@ h1 span {
     display: block;
 }
 h1 span + span {
-    color: var(--fb-brand-fold);
+    color: var(--fb-accent-text);
 }
 .og-headline-single {
     display: flex;
@@ -87,11 +98,11 @@ h1 span + span {
     width: 260px;
     height: 330px;
     object-fit: contain;
-    filter: drop-shadow(0 22px 48px rgb(139 53 255 / 30%));
+    filter: drop-shadow(0 22px 48px var(--fb-og-shadow));
 }
 .og-orbit {
     position: absolute;
-    border: 1px solid rgb(199 91 250 / 12%);
+    border: 1px solid var(--fb-og-orbit);
     border-radius: 50%;
     transform: rotate(-25deg);
 }

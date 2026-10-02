@@ -1,7 +1,10 @@
 import { createApp, h, type DefineComponent } from 'vue';
 import { createInertiaApp } from '@inertiajs/vue3';
 import '../../backend/resources/css/app.css';
+import '../../backend/resources/themes/appearance.js';
 import Gallery from './Gallery.vue';
+import ThemeFixture from './ThemeFixture.vue';
+import GradientFixture from './GradientFixture.vue';
 import './gallery.css';
 
 if (new URLSearchParams(window.location.search).has('placement')) {
@@ -24,6 +27,10 @@ if (new URLSearchParams(window.location.search).has('placement')) {
                 .mount(el);
         },
     });
+} else if (new URLSearchParams(window.location.search).has('gradients')) {
+    createApp(GradientFixture).mount('#app');
+} else if (new URLSearchParams(window.location.search).has('theme')) {
+    createApp(ThemeFixture).mount('#app');
 } else {
     createApp(Gallery).mount('#app');
 }

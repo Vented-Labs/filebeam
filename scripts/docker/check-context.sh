@@ -56,6 +56,7 @@ COPY icons /context/icons
 COPY scripts/check-icons.mjs scripts/generate-icons.mjs scripts/custom-icons.mjs scripts/generate-mobile-icons.mjs /context/scripts/
 COPY scripts/og /context/scripts/og
 COPY scripts/prism-gallery /context/scripts/prism-gallery
+COPY scripts/themes /context/scripts/themes
 COPY backend/artisan backend/composer.json backend/composer.lock backend/package.json backend/vite.config.ts backend/tsconfig.json /context/backend/
 COPY backend/app /context/backend/app
 COPY backend/bootstrap /context/backend/bootstrap
@@ -64,7 +65,7 @@ COPY backend/database/migrations /context/backend/database/migrations
 COPY backend/database/seeders /context/backend/database/seeders
 COPY backend/resources /context/backend/resources
 COPY backend/routes /context/backend/routes
-COPY backend/public/index.php backend/public/frankenphp-worker.php backend/public/robots.txt backend/public/.htaccess backend/public/favicon.ico backend/public/apple-touch-icon.png /context/backend/public/
+COPY backend/public/index.php backend/public/frankenphp-worker.php backend/public/robots.txt backend/public/.htaccess backend/public/favicon.ico backend/public/favicon.svg backend/public/favicon-16x16.png backend/public/favicon-32x32.png backend/public/apple-touch-icon.png /context/backend/public/
 COPY backend/public/brand /context/backend/public/brand
 COPY backend/public/fonts /context/backend/public/fonts
 COPY ui/package.json /context/ui/package.json
@@ -191,6 +192,8 @@ done
 require_prefix 'scripts/og'
 require_present 'scripts/prism-gallery/check-icons.mjs'
 require_present 'scripts/prism-gallery/Gallery.vue'
+require_present 'scripts/themes/palette.php'
+require_present 'backend/resources/themes/default.css'
 require_present 'backend/artisan'
 require_present 'backend/composer.json'
 require_present 'backend/composer.lock'
@@ -205,6 +208,9 @@ require_present 'updater/Updater.php'
 require_present 'backend/public/index.php'
 require_present 'backend/public/.htaccess'
 require_present 'backend/public/frankenphp-worker.php'
+require_present 'backend/public/favicon.svg'
+require_present 'backend/public/favicon-16x16.png'
+require_present 'backend/public/favicon-32x32.png'
 if [[ -f "$root/crates/encryption/Cargo.lock" ]]; then
     require_present 'crates/encryption/Cargo.lock'
 fi

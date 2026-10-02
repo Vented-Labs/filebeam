@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useBranding } from '../../lib/branding';
+import { useAppearance } from '../../composables/useAppearance';
 
 const props = withDefaults(
     defineProps<{
@@ -11,6 +12,7 @@ const props = withDefaults(
 );
 
 const branding = useBranding();
+const { mode } = useAppearance();
 const displayLabel = computed(() => props.label ?? branding.value.name);
 const customIdentity = computed(
     () => Boolean(branding.value.logo_url) || displayLabel.value !== 'Filebeam',
@@ -24,7 +26,11 @@ const customIdentity = computed(
             :class="compact || customIdentity ? 'fb-brand__glyph' : 'fb-brand__lockup'"
             :src="
                 branding.logo_url ||
-                (compact || customIdentity ? branding.default_mark_url : branding.default_logo_url)
+                (compact || customIdentity
+                    ? branding.default_mark_url
+                    : mode === 'light'
+                      ? branding.default_light_logo_url
+                      : branding.default_logo_url)
             "
             :alt="customIdentity && !compact ? '' : displayLabel"
         />
