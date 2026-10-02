@@ -11,6 +11,7 @@ use App\Support\Branding;
 use App\Support\EffectivePlan;
 use App\Support\FeatureAvailability;
 use App\Support\InstanceSettings;
+use App\Support\Theming\Appearance;
 use App\Support\Theming\Assets;
 use App\Support\Theming\Palette;
 use App\Support\TransportPolicy;
@@ -48,6 +49,7 @@ class HandleInertiaRequests extends Middleware
             ...parent::share($request),
             'name' => config('app.name'),
             'capabilities' => app(FeatureAvailability::class)->all(),
+            'appearance' => fn (): array => app(Appearance::class)->payload($request),
             'theme' => fn (): array => ['primary' => $palette->primary, 'css' => $palette->css(), 'chrome' => ['dark' => $palette->value('#0B0914'), 'light' => $palette->value('#0B0914', 'light')]],
             'auth' => [
                 'user' => function () use ($request): ?array {

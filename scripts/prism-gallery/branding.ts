@@ -1,4 +1,5 @@
 import { computed } from 'vue';
+import { useAppearance } from '../../ui/src/composables/useAppearance';
 
 const branding = {
     name: 'Filebeam',
@@ -14,5 +15,6 @@ const branding = {
 };
 
 export function useBranding() {
-    return computed(() => branding);
+    const { palette } = useAppearance();
+    return computed(() => ({ ...branding, ...palette.value?.branding }));
 }

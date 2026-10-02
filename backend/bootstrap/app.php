@@ -9,6 +9,7 @@ use App\Http\Middleware\SecurityHeaders;
 use App\Http\Middleware\TrackUpdateActivity;
 use App\Support\Installation\EnvironmentSettings;
 use App\Support\Installation\InstallationState;
+use App\Support\Theming\Appearance;
 use App\Support\Theming\Assets;
 use App\Support\Theming\Theme;
 use Illuminate\Foundation\Application;
@@ -36,6 +37,7 @@ $application = Application::configure(basePath: dirname(__DIR__))
         },
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        $middleware->encryptCookies(except: [Appearance::COOKIE]);
         $middleware->prepend(RequireInstallation::class);
         $middleware->append(TrackUpdateActivity::class);
         $middleware->trimStrings(except: [

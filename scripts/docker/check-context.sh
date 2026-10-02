@@ -56,6 +56,7 @@ COPY icons /context/icons
 COPY scripts/check-icons.mjs scripts/generate-icons.mjs scripts/custom-icons.mjs scripts/generate-mobile-icons.mjs /context/scripts/
 COPY scripts/og /context/scripts/og
 COPY scripts/prism-gallery /context/scripts/prism-gallery
+COPY scripts/themes /context/scripts/themes
 COPY backend/artisan backend/composer.json backend/composer.lock backend/package.json backend/vite.config.ts backend/tsconfig.json /context/backend/
 COPY backend/app /context/backend/app
 COPY backend/bootstrap /context/backend/bootstrap

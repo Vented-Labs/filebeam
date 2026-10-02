@@ -1,5 +1,6 @@
 import { usePage } from '@inertiajs/vue3';
 import { computed } from 'vue';
+import { useAppearance } from '../composables/useAppearance';
 
 export type Branding = {
     name: string;
@@ -31,6 +32,11 @@ const defaultBranding: Branding = {
 
 export function useBranding() {
     const page = usePage<{ branding?: Partial<Branding> }>();
+    const { palette } = useAppearance();
 
-    return computed<Branding>(() => ({ ...defaultBranding, ...page.props.branding }));
+    return computed<Branding>(() => ({
+        ...defaultBranding,
+        ...page.props.branding,
+        ...palette.value?.branding,
+    }));
 }

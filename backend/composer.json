@@ -57,10 +57,10 @@
             "@php artisan dev"
         ],
         "lint": [
-            "pint --parallel . artisan ../update.php ../updater ../scripts/release ../tests/updater"
+            "pint --parallel . artisan ../update.php ../updater ../scripts/release ../scripts/themes ../tests/updater"
         ],
         "lint:check": [
-            "pint --parallel --test . artisan ../update.php ../updater ../scripts/release ../tests/updater"
+            "pint --parallel --test . artisan ../update.php ../updater ../scripts/release ../scripts/themes ../tests/updater"
         ],
         "ci:check": [
             "Composer\\Config::disableProcessTimeout",

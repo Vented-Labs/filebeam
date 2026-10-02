@@ -1,4 +1,5 @@
 import { createInertiaApp, router } from '@inertiajs/vue3';
+import type { AppearancePayload } from '../../../ui/src/lib/appearance-types';
 
 if (typeof document !== 'undefined')
     router.on('navigate', ({ detail }) => {
@@ -18,7 +19,9 @@ if (typeof document !== 'undefined')
             chrome.dataset.fbDark = theme.chrome.dark;
             chrome.dataset.fbLight = theme.chrome.light;
         }
-        window.filebeamAppearance?.refresh();
+        const appearance = detail.page.props.appearance as AppearancePayload | undefined;
+        if (appearance) window.filebeamAppearance?.hydrate(appearance);
+        else window.filebeamAppearance?.refresh();
     });
 
 const appName =

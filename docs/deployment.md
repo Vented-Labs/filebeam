@@ -61,10 +61,18 @@ default light/dark themes and artwork while retaining the saved custom color.
 Restart PHP and notification workers after enabling GD to restore customization.
 GD is optional for installation and upgrades.
 
-The public interface initially follows the operating system. **About > Appearance**
-offers Light, Dark, and System choices, remembered in that browser. Admin retains
-its own appearance selector. Emails retain their light-body presentation and
-social cards retain their dark presentation, both using the instance palette.
+The public interface initially follows the operating system. The paintbrush
+between the footer logo and version opens System, Light, and Dark choices and
+curated color presets. Guests keep their choices in that browser. Signed-in users
+save them in their account's Fluent JSON settings. Existing account choices win
+on sign-in; an account without appearance settings adopts the guest choices once.
+Signing out restores the browser's guest choices. **Reset** saves System and
+Instance default explicitly. Apply database migrations before deploying this feature.
+
+Personal colors affect public pages and built-in browser artwork. **Instance
+default** follows the Admin/environment color. Admin, light-body emails, and dark
+social cards use the instance palette. GD availability gates custom colors while
+retaining saved preferences for when the extension is enabled again.
 
 Generated images and the error-page fallback are stored under
 `backend/storage/app/themes`. Keep this directory writable and persistent across

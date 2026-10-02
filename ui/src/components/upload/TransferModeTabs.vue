@@ -25,7 +25,7 @@ const mode = defineModel<'files' | 'note'>({ required: true });
     display: block;
     width: fit-content;
     margin-right: auto;
-    margin-bottom: 1.375rem;
+    margin-bottom: 1rem;
     margin-left: auto;
 }
 .prism-mode__list {
@@ -96,6 +96,11 @@ const mode = defineModel<'files' | 'note'>({ required: true });
 @media (prefers-reduced-motion: reduce) {
     .prism-mode__indicator {
         transition: none;
+    }
+}
+@media (min-width: 901px) and (max-height: 1000px) {
+    .prism-mode {
+        margin-bottom: 0.5rem;
     }
 }
 </style>

@@ -93,7 +93,7 @@ class ManageInstanceSettings
         });
 
         if (array_key_exists('primary_color', $normalizedValues)) {
-            app(Theme::class)->remember();
+            DB::afterCommit(static fn () => app(Theme::class)->remember());
         }
     }
 

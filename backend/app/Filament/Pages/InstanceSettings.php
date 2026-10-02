@@ -150,6 +150,24 @@ class InstanceSettings extends Page
                             ->label('Primary color')
                             ->hex()
                             ->placeholder('#8b35ff')
+                            ->extraAlpineAttributes([
+                                // The hex web component needs a valid seed even when the setting inherits.
+                                'x-init' => <<<'JS'
+                                    $nextTick(() => {
+                                        const seedPicker = () => {
+                                            if (!/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(state ?? '')) {
+                                                $refs.picker.color = $refs.input.placeholder
+                                            }
+                                        }
+                                        seedPicker()
+                                        $el.addEventListener('pointerdown', seedPicker, true)
+                                        $el.addEventListener('focusin', seedPicker, true)
+                                        $el.addEventListener('keydown', (event) => {
+                                            if (event.target !== $refs.input || event.key === 'Enter') seedPicker()
+                                        }, true)
+                                    })
+                                    JS,
+                            ])
                             ->helperText(! app(FeatureAvailability::class)->available(Feature::CustomThemes)
                                 ? 'Custom themes are unavailable: enable the PHP GD extension. Default light and dark themes remain available.'
                                 : $help('primary_color', 'Generates all built-in colors and artwork without rebuilding assets. Leave empty to restore Filebeam colors.'))

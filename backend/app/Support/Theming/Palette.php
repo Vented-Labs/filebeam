@@ -52,13 +52,15 @@ final class Palette
         return $this->palettes[$mode] = $tokens;
     }
 
-    public function css(): string
+    public function css(string $scope = ''): string
     {
         $declarations = static fn (array $tokens): string => implode('', array_map(static fn (string $name, string $value): string => $name.':'.$value.';', array_keys($tokens), array_values($tokens)));
         $dark = $this->tokens();
         $light = $declarations(array_diff_assoc($this->tokens('light'), $dark));
 
-        return ':root:root{'.$declarations($dark).'}:root[data-fb-theme="light"]{'.$light.'}@media(prefers-color-scheme:light){:root:not([data-fb-theme]){'.$light.'}}';
+        $root = ':root'.$scope;
+
+        return $root.':root{'.$declarations($dark).'}'.$root.'[data-fb-theme="light"]{'.$light.'}@media(prefers-color-scheme:light){'.$root.':not([data-fb-theme]){'.$light.'}}';
     }
 
     public function value(string $value, string $mode = 'dark', string $role = ''): string

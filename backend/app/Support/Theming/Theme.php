@@ -18,7 +18,7 @@ final class Theme
 
     public function primary(bool $database = true): string
     {
-        if (! $this->features->available(Feature::CustomThemes)) {
+        if (! $this->features->available(Feature::CustomThemes) || ! filled(config('app.key'))) {
             return Palette::DEFAULT_PRIMARY;
         }
         $value = $this->settings->environmentValue('primary_color');

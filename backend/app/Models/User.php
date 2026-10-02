@@ -17,12 +17,14 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Attributes\Scope;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Casts\AsFluent;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Fluent;
 
 /**
  * @property int $id
@@ -36,9 +38,10 @@ use Illuminate\Support\Carbon;
  * @property UserRole $role
  * @property Carbon|null $suspended_at
  * @property string $notification_channel
+ * @property Fluent<string, mixed>|null $settings
  */
 #[Fillable(['name', 'username', 'normalized_username', 'email', 'password', 'plan_id', 'inbox_enabled', 'notification_channel'])]
-#[Hidden(['password', 'remember_token'])]
+#[Hidden(['password', 'remember_token', 'settings'])]
 class User extends Authenticatable implements FilamentUser, HasAppAuthentication, HasAppAuthenticationRecovery, MustVerifyEmail
 {
     /** @use HasFactory<UserFactory> */
@@ -122,6 +125,7 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
             'inbox_enabled' => 'boolean',
             'role' => UserRole::class,
             'suspended_at' => 'datetime',
+            'settings' => AsFluent::class,
         ];
     }
 }

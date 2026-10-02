@@ -15,14 +15,10 @@ The root build generates the encryption WebAssembly package before building the 
 
 On the Send screen, paste text to open Notes or paste an image to add it to Files.
 Existing drafts are preserved. Paste inside an editor or form field behaves
-normally; the Paste action on the file dropzone appends text to the note draft.
-
-On mobile web, touch and hold the dropzone and choose **Paste**. The same action
-is available as a button and through the keyboard context menu. If the browser
-cannot read the clipboard directly, a paste field opens for its native Paste
-command. Image availability depends on the browser and clipboard source; use
-**Choose files** when the browser cannot expose the image. Sharing still requires
-the Send action.
+normally. Use the browser or keyboard paste action anywhere on the Send page;
+image availability depends on the browser and clipboard source. **Choose files**
+is available when the browser cannot expose a clipboard image. Sharing still
+requires the Send action.
 
 ## Theme tokens
 
@@ -31,3 +27,8 @@ Color roles are defined in `backend/resources/themes/default.css` and consumed a
 from those defaults. Keep component colors, interaction states, and decorative
 effects in tokens; the default dark values are the visual compatibility baseline.
 Appearance changes preserve mounted components and editor state.
+
+The footer paintbrush opens the appearance popup. Guest preferences are browser-local;
+authenticated preferences are saved under `users.settings.appearance`. Preset IDs
+are defined by `ThemePreset`; public palettes and instance branding use separate
+resolvers. The component gallery uses the same PHP palette generator.

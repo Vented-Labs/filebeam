@@ -527,7 +527,7 @@ jobs:
       - name: Test theme capabilities and rendering
         if: hashFiles('backend/tests/Feature/ThemeAssetsTest.php') != ''
         working-directory: backend
-        run: vendor/bin/pest tests/Unit/FeatureAvailabilityTest.php tests/Unit/ThemePaletteTest.php tests/Feature/ThemeSettingsTest.php tests/Feature/ThemeAssetsTest.php tests/Feature/BrandingTest.php tests/Feature/BrandedMailTest.php tests/Feature/BrandedErrorPagesTest.php
+        run: vendor/bin/pest tests/Unit/FeatureAvailabilityTest.php tests/Unit/ThemePaletteTest.php tests/Feature/ThemeSettingsTest.php tests/Feature/ThemeAssetsTest.php tests/Feature/AppearancePreferencesTest.php tests/Feature/BrandingTest.php tests/Feature/BrandedMailTest.php tests/Feature/BrandedErrorPagesTest.php
       - name: Test runtime theme changes against an isolated application
         if: matrix.gd == 'true' && hashFiles('scripts/themes/test.sh') != ''
         run: npm run test:theme

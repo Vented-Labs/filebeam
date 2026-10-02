@@ -1,6 +1,7 @@
 import { createApp, h, type DefineComponent } from 'vue';
 import { createInertiaApp } from '@inertiajs/vue3';
 import '../../backend/resources/css/app.css';
+import '../../backend/resources/themes/appearance.js';
 import Gallery from './Gallery.vue';
 import './gallery.css';
 

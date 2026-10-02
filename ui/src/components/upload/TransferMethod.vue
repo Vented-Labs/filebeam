@@ -352,4 +352,17 @@ function hideOutgoing(element: Element): void {
         transform: none;
     }
 }
+@media (min-width: 901px) and (max-height: 1000px) {
+    .transfer-method {
+        padding-block: 0.5rem;
+    }
+    .transfer-method__card {
+        height: 3rem;
+    }
+}
+@media (min-width: 901px) and (max-height: 760px) {
+    .transfer-method__card {
+        height: 2.75rem;
+    }
+}
 </style>

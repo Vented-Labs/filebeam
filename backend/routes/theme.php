@@ -3,7 +3,11 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\ThemeAssetController;
+use App\Http\Controllers\ThemeStylesheetController;
 use Illuminate\Support\Facades\Route;
+
+Route::get('/_theme/palettes/{version}.css', ThemeStylesheetController::class)
+    ->where('version', '[0-9a-f]{24}')->name('theme.stylesheet');
 
 Route::get('/_theme/{version}/{primary}/{mode}/{asset}', ThemeAssetController::class)
     ->where('version', '[0-9a-f]{24}')

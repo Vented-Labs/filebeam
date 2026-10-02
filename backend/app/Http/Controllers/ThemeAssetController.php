@@ -13,7 +13,7 @@ final class ThemeAssetController extends Controller
 {
     public function __invoke(Request $request, Assets $assets, string $version, string $primary, string $mode, string $asset): Response
     {
-        abort_unless($request->hasValidRelativeSignature(), 403);
+        abort_unless(filled(config('app.key')) && $request->hasValidRelativeSignature(), 403);
         $bytes = $assets->render($asset, new Palette('#'.$primary), $mode, $version);
         $type = match (pathinfo($asset, PATHINFO_EXTENSION)) {
             'svg' => 'image/svg+xml',

@@ -4,13 +4,16 @@ declare(strict_types=1);
 
 use App\Actions\Admin\ManageInstanceSettings;
 use App\Enums\UserRole;
+use App\Filament\Pages\InstanceSettings as InstanceSettingsPage;
 use App\Models\InstanceSetting;
 use App\Models\User;
 use App\Support\FeatureAvailability;
 use App\Support\InstanceSettingValue;
 use App\Support\Theming\Theme;
+use Filament\Facades\Filament;
 use Illuminate\Support\Facades\File;
 use Illuminate\Validation\ValidationException;
+use Livewire\Livewire;
 
 beforeEach(function () {
     config()->set('theme.storage_directory', storage_path('framework/testing/themes-'.bin2hex(random_bytes(8))));
@@ -48,3 +51,22 @@ test('missing GD disables custom themes without losing the stored setting', func
 test('colors cannot inject CSS or markup', function (mixed $value) {
     expect(fn () => InstanceSettingValue::color($value))->toThrow(InvalidArgumentException::class);
 })->with(['red', '#1234', '#12345678', '#abcdef; color:red', '</style>', 'var(--color)', ['array'], 123]);
+
+test('a failed SMTP save cannot publish an uncommitted theme fallback', function () {
+    app()->instance(FeatureAvailability::class, new FeatureAvailability(['gd']));
+    config()->set('smtp.managed', false);
+    $admin = User::factory()->create(['role' => UserRole::Admin]);
+    app(ManageInstanceSettings::class)->update($admin, ['primary_color' => '#008877']);
+    $this->actingAs($admin, 'admin');
+    Filament::setCurrentPanel(Filament::getPanel('admin'));
+    Livewire::test(InstanceSettingsPage::class)
+        ->fillForm(['primary_color' => '#cc5500', 'smtp' => [
+            'enabled' => true, 'host' => '', 'port' => 587, 'security' => 'starttls',
+            'username' => '', 'password' => '', 'clear_password' => false,
+            'from_address' => 'sender@example.test', 'from_name' => 'Filebeam',
+        ]])
+        ->call('save')
+        ->assertHasFormErrors(['smtp.host']);
+    expect(app(Theme::class)->primary())->toBe('#008877')
+        ->and(app(Theme::class)->primary(false))->toBe('#008877');
+});

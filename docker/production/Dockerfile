@@ -70,6 +70,7 @@ COPY icons icons
 COPY scripts/check-icons.mjs scripts/generate-icons.mjs scripts/custom-icons.mjs scripts/generate-mobile-icons.mjs scripts/
 COPY scripts/og scripts/og
 COPY scripts/prism-gallery scripts/prism-gallery
+COPY scripts/themes scripts/themes
 COPY vite.config.ts ./
 COPY --from=wasm /src/crates/encryption/pkg /opt/filebeam/crates/encryption/pkg
 COPY --from=wasm /src/crates/transfer-wasm/pkg /opt/filebeam/crates/transfer-wasm/pkg

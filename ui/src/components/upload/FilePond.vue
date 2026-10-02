@@ -2,8 +2,6 @@
 import Button from '../primitives/Button.vue';
 import Icon from '../primitives/Icon.vue';
 import BrandLogo from '../brand/BrandLogo.vue';
-import PasteInput from './PasteInput.vue';
-import type { PasteContent } from '../../lib/clipboard';
 
 const props = defineProps<{
     disabled: boolean;
@@ -13,7 +11,6 @@ const props = defineProps<{
 const emit = defineEmits<{
     choose: [];
     files: [files: FileList];
-    paste: [content: PasteContent];
 }>();
 
 function dropped(event: DragEvent): void {
@@ -34,26 +31,26 @@ function selected(event: Event): void {
 </script>
 
 <template>
-    <PasteInput :disabled="disabled" @paste="emit('paste', $event)">
-        <section
-            class="file-pond"
-            data-testid="file-pond"
-            :data-disabled="disabled || undefined"
-            :class="{ 'file-pond--dragging': dragging, 'file-pond--compact': compact }"
-            @dragover="onDragOver"
-            @drop="dropped"
-        >
-            <input
-                id="filebeam-picker"
-                class="sr-only"
-                type="file"
-                multiple
-                :disabled="disabled"
-                @change="selected"
-            />
-            <slot v-if="compact" />
-            <div v-else class="file-pond__empty">
-                <div class="file-pond__art" aria-hidden="true">
+    <section
+        class="file-pond"
+        data-testid="file-pond"
+        :data-disabled="disabled || undefined"
+        :class="{ 'file-pond--dragging': dragging, 'file-pond--compact': compact }"
+        @dragover="onDragOver"
+        @drop="dropped"
+    >
+        <input
+            id="filebeam-picker"
+            class="sr-only"
+            type="file"
+            multiple
+            :disabled="disabled"
+            @change="selected"
+        />
+        <slot v-if="compact" />
+        <div v-else class="file-pond__empty">
+            <div class="file-pond__art" aria-hidden="true">
+                <div class="file-pond__art-surface">
                     <span class="file-pond__card file-pond__card--left">
                         <Icon name="image" :size="21" />
                     </span>
@@ -65,19 +62,24 @@ function selected(event: Event): void {
                     </span>
                     <span class="file-pond__seal"><Icon name="lock" :size="12" /></span>
                 </div>
-                <h1>Drop your files <span>here</span></h1>
-                <p>They are encrypted in your browser before they leave your device.</p>
+            </div>
+            <h1>Drop your files <span>here</span></h1>
+            <p>They are encrypted in your browser before they leave your device.</p>
+            <div class="file-pond__actions">
                 <Button class="file-pond__choose" :disabled="disabled" @click="emit('choose')">
                     <Icon name="folder" :size="17" />Choose files<Icon name="arrow-up" :size="17" />
                 </Button>
-                <small>Or drag and drop anywhere</small>
             </div>
-        </section>
-    </PasteInput>
+            <small>
+                <span>Or drag and drop anywhere</span>
+            </small>
+        </div>
+    </section>
 </template>
 
 <style scoped>
 .file-pond {
+    --fb-pond-art-scale: 1;
     position: relative;
     min-width: 0;
     overflow: hidden;
@@ -140,9 +142,16 @@ function selected(event: Event): void {
 }
 .file-pond__art {
     position: relative;
+    width: calc(15.75rem * var(--fb-pond-art-scale));
+    height: calc(7.75rem * var(--fb-pond-art-scale));
+    margin-bottom: 0.4375rem;
+}
+.file-pond__art-surface {
+    position: relative;
     width: 15.75rem;
     height: 7.75rem;
-    margin-bottom: 0.4375rem;
+    transform: scale(var(--fb-pond-art-scale));
+    transform-origin: top left;
 }
 .file-pond__card {
     position: absolute;
@@ -224,6 +233,12 @@ function selected(event: Event): void {
 .file-pond__choose {
     min-width: 12.625rem;
     min-height: 2.75rem;
+}
+.file-pond__actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 0.625rem;
     margin-top: 1.4375rem;
 }
 .file-pond__empty > small {
@@ -275,6 +290,32 @@ function selected(event: Event): void {
     }
     .file-pond:not([data-disabled]):is(:hover, :focus-within) .file-pond__card {
         transform: none;
+    }
+}
+@media (min-width: 901px) and (max-height: 1000px) {
+    .file-pond {
+        --fb-pond-art-scale: 0.6;
+    }
+    .file-pond__empty {
+        min-height: 0;
+        padding-block: 0.5rem;
+    }
+    .file-pond__empty > p {
+        margin-top: 0.5rem;
+    }
+    .file-pond__actions {
+        margin-top: 0.75rem;
+    }
+    .file-pond__empty > small {
+        margin-top: 0.375rem;
+    }
+}
+@media (min-width: 901px) and (max-height: 760px) {
+    .file-pond {
+        --fb-pond-art-scale: 0.5;
+    }
+    .file-pond__empty h1 {
+        font-size: 2rem;
     }
 }
 </style>

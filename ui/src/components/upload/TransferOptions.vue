@@ -400,4 +400,22 @@ function setRetention(value: unknown): void {
         font-size: 0.6875rem;
     }
 }
+@media (min-width: 901px) and (max-height: 1000px) {
+    .transfer-options__grid {
+        padding-block: 0.75rem;
+    }
+    .transfer-options__footer {
+        min-height: 4rem;
+        padding-block: 0.625rem;
+    }
+}
+@media (min-width: 901px) and (max-height: 760px) {
+    .transfer-options__grid {
+        padding-block: 0.5rem;
+    }
+    .transfer-options__footer {
+        min-height: 3.75rem;
+        padding-block: 0.5rem;
+    }
+}
 </style>

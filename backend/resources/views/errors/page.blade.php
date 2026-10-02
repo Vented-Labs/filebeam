@@ -4,7 +4,7 @@
     $hasConfiguredLogo = is_string($configuredLogoUrl) && $configuredLogoUrl !== '';
     $hasCustomIdentity = $hasConfiguredLogo || $brandName !== 'Filebeam';
     $themeAssets = app(\App\Support\Theming\Assets::class);
-    $themePalette = app(\App\Support\Theming\Theme::class)->palette(false);
+    $themePalette = app(\App\Support\Theming\Appearance::class)->palette(request(), false);
     $logoUrl = $hasConfiguredLogo
         ? $configuredLogoUrl
         : $themeAssets->url($hasCustomIdentity ? 'mark.svg' : 'logo.svg', $themePalette);
@@ -12,11 +12,11 @@
     $faviconUrl = config('filebeam.branding.favicon_url') ?: $themeAssets->url('favicon.svg', $themePalette);
 @endphp
 <!DOCTYPE html>
-<html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
+<html lang="{{ str_replace('_', '-', app()->getLocale()) }}" data-fb-preset="{{ app(\App\Support\Theming\Appearance::class)->preset(request(), false) }}">
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <x-theme-head :database="false" chrome="--fb-bg" />
+        <x-theme-head :database="false" chrome="--fb-bg" :personal="true" />
         <meta name="robots" content="noindex">
         <link rel="icon" href="{{ $faviconUrl }}">
         <title>{{ $title }} - {{ $brandName }}</title>
@@ -190,11 +190,13 @@
                     <img
                         class="{{ $hasCustomIdentity ? 'brand-glyph' : 'brand-lockup' }} brand-logo--dark"
                         src="{{ $logoUrl }}"
+                        data-fb-brand="{{ $hasConfiguredLogo ? '' : ($hasCustomIdentity ? 'default_mark_url' : 'default_logo_url') }}"
                         alt="{{ $hasCustomIdentity ? '' : $brandName }}"
                     >
                     <img
                         class="{{ $hasCustomIdentity ? 'brand-glyph' : 'brand-lockup' }} brand-logo--light"
                         src="{{ $lightLogoUrl }}"
+                        data-fb-brand="{{ $hasConfiguredLogo ? '' : ($hasCustomIdentity ? 'default_mark_url' : 'default_light_logo_url') }}"
                         alt="{{ $hasCustomIdentity ? '' : $brandName }}"
                     >
                     @if ($hasCustomIdentity)
