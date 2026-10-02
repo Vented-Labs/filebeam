@@ -19,6 +19,20 @@ const emit = defineEmits<{ 'update:modelValue': [value: string] }>();
 const editorHost = ref<HTMLElement>();
 const fallback = ref(props.modelValue);
 const ready = ref(false);
+const fallbackInput = ref<HTMLTextAreaElement>();
+let focusPending = false;
+function focusEnd(): void {
+    if (view) {
+        view.dispatch({ selection: { anchor: view.state.doc.length }, scrollIntoView: true });
+        view.focus();
+        focusPending = false;
+    } else {
+        focusPending = true;
+        fallbackInput.value?.focus();
+        fallbackInput.value?.setSelectionRange(props.modelValue.length, props.modelValue.length);
+    }
+}
+defineExpose({ focusEnd });
 let view: EditorView | undefined;
 let languageCompartment: Compartment | undefined;
 let readOnlyCompartment: Compartment | undefined;
@@ -186,6 +200,7 @@ async function mountEditor(): Promise<void> {
         const state: EditorState = EditorState.create({ doc: initialModel, extensions });
         view = new EditorView({ state, parent: editorHost.value });
         ready.value = true;
+        if (focusPending) focusEnd();
     } catch {
         // The textarea remains functional when dynamic imports or browser APIs are unavailable.
         ready.value = false;
@@ -248,6 +263,7 @@ onBeforeUnmount(() => {
         <textarea
             v-if="!ready"
             id="private-note"
+            ref="fallbackInput"
             :value="fallback"
             :readonly="readOnly"
             aria-label="Secure note editor"

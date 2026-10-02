@@ -557,6 +557,7 @@ pub(crate) fn upload_options(options: UploadOptions) -> Result<protocol::UploadO
         }
     };
     Ok(protocol::UploadOptions {
+        snapshot_paths: Vec::new(),
         transport: match options.transport {
             Transport::Http => protocol::Transport::Http,
             Transport::WebRtc => protocol::Transport::WebRtc,

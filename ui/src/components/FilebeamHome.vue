@@ -8,7 +8,8 @@ import {
     DialogRoot,
     DialogTitle,
 } from 'reka-ui';
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { pastedContent, type PasteContent } from '../lib/clipboard';
 import type { FilebeamConfig, PublicRecipient, TransferDriver } from '../types';
 import { useEncryptedUpload } from '../composables/useEncryptedUpload';
 import { ciphertextBytes, formatBytes } from '../lib/format';
@@ -38,6 +39,7 @@ const props = defineProps<{
 const mode = ref<'files' | 'note'>('files');
 const note = ref('');
 const noteTitle = ref('');
+const noteComposer = ref<InstanceType<typeof NoteComposer>>();
 const language = ref('plain');
 const filePassword = ref('');
 const notePassword = ref('');
@@ -192,6 +194,51 @@ function goToFiles(): void {
 function addFiles(files: FileList): void {
     resetDragging();
     filesUpload.addFiles(files);
+}
+function canPaste(): boolean {
+    return (
+        canCreateTransfers.value &&
+        transfersAvailable.value &&
+        !isBusy.value &&
+        !activeShare.value &&
+        activeStatus.value !== 'complete'
+    );
+}
+async function acceptPaste(content: PasteContent): Promise<void> {
+    if (!canPaste()) return;
+    if (content.files.length) {
+        if (filesUpload.share.value) return;
+        mode.value = 'files';
+        filesUpload.addFiles(content.files);
+    } else if (content.text) {
+        if (noteUpload.share.value) return;
+        if (props.recipient) {
+            activeUpload.value.error.value =
+                'This recipient accepts files. Choose or paste a file instead.';
+            return;
+        }
+        mode.value = 'note';
+        note.value += content.text;
+        await nextTick();
+        noteComposer.value?.focusEnd();
+    }
+}
+function onPaste(event: ClipboardEvent): void {
+    const target = event.target instanceof Element ? event.target : null;
+    if (
+        event.defaultPrevented ||
+        !event.clipboardData ||
+        !canPaste() ||
+        target?.closest(
+            'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]',
+        ) ||
+        document.querySelector('[role="dialog"], [role="alertdialog"], [role="menu"]')
+    )
+        return;
+    const content = pastedContent(event.clipboardData);
+    if (!content.files.length && !content.text) return;
+    event.preventDefault();
+    void acceptPaste(content);
 }
 function hasDraggedFiles(event: DragEvent): boolean {
     return Array.from(event.dataTransfer?.types ?? []).includes('Files');
@@ -369,6 +416,7 @@ async function submitWithKeyboard(event: KeyboardEvent): Promise<void> {
     }
 }
 onMounted(() => {
+    window.addEventListener('paste', onPaste);
     window.addEventListener('dragenter', onDragEnter);
     window.addEventListener('dragleave', onDragLeave);
     window.addEventListener('dragover', preventFileNavigation);
@@ -380,6 +428,7 @@ onMounted(() => {
     window.addEventListener('filebeam:home', goToFiles);
 });
 onBeforeUnmount(() => {
+    window.removeEventListener('paste', onPaste);
     window.removeEventListener('dragenter', onDragEnter);
     window.removeEventListener('dragleave', onDragLeave);
     window.removeEventListener('dragover', preventFileNavigation);
@@ -515,6 +564,7 @@ onBeforeUnmount(() => {
                                             :compact="filesUpload.entries.value.length > 0"
                                             @choose="chooseFiles"
                                             @files="addFiles"
+                                            @paste="acceptPaste"
                                         >
                                             <FileQueue
                                                 :entries="filesUpload.entries.value"
@@ -533,6 +583,7 @@ onBeforeUnmount(() => {
                                         :aria-hidden="mode !== 'note' || undefined"
                                     >
                                         <NoteComposer
+                                            ref="noteComposer"
                                             v-model="note"
                                             v-model:title="noteTitle"
                                             v-model:language="language"

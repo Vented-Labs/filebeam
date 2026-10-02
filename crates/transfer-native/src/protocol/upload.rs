@@ -709,6 +709,7 @@ async fn run_new(
         }
     };
     prepared.retain_archive(store.path())?;
+    prepared.retain_sources(&options.snapshot_paths, store.path())?;
     // Validate declared sizes before reading potentially huge sources.
     let metadata = prepared
         .files

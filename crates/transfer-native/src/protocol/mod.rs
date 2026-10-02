@@ -478,6 +478,8 @@ pub enum Transport {
 
 #[derive(Clone, Default)]
 pub struct UploadOptions {
+    /// Ephemeral local sources to copy into the private job before checkpointing.
+    pub snapshot_paths: Vec<PathBuf>,
     pub transport: Transport,
     /// Publish an authenticated early descriptor so receivers can fetch chunks
     /// while this HTTP file upload is still pending.
