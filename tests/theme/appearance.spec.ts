@@ -205,10 +205,16 @@ test('the empty desktop homepage fits one viewport in both appearances', async (
 test('the paintbrush stays between logo and version and its popup supports keyboard selection', async ({
     page,
 }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
     for (const width of [320, 390, 768, 901, 1024, 1440]) {
         await page.setViewportSize({ width, height: 900 });
         await page.goto('/');
         const trigger = page.getByRole('button', { name: 'Appearance', exact: true });
+        await expect(trigger).toBeVisible();
+        await page.evaluate(async () => {
+            await document.fonts.ready;
+            await Promise.all([...document.images].map((image) => image.decode().catch(() => {})));
+        });
         const logo = (await page.locator('.fb-footer__identity .fb-brand').boundingBox())!;
         const toggle = (await trigger.boundingBox())!;
         const version = (await page.locator('.fb-footer__version').boundingBox())!;

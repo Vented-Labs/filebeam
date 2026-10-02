@@ -255,7 +255,9 @@ function goHome(event: MouseEvent): void {
             <div class="fb-footer__identity flex items-center gap-3">
                 <BrandLogo />
                 <AppearancePopover />
-                <span class="fb-footer__version text-xs font-normal text-[var(--fb-text-muted)]"
+                <span
+                    class="fb-footer__version text-xs font-normal text-[var(--fb-text-muted)]"
+                    :title="`v${branding.version}`"
                     >v{{ branding.version }}</span
                 >
             </div>
@@ -342,8 +344,21 @@ function goHome(event: MouseEvent): void {
     max-width: 100%;
     height: auto;
 }
+.fb-footer__identity :deep(.fb-brand__glyph) {
+    flex: none;
+}
+.fb-footer__identity :deep(.fb-brand__wordmark) {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 .fb-footer__version {
     flex: none;
+    min-width: 0;
+    max-width: min(12rem, 25vw);
+    overflow: hidden;
+    text-overflow: ellipsis;
     white-space: nowrap;
 }
 @media (min-width: 1200px) and (max-width: 1350px) {

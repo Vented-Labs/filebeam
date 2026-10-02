@@ -33,6 +33,8 @@
 !scripts/og/**
 !scripts/prism-gallery/
 !scripts/prism-gallery/**
+!scripts/themes/
+!scripts/themes/palette.php
 
 !backend/
 !backend/artisan
@@ -64,6 +66,7 @@
 !backend/public/robots.txt
 !backend/public/.htaccess
 !backend/public/favicon.ico
+!backend/public/favicon.svg
 !backend/public/favicon-*.png
 !backend/public/apple-touch-icon.png
 !backend/public/icon-*.png

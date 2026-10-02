@@ -69,6 +69,7 @@ test('paste-anywhere has no dedicated button or modal and leaves other popups al
     await page.getByRole('button', { name: 'Appearance', exact: true }).click();
     expect(await paste(page, 'ignore outside dialog')).toBe(false);
     await page.keyboard.press('Escape');
+    await expect(page.locator('[role="dialog"]')).toHaveCount(0);
     await paste(page, 'ordinary page paste');
     await expect.poll(() => noteText(page)).toBe('ordinary page paste');
 });
