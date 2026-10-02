@@ -7,6 +7,7 @@ use App\Models\User;
 use App\Notifications\InboxTransferCompleted;
 use App\Support\FeatureAvailability;
 use App\Support\Theming\Assets;
+use App\Support\Theming\BrandArtwork;
 use App\Support\Theming\Palette;
 use Illuminate\Support\Facades\File;
 
@@ -31,7 +32,7 @@ test('signed theme images are generated cached and served without sessions', fun
     $this->get($url)->assertContent($response->getContent());
     $this->withHeader('If-None-Match', $response->headers->get('etag'))->get($url)->assertNotModified();
     if ($type === 'image/svg+xml') {
-        expect($response->getContent())->toContain('#008877')->not->toContain('#8B35FF');
+        expect($response->getContent())->toBe(BrandArtwork::render($asset, new Palette('#008877')))->not->toContain('#8B35FF');
     } elseif ($type === 'image/png') {
         $image = imagecreatefromstring($response->getContent());
         expect($image)->toBeInstanceOf(GdImage::class);

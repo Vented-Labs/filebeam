@@ -137,7 +137,7 @@ function formatBytes(value: number): string {
     overflow: hidden;
     border: 1px solid var(--fb-note-border);
     border-radius: 0.8125rem;
-    background: var(--fb-surface-sunken);
+    background: var(--fb-editor-bg);
 }
 .note-composer__toolbar {
     display: flex;
@@ -177,7 +177,7 @@ function formatBytes(value: number): string {
     outline-offset: 3px;
 }
 .fb-note-title:disabled {
-    opacity: 0.48;
+    color: var(--fb-disabled-text);
     cursor: not-allowed;
 }
 .note-composer__tools {
@@ -205,7 +205,11 @@ function formatBytes(value: number): string {
 .note-composer__body {
     height: 16rem;
     min-height: 16rem;
-    background: var(--fb-surface-sunken);
+    background: var(--fb-editor-bg);
+}
+.note-composer__frame:has(.cm-content:focus-visible) {
+    outline: 2px solid var(--fb-focus);
+    outline-offset: 3px;
 }
 .note-composer__footer {
     display: flex;

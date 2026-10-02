@@ -33,7 +33,7 @@ const appName =
 void createInertiaApp({
     title: (title) => (title ? `${title} - ${appName}` : appName),
     progress: {
-        color: 'var(--fb-brand-bright)',
+        color: 'var(--fb-progress-fill)',
     },
     defaults: {
         visitOptions: (_href, options) => ({

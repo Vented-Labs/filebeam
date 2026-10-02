@@ -127,7 +127,7 @@ onBeforeUnmount(() => {
         :aria-label="label"
         :aria-valuemin="0"
         :aria-valuemax="100"
-        :aria-valuenow="percentage"
+        :aria-valuenow="displayed"
         :aria-valuetext="`${label}: ${percentage}%`"
     >
         <slot name="label" :percentage="percentage" />
@@ -145,7 +145,7 @@ onBeforeUnmount(() => {
     height: 0.375rem;
     overflow: hidden;
     border-radius: 999px;
-    background: var(--fb-border);
+    background: var(--fb-progress-track);
 }
 .smooth-progress--small .smooth-progress__track {
     height: 0.25rem;
@@ -157,7 +157,7 @@ onBeforeUnmount(() => {
     overflow: hidden;
     transform-origin: left center;
     border-radius: inherit;
-    background: var(--fb-brand-gradient);
+    background: var(--fb-progress-fill);
     will-change: transform;
 }
 .smooth-progress__fill::after {

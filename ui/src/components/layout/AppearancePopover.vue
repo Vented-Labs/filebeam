@@ -132,6 +132,7 @@ function opened(value: boolean): void {
                         :key="item.id"
                         :content="item.label"
                         :delay="150"
+                        @escape-key-down="open = false"
                     >
                         <RadioGroupItem
                             :value="item.id"
@@ -189,7 +190,7 @@ function opened(value: boolean): void {
     height: 2rem;
     place-items: center;
     padding: 0;
-    border: 1px solid var(--fb-settings-border);
+    border: 1px solid var(--fb-control-border);
     border-radius: var(--fb-radius-control);
     color: var(--fb-text-muted);
     background: var(--fb-surface-sunken);
@@ -205,8 +206,6 @@ function opened(value: boolean): void {
 .fb-appearance-trigger[data-state='open'] {
     border-color: var(--fb-password-open-border);
     background: var(--fb-password-open-surface);
-    outline: 2px solid var(--fb-password-focus);
-    outline-offset: 2px;
 }
 .fb-appearance-popover {
     z-index: 80;
@@ -251,7 +250,7 @@ function opened(value: boolean): void {
     gap: 0.375rem;
     min-height: 2.1875rem;
     padding: 0.25rem;
-    border: 1px solid var(--fb-settings-border);
+    border: 1px solid var(--fb-control-border);
     border-radius: var(--fb-radius-sm);
     background: var(--fb-surface-sunken);
     color: var(--fb-text-muted);
@@ -278,15 +277,15 @@ function opened(value: boolean): void {
     background: transparent;
     cursor: pointer;
 }
-.fb-appearance-color:hover {
+.fb-appearance-color:not(:disabled):not([aria-disabled='true']):hover {
     background: var(--fb-wash-06);
 }
 .fb-appearance-color[aria-checked='true'] {
-    border-color: var(--fb-focus);
+    border-color: var(--fb-choice-border);
     background: var(--fb-selected-surface);
 }
 .fb-appearance-color:disabled {
-    opacity: 0.4;
+    background: var(--fb-disabled-surface);
     cursor: not-allowed;
 }
 .fb-appearance-color__swatch {
@@ -294,6 +293,8 @@ function opened(value: boolean): void {
     place-items: center;
     width: 1.625rem;
     height: 1.625rem;
+    border: 1px solid var(--fb-swatch-border);
+    box-sizing: border-box;
     border-radius: 50%;
     background: var(--fb-preset-color);
     color: var(--fb-preset-ink);
@@ -302,7 +303,7 @@ function opened(value: boolean): void {
 .fb-appearance-color:focus-visible,
 .fb-appearance-trigger:focus-visible {
     outline: 2px solid var(--fb-focus);
-    outline-offset: 2px;
+    outline-offset: 3px;
 }
 .fb-appearance-help {
     margin: 0.75rem 0 0;

@@ -22,13 +22,31 @@ requires the Send action.
 
 ## Theme tokens
 
-Color roles are defined in `backend/resources/themes/default.css` and consumed as
-`--fb-*` CSS variables. `App\Support\Theming\Palette` generates runtime palettes
-from those defaults. Keep component colors, interaction states, and decorative
-effects in tokens; the default dark values are the visual compatibility baseline.
-Appearance changes preserve mounted components and editor state.
+`App\Support\Theming\ThemeDefinition` defines authored light/dark color roles,
+fixed syntax and semantic colors, and typed compatibility aliases. `Palette`
+composes these definitions; `CustomPalette` derives contrast-checked roles for
+arbitrary instance seeds. Components consume `--fb-*` variables. Use color tokens
+for foregrounds and borders, background tokens for backgrounds, and shadow tokens
+for elevation. Appearance changes preserve mounted components and editor state.
+
+`backend/resources/themes/default.css` is a generated fallback, not palette input.
+Regenerate and verify it from the repository root:
+
+```sh
+php scripts/themes/palette.php --write-default
+npm run check:themes
+```
+
+SVG artwork, raster compatibility, mixed-mode email, and Filament have separate
+adapters. `php scripts/themes/palette.php --write-artwork` updates the bundled
+default lockups when their explicit artwork definitions change.
 
 The footer paintbrush opens the appearance popup. Guest preferences are browser-local;
 authenticated preferences are saved under `users.settings.appearance`. Preset IDs
 are defined by `ThemePreset`; public palettes and instance branding use separate
 resolvers. The component gallery uses the same PHP palette generator.
+
+After building, `npm run test:theme` checks an isolated application and
+`npm run test:prism` checks production component fixtures and the editor. Both
+include visual regressions. Use `THEME_CAPTURE=1` to retain review images, inspect
+them, then explicitly pass `-- --update-snapshots` for intentional baseline changes.

@@ -55,6 +55,9 @@ jobs:
           php scripts/release/validate-og.php backend/public/build/og
       - name: Test social card rendering
         run: npm run test:og -- --workers=2
+      - name: Test theme components and editor
+        if: hashFiles('scripts/prism-gallery/theme.spec.ts') != ''
+        run: npm run test:prism -- --workers=2
       - name: Check JavaScript
         run: npm run check
       - name: Share compiled frontend
@@ -71,7 +74,11 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: playwright-frontend
-          path: test-results/
+          path: |
+            test-results/
+            .filebeam/test-results/prism-gallery/
+            .filebeam/test-results/og/
+          include-hidden-files: true
           if-no-files-found: ignore
 
   rust:
@@ -531,6 +538,10 @@ jobs:
       - name: Test runtime theme changes against an isolated application
         if: matrix.gd == 'true' && hashFiles('scripts/themes/test.sh') != ''
         run: npm run test:theme
+      - name: Test explicit theme adapters
+        if: hashFiles('backend/tests/Unit/BrandArtworkTest.php') != ''
+        working-directory: backend
+        run: vendor/bin/pest tests/Unit/BrandArtworkTest.php tests/Unit/MailThemeTest.php
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: failure()
         with:

@@ -10,7 +10,6 @@ use App\Filament\Pages\StaffProfile;
 use App\Support\Icons\FilamentIcons;
 use App\Support\Icons\IconsaxLoadingIndicator;
 use App\Support\Theming\Assets;
-use App\Support\Theming\Palette;
 use App\Support\Theming\Theme;
 use BladeUI\Icons\Factory as BladeIconFactory;
 use Filament\Auth\MultiFactor\App\AppAuthentication;
@@ -76,15 +75,8 @@ class AdminPanelProvider extends PanelProvider
             ])
             ->colors(function (): array {
                 $palette = app(Theme::class)->palette();
-                if ($palette->primary === Palette::DEFAULT_PRIMARY) {
-                    return ['primary' => '#7c3aed'];
-                }
-                $gray = [];
-                foreach (Color::Zinc as $shade => $value) {
-                    $gray[$shade] = $palette->color(Color::convertToHex($value));
-                }
 
-                return ['primary' => Color::generatePalette($palette->primary), 'gray' => $gray];
+                return ['primary' => $palette->filamentPrimary(), 'gray' => Color::Zinc];
             })
             ->icons([
                 ...FilamentIcons::aliases(),

@@ -89,7 +89,7 @@ function selectWithKeyboard(event: KeyboardEvent): void {
 }
 .fb-platform-select__item:focus-visible {
     outline: 2px solid var(--fb-focus);
-    outline-offset: 2px;
+    outline-offset: 3px;
 }
 .fb-platform-select__item[aria-checked='true'] {
     border-color: var(--fb-choice-border);

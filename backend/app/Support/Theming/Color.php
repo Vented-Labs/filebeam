@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Support\Theming;
 
+use InvalidArgumentException;
+use RuntimeException;
+
 final class Color
 {
     /** @return array{float, float, float} OKLCH */
@@ -27,11 +30,69 @@ final class Color
     /** @return array{int, int, int} */
     public static function channels(string $hex): array
     {
-        return [(int) hexdec(substr($hex, 1, 2)), (int) hexdec(substr($hex, 3, 2)), (int) hexdec(substr($hex, 5, 2))];
+        [$r, $g, $b, $alpha] = self::parse($hex);
+        if ($alpha !== 1.0) {
+            throw new InvalidArgumentException('Composite translucent colors before calculating luminance: '.$hex);
+        }
+
+        return [$r, $g, $b];
+    }
+
+    /** @return array{int, int, int, float} Encoded sRGB and alpha. */
+    public static function parse(string $value): array
+    {
+        if ($value === 'transparent') {
+            return [0, 0, 0, 0.0];
+        }
+        if (preg_match('/^#(?:[a-f0-9]{3}|[a-f0-9]{4}|[a-f0-9]{6}|[a-f0-9]{8})$/iD', $value)) {
+            $hex = substr($value, 1);
+            if (strlen($hex) <= 4) {
+                $hex = implode('', array_map(static fn (string $digit): string => $digit.$digit, str_split($hex)));
+            }
+
+            return [(int) hexdec(substr($hex, 0, 2)), (int) hexdec(substr($hex, 2, 2)), (int) hexdec(substr($hex, 4, 2)), strlen($hex) === 8 ? hexdec(substr($hex, 6, 2)) / 255 : 1.0];
+        }
+        if (preg_match('/^rgb\(\s*(\d{1,3})\s+(\d{1,3})\s+(\d{1,3})(?:\s*\/\s*(0(?:\.\d+)?|1(?:\.0+)?))?\s*\)$/D', $value, $m) && max((int) $m[1], (int) $m[2], (int) $m[3]) <= 255) {
+            return [(int) $m[1], (int) $m[2], (int) $m[3], isset($m[4]) ? (float) $m[4] : 1.0];
+        }
+
+        throw new InvalidArgumentException('Unsupported sRGB color: '.$value);
+    }
+
+    public static function composite(string $foreground, string $background, float $opacity = 1): string
+    {
+        if (! is_finite($opacity) || $opacity < 0 || $opacity > 1) {
+            throw new InvalidArgumentException('Opacity must be finite and within [0,1].');
+        }
+        [$r, $g, $b, $alpha] = self::parse($foreground);
+        $alpha *= $opacity;
+        $back = self::channels($background);
+        $out = [];
+        foreach ([$r, $g, $b] as $i => $channel) {
+            $out[] = (int) round($alpha * $channel + (1 - $alpha) * $back[$i]);
+        }
+
+        return sprintf('#%02x%02x%02x', ...$out);
+    }
+
+    public static function mixOKLab(string $first, string $second, float $weight): string
+    {
+        if (! is_finite($weight) || $weight < 0 || $weight > 1) {
+            throw new InvalidArgumentException('Color weight must be finite and within [0,1].');
+        }
+        [$l1, $c1, $h1] = self::oklch($first);
+        [$l2, $c2, $h2] = self::oklch($second);
+        $a = $weight * $c1 * cos(deg2rad($h1)) + (1 - $weight) * $c2 * cos(deg2rad($h2));
+        $b = $weight * $c1 * sin(deg2rad($h1)) + (1 - $weight) * $c2 * sin(deg2rad($h2));
+
+        return self::hex($weight * $l1 + (1 - $weight) * $l2, hypot($a, $b), rad2deg(atan2($b, $a)));
     }
 
     public static function hex(float $lightness, float $chroma, float $hue): string
     {
+        if (! is_finite($lightness) || ! is_finite($chroma) || ! is_finite($hue)) {
+            throw new InvalidArgumentException('OKLCH coordinates must be finite.');
+        }
         $lightness = max(0, min(1, $lightness));
         $low = 0.0;
         $high = max(0, $chroma);
@@ -89,12 +150,36 @@ final class Color
 
     public static function legible(string $foreground, string $background, float $ratio, bool $light): string
     {
-        [$l, $c, $h] = self::oklch($foreground);
-        for ($step = 0; $step < 100 && self::contrast($foreground, $background) < $ratio; $step++) {
-            $l = max(0, min(1, $l + ($light ? -0.01 : 0.01)));
-            $foreground = self::hex($l, $c, $h);
+        return self::against(self::oklch($foreground), [$background], $ratio, $light);
+    }
+
+    /** @param array{float, float, float} $oklch
+     * @param  list<string>  $backgrounds
+     */
+    public static function against(array $oklch, array $backgrounds, float $ratio, bool $darker): string
+    {
+        [$l, $c, $h] = $oklch;
+        for ($step = 0; $step <= 1000; $step++) {
+            $candidate = $l + ($darker ? -1 : 1) * $step * 0.001;
+            if ($candidate < 0 || $candidate > 1) {
+                break;
+            }
+            $foreground = self::hex($candidate, $c, $h);
+            if (self::minimumContrast($foreground, $backgrounds) >= $ratio) {
+                return $foreground;
+            }
         }
 
-        return $foreground;
+        throw new RuntimeException('Cannot satisfy '.$ratio.':1 contrast against '.implode(', ', $backgrounds));
+    }
+
+    /** @param list<string> $backgrounds */
+    public static function minimumContrast(string $foreground, array $backgrounds): float
+    {
+        if ($backgrounds === []) {
+            throw new InvalidArgumentException('At least one contrast background is required.');
+        }
+
+        return min(array_map(static fn (string $background): float => self::contrast($foreground, $background), $backgrounds));
     }
 }

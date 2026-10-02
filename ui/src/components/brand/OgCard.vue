@@ -37,8 +37,7 @@ const copy = {
     width: 1200px;
     height: 630px;
     overflow: hidden;
-    background:
-        radial-gradient(ellipse at 88% 43%, var(--fb-og-glow), transparent 48%), var(--fb-bg);
+    background: var(--fb-bg);
     color: var(--fb-text);
     font-family: var(--fb-font-ui);
     -webkit-font-smoothing: antialiased;
@@ -67,7 +66,7 @@ h1 span {
     display: block;
 }
 h1 span + span {
-    color: var(--fb-brand-fold);
+    color: var(--fb-accent-text);
 }
 .og-headline-single {
     display: flex;

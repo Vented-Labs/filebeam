@@ -221,12 +221,9 @@ test('keeps material, policy, keyboard, collision, and toast contracts exact', a
         await page
             .getByTestId('file-pond')
             .evaluate((node) => getComputedStyle(node, '::before').backgroundImage),
-    ).toContain('radial-gradient');
+    ).toBe('none');
     await page.getByRole('tab', { name: 'Notes', exact: true }).click();
-    await expect(page.locator('.note-composer__toolbar')).toHaveCSS(
-        'background-image',
-        /radial-gradient/,
-    );
+    await expect(page.locator('.note-composer__toolbar')).toHaveCSS('background-image', 'none');
     await expect(page.locator('.note-composer__footer')).toHaveCSS('background-image', 'none');
 
     await page.getByRole('button', { name: /^Methods & retention/ }).click();

@@ -15,8 +15,13 @@ export default defineConfig({
     timeout: 60_000,
     outputDir: '.filebeam/test-results/themes',
     reporter: 'list',
+    updateSnapshots: 'none',
+    snapshotPathTemplate: '{testDir}/snapshots/{testFilePath}/{arg}{ext}',
     use: {
         baseURL,
+        locale: 'en-US',
+        timezoneId: 'UTC',
+        deviceScaleFactor: 1,
         trace: 'retain-on-failure',
         screenshot: 'only-on-failure',
     },

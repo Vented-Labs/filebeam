@@ -132,7 +132,7 @@ final class Appearance
 
     public static function revision(): string
     {
-        return substr(hash('sha256', implode('|', array_map(static fn (string $path): string => (string) hash_file('sha256', $path), [__DIR__.'/Palette.php', __DIR__.'/Color.php', __DIR__.'/../../Enums/ThemePreset.php', __DIR__.'/../../../resources/themes/default.css']))), 0, 24);
+        return substr(hash('sha256', Palette::VERSION.'|'.implode('|', array_map(static fn (string $path): string => (string) hash_file('sha256', $path), [__FILE__, ...Palette::sources(), __DIR__.'/../../Enums/ThemePreset.php']))), 0, 24);
     }
 
     public static function stylesheet(): string

@@ -6,6 +6,7 @@
             "@resvg/resvg-js": "2.6.2",
             "@vitejs/plugin-vue": "^6.0.8",
             "@vue/compiler-sfc": "^3.5.42",
+            "css-tree": "^3.2.1",
             "iconsax": "0.1.1",
             "typescript": "^6.0.3",
             "vite": "npm:@voidzero-dev/vite-plus-core@1.0.0",
@@ -73,8 +74,8 @@
         }
     },
     "npmResolved": {
-        "count": 365,
-        "sha256": "f4cb3d22f411bbca77ddee5c0cee414e03bc81d778680d8fc63a6b29270cdef9"
+        "count": 367,
+        "sha256": "7dae400fc68535d6c333eeb9f314c655a09156a04a9c16315a27b6c1f3c5d966"
     },
     "composerResolved": {
         "count": 181,

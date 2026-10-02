@@ -3,7 +3,7 @@ import { defineConfig } from '@playwright/test';
 export default defineConfig({
     testDir: '.',
     testMatch: 'card.spec.ts',
-    outputDir: '../../test-results/og',
+    outputDir: '../../.filebeam/test-results/og',
     fullyParallel: true,
     use: {
         baseURL: 'http://127.0.0.1:5174',

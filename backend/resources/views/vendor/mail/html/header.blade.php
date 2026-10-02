@@ -9,7 +9,7 @@
         : (empty($configuredLogo) ? app(\App\Support\Theming\Assets::class)->url('email.png') : null);
 @endphp
 <tr>
-<td class="header" align="center" bgcolor="{{ app(\App\Support\Theming\Theme::class)->palette()->color('#0b0914') }}">
+<td class="header" align="center" bgcolor="{{ app(\App\Support\Theming\Theme::class)->palette()->tokens('dark')['--fb-bg'] }}">
 <a href="{{ $url }}" class="brand-link">
 @if ($logoUrl !== null)
 <img src="{{ $logoUrl }}" class="logo" width="32" height="32" alt="" />

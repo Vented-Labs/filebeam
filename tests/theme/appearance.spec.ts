@@ -242,6 +242,16 @@ test('the paintbrush stays between logo and version and its popup supports keybo
         await page.keyboard.press('ArrowRight');
         await expect(group.getByRole('radio', { name: 'Dark', exact: true })).toBeChecked();
         await expect(page.locator('html')).toHaveAttribute('data-fb-theme', 'dark');
+        const colors = popup.getByRole('radiogroup', { name: 'Color', exact: true });
+        await colors.getByRole('radio', { name: 'Purple', exact: true }).click();
+        await page.keyboard.press('ArrowRight');
+        await expect(colors.getByRole('radio', { name: 'Blue', exact: true })).toBeChecked();
+        await page.keyboard.press('End');
+        await expect(colors.getByRole('radio', { name: 'Rose', exact: true })).toBeChecked();
+        await page.keyboard.press('Home');
+        await expect(
+            colors.getByRole('radio', { name: 'Instance default', exact: true }),
+        ).toBeChecked();
         await page.keyboard.press('Escape');
         await expect(popup).toBeHidden();
         await expect(trigger).toBeFocused();

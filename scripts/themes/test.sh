@@ -16,6 +16,7 @@ export APP_ENV=local APP_DEBUG=false APP_URL="http://127.0.0.1:${THEME_PORT:-803
 export APP_NAME="filebeam-theme-$(php -r 'echo bin2hex(random_bytes(12));')"
 export THEME_TEST_INSTANCE="$APP_NAME"
 export FILEBEAM_NAME=Filebeam FILEBEAM_LOGO_URL='' FILEBEAM_FAVICON_URL='' FILEBEAM_OG_IMAGE_URL=''
+export FILEBEAM_COPYRIGHT_YEAR=2026
 export APP_KEY="base64:$(php -r 'echo base64_encode(random_bytes(32));')"
 export FILEBEAM_CONTAINER=true FILEBEAM_VARIANT=light FILEBEAM_DATA_DIR="$state"
 export DB_CONNECTION=sqlite DB_DATABASE="$state/database.sqlite" DB_URL=''

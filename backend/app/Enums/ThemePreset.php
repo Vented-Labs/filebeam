@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Enums;
 
+use App\Support\Theming\ThemeDefinition;
+
 enum ThemePreset: string
 {
     case Instance = 'instance';
@@ -22,15 +24,6 @@ enum ThemePreset: string
 
     public function primary(string $instance): string
     {
-        return match ($this) {
-            self::Instance => $instance,
-            self::Purple => '#8b35ff',
-            self::Blue => '#3b82f6',
-            self::Teal => '#14b8a6',
-            self::Green => '#22c55e',
-            self::Amber => '#f59e0b',
-            self::Orange => '#f97316',
-            self::Rose => '#f43f5e',
-        };
+        return $this === self::Instance ? $instance : ThemeDefinition::SEEDS[$this->value];
     }
 }

@@ -13,6 +13,8 @@ const generatedPaths = [
     '**/AGENTS.md',
     '**/boost.json',
     '**/opencode.json',
+    '**/resources/themes/default.css',
+    '**/resources/themes/mail.css',
 ];
 
 export default defineConfig({

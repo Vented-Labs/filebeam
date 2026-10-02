@@ -120,10 +120,10 @@
                 position: relative;
                 z-index: 1;
                 padding: .34rem .55rem;
-                border: 1px solid var(--fb-error-badge-border);
+                border: 1px solid var(--fb-danger-border);
                 border-radius: .5rem;
-                color: var(--fb-error-text);
-                background: var(--fb-account-rail);
+                color: var(--fb-danger);
+                background: var(--fb-danger-surface);
                 font-family: "JetBrains Mono", ui-monospace, monospace;
                 font-size: .875rem;
                 font-weight: 600;
@@ -153,7 +153,7 @@
                 gap: .55rem;
                 margin-top: 2rem;
                 padding: .625rem 1rem;
-                border: 1px solid var(--fb-share-border);
+                border: 1px solid var(--fb-control-border);
                 border-radius: .75rem;
                 color: var(--fb-error-text);
                 background: var(--fb-error-surface);
@@ -165,7 +165,7 @@
             }
 
             .action:hover { border-color: var(--fb-error-hover-border); background: var(--fb-error-hover-surface); }
-            .action:focus-visible { outline: 3px solid var(--fb-error-signal); outline-offset: 3px; }
+            .action:focus-visible { outline: 2px solid var(--fb-focus); outline-offset: 3px; }
             .action svg { width: 1rem; height: 1rem; }
 
             .footer {

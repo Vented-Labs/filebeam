@@ -79,13 +79,13 @@ final class Assets
     {
         $source = public_path($this->source($name));
 
-        $sources = [$source];
+        $sources = [$source, ...Palette::sources(), __DIR__.'/BrandArtwork.php', __DIR__.'/LegacyArtworkPalette.php'];
         if ($name === 'favicon.ico') {
             $sources = [...$sources, public_path('favicon-16x16.png'), public_path('favicon-32x32.png'), public_path('apple-touch-icon.png')];
         }
         $hashes = array_map(static fn (string $path): string => is_file($path) ? (string) hash_file('sha256', $path) : 'missing', $sources);
 
-        return substr(hash('sha256', implode('|', [Palette::VERSION, hash_file('sha256', __FILE__), hash_file('sha256', __DIR__.'/Palette.php'), hash_file('sha256', __DIR__.'/Color.php'), ...$hashes])), 0, 24);
+        return substr(hash('sha256', implode('|', [Palette::VERSION, hash_file('sha256', __FILE__), ...$hashes])), 0, 24);
     }
 
     public function render(string $name, Palette $palette, string $mode, ?string $version = null): string
@@ -100,7 +100,7 @@ final class Assets
             return (string) file_get_contents($path);
         }
         abort_unless(is_file($source) && hash_equals($this->revision($name), $version), 404);
-        if ($palette->primary === Palette::DEFAULT_PRIMARY && $mode === 'dark') {
+        if ($palette->primary === Palette::DEFAULT_PRIMARY && ($mode === 'dark' || pathinfo($name, PATHINFO_EXTENSION) !== 'svg')) {
             return (string) file_get_contents($source);
         }
         abort_unless($this->features->available(Feature::CustomThemes), 503, 'Custom artwork requires PHP GD.');
@@ -114,7 +114,7 @@ final class Assets
             }
             if (! is_file($path)) {
                 $bytes = match (pathinfo($name, PATHINFO_EXTENSION)) {
-                    'svg' => $palette->value((string) file_get_contents($source), $mode),
+                    'svg' => BrandArtwork::render($name, $palette, $mode),
                     'ico' => $this->icon($palette, $mode),
                     default => $this->png($source, $palette, $mode),
                 };
@@ -138,6 +138,7 @@ final class Assets
         imagealphablending($image, false);
         imagesavealpha($image, true);
         $colors = [];
+        $artwork = new LegacyArtworkPalette($palette);
         $width = imagesx($image);
         $height = imagesy($image);
         // The shipped raster carries the original typography, gradients and antialiasing.
@@ -146,7 +147,7 @@ final class Assets
             for ($x = 0; $x < $width; $x++) {
                 $pixel = imagecolorat($image, $x, $y);
                 $rgb = $pixel & 0xFFFFFF;
-                $colors[$rgb] ??= (int) hexdec(substr($palette->color(sprintf('#%06x', $rgb), $mode), 1));
+                $colors[$rgb] ??= (int) hexdec(substr($artwork->color(sprintf('#%06x', $rgb)), 1));
                 imagesetpixel($image, $x, $y, ($pixel & 0x7F000000) | $colors[$rgb]);
             }
         }

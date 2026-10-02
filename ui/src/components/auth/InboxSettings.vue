@@ -814,7 +814,7 @@ onBeforeUnmount(() => {
 }
 .inbox-settings__custody-card:focus-within {
     outline: 2px solid var(--fb-focus);
-    outline-offset: 2px;
+    outline-offset: 3px;
 }
 .inbox-settings__custody-card--selected {
     border-color: var(--fb-inbox-button-hover-border);
@@ -876,7 +876,7 @@ onBeforeUnmount(() => {
 }
 .inbox-settings__acknowledgement input {
     margin-top: 0.2rem;
-    accent-color: var(--fb-brand-bright);
+    accent-color: var(--fb-action);
 }
 .inbox-settings__wizard-actions,
 .inbox-settings__export-actions {

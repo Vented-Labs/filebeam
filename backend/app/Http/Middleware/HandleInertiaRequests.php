@@ -50,7 +50,7 @@ class HandleInertiaRequests extends Middleware
             'name' => config('app.name'),
             'capabilities' => app(FeatureAvailability::class)->all(),
             'appearance' => fn (): array => app(Appearance::class)->payload($request),
-            'theme' => fn (): array => ['primary' => $palette->primary, 'css' => $palette->css(), 'chrome' => ['dark' => $palette->value('#0B0914'), 'light' => $palette->value('#0B0914', 'light')]],
+            'theme' => fn (): array => ['primary' => $palette->primary, 'css' => $palette->css(), 'chrome' => ['dark' => $palette->tokens('dark')['--fb-browser-chrome'], 'light' => $palette->tokens('light')['--fb-browser-chrome']]],
             'auth' => [
                 'user' => function () use ($request): ?array {
                     $user = $request->user();

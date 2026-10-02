@@ -36,10 +36,10 @@ test('guest presets persist, recolor browser artwork, and keep instance social i
         )
         .not.toBe(originalBackground);
     const logo = page.locator('header .fb-brand img');
-    await expect(logo).toHaveAttribute('src', /\/3b82f6\/dark\/logo\.svg/);
+    await expect(logo).toHaveAttribute('src', /\/3d78d8\/dark\/logo\.svg/);
     await expect(page.locator('link[data-fb-favicon="favicon.svg"]')).toHaveAttribute(
         'href',
-        /\/3b82f6\/dark\/favicon\.svg/,
+        /\/3d78d8\/dark\/favicon\.svg/,
     );
     await expect(dialog).toContainText('Saved in this browser.');
     await dialog.getByRole('button', { name: 'Done', exact: true }).click();

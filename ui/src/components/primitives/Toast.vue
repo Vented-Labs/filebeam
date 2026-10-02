@@ -28,11 +28,13 @@ const open = defineModel<boolean>('open', { required: true });
             type="background"
             :class="[
                 'fb-toast pointer-events-auto flex w-full items-start gap-3 rounded-xl border bg-[var(--fb-surface-raised)] p-4 text-[var(--fb-text)] shadow-xl shadow-[color:var(--fb-shadow-toast)]',
-                tone === 'success' ? 'border-[var(--fb-success)]' : 'border-[var(--fb-border)]',
+                tone === 'success'
+                    ? 'border-[var(--fb-success-border)]'
+                    : 'border-[var(--fb-border)]',
             ]"
         >
             <span
-                class="grid size-6 shrink-0 place-items-center rounded-full bg-[var(--fb-selected-surface)] text-[var(--fb-success)]"
+                class="grid size-6 shrink-0 place-items-center rounded-full bg-[var(--fb-success-surface)] text-[var(--fb-success)]"
             >
                 <Icon name="check" :size="16" />
             </span>
@@ -47,7 +49,7 @@ const open = defineModel<boolean>('open', { required: true });
             </div>
             <ToastClose
                 aria-label="Dismiss notification"
-                class="rounded-md p-1 text-[var(--fb-text-muted)] outline-none transition-colors hover:text-[var(--fb-text)] focus-visible:ring-2 focus-visible:ring-[var(--fb-focus)]"
+                class="fb-toast__close rounded-md p-1 text-[var(--fb-text-muted)] transition-colors hover:text-[var(--fb-text)]"
             >
                 <Icon name="x" :size="16" />
             </ToastClose>
@@ -59,6 +61,10 @@ const open = defineModel<boolean>('open', { required: true });
 </template>
 
 <style>
+.fb-toast__close:focus-visible {
+    outline: 2px solid var(--fb-focus);
+    outline-offset: 3px;
+}
 .fb-toast[data-state='open'] {
     animation: toast-enter var(--fb-duration-toast-in) var(--fb-ease);
 }

@@ -174,7 +174,7 @@ function generatePassword(): void {
     align-items: center;
     gap: 0.5625rem;
     padding: 0 0.6875rem;
-    border: 1px solid var(--fb-settings-border);
+    border: 1px solid var(--fb-control-border);
     border-radius: var(--fb-radius-control);
     color: var(--fb-text-muted);
     background: var(--fb-surface-sunken);
@@ -201,8 +201,6 @@ function generatePassword(): void {
 .password-trigger[data-state='open'] {
     border-color: var(--fb-password-open-border);
     background: var(--fb-password-open-surface);
-    outline: 2px solid var(--fb-password-focus);
-    outline-offset: 2px;
 }
 .password-trigger--invalid {
     border-color: var(--fb-danger);
@@ -210,7 +208,9 @@ function generatePassword(): void {
 }
 .password-trigger:disabled {
     cursor: not-allowed;
-    opacity: 0.48;
+    color: var(--fb-disabled-text);
+    background: var(--fb-disabled-surface);
+    border-color: var(--fb-disabled-border);
 }
 .password-trigger__error {
     margin: 0.5rem 0 0;

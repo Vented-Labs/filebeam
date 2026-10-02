@@ -336,7 +336,6 @@ function setRetention(value: unknown): void {
     color: inherit;
     font: inherit;
     font-size: 0.625rem;
-    opacity: 0.7;
 }
 .retention-menu {
     min-width: 12.8125rem;

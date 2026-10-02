@@ -431,7 +431,7 @@ test('profile and home navigation stays within the Vue document without route gh
             });
         expect(surfaceState.outgoingHidden).toBe(true);
         expect(surfaceState.mask).toBe('none');
-        expect(surfaceState.ambient).toContain('radial-gradient');
+        expect(surfaceState.ambient).toBe('none');
         const frames = await frameSampling;
         expect(frames.samples).toBeGreaterThan(0);
         expect(frames.accountStateSamples).toBeGreaterThan(0);

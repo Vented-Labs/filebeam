@@ -190,23 +190,24 @@ function hideOutgoing(element: Element): void {
         background var(--fb-duration-control) ease,
         transform var(--fb-duration-control) var(--fb-ease);
 }
-.transfer-method__card:hover:not([data-disabled]) {
+.transfer-method__card:hover:not([data-disabled]):not([aria-disabled='true']) {
     background: var(--fb-wash-05);
 }
-.transfer-method__card:active:not([data-disabled]) {
-    background: var(--fb-shadow-soft);
+.transfer-method__card:active:not([data-disabled]):not([aria-disabled='true']) {
+    background: var(--fb-surface-active);
     transform: translateY(1px) scale(0.982);
 }
 .transfer-method__card:focus-visible {
     outline: 2px solid var(--fb-focus);
-    outline-offset: 2px;
+    outline-offset: 3px;
 }
 .transfer-method__card[data-state='checked'] {
     color: var(--fb-text);
 }
 .transfer-method__card[data-disabled] {
     cursor: not-allowed;
-    opacity: 0.45;
+    color: var(--fb-disabled-text);
+    background: var(--fb-disabled-surface);
 }
 .transfer-method__icon {
     display: grid;
