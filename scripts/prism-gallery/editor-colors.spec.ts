@@ -242,6 +242,13 @@ test('search and keyboard selections remain visible above the translucent active
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto('/?theme');
     await expect(page.locator('.cm-content')).toBeVisible();
+    // Single-line blocks avoid the library's OS-dependent open-fold glyph in color snapshots.
+    await page.locator('.cm-content').click();
+    await page.keyboard.press('Control+A');
+    await page.keyboard.insertText(
+        '// A private draft\nconst Parcel = { size: 42, message: "hello\\nworld" };\nconst ready = true;\nconst match = /safe/i.test(Parcel.message);\nconsole.log(Parcel.size, ready, match);',
+    );
+    await expect(page.locator('.cm-foldGutter span[title="Fold line"]')).toHaveCount(0);
     await page.evaluate(async () => {
         const url = '/editor-probe.ts';
         await (await import(/* @vite-ignore */ url)).settle();
