@@ -41,6 +41,13 @@ SVG artwork, raster compatibility, mixed-mode email, and Filament have separate
 adapters. `php scripts/themes/palette.php --write-artwork` updates the bundled
 default lockups when their explicit artwork definitions change.
 
+`ThemeEffects` composes decorative gradients separately: dark recipes preserve
+their original lighting, while light recipes use authored tints and falloffs.
+The Notes wash belongs to its toolbar. `EditorPalette` gives the opaque editor,
+gutters, selections, and keyword/type/heading accents their own contrast-checked
+preset colors. Strings, numbers, errors, and other semantic syntax retain their
+distinct mode-specific colors.
+
 The footer paintbrush opens the appearance popup. Guest preferences are browser-local;
 authenticated preferences are saved under `users.settings.appearance`. Preset IDs
 are defined by `ThemePreset`; public palettes and instance branding use separate

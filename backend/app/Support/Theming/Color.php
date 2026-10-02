@@ -52,8 +52,11 @@ final class Color
 
             return [(int) hexdec(substr($hex, 0, 2)), (int) hexdec(substr($hex, 2, 2)), (int) hexdec(substr($hex, 4, 2)), strlen($hex) === 8 ? hexdec(substr($hex, 6, 2)) / 255 : 1.0];
         }
-        if (preg_match('/^rgb\(\s*(\d{1,3})\s+(\d{1,3})\s+(\d{1,3})(?:\s*\/\s*(0(?:\.\d+)?|1(?:\.0+)?))?\s*\)$/D', $value, $m) && max((int) $m[1], (int) $m[2], (int) $m[3]) <= 255) {
-            return [(int) $m[1], (int) $m[2], (int) $m[3], isset($m[4]) ? (float) $m[4] : 1.0];
+        if (preg_match('/^rgb\(\s*(\d{1,3})\s+(\d{1,3})\s+(\d{1,3})(?:\s*\/\s*(\d+(?:\.\d+)?)(%?))?\s*\)$/D', $value, $m) && max((int) $m[1], (int) $m[2], (int) $m[3]) <= 255) {
+            $alpha = isset($m[4]) ? (float) $m[4] / (($m[5] ?? '') === '%' ? 100.0 : 1.0) : 1.0;
+            if ($alpha <= 1.0) {
+                return [(int) $m[1], (int) $m[2], (int) $m[3], $alpha];
+            }
         }
 
         throw new InvalidArgumentException('Unsupported sRGB color: '.$value);

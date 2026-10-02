@@ -1,12 +1,14 @@
 import { expect, test } from '@playwright/test';
 
-test('matte surfaces retain dropzone icon motion and respect reduced motion', async ({ page }) => {
+test('gradient surfaces retain dropzone icon motion and respect reduced motion', async ({
+    page,
+}) => {
     await page.goto('/');
     const pond = page.getByTestId('file-pond');
-    await expect(page.locator('.fb-shell')).toHaveCSS('background-image', 'none');
-    expect(await pond.evaluate((node) => getComputedStyle(node, '::before').backgroundImage)).toBe(
-        'none',
-    );
+    await expect(page.locator('.fb-shell')).toHaveCSS('background-image', /radial-gradient/);
+    expect(
+        await pond.evaluate((node) => getComputedStyle(node, '::before').backgroundImage),
+    ).toContain('radial-gradient');
     const cards = pond.locator('.file-pond__card');
     const initial = await cards.evaluateAll((nodes) =>
         nodes.map((node) => getComputedStyle(node).transform),
@@ -50,7 +52,10 @@ test('matte surfaces retain dropzone icon motion and respect reduced motion', as
         await expect(card).toHaveCSS('transform', 'none');
     }
     await page.getByRole('tab', { name: 'Notes', exact: true }).click();
-    await expect(page.locator('.note-composer__toolbar')).toHaveCSS('background-image', 'none');
+    await expect(page.locator('.note-composer__toolbar')).toHaveCSS(
+        'background-image',
+        /radial-gradient/,
+    );
 });
 
 test('password generation uses browser cryptographic randomness and preserves separate composer values', async ({

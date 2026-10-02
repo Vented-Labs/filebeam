@@ -41,6 +41,8 @@ final class Palette
         }
         $tokens = [
             ...ThemeDefinition::common(), ...ThemeDefinition::fixed($mode), ...$roles,
+            ...EditorPalette::tokens($this->primary, $mode, $roles),
+            ...ThemeEffects::tokens($this->primary, $mode, $roles),
             ...$artwork,
             '--fb-brand' => $this->primary,
             '--fb-progress-track' => $roles[$mode === 'light' ? '--fb-surface-active' : '--fb-border'],
@@ -95,6 +97,6 @@ final class Palette
     /** @return list<string> */
     public static function sources(): array
     {
-        return [__FILE__, __DIR__.'/ThemeDefinition.php', __DIR__.'/CustomPalette.php', __DIR__.'/TokenContract.php', __DIR__.'/Color.php'];
+        return [__FILE__, __DIR__.'/ThemeDefinition.php', __DIR__.'/ThemeEffects.php', __DIR__.'/EditorPalette.php', __DIR__.'/CustomPalette.php', __DIR__.'/TokenContract.php', __DIR__.'/Color.php'];
     }
 }

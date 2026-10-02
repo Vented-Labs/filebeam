@@ -40,6 +40,8 @@ export const filebeamHighlighting = syntaxHighlighting(filebeamHighlightStyle);
 
 // Mode is provided only by the editor's appearance compartment. This theme is mode-neutral.
 export const filebeamEditorChrome = EditorView.theme({
+    // Keep code colors atomic even when global reduced-motion rules assign a transition duration.
+    '&, & *': { transitionProperty: 'none' },
     '&': {
         height: '100%',
         backgroundColor: 'var(--fb-editor-bg)',
@@ -68,8 +70,13 @@ export const filebeamEditorChrome = EditorView.theme({
         backgroundColor: 'var(--fb-editor-gutter-active-bg)',
         color: 'var(--fb-editor-gutter-active-fg)',
     },
-    '.cm-selectionBackground': { backgroundColor: 'var(--fb-editor-selection-inactive)' },
-    '&.cm-focused .cm-selectionBackground': { backgroundColor: 'var(--fb-editor-selection)' },
+    // The built-in focused selection rule also includes the selection-layer ancestry.
+    '&.cm-editor > .cm-scroller > .cm-selectionLayer .cm-selectionBackground': {
+        backgroundColor: 'var(--fb-editor-selection-inactive)',
+    },
+    '&.cm-editor.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground': {
+        backgroundColor: 'var(--fb-editor-selection)',
+    },
     '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--fb-editor-caret)' },
     '.cm-content': { caretColor: 'var(--fb-editor-caret)', padding: '16px 0' },
     '.cm-matchingBracket': {

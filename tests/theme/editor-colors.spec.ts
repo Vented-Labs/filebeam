@@ -1,12 +1,9 @@
 import { expect, test } from '@playwright/test';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import type { ThemePreset } from '../../ui/src/lib/appearance-types';
 import { visual } from './visual';
+import { profiles } from './palette';
 
-const contract = JSON.parse(
-    readFileSync(resolve('backend/tests/Fixtures/theme-color-contract.json'), 'utf8'),
-);
+const contract = { profiles };
 const presets: ThemePreset[] = ['purple', 'blue', 'teal', 'green', 'amber', 'orange', 'rose'];
 
 for (const preset of presets)

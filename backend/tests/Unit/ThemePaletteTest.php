@@ -35,13 +35,17 @@ test('OKLCH conversion round trips RGB without clipping', function (string $hex)
     expect(Color::hex(...Color::oklch($hex)))->toBe($hex);
 })->with(['#8b35ff', '#008877', '#ffffff', '#000000', '#ff0000', '#0000ff']);
 
-test('authored profiles match the independent concrete output oracle', function (string $preset, string $mode) {
+test('authored profiles preserve the independent oracle outside preset-aware editor roles', function (string $preset, string $mode) {
     $fixture = json_decode((string) file_get_contents(__DIR__.'/../Fixtures/theme-color-contract.json'), true, flags: JSON_THROW_ON_ERROR);
     $palette = new Palette($fixture['preset_seeds'][$preset]);
     $expected = $fixture['profiles'][$preset][$mode];
     $actual = $palette->tokens($mode);
     expect(array_keys($actual))->toEqualCanonicalizing(array_keys($expected));
+    $editorAccents = ['--fb-editor-bg', '--fb-editor-gutter-bg', '--fb-editor-border', '--fb-editor-gutter-active-bg', '--fb-editor-selection', '--fb-editor-selection-inactive', '--fb-editor-matching-bracket', '--fb-editor-keyword', '--fb-editor-type', '--fb-editor-heading', '--fb-editor-bracket-border', '--fb-selection'];
     foreach ($expected as $name => $value) {
+        if ($preset !== 'purple' && in_array($name, $editorAccents, true)) {
+            continue;
+        }
         expect(strtolower($actual[$name]), "$preset $mode $name")->toBe(strtolower($value));
     }
     foreach ($fixture['aliases'] as $alias => $target) {
@@ -92,7 +96,7 @@ test('role contrasts survive enabled states overlays and quantization', function
     }
     $default = (new Palette)->tokens($mode);
     foreach ($t as $name => $value) {
-        if (preg_match('/^--fb-(editor-|success|warning|danger|info)/', $name)) {
+        if (preg_match('/^--fb-(success|warning|danger|info)/', $name) || in_array($name, ['--fb-editor-string', '--fb-editor-number', '--fb-editor-invalid', '--fb-editor-comment', '--fb-editor-property', '--fb-editor-function', '--fb-editor-constant', '--fb-editor-search-match'], true)) {
             expect($value, "$seed $mode $name remains semantic")->toBe($default[$name]);
         }
     }
@@ -121,3 +125,22 @@ test('achromatic custom seeds have no arbitrary hue and retain highlight polarit
     }
     expect($t['--fb-progress-sheen'])->toBe($mode === 'light' ? 'transparent' : 'rgb(255 255 255 / 0.04)');
 })->with(['#000000', '#ffffff', '#808080', '#010101', '#fefefe'])->with(['light', 'dark']);
+
+test('editor surfaces and syntax accents follow the preset without changing semantic syntax', function (string $seed, string $mode) {
+    $t = (new Palette($seed))->tokens($mode);
+    $purple = (new Palette)->tokens($mode);
+    foreach (['bg', 'gutter-bg', 'selection', 'matching-bracket', 'keyword', 'type', 'heading'] as $role) {
+        expect($t['--fb-editor-'.$role], "$seed $mode editor $role")->not->toBe($purple['--fb-editor-'.$role]);
+    }
+    $seedHue = Color::oklch($seed)[2];
+    foreach (['keyword', 'type', 'heading'] as $role) {
+        [, $chroma, $hue] = Color::oklch($t['--fb-editor-'.$role]);
+        $distance = abs($hue - $seedHue);
+        expect(min($distance, 360 - $distance), "$seed $mode $role hue")->toBeLessThan(25)
+            ->and($chroma)->toBeGreaterThan(0.025);
+    }
+    if ($mode === 'dark') {
+        expect($t['--fb-editor-bg'])->toBe($t['--fb-surface-sunken']);
+    }
+    expect($t['--fb-selection'])->toBe($t['--fb-editor-selection']);
+})->with(array_values(array_diff_key(ThemeDefinition::SEEDS, ['purple' => true])))->with(['light', 'dark']);

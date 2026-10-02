@@ -6,7 +6,13 @@ if (!['chromium', 'firefox', 'webkit'].includes(browserName))
 
 export default defineConfig({
     testDir: '.',
-    testMatch: ['gallery.spec.ts', 'placement.spec.ts', 'theme.spec.ts', 'editor-colors.spec.ts'],
+    testMatch: [
+        'gallery.spec.ts',
+        'placement.spec.ts',
+        'theme.spec.ts',
+        'editor-colors.spec.ts',
+        'gradients.spec.ts',
+    ],
     outputDir: '../../.filebeam/test-results/prism-gallery',
     snapshotPathTemplate: '{testDir}/snapshots/{testFilePath}/{arg}{ext}',
     fullyParallel: false,

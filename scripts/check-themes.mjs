@@ -143,7 +143,7 @@ for (const [preset, modes] of Object.entries(contracts.profiles)) {
     for (const [mode, tokens] of Object.entries(modes)) {
         assert.deepEqual(Object.keys(tokens).sort(), Object.keys(contracts.types).sort(), `${preset}/${mode} token completeness`);
         for (const [name, type] of Object.entries(contracts.types)) {
-            const property = { color: 'color', background: 'background', shadow: 'box-shadow' }[type];
+            const property = { color: 'color', background: 'background', image: 'background-image', shadow: 'box-shadow' }[type];
             if (property && css.lexer.matchProperty(property, tokens[name]).error) errors.push(`${preset}/${mode}: invalid ${type} token ${name}: ${tokens[name]}`);
         }
     }

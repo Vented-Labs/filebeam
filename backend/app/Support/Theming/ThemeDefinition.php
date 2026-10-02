@@ -131,7 +131,7 @@ final class ThemeDefinition
             ? '292532 783ab0 176b45 925016 aa355a 245fa5 086976 744a97 a73558 8a4b17 5c606d 565c6a 565c6a 765a17 a03652 964712 245fa5 6e38b0 b4233f'
             : 'eceaf2 cbacf5 91ceac e7bc87 f3aec2 9abff5 89c8d3 d6b8f0 f0a7b9 e8c095 ada6b8 aba5b7 beb7cc dcc088 f3abc0 edc49a 9abff5 ceaeff f5a3b5');
         $tokens += self::prefix([
-            'color-scheme' => $mode, 'ambient-glow' => 'none', 'dropzone-glow' => 'none', 'switch-thumb-off' => '#ffffff',
+            'color-scheme' => $mode, 'switch-thumb-off' => '#ffffff',
             'action-shadow' => $light ? '0 1px 2px rgb(24 20 32 / 0.10)' : 'inset 0 1px 0 rgb(255 255 255 / 0.08), 0 2px 4px rgb(0 0 0 / 0.22)',
             'action-hover-shadow' => $light ? '0 2px 4px rgb(24 20 32 / 0.12)' : 'inset 0 1px 0 rgb(255 255 255 / 0.08), 0 3px 6px rgb(0 0 0 / 0.26)',
             'action-active-shadow' => $light ? 'inset 0 1px 2px rgb(24 20 32 / 0.12)' : 'inset 0 1px 2px rgb(0 0 0 / 0.20)',
@@ -141,7 +141,6 @@ final class ThemeDefinition
             'drawer-scrim' => $light ? 'rgb(24 20 32 / 0.24)' : 'rgb(8 6 14 / 0.52)',
             'progress-sheen' => $light ? 'transparent' : 'rgb(255 255 255 / 0.04)',
             'progress-sheen-peak' => $light ? 'transparent' : 'rgb(255 255 255 / 0.12)',
-            'og-glow' => 'transparent', 'og-shadow' => $light ? 'rgb(24 20 32 / 0.08)' : 'rgb(0 0 0 / 0.18)',
         ]);
         foreach (['soft' => ['0.06', '0.10'], 'medium' => ['0.10', '0.18'], 'strong' => ['0.14', '0.24'], 'heavy' => ['0.18', '0.42'], 'tooltip' => ['0.12', '0.24'], 'toast' => ['0.12', '0.25']] as $name => $alpha) {
             $tokens['--fb-shadow-'.$name] = 'rgb('.($light ? '24 20 32 / '.$alpha[0] : '0 0 0 / '.$alpha[1]).')';
@@ -189,16 +188,16 @@ final class ThemeDefinition
             'text' => 'secondary-text rail-text settings-text settings-label tabs-text cli-command error-text report-heading report-label',
             'text-muted' => 'pill-text cli-icon cli-option cli-value cli-label error-muted report-description report-optional',
             'accent-text' => 'choice-text cli-accent share-mark-text error-signal os-accent focus',
-            'border' => 'rail-border settings-border tabs-border file-mark-border note-border card-border share-border cli-border report-border error-badge-border password-menu-border row-hover-border og-orbit',
+            'border' => 'rail-border settings-border tabs-border file-mark-border note-border card-border share-border cli-border report-border error-badge-border password-menu-border row-hover-border',
             'control-border' => 'secondary-border dropzone-border dropzone-mark-border password-input-border inbox-empty-border inbox-button-border scrollbar switch-track-off',
             'control-border-hover' => 'secondary-hover-border dropzone-mark-hover-border password-hover-border inbox-button-hover-border cli-hover-border error-hover-border',
             'focus' => 'dropzone-hover-border password-open-border password-focus',
             'surface' => 'secondary-surface row-surface report-surface',
             'surface-hover' => 'secondary-hover-surface row-hover-surface password-hover-surface error-hover-surface',
             'surface-raised' => 'password-menu-surface error-surface', 'surface-sunken' => 'tabs-surface account-rail',
-            'selected-surface' => 'choice-surface password-open-surface inbox-key-surface dropzone-mark-hover',
-            'choice-border' => 'inbox-key-border', 'accent-surface' => 'choice-wash dropzone-mark share-mark-surface',
-            'settings-surface' => 'note-surface note-tab-surface', 'danger-border' => 'alert-border',
+            'selected-surface' => 'choice-surface password-open-surface inbox-key-surface',
+            'choice-border' => 'inbox-key-border', 'accent-surface' => 'choice-wash',
+            'settings-surface' => 'note-tab-surface', 'danger-border' => 'alert-border',
             'danger-surface' => 'alert-surface', 'danger' => 'report-error', 'editor-selection' => 'selection',
             'action-hover' => 'action-hover-bg', 'action-active' => 'action-active-bg', 'on-action' => 'switch-thumb-checked',
         ];
@@ -215,14 +214,17 @@ final class ThemeDefinition
     /** @return array<string, string> */
     public static function types(): array
     {
-        $tokens = [...self::common(), ...self::fixed('dark'), ...self::authored('purple', 'dark'), ...self::artwork(self::SEEDS['purple'], self::ENDPOINTS['purple'], 'dark', true), ...self::aliases(), '--fb-progress-track' => '', '--fb-focus-ring' => ''];
+        $tokens = [...self::common(), ...self::fixed('dark'), ...self::authored('purple', 'dark'), ...ThemeEffects::tokens(self::SEEDS['purple'], 'dark', self::authored('purple', 'dark')), ...self::artwork(self::SEEDS['purple'], self::ENDPOINTS['purple'], 'dark', true), ...self::aliases(), '--fb-progress-track' => '', '--fb-focus-ring' => ''];
         $types = array_fill_keys(array_keys($tokens), 'color');
         foreach (array_keys(self::common()) as $name) {
             $types[$name] = 'non-color';
         }
         $types['--fb-color-scheme'] = 'non-color';
-        foreach (explode(' ', 'action-bg action-hover-bg action-active-bg brand-gradient ambient-glow dropzone-glow note-surface share-mark-surface') as $name) {
+        foreach (explode(' ', 'action-bg action-hover-bg action-active-bg brand-gradient note-surface share-mark-surface') as $name) {
             $types['--fb-'.$name] = 'background';
+        }
+        foreach (explode(' ', 'ambient-glow dropzone-glow dropzone-mark dropzone-mark-hover') as $name) {
+            $types['--fb-'.$name] = 'image';
         }
         foreach (explode(' ', 'shadow-panel shadow-popover action-shadow action-hover-shadow action-active-shadow focus-ring') as $name) {
             $types['--fb-'.$name] = 'shadow';

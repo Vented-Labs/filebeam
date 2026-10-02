@@ -1,10 +1,65 @@
 import { expect, test, type Page } from '@playwright/test';
 import { visual } from '../../tests/theme/visual';
+import { profiles, cssRgb } from '../../tests/theme/palette';
 
 async function probe(page: Page) {
     return page.evaluate(async () => {
         const url = '/editor-probe.ts';
         return (await import(/* @vite-ignore */ url)).inspect();
+    });
+}
+
+for (const reducedMotion of ['reduce', 'no-preference'] as const) {
+    test(`CodeMirror paints the selected preset and mode immediately (${reducedMotion})`, async ({
+        page,
+    }) => {
+        await page.emulateMedia({ reducedMotion });
+        await page.goto('/?theme');
+        await expect(page.locator('.fb-syn-keyword').first()).toBeVisible();
+        const darkSchemes = new Set<string>();
+        await page.evaluate(async () => {
+            const url = '/editor-probe.ts';
+            (await import(/* @vite-ignore */ url)).select(0, 10);
+        });
+        for (const preset of [
+            'purple',
+            'blue',
+            'teal',
+            'green',
+            'amber',
+            'orange',
+            'rose',
+        ] as const)
+            for (const mode of ['dark', 'light', 'dark'] as const) {
+                const colors = await page.evaluate(
+                    ({ preset, mode }) => {
+                        window.filebeamAppearance!.setPreset(preset);
+                        window.filebeamAppearance!.set(mode);
+                        return {
+                            background: getComputedStyle(document.querySelector('.cm-editor')!)
+                                .backgroundColor,
+                            keyword: getComputedStyle(document.querySelector('.fb-syn-keyword')!)
+                                .color,
+                        };
+                    },
+                    { preset, mode },
+                );
+                expect(colors).toEqual({
+                    background: cssRgb(profiles[preset][mode]['--fb-editor-bg']),
+                    keyword: cssRgb(profiles[preset][mode]['--fb-editor-keyword']),
+                });
+                if (mode === 'dark') darkSchemes.add(JSON.stringify(colors));
+                await expect(page.locator('.cm-selectionBackground').first()).toHaveCSS(
+                    'background-color',
+                    cssRgb(profiles[preset][mode]['--fb-editor-selection']),
+                );
+            }
+        expect(darkSchemes.size).toBe(7);
+        await page.getByTestId('primary').focus();
+        await expect(page.locator('.cm-selectionBackground').first()).toHaveCSS(
+            'background-color',
+            cssRgb(profiles.rose.dark['--fb-editor-selection-inactive']),
+        );
     });
 }
 
@@ -129,7 +184,7 @@ const languages = [
 ];
 
 for (const language of languages) {
-    test(`actual ${language.label} parser output uses fixed readable syntax in both modes`, async ({
+    test(`actual ${language.label} parser output uses readable semantic syntax in both modes`, async ({
         page,
     }) => {
         await page.goto('/?theme');
@@ -187,6 +242,10 @@ test('search and keyboard selections remain visible above the translucent active
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto('/?theme');
     await expect(page.locator('.cm-content')).toBeVisible();
+    await page.evaluate(async () => {
+        const url = '/editor-probe.ts';
+        await (await import(/* @vite-ignore */ url)).settle();
+    });
     for (const mode of ['light', 'dark'] as const) {
         await page.evaluate(async (next) => {
             window.filebeamAppearance!.set(next);

@@ -42,6 +42,14 @@ export function scroll(top: number) {
     editor().scrollDOM.scrollTop = top;
 }
 
+export async function settle() {
+    await document.fonts.ready;
+    const view = editor();
+    await new Promise<void>((resolve) =>
+        view.requestMeasure({ read: () => null, write: () => resolve() }),
+    );
+}
+
 export function search(text: string) {
     openSearchPanel(editor());
     editor().dispatch({ effects: setSearchQuery.of(new SearchQuery({ search: text })) });

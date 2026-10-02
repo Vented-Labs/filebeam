@@ -539,9 +539,9 @@ jobs:
         if: matrix.gd == 'true' && hashFiles('scripts/themes/test.sh') != ''
         run: npm run test:theme
       - name: Test explicit theme adapters
-        if: hashFiles('backend/tests/Unit/BrandArtworkTest.php') != ''
+        if: hashFiles('backend/tests/Unit/ThemeEffectsTest.php') != ''
         working-directory: backend
-        run: vendor/bin/pest tests/Unit/BrandArtworkTest.php tests/Unit/MailThemeTest.php
+        run: vendor/bin/pest tests/Unit/BrandArtworkTest.php tests/Unit/MailThemeTest.php tests/Unit/ThemeEffectsTest.php
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: failure()
         with:

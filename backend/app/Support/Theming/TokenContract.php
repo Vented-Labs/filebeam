@@ -49,7 +49,9 @@ final class TokenContract
             $value = $tokens[$name];
             if ($type === 'color') {
                 Color::parse($value);
-            } elseif ($type === 'background' && $value !== 'none' && ! str_starts_with($value, 'linear-gradient(')) {
+            } elseif ($type === 'image' && ! preg_match('/^(?:linear|radial)-gradient\(/', $value)) {
+                throw new RuntimeException($context.': invalid image token '.$name);
+            } elseif ($type === 'background' && $value !== 'none' && ! preg_match('/^(?:linear|radial)-gradient\(/', $value)) {
                 Color::parse($value);
             }
             if (preg_match('/(?:NaN|Infinity|[{};])/i', $value)) {

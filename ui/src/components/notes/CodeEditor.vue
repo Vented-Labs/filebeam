@@ -252,6 +252,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .fb-editor-fallback {
     caret-color: var(--fb-editor-caret);
+    transition-property: none;
 }
 .fb-editor-fallback::selection {
     background: var(--fb-editor-selection);
