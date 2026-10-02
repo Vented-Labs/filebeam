@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Support\InstanceMailManager;
 use Carbon\CarbonImmutable;
 use Filebeam\Updater\ActivityLock;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Http\Request;
 use Illuminate\Queue\Events\JobAttempted;
 use Illuminate\Queue\Events\JobProcessing;
@@ -25,6 +27,7 @@ class AppServiceProvider extends ServiceProvider
 {
     public function boot(): void
     {
+        $this->app->extend('mail.manager', static fn (mixed $manager, Application $app): InstanceMailManager => new InstanceMailManager($app));
         $this->configureDefaults();
         $this->configureRateLimiting();
         $this->configureUpdateActivityTracking();

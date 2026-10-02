@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
 # All service images are the selected, multi-architecture upstream releases.
 FROM dunglas/frankenphp:1.12.7-php8.5-trixie@sha256:f92d81eb3fe4fd18b35d3d58192b7cc3acc8943817bbf39f2fcf0be02a3916dc AS php-base
+ENV LOG_CHANNEL=stdout LOG_STACK=stdout LOG_EMERGENCY_PATH=php://stdout
 
 COPY docker/production/apt.conf /etc/apt/apt.conf.d/80-filebeam-network
 RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
@@ -91,7 +92,6 @@ FROM php-base AS runtime
 ARG FILEBEAM_VARIANT=light
 ENV FILEBEAM_CONTAINER=true \
     FILEBEAM_VARIANT=${FILEBEAM_VARIANT} \
-    LOG_CHANNEL=stderr \
     APP_ENV=production \
     APP_DEBUG=false \
     FILEBEAM_DATA_DIR=/data \

@@ -49,6 +49,7 @@ type Cache = {
 };
 
 type Defaults = {
+    smtp: Smtp;
     database: Database;
     cache: Cache;
     instance: {
@@ -73,6 +74,9 @@ type Chunks = {
 };
 
 type Managed = {
+    smtp: boolean;
+    smtp_from_address: boolean;
+    smtp_from_name: boolean;
     container: boolean;
     variant: string | null;
     database: boolean;
@@ -115,6 +119,9 @@ const probeInFlight = ref(false);
 const probeGeneration = ref(0);
 const sqliteDatabaseDefault = ref('');
 const managed = ref<Managed>({
+    smtp: false,
+    smtp_from_address: false,
+    smtp_from_name: false,
     container: false,
     variant: null,
     database: false,
@@ -123,7 +130,28 @@ const managed = ref<Managed>({
     auto_updates: false,
 });
 
+type Smtp = {
+    enabled: boolean;
+    host: string;
+    port: string | number;
+    security: string;
+    username: string;
+    password: string;
+    from_address: string;
+    from_name: string;
+};
+
 const form = reactive({
+    smtp: {
+        enabled: false,
+        host: '',
+        port: 587,
+        security: 'starttls',
+        username: '',
+        password: '',
+        from_address: '',
+        from_name: 'Filebeam',
+    } as Smtp,
     database: {
         driver: 'mysql',
         transport: 'tcp',
@@ -287,7 +315,7 @@ function clearError(path: string): void {
 function errorStep(path: string): number {
     if (path === 'token' || path === 'challenge') return 1;
     if (/^(database|cache)(\.|$)/.test(path)) return 2;
-    if (/^instance(\.|$)/.test(path)) return 3;
+    if (/^(instance|smtp)(\.|$)/.test(path)) return 3;
     if (/^storage(\.|$)/.test(path) || path.startsWith('chunk_') || path === 'placement_mode')
         return 4;
     if (/^admin(\.|$)/.test(path)) return 5;
@@ -377,6 +405,7 @@ async function navigateStep(target: number, validate = false): Promise<void> {
 }
 
 function applyDefaults(defaults: Defaults): void {
+    Object.assign(form.smtp, defaults.smtp);
     Object.assign(form.database, defaults.database);
     Object.assign(form.cache, defaults.cache);
     sqliteDatabaseDefault.value = defaults.database.database;
@@ -1331,6 +1360,96 @@ watch(
                     aria-labelledby="install-step-title"
                 >
                     <h2 id="install-step-title" class="title" tabindex="-1">Instance</h2>
+                    <h3 class="mt-6 font-semibold">Outgoing email</h3>
+                    <p v-if="managed.smtp" class="mt-2 text-sm text-[var(--fb-text-muted)]">
+                        Mail transport is managed by the environment.
+                    </p>
+                    <template v-else>
+                        <InstallationField
+                            v-model="form.smtp.enabled"
+                            path="smtp.enabled"
+                            label="Configure SMTP"
+                            type="checkbox"
+                            class="mt-4"
+                            description="Optional. You can configure outgoing email later in Admin instance settings."
+                            :error="fieldErrors('smtp.enabled').join(' ')"
+                            @update:model-value="clearError('smtp.enabled')"
+                        />
+                        <div v-if="form.smtp.enabled" class="mt-4 grid gap-4 sm:grid-cols-2">
+                            <InstallationField
+                                v-model="form.smtp.host"
+                                path="smtp.host"
+                                label="SMTP host"
+                                required
+                                maxlength="253"
+                                :error="fieldErrors('smtp.host').join(' ')"
+                                @update:model-value="clearError('smtp.host')"
+                            />
+                            <InstallationField
+                                v-model="form.smtp.port"
+                                path="smtp.port"
+                                label="SMTP port"
+                                type="number"
+                                required
+                                min="1"
+                                max="65535"
+                                :error="fieldErrors('smtp.port').join(' ')"
+                                @update:model-value="clearError('smtp.port')"
+                            />
+                            <InstallationField
+                                v-model="form.smtp.security"
+                                path="smtp.security"
+                                label="Connection security"
+                                type="select"
+                                :error="fieldErrors('smtp.security').join(' ')"
+                                @update:model-value="clearError('smtp.security')"
+                            >
+                                <option value="starttls">STARTTLS (required)</option>
+                                <option value="tls">TLS (implicit)</option>
+                                <option value="none">None</option>
+                            </InstallationField>
+                            <InstallationField
+                                v-model="form.smtp.username"
+                                path="smtp.username"
+                                label="SMTP username"
+                                autocomplete="off"
+                                maxlength="1024"
+                                :error="fieldErrors('smtp.username').join(' ')"
+                                @update:model-value="clearError('smtp.username')"
+                            />
+                            <InstallationField
+                                v-model="form.smtp.password"
+                                path="smtp.password"
+                                label="SMTP password"
+                                type="password"
+                                autocomplete="new-password"
+                                maxlength="4096"
+                                :error="fieldErrors('smtp.password').join(' ')"
+                                @update:model-value="clearError('smtp.password')"
+                            />
+                            <InstallationField
+                                v-model="form.smtp.from_address"
+                                path="smtp.from_address"
+                                label="Sender email address"
+                                type="email"
+                                required
+                                maxlength="254"
+                                :disabled="managed.smtp_from_address"
+                                :error="fieldErrors('smtp.from_address').join(' ')"
+                                @update:model-value="clearError('smtp.from_address')"
+                            />
+                            <InstallationField
+                                v-model="form.smtp.from_name"
+                                path="smtp.from_name"
+                                label="Sender name"
+                                required
+                                maxlength="255"
+                                :disabled="managed.smtp_from_name"
+                                :error="fieldErrors('smtp.from_name').join(' ')"
+                                @update:model-value="clearError('smtp.from_name')"
+                            />
+                        </div>
+                    </template>
                     <div class="mt-6 grid gap-4 sm:grid-cols-2">
                         <InstallationField
                             v-model="form.instance.name"

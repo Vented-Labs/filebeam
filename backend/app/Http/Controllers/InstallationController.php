@@ -11,6 +11,7 @@ use App\Support\Installation\ContainerConfiguration;
 use App\Support\Installation\EnvironmentWriter;
 use App\Support\Installation\InstallationConfiguration;
 use App\Support\Installation\InstallationState;
+use App\Support\SmtpSettings;
 use Illuminate\Cache\FileStore;
 use Illuminate\Cache\RateLimiter;
 use Illuminate\Cache\Repository;
@@ -57,8 +58,9 @@ class InstallationController extends Controller
                 'instance' => array_replace(['name' => 'Filebeam', 'url' => $request->getSchemeAndHttpHost(), 'username_domain' => '', 'visibility' => 'private', 'auto_updates_enabled' => false], $containerDefaults['instance']),
                 'storage' => [['name' => 'Local storage', 'driver' => 'local', 'root' => 'primary', 'bucket' => '', 'key' => '', 'secret' => '', 'region' => 'us-east-1', 'endpoint' => '', 'use_path_style_endpoint' => false]],
                 'placement_mode' => 'replicate',
+                'smtp' => app(SmtpSettings::class)->form(installed: false),
             ],
-            'managed' => ['container' => $container->enabled(), 'variant' => $container->variant(), ...$container->managed()],
+            'managed' => ['container' => $container->enabled(), 'variant' => $container->variant(), ...$container->managed(), 'smtp' => app(SmtpSettings::class)->managed(), 'smtp_from_address' => config('smtp.from_address') !== null, 'smtp_from_name' => config('smtp.from_name') !== null],
             'prerequisites' => $this->prerequisites($state),
             'chunks' => $chunks->limits(),
         ]);

@@ -11,6 +11,7 @@ use App\Support\Installation\EnvironmentWriter;
 use App\Support\Installation\InstallationConfiguration;
 use App\Support\Installation\InstallationState;
 use App\Support\Installation\OptimizeInstallation;
+use App\Support\SmtpSettings;
 use Dotenv\Dotenv;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
@@ -32,7 +33,7 @@ afterEach(function (): void {
     File::deleteDirectory($this->completeDirectory);
 });
 
-test('completes an isolated installation and persists a reloadable environment', function (bool $interruptClaim): void {
+test('completes an isolated installation and persists a reloadable environment', function (bool $interruptClaim, bool $smtp = false): void {
     $directory = storage_path('framework/testing/complete-installation-'.bin2hex(random_bytes(6)));
     $this->completeDirectory = $directory;
     File::ensureDirectoryExists($directory);
@@ -52,6 +53,10 @@ test('completes an isolated installation and persists a reloadable environment',
     config()->set('app.key', $bootstrap['APP_KEY']);
     app()->instance('installation.external_environment', []);
     $input = completeInstallationInput($directory.'/database/filebeam.sqlite');
+    if ($smtp) {
+        config()->set('smtp.managed', false);
+        $input['smtp'] = ['enabled' => true, 'host' => 'smtp.example.test', 'port' => 587, 'security' => 'starttls', 'username' => 'user', 'password' => 'secret', 'from_address' => 'files@example.test', 'from_name' => 'Files'];
+    }
     $validated = app(InstallationConfiguration::class)->validate($input);
 
     if ($interruptClaim) {
@@ -76,6 +81,11 @@ test('completes an isolated installation and persists a reloadable environment',
     $environment = Dotenv::createArrayBacked($directory, '.env')->load();
     expect($environment)->toMatchArray(['APP_KEY' => $bootstrap['APP_KEY'], 'APP_NAME' => 'Private Filebeam', 'FILEBEAM_NAME' => 'Private Filebeam', 'APP_URL' => 'http://localhost', 'DB_CONNECTION' => 'sqlite', 'DB_DATABASE' => $directory.'/database/filebeam.sqlite', 'CHUNK_MAX_SIZE' => '17']);
     expect($environment)->not->toHaveKey('FILEBEAM_INSTALL_TOKEN');
+    if ($smtp) {
+        expect(app(SmtpSettings::class)->stored()['password'])->toBe('secret')
+            ->and($environment)->not->toHaveKey('MAIL_PASSWORD')
+            ->and(DB::table('instance_settings')->where('key', 'smtp')->value('value'))->not->toContain('secret');
+    }
 
     $state->write(['id' => $state->read()['id'], 'status' => 'installing', 'token_hash' => hash('sha256', 'stale-token')]);
     app(CompleteInstallation::class)->handle($validated);
@@ -96,7 +106,7 @@ test('completes an isolated installation and persists a reloadable environment',
     $state->write(['id' => (string) Str::uuid(), 'status' => 'pending', 'token_hash' => hash('sha256', 'other-token')]);
     expect(fn (): mixed => app(CompleteInstallation::class)->handle($validated))->toThrow(ValidationException::class);
 
-})->with([false, true]);
+})->with([[false, false], [true, false], [false, true], [true, true]]);
 
 /** @return array<string, mixed> */
 function completeInstallationInput(string $database): array

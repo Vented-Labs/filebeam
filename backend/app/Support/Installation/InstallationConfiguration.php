@@ -7,6 +7,7 @@ namespace App\Support\Installation;
 use App\Models\Filestore;
 use App\Rules\ReservedUsername;
 use App\Support\FilestoreRegistry;
+use App\Support\SmtpSettings;
 use Illuminate\Database\Connection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
@@ -29,6 +30,7 @@ class InstallationConfiguration
     {
         $validated = Validator::make($input, [
             'cache' => ['sometimes', 'array'],
+            'smtp' => ['sometimes', 'array'],
             'database' => ['required', 'array:driver,transport,socket,host,port,database,username,password,sslmode'], 'database.driver' => ['required', 'in:sqlite,mysql,mariadb,pgsql'], 'database.transport' => ['sometimes', 'in:tcp,socket'], 'database.socket' => ['nullable', 'string', 'max:4096'], 'database.host' => ['nullable', 'string'], 'database.port' => ['nullable', 'integer', 'between:1,65535'], 'database.database' => ['nullable', 'string'], 'database.username' => ['nullable', 'string'], 'database.password' => ['nullable', 'string'], 'database.sslmode' => ['nullable', 'in:disable,allow,prefer,require,verify-ca,verify-full'],
             'instance' => ['required', 'array:name,url,username_domain,visibility,auto_updates_enabled'], 'instance.name' => ['required', 'string', 'max:255'], 'instance.url' => ['required', 'url'], 'instance.username_domain' => ['nullable', 'string', 'max:253'], 'instance.visibility' => ['required', 'in:public,private'], 'instance.auto_updates_enabled' => ['sometimes', 'boolean'],
             'storage' => ['required', 'array', 'min:1', 'max:'.self::MaxStores], 'storage.*' => ['array:name,driver,root,bucket,key,secret,region,endpoint,use_path_style_endpoint'], 'storage.*.name' => ['required', 'string', 'max:255', 'distinct'], 'storage.*.driver' => ['required', 'in:local,s3'], 'storage.*.root' => ['nullable', 'string'], 'storage.*.bucket' => ['nullable', 'string'], 'storage.*.key' => ['nullable', 'string'], 'storage.*.secret' => ['nullable', 'string'], 'storage.*.region' => ['nullable', 'string'], 'storage.*.endpoint' => ['nullable', 'url'], 'storage.*.use_path_style_endpoint' => ['required', 'boolean'],
@@ -39,6 +41,7 @@ class InstallationConfiguration
         ])->validate();
         $validated['admin']['username'] = mb_strtolower($validated['admin']['username']);
         $validated['cache'] = app(CacheConfiguration::class)->validate($validated['cache'] ?? ['driver' => 'file']);
+        $validated['smtp'] = app(SmtpSettings::class)->validate($validated['smtp'] ?? ['enabled' => false]);
         $validated['instance']['username_domain'] = ($validated['instance']['username_domain'] ?? '') === '' ? null : $validated['instance']['username_domain'];
         $this->validateDatabase($validated['database']);
         $this->validateInstance($validated['instance']);

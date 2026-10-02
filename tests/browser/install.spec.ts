@@ -3,6 +3,16 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 type CompleteFailure = Record<string, string[]>;
 
 const defaults = {
+    smtp: {
+        enabled: false,
+        host: '',
+        port: 587,
+        security: 'starttls',
+        username: '',
+        password: '',
+        from_address: '',
+        from_name: 'Filebeam',
+    },
     database: {
         driver: 'sqlite',
         transport: 'tcp',
@@ -79,6 +89,7 @@ async function install(
     request: APIRequestContext,
     completeFailure?: CompleteFailure,
     managedInstance = false,
+    managedSmtp = false,
 ): Promise<void> {
     const response = await request.get('/');
     if (!response.ok())
@@ -115,6 +126,9 @@ async function install(
                         cache: false,
                         instance: managedInstance,
                         auto_updates: false,
+                        smtp: managedSmtp,
+                        smtp_from_address: false,
+                        smtp_from_name: false,
                     },
                 }),
             });
@@ -213,6 +227,40 @@ test('renders the Filebeam installer shell and accessible desktop progress', asy
             .evaluate((element) => getComputedStyle(element).fontFamily),
     ).toContain('Inter');
     expect(await page.evaluate(() => document.fonts.check('500 14px "Inter Variable"'))).toBe(true);
+});
+
+test('validates optional SMTP fields and retains them across installer steps', async ({
+    page,
+    request,
+}) => {
+    await install(page, request);
+    await ready(page);
+    await page.getByRole('button', { name: 'Continue to database' }).click();
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await page.getByLabel('Configure SMTP', { exact: true }).check();
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await expect(page.getByLabel('SMTP host', { exact: true })).toBeFocused();
+    await page.getByLabel('SMTP host', { exact: true }).fill('smtp.example.test');
+    await page.getByLabel('SMTP username', { exact: true }).fill('smtp-user');
+    await page.getByLabel('SMTP password', { exact: true }).fill('smtp-password');
+    await page.getByLabel('Sender email address', { exact: true }).fill('files@example.test');
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await expect(page.getByRole('heading', { name: 'Storage and chunks' })).toBeVisible();
+    await page.getByRole('button', { name: 'Back', exact: true }).click();
+    await expect(page.getByLabel('SMTP host', { exact: true })).toHaveValue('smtp.example.test');
+    await expect(page.getByLabel('SMTP password', { exact: true })).toHaveAttribute(
+        'type',
+        'password',
+    );
+});
+
+test('shows environment managed SMTP during onboarding', async ({ page, request }) => {
+    await install(page, request, undefined, false, true);
+    await ready(page);
+    await page.getByRole('button', { name: 'Continue to database' }).click();
+    await page.getByRole('button', { name: 'Continue' }).click();
+    await expect(page.getByText('Mail transport is managed by the environment.')).toBeVisible();
+    await expect(page.getByLabel('Configure SMTP', { exact: true })).toHaveCount(0);
 });
 
 test('uses native validation for the optional username domain before advancing', async ({
