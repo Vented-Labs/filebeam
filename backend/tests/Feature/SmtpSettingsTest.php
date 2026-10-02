@@ -22,6 +22,7 @@ use Symfony\Component\Mailer\Transport\Smtp\EsmtpTransport;
 beforeEach(function (): void {
     config()->set('app.key', 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=');
     config()->set('smtp', ['managed' => false, 'from_address' => null, 'from_name' => null]);
+    config()->set('mail.default', 'array');
     config()->set('installation.environment_path', base_path('composer.json'));
 });
 
@@ -43,7 +44,7 @@ test('SMTP configuration is encrypted and audit records and form state omit save
     expect($raw)->not->toContain('smtp-secret')->not->toContain('smtp-user')
         ->and($settings->stored()['password'])->toBe(' smtp-secret ')
         ->and($settings->form()['password'])->toBe('')
-        ->and(AdminAudit::query()->sole()->changes)->toBe(['configured' => ['from' => false, 'to' => true]]);
+        ->and(AdminAudit::query()->sole()->changes)->toEqual(['configured' => ['from' => false, 'to' => true]]);
 
     $settings->update($actor, smtpInput(['password' => '', 'host' => 'new.example.test']));
     expect($settings->stored()['password'])->toBe(' smtp-secret ');
