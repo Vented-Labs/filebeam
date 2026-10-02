@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { Compartment, EditorState, Extension } from '@codemirror/state';
 import type { StringStream } from '@codemirror/language';
 import type { EditorView, ViewUpdate } from '@codemirror/view';
@@ -19,6 +19,20 @@ const emit = defineEmits<{ 'update:modelValue': [value: string] }>();
 const editorHost = ref<HTMLElement>();
 const fallback = ref(props.modelValue);
 const ready = ref(false);
+const fallbackInput = ref<HTMLTextAreaElement>();
+let focusPending = false;
+function focusEnd(): void {
+    if (view) {
+        view.dispatch({ selection: { anchor: view.state.doc.length }, scrollIntoView: true });
+        view.focus();
+        focusPending = false;
+    } else {
+        focusPending = true;
+        fallbackInput.value?.focus();
+        fallbackInput.value?.setSelectionRange(props.modelValue.length, props.modelValue.length);
+    }
+}
+defineExpose({ focusEnd });
 let view: EditorView | undefined;
 let languageCompartment: Compartment | undefined;
 let readOnlyCompartment: Compartment | undefined;
@@ -185,7 +199,11 @@ async function mountEditor(): Promise<void> {
         ];
         const state: EditorState = EditorState.create({ doc: initialModel, extensions });
         view = new EditorView({ state, parent: editorHost.value });
+        const transferFocus = focusPending && document.activeElement === fallbackInput.value;
         ready.value = true;
+        await nextTick();
+        if (transferFocus && !destroyed) focusEnd();
+        else focusPending = false;
     } catch {
         // The textarea remains functional when dynamic imports or browser APIs are unavailable.
         ready.value = false;
@@ -248,6 +266,7 @@ onBeforeUnmount(() => {
         <textarea
             v-if="!ready"
             id="private-note"
+            ref="fallbackInput"
             :value="fallback"
             :readonly="readOnly"
             aria-label="Secure note editor"

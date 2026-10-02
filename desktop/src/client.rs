@@ -439,6 +439,7 @@ impl Worker {
         };
         let password = Zeroizing::new(request.password);
         let options = UploadOptions {
+            snapshot_paths: Vec::new(),
             transport: if request.transport == SendTransport::Live {
                 Transport::WebRtc
             } else {
