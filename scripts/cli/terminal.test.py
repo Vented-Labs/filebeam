@@ -262,6 +262,27 @@ def main():
         assert (root / "plain" / source.name).read_bytes() == source.read_bytes()
         print("PASS: plain and redirected output")
 
+        paste_env = {key: value for key, value in env.items()
+                     if key not in ("DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR")}
+        screen = Terminal(["--reduced-motion"], paste_env, root)
+        screen.until(b"Choose what to share")
+        screen.send(b"\x1b[200~first line\n\tsecond line\x1b[201~")
+        screen.until(b"second line")
+        screen.send(b"\r\x1b[200~third line\x1b[201~")
+        screen.until(b"third line")
+        screen.send(b"\x1b")
+        screen.pump(0.2)
+        screen.send(b"n")
+        screen.until(b"[Files] / Notes")
+        screen.send(b"v")
+        screen.until(b"Use terminal text paste")
+        screen.send(b"n")
+        screen.pump(0.2)
+        screen.send(b"q")
+        code, output = screen.finish()
+        assert code == 0, output
+        print("PASS: Send bracketed multiline paste, draft navigation and headless clipboard feedback")
+
         screen = Terminal([], env, root)
         screen.until(b"Choose what to share")
         screen.send(b"/QA\r ")

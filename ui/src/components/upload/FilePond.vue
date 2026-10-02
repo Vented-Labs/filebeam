@@ -2,13 +2,19 @@
 import Button from '../primitives/Button.vue';
 import Icon from '../primitives/Icon.vue';
 import BrandLogo from '../brand/BrandLogo.vue';
+import PasteInput from './PasteInput.vue';
+import type { PasteContent } from '../../lib/clipboard';
 
 const props = defineProps<{
     disabled: boolean;
     dragging: boolean;
     compact?: boolean;
 }>();
-const emit = defineEmits<{ choose: []; files: [files: FileList] }>();
+const emit = defineEmits<{
+    choose: [];
+    files: [files: FileList];
+    paste: [content: PasteContent];
+}>();
 
 function dropped(event: DragEvent): void {
     const files = event.dataTransfer?.files;
@@ -28,44 +34,46 @@ function selected(event: Event): void {
 </script>
 
 <template>
-    <section
-        class="file-pond"
-        data-testid="file-pond"
-        :data-disabled="disabled || undefined"
-        :class="{ 'file-pond--dragging': dragging, 'file-pond--compact': compact }"
-        @dragover="onDragOver"
-        @drop="dropped"
-    >
-        <input
-            id="filebeam-picker"
-            class="sr-only"
-            type="file"
-            multiple
-            :disabled="disabled"
-            @change="selected"
-        />
-        <slot v-if="compact" />
-        <div v-else class="file-pond__empty">
-            <div class="file-pond__art" aria-hidden="true">
-                <span class="file-pond__card file-pond__card--left">
-                    <Icon name="image" :size="21" />
-                </span>
-                <span class="file-pond__card file-pond__card--right">
-                    <Icon name="code" :size="21" />
-                </span>
-                <span class="file-pond__card file-pond__card--main">
-                    <BrandLogo compact />
-                </span>
-                <span class="file-pond__seal"><Icon name="lock" :size="12" /></span>
+    <PasteInput :disabled="disabled" @paste="emit('paste', $event)">
+        <section
+            class="file-pond"
+            data-testid="file-pond"
+            :data-disabled="disabled || undefined"
+            :class="{ 'file-pond--dragging': dragging, 'file-pond--compact': compact }"
+            @dragover="onDragOver"
+            @drop="dropped"
+        >
+            <input
+                id="filebeam-picker"
+                class="sr-only"
+                type="file"
+                multiple
+                :disabled="disabled"
+                @change="selected"
+            />
+            <slot v-if="compact" />
+            <div v-else class="file-pond__empty">
+                <div class="file-pond__art" aria-hidden="true">
+                    <span class="file-pond__card file-pond__card--left">
+                        <Icon name="image" :size="21" />
+                    </span>
+                    <span class="file-pond__card file-pond__card--right">
+                        <Icon name="code" :size="21" />
+                    </span>
+                    <span class="file-pond__card file-pond__card--main">
+                        <BrandLogo compact />
+                    </span>
+                    <span class="file-pond__seal"><Icon name="lock" :size="12" /></span>
+                </div>
+                <h1>Drop your files <span>here</span></h1>
+                <p>They are encrypted in your browser before they leave your device.</p>
+                <Button class="file-pond__choose" :disabled="disabled" @click="emit('choose')">
+                    <Icon name="folder" :size="17" />Choose files<Icon name="arrow-up" :size="17" />
+                </Button>
+                <small>Or drag and drop anywhere</small>
             </div>
-            <h1>Drop your files <span>here</span></h1>
-            <p>They are encrypted in your browser before they leave your device.</p>
-            <Button class="file-pond__choose" :disabled="disabled" @click="emit('choose')">
-                <Icon name="folder" :size="17" />Choose files<Icon name="arrow-up" :size="17" />
-            </Button>
-            <small>Or drag and drop anywhere</small>
-        </div>
-    </section>
+        </section>
+    </PasteInput>
 </template>
 
 <style scoped>

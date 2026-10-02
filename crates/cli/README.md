@@ -18,6 +18,25 @@ In the full-screen interface, use `1`, `2`, and `3` to switch between Send,
 Receive, and Transfers. When editing a field, press `Esc` first to return to
 page shortcuts.
 
+### Paste on Send
+
+Paste text with your terminal's paste shortcut to open the Notes composer. Press
+`Esc` to leave editing, then `n` to switch between Files and Notes, preserving
+both drafts. In Notes, `e` edits the selected field, `Shift+Tab` changes fields,
+and `Enter` inserts a newline in the note body. Press `Esc`, then `Enter` to share.
+Pasted notes preserve whitespace and Unicode, up to 64 KiB.
+
+From Send's page shortcuts, press `v` to read the local system clipboard. Images
+are added to the file queue as PNG; text opens Notes. This requires a desktop
+clipboard on Windows, macOS, or Linux (X11 or a compositor supporting Wayland
+data-control). Over SSH, it accesses the remote machine's clipboard; terminal
+text paste still works without desktop clipboard access.
+
+Clipboard images are limited to 128 MiB of decoded pixels. Their private temporary
+sources are removed when dequeued or when Beam exits normally. Uploads retain a
+private source copy with their recovery state, so they remain resumable; removing
+the saved transfer removes that copy. Paste never starts a transfer automatically.
+
 Turbo is HTTP-only and cannot be combined with `--transport webrtc`. Use native
 live WebRTC for a file send with:
 

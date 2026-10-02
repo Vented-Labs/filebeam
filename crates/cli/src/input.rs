@@ -5,10 +5,11 @@ use zeroize::Zeroize;
 
 use crate::presentation::{clean, clip};
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Input {
     pub value: String,
     cursor: usize,
+    multiline: bool,
 }
 
 impl Input {
@@ -16,17 +17,43 @@ impl Input {
         Self {
             cursor: value.len(),
             value,
+            multiline: false,
         }
     }
 
     pub fn insert(&mut self, text: &str) {
-        let text = clean(text);
+        self.try_insert(text);
+    }
+
+    pub fn multiline() -> Self {
+        Self {
+            multiline: true,
+            value: String::new(),
+            cursor: 0,
+        }
+    }
+
+    pub fn end(&mut self) {
+        self.cursor = self.value.len();
+    }
+
+    pub fn cursor(&self) -> usize {
+        self.cursor
+    }
+
+    pub fn try_insert(&mut self, text: &str) -> bool {
+        let text = if self.multiline {
+            text.to_owned()
+        } else {
+            clean(text)
+        };
         // Native note editing accepts the same bounded 64 KiB schema as file/stdin input.
         if self.value.len() + text.len() > 64 * 1024 {
-            return;
+            return false;
         }
         self.value.insert_str(self.cursor, &text);
         self.cursor += text.len();
+        true
     }
 
     pub fn take(&mut self) -> String {
@@ -48,6 +75,10 @@ impl Input {
             return;
         }
         match key.code {
+            KeyCode::Up if self.multiline => self.move_line(false),
+            KeyCode::Down if self.multiline => self.move_line(true),
+            KeyCode::Enter if self.multiline => self.insert("\n"),
+            KeyCode::Tab if self.multiline => self.insert("\t"),
             KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::ALT) => {
                 self.insert(&c.to_string())
             }
@@ -65,6 +96,29 @@ impl Input {
             }
             _ => {}
         }
+    }
+
+    fn move_line(&mut self, down: bool) {
+        let start = self.value[..self.cursor].rfind('\n').map_or(0, |n| n + 1);
+        let column = self.value[start..self.cursor].graphemes(true).count();
+        let target = if down {
+            let Some(next) = self.value[self.cursor..].find('\n') else {
+                return;
+            };
+            self.cursor + next + 1
+        } else {
+            if start == 0 {
+                return;
+            }
+            self.value[..start - 1].rfind('\n').map_or(0, |n| n + 1)
+        };
+        let line = self.value[target..].split('\n').next().unwrap_or("");
+        self.cursor = target
+            + line
+                .graphemes(true)
+                .take(column)
+                .map(str::len)
+                .sum::<usize>();
     }
 
     fn previous(&self) -> usize {
@@ -110,6 +164,20 @@ impl Drop for Input {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn multiline_paste_preserves_content_and_rejects_overflow_atomically() {
+        let mut input = Input::multiline();
+        let text = "日本\n\tsecond\r\n\u{1b}[31m";
+        assert!(input.try_insert(text));
+        assert_eq!(input.value, text);
+        assert!(!input.try_insert(&"x".repeat(65536)));
+        assert_eq!(input.value, text);
+        let mut editing = Input::multiline();
+        editing.insert("ab\ncd");
+        editing.handle(KeyCode::Up.into());
+        editing.handle(KeyCode::Enter.into());
+        assert_eq!(editing.value, "ab\n\ncd");
+    }
     #[test]
     fn editing_and_secret_scrolling_respect_graphemes() {
         let mut input = Input::new("a\u{301}日本".into());

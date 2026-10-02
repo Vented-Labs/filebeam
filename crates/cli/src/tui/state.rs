@@ -160,6 +160,22 @@ pub struct NativeForm {
     pub field: usize,
 }
 
+impl NativeForm {
+    fn note() -> Self {
+        let mut fields = NativeAction::NoteCreate
+            .fields()
+            .iter()
+            .map(|_| Input::default())
+            .collect::<Vec<_>>();
+        fields[2] = Input::multiline();
+        Self {
+            action: NativeAction::NoteCreate,
+            fields,
+            field: 2,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Entry {
     pub path: PathBuf,
@@ -215,6 +231,12 @@ pub struct Receipt {
 }
 
 pub struct State {
+    pub send_notes: bool,
+    pub note: NativeForm,
+    pub note_editing: bool,
+    clipboard_result: Option<mpsc::Receiver<Result<crate::clipboard::Content>>>,
+    clipboard_files: BTreeMap<PathBuf, tempfile::NamedTempFile>,
+    clipboard_directory: tempfile::TempDir,
     pub directory: PathBuf,
     pub entries: Vec<Entry>,
     pub filtered: Vec<usize>,
@@ -256,6 +278,12 @@ pub struct State {
 impl State {
     pub fn new(config: &Config, instance: &str, directory: PathBuf) -> Result<Self> {
         let mut state = Self {
+            send_notes: false,
+            note: NativeForm::note(),
+            note_editing: false,
+            clipboard_result: None,
+            clipboard_files: BTreeMap::new(),
+            clipboard_directory: crate::clipboard::directory()?,
             destination: Input::new(directory.display().to_string()),
             directory,
             entries: Vec::new(),
@@ -378,6 +406,24 @@ impl State {
     }
 
     fn start_upload(&mut self, turbo: bool) {
+        if self.clipboard_result.is_some() || self.service_result.is_some() {
+            return;
+        }
+        if self.mode == Mode::Send && self.send_notes {
+            if self.note.fields[2].value.is_empty() {
+                self.toast("Paste or write a note first");
+                return;
+            }
+            let form = NativeForm {
+                action: NativeAction::NoteCreate,
+                fields: self.note.fields.clone(),
+                field: 2,
+            };
+            if let Err(error) = self.run_native(form) {
+                self.toast(error.to_string());
+            }
+            return;
+        }
         self.notice = None;
         let request = match self.mode {
             Mode::Send => {
@@ -409,6 +455,12 @@ impl State {
                     self.selected.keys().cloned().collect(),
                     crate::uploads::DirectoryMode::Individual,
                     protocol::UploadOptions {
+                        snapshot_paths: self
+                            .selected
+                            .keys()
+                            .filter(|path| self.clipboard_files.contains_key(*path))
+                            .cloned()
+                            .collect(),
                         turbo,
                         ..Default::default()
                     },
@@ -497,6 +549,37 @@ impl State {
 
     pub fn receive(&mut self, theme: Theme) {
         if let Some(result) = self
+            .clipboard_result
+            .as_ref()
+            .and_then(|receiver| receiver.try_recv().ok())
+        {
+            self.clipboard_result = None;
+            if self.can_paste() {
+                match result {
+                    Ok(crate::clipboard::Content::Text(text)) => self.paste_note(&text),
+                    Ok(crate::clipboard::Content::Image(file)) => {
+                        let path = file.path().to_owned();
+                        let entry = Entry {
+                            name: path.file_name().unwrap().to_string_lossy().into_owned(),
+                            size: file.as_file().metadata().map(|m| m.len()).unwrap_or(0),
+                            path: path.clone(),
+                            directory: false,
+                        };
+                        self.selected.insert(path.clone(), entry);
+                        self.clipboard_files.insert(path, file);
+                        self.send_notes = false;
+                        self.focus = Focus::Queue;
+                        self.toast("Clipboard image added");
+                    }
+                    Err(error) => self.toast(format!("{error:#}")),
+                }
+            }
+        }
+        if self.job.is_none() {
+            self.clipboard_files
+                .retain(|path, _| self.selected.contains_key(path));
+        }
+        if let Some(result) = self
             .service_result
             .as_ref()
             .and_then(|job| job.try_recv().ok())
@@ -553,6 +636,9 @@ impl State {
     }
 
     pub fn paste(&mut self, value: &str) {
+        if self.help || self.palette || self.receipt.is_some() {
+            return;
+        }
         if let Some(form) = &mut self.native {
             if let Some(field) = form.fields.get_mut(form.field) {
                 field.insert(value);
@@ -570,7 +656,54 @@ impl State {
                 Focus::Destination => self.destination.insert(value),
                 _ => {}
             }
+        } else if self.can_paste() {
+            if self.send_notes && self.note_editing {
+                if !self.note.fields[self.note.field].try_insert(value) {
+                    self.toast("Note input exceeds 64 KiB; paste was not inserted");
+                }
+            } else {
+                self.paste_note(value);
+            }
         }
+    }
+
+    fn can_paste(&self) -> bool {
+        self.mode == Mode::Send
+            && self.job.is_none()
+            && self.receipt.is_none()
+            && self.prompt.is_none()
+            && self.native.is_none()
+            && !self.help
+            && !self.palette
+            && !self.searching
+            && self.service_result.is_none()
+    }
+
+    fn paste_note(&mut self, value: &str) {
+        if value.is_empty() {
+            return;
+        }
+        self.note.fields[2].end();
+        if !self.note.fields[2].try_insert(value) {
+            self.toast("Note exceeds 64 KiB; paste was not inserted");
+            return;
+        }
+        self.send_notes = true;
+        self.note.field = 2;
+        self.note_editing = true;
+    }
+
+    fn read_clipboard(&mut self) {
+        if !self.can_paste() || self.clipboard_result.is_some() {
+            return;
+        }
+        let (sender, receiver) = mpsc::channel();
+        self.clipboard_result = Some(receiver);
+        let directory = self.clipboard_directory.path().to_owned();
+        std::thread::spawn(move || {
+            let _ = sender.send(crate::clipboard::read(&directory));
+        });
+        self.toast("Reading local clipboard…");
     }
 
     pub fn key(&mut self, key: KeyEvent) -> Result<bool> {
@@ -687,6 +820,23 @@ impl State {
             }
             return Ok(false);
         }
+        if self.mode == Mode::Send && self.send_notes && self.note_editing {
+            if self.service_result.is_some() {
+                return Ok(false);
+            }
+            match key.code {
+                KeyCode::Esc => self.note_editing = false,
+                KeyCode::BackTab => self.note.field = (self.note.field + 4) % 5,
+                KeyCode::Tab
+                    if self.note.field != 2 || key.modifiers.contains(KeyModifiers::CONTROL) =>
+                {
+                    self.note.field = (self.note.field + 1) % 5
+                }
+                KeyCode::Enter if key.modifiers.contains(KeyModifiers::CONTROL) => self.start(),
+                _ => self.note.fields[self.note.field].handle(key),
+            }
+            return Ok(false);
+        }
         if self.mode == Mode::Receive && matches!(self.focus, Focus::Link | Focus::Destination) {
             match key.code {
                 KeyCode::Tab => self.next_focus(false),
@@ -718,6 +868,19 @@ impl State {
             return Ok(false);
         }
         match key.code {
+            KeyCode::Enter if self.mode == Mode::Send && self.send_notes => self.start(),
+            KeyCode::Char('v') if self.mode == Mode::Send => self.read_clipboard(),
+            KeyCode::Char('n') if self.mode == Mode::Send => {
+                self.send_notes = !self.send_notes;
+                self.note_editing = false;
+            }
+            KeyCode::Char('e') if self.mode == Mode::Send && self.send_notes => {
+                self.note_editing = true
+            }
+            KeyCode::Tab if self.mode == Mode::Send && self.send_notes => {
+                self.note.field = (self.note.field + 1) % 5;
+                self.note_editing = true;
+            }
             KeyCode::Esc | KeyCode::Char('q') => return Ok(true),
             KeyCode::Char('?') => self.help = true,
             KeyCode::Char('p') => self.palette = true,
@@ -737,7 +900,7 @@ impl State {
             KeyCode::Enter if self.mode == Mode::Transfers => self.resume_selected(),
             KeyCode::Enter if self.focus == Focus::Action => self.start(),
             _ if self.mode == Mode::Transfers => self.transfers_key(key),
-            _ if self.mode == Mode::Send => self.browser_key(key),
+            _ if self.mode == Mode::Send && !self.send_notes => self.browser_key(key),
             _ => {}
         }
         Ok(false)
@@ -1115,6 +1278,62 @@ fn native_action(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn send_paste_keeps_both_drafts_and_respects_editing_and_overlays() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state =
+            State::new(&Config::default(), "http://127.0.0.1:1", dir.path().into()).unwrap();
+        let path = dir.path().join("original.txt");
+        state.selected.insert(
+            path.clone(),
+            Entry {
+                path,
+                name: "original.txt".into(),
+                size: 3,
+                directory: false,
+            },
+        );
+        state.paste("one\n\ttwo 日本");
+        assert!(state.send_notes && state.note_editing);
+        assert_eq!(state.note.fields[2].value, "one\n\ttwo 日本");
+        assert_eq!(state.selected.len(), 1);
+        state.key(KeyCode::Esc.into()).unwrap();
+        state.key(KeyCode::Char('n').into()).unwrap();
+        state.paste("\nthree");
+        assert_eq!(state.note.fields[2].value, "one\n\ttwo 日本\nthree");
+        state.note.field = 0;
+        state.paste("title");
+        assert_eq!(state.note.fields[0].value, "title");
+        state.help = true;
+        state.paste("ignored");
+        assert_eq!(state.note.fields[0].value, "title");
+        state.help = false;
+        state.note_editing = false;
+        state.switch_mode(Mode::Receive);
+        state.paste(" https://example.com/link ");
+        assert_eq!(state.link.value, "https://example.com/link");
+        assert_eq!(state.note.fields[2].value, "one\n\ttwo 日本\nthree");
+    }
+
+    #[test]
+    fn queued_clipboard_source_is_removed_only_after_queue_removal() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state =
+            State::new(&Config::default(), "http://127.0.0.1:1", dir.path().into()).unwrap();
+        let file = tempfile::NamedTempFile::new_in(state.clipboard_directory.path()).unwrap();
+        let path = file.path().to_owned();
+        let (sender, receiver) = mpsc::channel();
+        state.clipboard_result = Some(receiver);
+        sender
+            .send(Ok(crate::clipboard::Content::Image(file)))
+            .unwrap();
+        state.receive(Theme::new(&Config::default()));
+        assert!(state.selected.contains_key(&path));
+        assert!(path.exists());
+        state.selected.clear();
+        state.receive(Theme::new(&Config::default()));
+        assert!(!path.exists());
+    }
     use super::*;
 
     #[test]

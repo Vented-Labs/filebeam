@@ -36,6 +36,36 @@ pub struct Prepared {
 }
 
 impl Prepared {
+    pub fn retain_sources(&mut self, paths: &[PathBuf], directory: &Path) -> Result<()> {
+        let paths = paths
+            .iter()
+            .map(|path| path.canonicalize())
+            .collect::<std::io::Result<HashSet<_>>>()?;
+        for (index, source) in self.files.iter_mut().enumerate() {
+            if !paths.contains(&source.path) {
+                continue;
+            }
+            let destination = directory.join(format!("source-{index}"));
+            let mut options = fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            let mut output = options.open(&destination)?;
+            std::io::copy(&mut File::open(&source.path)?, &mut output)?;
+            output.sync_all()?;
+            source.path = destination;
+            source.spec = SourceSpec::Path {
+                path: source.path.clone(),
+                offset: 0,
+                length: output.metadata()?.len(),
+            };
+        }
+        Ok(())
+    }
+
     pub fn from_sources(
         sources: &[UploadSource],
         mode: DirectoryMode,
@@ -398,6 +428,50 @@ fn unique_name(name: &str, used: &mut HashSet<String>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ephemeral_sources_survive_original_cleanup_inside_the_job() {
+        let original = tempfile::tempdir().unwrap();
+        let image = original.path().join("pasted.png");
+        let ordinary = original.path().join("ordinary.txt");
+        fs::write(&image, b"clipboard bytes").unwrap();
+        fs::write(&ordinary, b"user file").unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let id = uuid::Uuid::new_v4().to_string();
+        let store = crate::checkpoint::Store::create(root.path(), &id).unwrap();
+        let mut prepared = prepare(
+            &[image.clone(), ordinary.clone()],
+            DirectoryMode::Individual,
+            None,
+            &Control::test_factory(),
+        )
+        .unwrap();
+        prepared.retain_sources(&[image], store.path()).unwrap();
+        let retained = prepared
+            .files
+            .iter()
+            .find(|file| file.name == "pasted.png")
+            .unwrap();
+        let retained_path = retained.path.clone();
+        assert_eq!(
+            prepared
+                .files
+                .iter()
+                .find(|file| file.name == "ordinary.txt")
+                .unwrap()
+                .path,
+            ordinary.canonicalize().unwrap()
+        );
+        assert_eq!(retained.name, "pasted.png");
+        drop(original);
+        assert_eq!(fs::read(&retained_path).unwrap(), b"clipboard bytes");
+        assert!(
+            matches!(&retained.spec, SourceSpec::Path { path, length: 15, .. } if path == &retained_path)
+        );
+        drop(store);
+        crate::checkpoint::Store::discard(root.path(), &id).unwrap();
+        assert!(!retained_path.exists());
+    }
 
     #[test]
     fn source_tree_zip_preserves_relative_paths_and_rejects_collisions() {

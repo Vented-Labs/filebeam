@@ -207,6 +207,22 @@ fn navigation(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) {
 }
 
 fn send(area: Rect, buffer: &mut Buffer, state: &mut State, theme: Theme) -> Option<(u16, u16)> {
+    paint::line(
+        at(area, 0, 1),
+        buffer,
+        Line::styled(
+            if state.send_notes {
+                "Files / [Notes] · n switch · v Paste"
+            } else {
+                "[Files] / Notes · n switch · v Paste"
+            },
+            theme.strong(),
+        ),
+    );
+    let area = at(area, 2, area.height.saturating_sub(2));
+    if state.send_notes {
+        return note_composer(area, buffer, state, theme);
+    }
     if area.width >= 100 {
         let left_width = area.width * 63 / 100;
         let left = Rect::new(area.x, area.y, left_width, area.height);
@@ -1032,6 +1048,76 @@ fn transfer(area: Rect, buffer: &mut Buffer, state: &mut State, theme: Theme) {
     }
 }
 
+fn note_composer(
+    area: Rect,
+    buffer: &mut Buffer,
+    state: &State,
+    theme: Theme,
+) -> Option<(u16, u16)> {
+    use unicode_width::UnicodeWidthStr;
+    let index = state.note.field;
+    let input = &state.note.fields[index];
+    let (label, masked) = NativeAction::NoteCreate.fields()[index];
+    paint::line(
+        at(area, 0, 1),
+        buffer,
+        Line::styled(format!("{} / 5 · {label}", index + 1), theme.dim()),
+    );
+    paint::line(
+        at(area, area.height.saturating_sub(1), 1),
+        buffer,
+        Line::styled(
+            if state.note_editing {
+                "Shift+Tab field · Esc done · Ctrl+Enter share"
+            } else {
+                "e edit · Tab next field · Enter share"
+            },
+            theme.dim(),
+        ),
+    );
+    let body = at(area, 2, area.height.saturating_sub(3));
+    if index != 2 {
+        return field(body, buffer, input, theme, state.note_editing, "", masked);
+    }
+    if body.width == 0 || body.height == 0 {
+        return None;
+    }
+    let before = &input.value[..input.cursor()];
+    let row = before.bytes().filter(|b| *b == b'\n').count();
+    let column = clean(before.rsplit('\n').next().unwrap_or("")).width();
+    let scroll = row.saturating_sub(body.height as usize - 1);
+    let left = column.saturating_sub(body.width as usize - 1);
+    for (index, line) in input
+        .value
+        .split('\n')
+        .skip(scroll)
+        .take(body.height as usize)
+        .enumerate()
+    {
+        let text = clean(line);
+        let mut skipped = 0;
+        let text: String = text
+            .chars()
+            .skip_while(|c| {
+                if skipped >= left {
+                    return false;
+                }
+                skipped += unicode_width::UnicodeWidthChar::width(*c).unwrap_or(0);
+                true
+            })
+            .collect();
+        paint::line(
+            at(body, index as u16, 1),
+            buffer,
+            Line::styled(clip(&text, body.width), theme.strong()),
+        );
+    }
+    state.note_editing.then_some((
+        body.x + (column - left) as u16,
+        body.y + (row - scroll) as u16,
+    ))
+}
+
 fn footer_view(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) {
     if let Some((notice, _)) = &state.notice {
         paint::line(
@@ -1080,6 +1166,17 @@ fn footer_view(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) {
             ("Enter", "continue"),
             ("Esc", "cancel"),
         ]
+    } else if state.mode == Mode::Send && state.send_notes {
+        if state.note_editing {
+            vec![("Esc", "done editing"), ("Shift+Tab", "field")]
+        } else {
+            vec![
+                ("n", "files"),
+                ("v", "paste"),
+                ("e", "edit"),
+                ("Enter", "share"),
+            ]
+        }
     } else if state.searching {
         vec![("Enter", "apply search"), ("Esc", "clear")]
     } else if state.mode == Mode::Receive && state.focus == Focus::Action {
@@ -1161,6 +1258,10 @@ fn help(area: Rect, buffer: &mut Buffer, theme: Theme) {
         ("", ""),
         ("1 / 2 / 3", "Send files / receive a link / saved transfers"),
         ("p", "Notes, account, inbox and transfer actions"),
+        (
+            "n / v",
+            "Switch Files/Notes / paste local clipboard on Send",
+        ),
         ("Tab / Shift+Tab", "Move between panels or form fields"),
         ("Esc in a field", "Leave input to use page shortcuts"),
         ("↑↓ / j k", "Move through files"),

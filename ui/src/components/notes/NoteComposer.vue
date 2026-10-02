@@ -30,6 +30,8 @@ const emit = defineEmits<{
     'update:title': [value: string];
 }>();
 const wrap = ref(true);
+const editor = ref<InstanceType<typeof CodeEditor>>();
+defineExpose({ focusEnd: () => editor.value?.focusEnd() });
 const bytes = computed(() => new TextEncoder().encode(props.modelValue).byteLength);
 const filename = computed(() => noteFilename(props.language));
 function formatBytes(value: number): string {
@@ -94,6 +96,7 @@ function formatBytes(value: number): string {
             </div>
             <div class="note-composer__body">
                 <CodeEditor
+                    ref="editor"
                     :model-value="modelValue"
                     :language="language"
                     :read-only="disabled"
