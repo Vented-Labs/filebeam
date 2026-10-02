@@ -43,6 +43,26 @@ Choose a TLS mode:
 
 For direct HTTPS, set `APP_URL` to the root HTTPS URL users reach, including any non-default published port. Its hostname must match `FILEBEAM_SERVER_NAME` when that variable is supplied. HTTP on container port 8080 serves `/up` and redirects other requests to the complete `APP_URL`. The HTTP listener need not be published when using a supplied certificate.
 
+### Optional HTTP/3
+
+Direct TLS uses HTTP/1.1 and HTTP/2 by default. Set the container environment variable `FILEBEAM_HTTP3=true` to also enable HTTP/3 in either `auto` or `certificate` mode. Publish **both TCP and UDP** from the public HTTPS port to container port `8443`, and allow both protocols through any firewall or router. For `APP_URL=https://files.example.com`, the Compose port mappings are:
+
+```yaml
+ports:
+  - "443:8443/tcp"
+  - "443:8443/udp"
+```
+
+For a custom public port, such as TrueNAS port `30443`, use `APP_URL=https://files.example.com:30443` and map `30443:8443` for both protocols. The HTTP/3 `Alt-Svc` header advertises the port from `APP_URL` (443 when omitted), not the internal listener port. Docker's `EXPOSE` metadata alone does not publish UDP. Automatic certificate issuance still requires the ACME connectivity described above.
+
+Leave `FILEBEAM_HTTP3` unset or `false` for TCP-only deployments, including TrueNAS configurations that publish only TCP. This disables the QUIC listener and its advertisement; no additional port mapping is required. Restart the container after changing these settings.
+
+In `FILEBEAM_TLS=proxy` mode, including HTTP containers behind load balancers, `FILEBEAM_HTTP3` has no effect: the container continues serving HTTP on `8080`. Enable HTTP/3 at the public TLS-terminating proxy instead. A TLS-passthrough load balancer must also forward UDP to the correct backend to support built-in HTTP/3.
+
+HTTP/3 is an optional transport optimization. Supporting clients can fall back to TCP when UDP is unavailable; network-switch continuity depends on the client and network. Adaptive upload recovery remains available on all supported HTTP versions. Non-Docker deployments configure HTTP/3 at their own HTTPS server; this container setting is not required by the application.
+
+### Bootstrap And Health Checks
+
 Before the first bootstrap, forwarded headers are deliberately ignored because `/data/config/.env` does not yet exist. For proxy deployments, set `FILEBEAM_BOOTSTRAP_ON_START=true` and the explicit `FILEBEAM_TRUSTED_PROXIES` before starting the container, then read the installation token from its logs and complete `/install` through the HTTPS proxy. Without startup bootstrap, use direct HTTPS or a loopback-only listener such as an SSH localhost tunnel for the first bootstrap.
 
 If direct HTTPS or loopback access is unavailable, the container owner can create the pending environment and token without a browser request:

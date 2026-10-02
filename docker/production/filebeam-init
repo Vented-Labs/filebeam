@@ -4,6 +4,8 @@ set -eu
 
 data=${FILEBEAM_DATA_DIR:-/data}
 tls=${FILEBEAM_TLS:-proxy}
+http3=${FILEBEAM_HTTP3:-false}
+https_protocols='h1 h2'
 name=${FILEBEAM_SERVER_NAME:-}
 bootstrap=${FILEBEAM_BOOTSTRAP_ON_START:-false}
 shutdown_timeout=${FILEBEAM_SHUTDOWN_TIMEOUT:-90}
@@ -43,6 +45,7 @@ if [ -z "$name" ] && [ -n "${APP_URL:-}" ]; then
     name=$(/usr/local/bin/php -r 'echo parse_url($argv[1], PHP_URL_HOST) ?: "";' "$APP_URL")
 fi
 case "$bootstrap" in true|false) ;; *) printf '%s\n' 'FILEBEAM_BOOTSTRAP_ON_START must be true or false.' >&2; exit 64 ;; esac
+case "$http3" in true|false) ;; *) printf '%s\n' 'FILEBEAM_HTTP3 must be true or false.' >&2; exit 64 ;; esac
 case "$shutdown_timeout" in ''|*[!0-9]*) printf '%s\n' 'FILEBEAM_SHUTDOWN_TIMEOUT must be an integer from 1 to 300.' >&2; exit 64 ;; esac
 if [ "$shutdown_timeout" -lt 1 ] || [ "$shutdown_timeout" -gt 300 ]; then
     printf '%s\n' 'FILEBEAM_SHUTDOWN_TIMEOUT must be an integer from 1 to 300.' >&2
@@ -128,10 +131,24 @@ if [ "$tls" = certificate ]; then
 else
     printf '%s\n' '# TLS certificates are managed by Caddy when enabled.' >/run/filebeam/tls.caddy
 fi
+if [ "$http3" = true ] && [ "$tls" != proxy ]; then
+    https_protocols='h1 h2 h3'
+    public_port=$(/usr/local/bin/php -r '
+        $port = parse_url($argv[1], PHP_URL_PORT) ?? 443;
+        if ($port < 1 || $port > 65535) {
+            fwrite(STDERR, "HTTP/3 requires a valid public HTTPS port.\n");
+            exit(64);
+        }
+        echo $port;
+    ' "$https_origin")
+    # Caddy otherwise advertises the internal listener port across Docker/NAT.
+    printf 'header Alt-Svc "h3=\\":%s\\"; ma=86400"\n' "$public_port" >>/run/filebeam/tls.caddy
+fi
 tls_server_name=${name:-localhost}
 tls_server_name=${tls_server_name#\[}
 tls_server_name=${tls_server_name%\]}
 export FILEBEAM_AUTO_HTTPS="$auto_https" FILEBEAM_HTTP_REDIRECT="$redirect" FILEBEAM_SITE="$site" FILEBEAM_CADDY_STORAGE="$data/caddy" FILEBEAM_TLS_SERVER_NAME="$tls_server_name" FILEBEAM_SHUTDOWN_TIMEOUT="$shutdown_timeout"
+export FILEBEAM_HTTPS_PROTOCOLS="$https_protocols"
 cp /etc/filebeam/Caddyfile /run/filebeam/Caddyfile
 /usr/local/bin/frankenphp fmt --overwrite /run/filebeam/Caddyfile
 exec "$@"

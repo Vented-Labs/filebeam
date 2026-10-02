@@ -20,6 +20,9 @@
     servers :8080 {
         protocols h1
     }
+    servers :8443 {
+        protocols {$FILEBEAM_HTTPS_PROTOCOLS:h1 h2}
+    }
     frankenphp {
         num_threads {$FILEBEAM_THREADS:4}
         import /run/filebeam/worker.caddy
