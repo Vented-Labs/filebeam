@@ -79,6 +79,9 @@ test('denied clipboard opens native paste fallback and does not intercept unrela
     await paste(page, 'fallback note', 0, 'textarea[aria-label="Paste text or images here"]');
     await expect(page.getByRole('dialog')).toHaveCount(0);
     await expect.poll(() => noteText(page)).toBe('fallback note');
+    await expect(
+        page.getByRole('textbox', { name: 'Secure note editor', exact: true }),
+    ).toBeFocused();
 });
 
 test('explicit clipboard read prefers images over alternate text', async ({ page }) => {

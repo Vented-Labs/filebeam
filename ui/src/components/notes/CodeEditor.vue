@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { Compartment, EditorState, Extension } from '@codemirror/state';
 import type { StringStream } from '@codemirror/language';
 import type { EditorView, ViewUpdate } from '@codemirror/view';
@@ -199,8 +199,11 @@ async function mountEditor(): Promise<void> {
         ];
         const state: EditorState = EditorState.create({ doc: initialModel, extensions });
         view = new EditorView({ state, parent: editorHost.value });
+        const transferFocus = focusPending && document.activeElement === fallbackInput.value;
         ready.value = true;
-        if (focusPending) focusEnd();
+        await nextTick();
+        if (transferFocus && !destroyed) focusEnd();
+        else focusPending = false;
     } catch {
         // The textarea remains functional when dynamic imports or browser APIs are unavailable.
         ready.value = false;
