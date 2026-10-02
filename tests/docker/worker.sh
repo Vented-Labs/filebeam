@@ -107,9 +107,9 @@ wait_healthy
 docker exec "$container" test ! -e /data/config/.env
 acceptance bootstrap
 acceptance complete
-acceptance status /install/ 404
-wait_healthy
+wait_worker_ready "$container"
 wait_worker_mode
+acceptance status /install/ 404
 docker exec --user 10001:10001 "$container" sh -ec 'test -d /storage/primary; test ! -w /opt/filebeam/backend; touch /storage/primary/.worker-fixture'
 worker_client seed
 runtime_output=$(worker_client runtime)

@@ -158,7 +158,7 @@ LABEL org.opencontainers.image.title="Filebeam" \
 RUN VERSION="$VERSION" COMMIT="$COMMIT" BUILD_METADATA="$BUILD_METADATA" php -r 'file_put_contents("/opt/filebeam/backend/config/version.php", "<?php\ndeclare(strict_types=1);\nreturn ".var_export(["version" => getenv("VERSION"), "tag" => getenv("VERSION"), "commit" => getenv("COMMIT"), "distribution" => "container", "build" => getenv("BUILD_METADATA"), "update_public_key" => ""], true).";\n");'
 
 WORKDIR /opt/filebeam/backend
-EXPOSE 8080 8443
+EXPOSE 8080 8443 8443/udp
 STOPSIGNAL SIGTERM
 HEALTHCHECK --interval=10s --timeout=8s --start-period=60s --retries=3 CMD ["/usr/local/bin/filebeam-healthcheck"]
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/filebeam-init"]

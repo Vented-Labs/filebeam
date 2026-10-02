@@ -88,10 +88,64 @@ assert_redirect() {
     docker exec "$app" sh -ec 'curl -sS -D - -o /dev/null http://localhost:8080/install | grep -Fi "Location: $1"' tls-test "$url" >/dev/null
 }
 
+assert_no_http3() {
+    docker exec "$app" sh -ec '
+        url=$1 ca=$2
+        shift 2
+        headers=$(curl --fail --silent --show-error ${ca:+--cacert "$ca"} "$@" -D - -o /dev/null "$url/up")
+        if printf "%s\n" "$headers" | grep -qi "^alt-svc:"; then
+            printf "%s\n" "Unexpected HTTP/3 advertisement" >&2
+            exit 1
+        fi
+        ! grep -qi ":20FB " /proc/net/udp /proc/net/udp6
+    ' tls-test "$base_url" "$ca_file" "$@"
+}
+
+public_port() {
+    # Reserve a free TCP/UDP pair on the host while selecting a high public port.
+    docker run --rm --network host --entrypoint php "$image" -r '
+        $tcp = stream_socket_server("tcp://127.0.0.1:0", $errno, $error);
+        if ($tcp === false) { exit(1); }
+        $address = stream_socket_get_name($tcp, false);
+        $udp = stream_socket_server("udp://".$address, $errno, $error, STREAM_SERVER_BIND);
+        if ($udp === false) { exit(1); }
+        echo substr(strrchr($address, ":"), 1);
+    '
+}
+
+assert_public_http3() {
+    local host=$1 port=$2 install_status=$3
+    # A separate client crosses Docker's published ports, rather than connecting
+    # to the internal listener. Use the image's HTTP/3-capable Debian curl.
+    docker run --rm --network host --entrypoint sh \
+        -v "$certs:/certs:ro" -v "$data:/data:ro" "$image" -ec '
+        ca=$1 host=$2 port=$3 expected=$4
+        url="https://$host:$port"
+        request() {
+            curl --silent --show-error --noproxy "*" --connect-timeout 5 --max-time 20 \
+                --cacert "$ca" --resolve "$host:$port:127.0.0.1" "$@"
+        }
+        test "$(request --http1.1 --fail -o /dev/null -w "%{http_version}" "$url/up")" = 1.1
+        test "$(request --http2 --fail --alt-svc /tmp/alt-svc -D /tmp/headers \
+            -o /dev/null -w "%{http_version}" "$url/up")" = 2
+        test "$(grep -ic "^alt-svc:" /tmp/headers)" = 1
+        tr -d "\r" </tmp/headers | grep -Fxi "alt-svc: h3=\":$port\"; ma=86400"
+        test "$(request --http3-only --fail -o /dev/null -w "%{http_version}" "$url/up")" = 3
+        test "$(request --http3-only -o /dev/null -w "%{http_code}" "$url/install/")" = "$expected"
+        # Follow the real advertisement, without forcing HTTP/3 on this request.
+        test "$(request --alt-svc /tmp/alt-svc --fail -o /dev/null -w "%{http_version}" "$url/up")" = 3
+    ' tls-test "$ca_file" "$host" "$port" "$install_status"
+}
+
 docker network create --label com.filebeam.test="$prefix" "$network" >/dev/null
 for volume in "$certs" "$data" "$storage" "$proxy_data" "$proxy_config"; do
     docker volume create --label com.filebeam.test="$prefix" "$volume" >/dev/null
 done
+
+if docker run --rm -e FILEBEAM_HTTP3=invalid "$image" true; then
+    printf '%s\n' 'An invalid HTTP/3 setting was accepted' >&2
+    exit 1
+fi
 
 # Test-only keys are generated in an owned Docker volume, never stored in the repository.
 docker run --rm --user 0:0 --entrypoint sh -v "$certs:/certs" "$image" -ec '
@@ -106,11 +160,21 @@ base_url=https://filebeam.test:8443 ca_file=/certs/tls.crt
 start_app -e FILEBEAM_TLS=certificate -e APP_URL=https://filebeam.test:30443 \
     -e FILEBEAM_TLS_CERT_FILE=/certs/tls.crt -e FILEBEAM_TLS_KEY_FILE=/certs/tls.key
 assert_redirect https://filebeam.test:30443/install
+assert_no_http3
 acceptance status /install/ 200
 assert_bootstrap_preserved
+stop_after_runtime_log_check 120 "$app"
+docker rm "$app" >/dev/null
+port=$(public_port)
+start_app -e FILEBEAM_TLS=certificate -e FILEBEAM_HTTP3=true -e APP_URL="https://filebeam.test:$port" \
+    -e FILEBEAM_TLS_CERT_FILE=/certs/tls.crt -e FILEBEAM_TLS_KEY_FILE=/certs/tls.key \
+    -p "127.0.0.1:$port:8443/tcp" -p "127.0.0.1:$port:8443/udp"
+assert_redirect "https://filebeam.test:$port/install"
+assert_public_http3 filebeam.test "$port" 200
 acceptance complete
 wait_worker_ready "$app"
 acceptance status /install/ 404
+assert_public_http3 filebeam.test "$port" 404
 assert_bootstrap_preserved
 
 # Replacing a mounted certificate must be picked up after a restart.
@@ -125,14 +189,27 @@ docker restart "$app" >/dev/null
 wait_healthy
 [[ $(docker exec "$app" sha256sum /certs/tls.crt) != "$old_cert" ]]
 acceptance status /install/ 404
+assert_public_http3 filebeam.test "$port" 404
+stop_after_runtime_log_check 120 "$app"
+docker rm "$app" >/dev/null
+
+# Even an opted-in deployment without UDP forwarding must still serve TCP.
+start_app -e FILEBEAM_TLS=certificate -e FILEBEAM_HTTP3=true -e APP_URL="https://filebeam.test:$port" \
+    -e FILEBEAM_TLS_CERT_FILE=/certs/tls.crt -e FILEBEAM_TLS_KEY_FILE=/certs/tls.key \
+    -p "127.0.0.1:$port:8443/tcp"
+docker run --rm --network host --entrypoint sh -v "$certs:/certs:ro" "$image" -ec '
+    test "$(curl --http3 --fail --silent --show-error --noproxy "*" --max-time 15 \
+        --cacert /certs/tls.crt --resolve "filebeam.test:$1:127.0.0.1" \
+        -o /dev/null -w "%{http_version}" "https://filebeam.test:$1/up")" = 2
+' tls-test "$port"
 stop_after_runtime_log_check 120 "$app"
 docker rm "$app" >/dev/null
 
 # IP clients omit SNI, and Docker's listener address differs from the public IP.
-start_app -e FILEBEAM_TLS=certificate -e APP_URL=https://192.0.2.10:30443 \
+start_app -e FILEBEAM_TLS=certificate -e FILEBEAM_HTTP3=false -e APP_URL=https://192.0.2.10:30443 \
     -e FILEBEAM_TLS_CERT_FILE=/certs/tls.crt -e FILEBEAM_TLS_KEY_FILE=/certs/tls.key
-docker exec "$app" curl --fail --silent --show-error --cacert /certs/tls.crt \
-    --resolve 192.0.2.10:8443:127.0.0.1 https://192.0.2.10:8443/up >/dev/null
+base_url=https://192.0.2.10:8443
+assert_no_http3 --resolve 192.0.2.10:8443:127.0.0.1
 # A stopped queue worker cannot process SIGTERM; shutdown must still honor its budget.
 queue_pid=$(docker exec "$app" pgrep -o -f 'artisan queue:work')
 docker exec "$app" kill -STOP "$queue_pid"
@@ -158,9 +235,23 @@ prepare_storage
 base_url=https://localhost:8443 ca_file=/data/caddy/pki/authorities/local/root.crt
 start_app -e FILEBEAM_TLS=auto -e APP_URL=https://localhost:30444
 assert_redirect https://localhost:30444/install
+assert_no_http3
 acceptance status /install/ 200
+stop_after_runtime_log_check 120 "$app"
+docker rm "$app" >/dev/null
+# The implicit public port comes from the HTTPS origin, not the 8443 listener.
+start_app -e FILEBEAM_TLS=auto -e FILEBEAM_HTTP3=true -e FILEBEAM_SERVER_NAME=localhost
+docker exec "$app" sh -ec 'curl --fail --silent --show-error --cacert "$1" -D - -o /dev/null "$2/up" | grep -F "h3=\":443\"; ma=86400"' tls-test "$ca_file" "$base_url"
+stop_after_runtime_log_check 120 "$app"
+docker rm "$app" >/dev/null
+port=$(public_port)
+start_app -e FILEBEAM_TLS=auto -e FILEBEAM_HTTP3=true -e APP_URL="https://localhost:$port" \
+    -p "127.0.0.1:$port:8443/tcp" -p "127.0.0.1:$port:8443/udp"
+assert_redirect "https://localhost:$port/install"
+assert_public_http3 localhost "$port" 200
 acceptance complete
 wait_worker_ready "$app"
+assert_public_http3 localhost "$port" 404
 assert_bootstrap_preserved
 stop_after_runtime_log_check 120 "$app"
 docker rm "$app" >/dev/null
@@ -178,7 +269,9 @@ docker run -d --name "$proxy" --label com.filebeam.test="$prefix" --network "$ne
     -v "$proxy_config:/etc/caddy:ro" -v "$proxy_data:/data" caddy:2.10.2-alpine \
     caddy run --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
 proxy_ip=$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$proxy")
-start_app -e FILEBEAM_TLS=proxy -e APP_URL=https://proxy.test:9443 -e FILEBEAM_TRUSTED_PROXIES="$proxy_ip"
+start_app -e FILEBEAM_TLS=proxy -e FILEBEAM_HTTP3=true -e APP_URL=https://proxy.test:9443 -e FILEBEAM_TRUSTED_PROXIES="$proxy_ip"
+base_url=http://localhost:8080 ca_file=''
+assert_no_http3
 deadline=$((SECONDS + 60))
 until docker exec "$proxy" test -f /data/caddy/pki/authorities/local/root.crt; do
     ((SECONDS < deadline)) || exit 1
@@ -209,6 +302,8 @@ docker run --rm --user 0:0 --entrypoint sh -v "$certs:/certs" "$image" -ec '
     chmod 0600 /certs/setup-token
 '
 start_app -e FILEBEAM_TLS=proxy -e FILEBEAM_SETUP_TOKEN_FILE=/certs/setup-token
+base_url=http://localhost:8080 ca_file=''
+assert_no_http3
 docker exec --user 10001:10001 "$app" php -r '
     require "/opt/filebeam/backend/vendor/autoload.php";
     $env = Dotenv\Dotenv::parse(file_get_contents("/data/config/.env"));
