@@ -4,11 +4,15 @@ declare(strict_types=1);
 
 namespace App\Http\Middleware;
 
+use App\Enums\Feature;
 use App\Models\User;
 use App\Notifications\InboxTransferCompleted;
 use App\Support\Branding;
 use App\Support\EffectivePlan;
+use App\Support\FeatureAvailability;
 use App\Support\InstanceSettings;
+use App\Support\Theming\Assets;
+use App\Support\Theming\Palette;
 use App\Support\TransportPolicy;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
@@ -32,14 +36,19 @@ class HandleInertiaRequests extends Middleware
             'registration',
             'anonymous_uploads',
             'username_routing',
+            'primary_color',
             ...Branding::KEYS,
         ]);
         $branding = app(Branding::class)->resolve($settings);
+        $palette = new Palette(app(FeatureAvailability::class)->available(Feature::CustomThemes) ? ($settings['primary_color'] ?? Palette::DEFAULT_PRIMARY) : Palette::DEFAULT_PRIMARY);
+        $request->attributes->set(Palette::class, $palette);
         $enabled = static fn (string $key): bool => filter_var($settings[$key], FILTER_VALIDATE_BOOLEAN);
 
         return [
             ...parent::share($request),
             'name' => config('app.name'),
+            'capabilities' => app(FeatureAvailability::class)->all(),
+            'theme' => fn (): array => ['primary' => $palette->primary, 'css' => $palette->css(), 'chrome' => ['dark' => $palette->value('#0B0914'), 'light' => $palette->value('#0B0914', 'light')]],
             'auth' => [
                 'user' => function () use ($request): ?array {
                     $user = $request->user();
@@ -55,8 +64,7 @@ class HandleInertiaRequests extends Middleware
             'branding' => [
                 ...config('filebeam.branding'),
                 ...Arr::except($branding, ['community_links']),
-                'default_logo_url' => asset('brand/filebeam-logo-header.svg'),
-                'default_mark_url' => asset('brand/filebeam-mark.svg'),
+                ...app(Assets::class)->branding($palette),
             ],
             'filebeam' => [
                 'main_site_url' => config('app.url'),

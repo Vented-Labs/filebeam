@@ -14,7 +14,9 @@ const props = defineProps<{
 
 const attrs = useAttrs();
 const markup = computed(() =>
-    Object.hasOwn(iconMarkup, props.name) ? iconMarkup[props.name] : undefined,
+    Object.hasOwn(iconMarkup, props.name)
+        ? iconMarkup[props.name].replaceAll('#d8a657', 'var(--fb-os-accent)')
+        : undefined,
 );
 const renderedSize = computed(() =>
     typeof props.size === 'number' && Number.isFinite(props.size) && props.size > 0

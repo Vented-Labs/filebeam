@@ -211,7 +211,7 @@ function setRetention(value: unknown): void {
 
 <style scoped>
 .transfer-options {
-    border-top: 1px solid #ffffff08;
+    border-top: 1px solid var(--fb-line-soft);
     background: var(--fb-settings-surface);
 }
 .transfer-options__grid {
@@ -235,7 +235,7 @@ function setRetention(value: unknown): void {
     align-items: baseline;
     gap: 0.25rem;
     margin: 0 0 0.5rem;
-    color: #d8cee4;
+    color: var(--fb-settings-text);
     font-size: 0.75rem;
     font-weight: 500;
     line-height: 1rem;
@@ -249,7 +249,7 @@ function setRetention(value: unknown): void {
     min-height: 2.625rem;
     gap: 0.5625rem;
     padding-inline: 0.6875rem;
-    border-color: #44374f;
+    border-color: var(--fb-settings-border);
     font-size: 0.8125rem;
 }
 .transfer-options__value {
@@ -272,7 +272,7 @@ function setRetention(value: unknown): void {
     align-items: center;
     justify-content: space-between;
     gap: 0.75rem;
-    color: #d3c9df;
+    color: var(--fb-settings-label);
     font-size: 0.75rem;
     cursor: pointer;
 }
@@ -289,10 +289,10 @@ function setRetention(value: unknown): void {
     gap: 0.5rem;
     margin: -0.0625rem 1.5rem 1.125rem;
     padding: 0.625rem 0.75rem;
-    border: 1px solid #ffffff08;
+    border: 1px solid var(--fb-line-soft);
     border-radius: 0.625rem;
     color: var(--fb-text-muted);
-    background: #ffffff03;
+    background: var(--fb-wash-03);
     font-size: 0.75rem;
 }
 .transfer-options__footer {
@@ -303,7 +303,7 @@ function setRetention(value: unknown): void {
     justify-content: space-between;
     gap: 1.125rem;
     padding: 1.0625rem 1.5rem;
-    border-top: 1px solid #ffffff08;
+    border-top: 1px solid var(--fb-line-soft);
     border-radius: 0 0 var(--fb-radius-panel) var(--fb-radius-panel);
     background: var(--fb-footer-surface);
 }
@@ -350,7 +350,7 @@ function setRetention(value: unknown): void {
 }
 .retention-menu__footer {
     padding-top: 0.625rem;
-    border-top: 1px solid #ffffff08;
+    border-top: 1px solid var(--fb-line-soft);
 }
 @media (max-width: 780px) {
     .transfer-options__grid {

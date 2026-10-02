@@ -20,6 +20,9 @@
         "league/flysystem-aws-s3-v3": "^3.35",
         "ext-sodium": "*"
     },
+    "suggest": {
+        "ext-gd": "Enables custom theme colors and runtime branded image generation."
+    },
     "require-dev": {
         "fakerphp/faker": "^1.24",
         "larastan/larastan": "^3.9",

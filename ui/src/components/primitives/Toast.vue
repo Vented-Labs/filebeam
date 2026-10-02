@@ -27,7 +27,7 @@ const open = defineModel<boolean>('open', { required: true });
             v-model:open="open"
             type="background"
             :class="[
-                'fb-toast pointer-events-auto flex w-full items-start gap-3 rounded-xl border bg-[var(--fb-surface-raised)] p-4 text-[var(--fb-text)] shadow-xl shadow-black/25',
+                'fb-toast pointer-events-auto flex w-full items-start gap-3 rounded-xl border bg-[var(--fb-surface-raised)] p-4 text-[var(--fb-text)] shadow-xl shadow-[color:var(--fb-shadow-toast)]',
                 tone === 'success' ? 'border-[var(--fb-success)]' : 'border-[var(--fb-border)]',
             ]"
         >

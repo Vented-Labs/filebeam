@@ -84,6 +84,7 @@ install_local() {
         sleep 1
     done
     php_client complete
+    wait_worker_ready "$container"
     http_status /install/ 404
     php_client status-protected /.env
     php_client status-protected /config/.env
@@ -91,7 +92,8 @@ install_local() {
     docker exec --user 10001:10001 "$container" sh -ec 'test -d /storage/primary; test ! -w /opt/filebeam/backend; touch /storage/primary/.persistence-fixture'
     # shellcheck disable=SC2016 # The PHP client needs literal $ variables.
     php_in_app 'require "/opt/filebeam/backend/vendor/autoload.php"; $app = require "/opt/filebeam/backend/bootstrap/app.php"; $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap(); exit(App\Models\User::query()->where("username", "acceptance")->exists() ? 0 : 1);'
-    wait_worker_ready "$container"
+    # Theme generation must work in the read-only production image without Node.
+    php_in_app 'require "/opt/filebeam/backend/vendor/autoload.php"; $app = require "/opt/filebeam/backend/bootstrap/app.php"; $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap(); if (! extension_loaded("gd")) { exit(1); } $bytes = app(App\Support\Theming\Assets::class)->render("email.png", new App\Support\Theming\Palette("#008877"), "dark"); $image = imagecreatefromstring($bytes); exit($image instanceof GdImage && imagesx($image) > 0 ? 0 : 1);'
     docker exec --user 10001:10001 "$container" sh -ec 'cd /opt/filebeam/backend && php artisan schedule:list --no-interaction >/dev/null'
 }
 

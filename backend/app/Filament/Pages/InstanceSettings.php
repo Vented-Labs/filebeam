@@ -5,14 +5,18 @@ declare(strict_types=1);
 namespace App\Filament\Pages;
 
 use App\Actions\Admin\ManageInstanceSettings;
+use App\Enums\Feature;
 use App\Enums\SocialPlatform;
 use App\Models\User;
+use App\Support\FeatureAvailability;
 use App\Support\InstanceSettings as InstanceSettingsResolver;
 use App\Support\InstanceSettingValue;
 use App\Support\LinkUrl;
 use App\Support\SmtpSettings;
+use App\Support\Theming\Theme;
 use BackedEnum;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\ColorPicker;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
@@ -142,6 +146,14 @@ class InstanceSettings extends Page
                 Section::make('Branding')
                     ->description('The copyright line, project link, and community links shown on public pages. Environment values always take precedence.')
                     ->schema([
+                        ColorPicker::make('primary_color')
+                            ->label('Primary color')
+                            ->hex()
+                            ->placeholder('#8b35ff')
+                            ->helperText(! app(FeatureAvailability::class)->available(Feature::CustomThemes)
+                                ? 'Custom themes are unavailable: enable the PHP GD extension. Default light and dark themes remain available.'
+                                : $help('primary_color', 'Generates all built-in colors and artwork without rebuilding assets. Leave empty to restore Filebeam colors.'))
+                            ->disabled($locked('primary_color') || ! app(FeatureAvailability::class)->available(Feature::CustomThemes)),
                         TextInput::make('copyright_holder')
                             ->label('Copyright holder')
                             ->maxLength(InstanceSettingValue::MAX_TEXT_LENGTH)
@@ -211,6 +223,9 @@ class InstanceSettings extends Page
         $values = [];
 
         foreach (array_keys($settings->definitions()) as $key) {
+            if ($key === 'primary_color' && ! app(FeatureAvailability::class)->available(Feature::CustomThemes)) {
+                continue;
+            }
             if ($settings->environmentValue($key) !== null) {
                 continue;
             }
@@ -220,6 +235,7 @@ class InstanceSettings extends Page
                 : ($state[$key] ?? null);
         }
 
+        $previousColor = app(Theme::class)->primary();
         DB::transaction(function () use ($actor, $values, $state): void {
             app(ManageInstanceSettings::class)->update($actor, $values);
             if (! app(SmtpSettings::class)->managed()) {
@@ -234,5 +250,8 @@ class InstanceSettings extends Page
         $this->fillForm();
 
         Notification::make()->title('Instance settings updated')->success()->send();
+        if ($previousColor !== app(Theme::class)->primary()) {
+            $this->redirect(static::getUrl());
+        }
     }
 }

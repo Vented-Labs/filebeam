@@ -1,0 +1,94 @@
+name: Desktop dependency cache
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'desktop/Cargo.toml'
+      - 'desktop/Cargo.lock'
+      - 'crates/client-core/Cargo.toml'
+      - 'crates/client-core/Cargo.lock'
+      - 'crates/client-config/Cargo.toml'
+      - 'crates/client-updater/Cargo.toml'
+      - 'crates/encryption/Cargo.toml'
+      - 'crates/transfer/Cargo.toml'
+      - 'crates/transfer-native/Cargo.toml'
+      - 'crates/cli/Cargo.toml'
+      - 'crates/cli/Cargo.lock'
+      - 'docker/desktop/Dockerfile'
+      - 'scripts/desktop/ci-build.sh'
+      - 'scripts/desktop/ci-e2e.sh'
+      - 'scripts/desktop/run.sh'
+      - '.github/actions/desktop-cache/**'
+      - '.github/workflows/desktop-cache.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-dependency-cache-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  seed:
+    if: github.ref == 'refs/heads/master'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {runner: blacksmith-4vcpu-ubuntu-2404-arm, target: aarch64-unknown-linux-gnu}
+          - {runner: blacksmith-4vcpu-ubuntu-2404, target: x86_64-unknown-linux-gnu}
+          - {runner: blacksmith-4vcpu-windows-2025, target: x86_64-pc-windows-msvc}
+          - {runner: blacksmith-6vcpu-macos-15, target: aarch64-apple-darwin}
+          - {runner: blacksmith-6vcpu-macos-15, target: x86_64-apple-darwin}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      FILEBEAM_RELEASE_VERSION: '0.1.0'
+      FILEBEAM_RELEASE_TAG: 'v0.1.0'
+      FILEBEAM_RELEASE_SHA: ${{ github.sha }}
+      CARGO_TARGET_DIR: ${{ github.workspace }}/desktop/target
+      MACOSX_DEPLOYMENT_TARGET: '11.0'
+      FILEBEAM_DESKTOP_BUILD_ONLY: ${{ matrix.target == 'x86_64-apple-darwin' && '1' || '0' }}
+      FILEBEAM_BINARY_SUFFIX: ${{ matrix.target == 'x86_64-pc-windows-msvc' && '.exe' || '' }}
+    steps:
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
+        with:
+          persist-credentials: false
+          dissociate: true
+          ref: ${{ github.sha }}
+      - uses: ./.github/actions/desktop-cache
+        id: probe
+        with:
+          target: ${{ matrix.target }}
+          seed: 'true'
+          lookup-only: 'true'
+      - uses: ./.github/actions/desktop-cache
+        if: steps.probe.outputs.cache-hit != 'true'
+        with:
+          target: ${{ matrix.target }}
+          seed: 'true'
+      - name: Install native toolchain
+        if: steps.probe.outputs.cache-hit != 'true' && runner.os != 'Linux'
+        shell: bash
+        run: |
+          rustup toolchain install 1.98.0 --profile minimal --component rustfmt --component clippy
+          rustup default 1.98.0
+          rustup target add '${{ matrix.target }}'
+          if [[ "$RUNNER_OS" == macOS ]]; then brew install pkg-config; fi
+          if [[ "$RUNNER_OS" == Windows ]]; then choco install llvm --no-progress --yes; fi
+      - name: Populate Linux build profiles
+        if: steps.probe.outputs.cache-hit != 'true' && runner.os == 'Linux'
+        run: |
+          bash scripts/desktop/run.sh bash scripts/desktop/ci-build.sh '${{ matrix.target }}' dist/desktop
+          bash scripts/desktop/run.sh bash scripts/desktop/ci-e2e.sh dist/native-tests
+      - name: Populate native build profiles
+        if: steps.probe.outputs.cache-hit != 'true' && runner.os != 'Linux'
+        shell: bash
+        run: bash scripts/desktop/ci-build.sh '${{ matrix.target }}' dist/desktop
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: success() && steps.probe.outputs.cache-hit != 'true'
+        with:
+          path: ${{ steps.probe.outputs.paths }}
+          key: ${{ steps.probe.outputs.key }}

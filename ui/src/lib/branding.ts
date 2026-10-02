@@ -5,6 +5,7 @@ export type Branding = {
     name: string;
     logo_url: string | null;
     default_logo_url: string;
+    default_light_logo_url: string;
     default_mark_url: string;
     favicon_url: string | null;
     version: string;
@@ -18,6 +19,7 @@ const defaultBranding: Branding = {
     name: 'Filebeam',
     logo_url: null,
     default_logo_url: '/brand/filebeam-logo-header.svg',
+    default_light_logo_url: '/brand/filebeam-logo-header-on-light.svg',
     default_mark_url: '/brand/filebeam-mark.svg',
     favicon_url: null,
     version: '0.1.0',

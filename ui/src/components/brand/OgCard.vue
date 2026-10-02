@@ -38,7 +38,7 @@ const copy = {
     height: 630px;
     overflow: hidden;
     background:
-        radial-gradient(ellipse at 88% 43%, rgb(139 53 255 / 24%), transparent 48%), var(--fb-bg);
+        radial-gradient(ellipse at 88% 43%, var(--fb-og-glow), transparent 48%), var(--fb-bg);
     color: var(--fb-text);
     font-family: var(--fb-font-ui);
     -webkit-font-smoothing: antialiased;
@@ -87,11 +87,11 @@ h1 span + span {
     width: 260px;
     height: 330px;
     object-fit: contain;
-    filter: drop-shadow(0 22px 48px rgb(139 53 255 / 30%));
+    filter: drop-shadow(0 22px 48px var(--fb-og-shadow));
 }
 .og-orbit {
     position: absolute;
-    border: 1px solid rgb(199 91 250 / 12%);
+    border: 1px solid var(--fb-og-orbit);
     border-radius: 50%;
     transform: rotate(-25deg);
 }

@@ -1,7 +1,7 @@
 @import './filebeam-tokens.css';
 
 :root {
-    color-scheme: dark;
+    color-scheme: var(--fb-color-scheme);
 }
 
 html {
@@ -50,7 +50,7 @@ body {
     display: flex;
     align-items: center;
     gap: 1.5rem;
-    border-bottom: 1px solid #ffffff07;
+    border-bottom: 1px solid var(--fb-line-faint);
 }
 .fb-header__brand {
     color: inherit;
@@ -170,38 +170,38 @@ body {
 .fb-button--primary {
     background: var(--fb-action);
     color: var(--fb-on-action);
-    border-color: #be8aef55;
+    border-color: var(--fb-action-border);
     box-shadow: var(--fb-action-shadow);
 }
 .fb-button--primary:not(:disabled):not([aria-disabled='true']):hover {
     background: var(--fb-action-hover);
     box-shadow:
-        inset 0 1px 0 #ffffff25,
-        0 5px 10px #0003;
+        inset 0 1px 0 var(--fb-shadow-highlight-action),
+        0 5px 10px var(--fb-shadow-medium);
     transform: translateY(-1px);
 }
 .fb-button--primary:not(:disabled):not([aria-disabled='true']):active {
     background: var(--fb-action-active);
-    box-shadow: inset 0 2px 3px #0003;
+    box-shadow: inset 0 2px 3px var(--fb-shadow-medium);
     transform: translateY(1px) scale(0.985);
 }
 .fb-button--primary:disabled,
 .fb-button--primary[aria-disabled='true'] {
-    border-color: #493452;
-    background: #33263f;
-    color: #a797b8;
+    border-color: var(--fb-disabled-border);
+    background: var(--fb-disabled-surface);
+    color: var(--fb-disabled-text);
     box-shadow: none;
     opacity: 1;
 }
 .fb-button--secondary {
-    border-color: #4c3c5a;
-    background: #282030;
-    color: #d7c7e4;
+    border-color: var(--fb-secondary-border);
+    background: var(--fb-secondary-surface);
+    color: var(--fb-secondary-text);
 }
 .fb-button--secondary:not(:disabled):not([aria-disabled='true']):hover {
-    background: #34283f;
-    border-color: #6b527c;
-    box-shadow: 0 3px 7px #0002;
+    background: var(--fb-secondary-hover-surface);
+    border-color: var(--fb-secondary-hover-border);
+    box-shadow: 0 3px 7px var(--fb-shadow-soft);
     transform: translateY(-1px);
 }
 .fb-button--secondary:not(:disabled):not([aria-disabled='true']):active {
@@ -425,7 +425,7 @@ textarea.fb-input {
     border-radius: 9999px;
     background: var(--fb-text);
     transform: translateX(0);
-    box-shadow: 0 1px 3px #0004;
+    box-shadow: 0 1px 3px var(--fb-shadow-strong);
     transition: transform var(--fb-duration-switch) var(--fb-ease);
 }
 .fb-switch-thumb[data-state='checked'] {
@@ -480,7 +480,7 @@ textarea.fb-input {
     position: fixed;
     z-index: 50;
     inset: 0;
-    background: rgba(4, 3, 11, 0.72);
+    background: var(--fb-dialog-scrim);
     backdrop-filter: blur(3px);
     animation: fb-dialog-overlay-in 180ms ease;
 }
@@ -546,7 +546,7 @@ textarea.fb-input {
     border-radius: 1.25rem;
     padding: 1.45rem 3rem 1.45rem 1.45rem;
     background: var(--fb-surface-raised);
-    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 24px 80px var(--fb-shadow-heavy);
     outline: none;
 }
 .fb-dialog__title {
@@ -574,7 +574,7 @@ textarea.fb-input {
 }
 .fb-dialog__close:hover {
     color: var(--fb-text);
-    background: rgba(255, 255, 255, 0.07);
+    background: var(--fb-wash-hover);
 }
 .fb-trust-features {
     display: grid;
@@ -605,7 +605,7 @@ textarea.fb-input {
     justify-content: space-between;
     flex-wrap: wrap;
     gap: 1rem;
-    border-top: 1px solid #ffffff07;
+    border-top: 1px solid var(--fb-line-faint);
     color: var(--fb-text-muted);
     font-size: 0.6875rem;
 }
@@ -781,7 +781,7 @@ textarea.fb-input {
     position: fixed;
     z-index: 60;
     inset: 0;
-    background: rgba(5, 3, 13, 0.54);
+    background: var(--fb-drawer-scrim);
     backdrop-filter: blur(4px);
     animation: auth-drawer-overlay-in 0.2s ease-out;
 }
@@ -804,8 +804,8 @@ textarea.fb-input {
     background: var(--fb-surface-raised);
     color: var(--fb-text);
     box-shadow:
-        18px 24px 72px rgba(0, 0, 0, 0.5),
-        0 0 0 1px rgba(255, 255, 255, 0.035) inset;
+        18px 24px 72px var(--fb-shadow-heavy),
+        0 0 0 1px var(--fb-shadow-highlight-dialog) inset;
     outline: none;
     animation: auth-drawer-in 0.36s cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -833,7 +833,7 @@ textarea.fb-input {
 }
 .auth-drawer__close:hover {
     color: var(--fb-text);
-    background: rgba(255, 255, 255, 0.07);
+    background: var(--fb-wash-hover);
 }
 .auth-drawer__body {
     position: relative;

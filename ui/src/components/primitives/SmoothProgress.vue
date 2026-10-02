@@ -167,9 +167,9 @@ onBeforeUnmount(() => {
     background: linear-gradient(
         105deg,
         transparent 20%,
-        rgb(255 255 255 / 18%) 40%,
-        rgb(255 255 255 / 75%) 50%,
-        rgb(255 255 255 / 18%) 60%,
+        var(--fb-progress-sheen) 40%,
+        var(--fb-progress-sheen-peak) 50%,
+        var(--fb-progress-sheen) 60%,
         transparent 80%
     );
     opacity: 0;

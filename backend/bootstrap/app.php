@@ -9,6 +9,8 @@ use App\Http\Middleware\SecurityHeaders;
 use App\Http\Middleware\TrackUpdateActivity;
 use App\Support\Installation\EnvironmentSettings;
 use App\Support\Installation\InstallationState;
+use App\Support\Theming\Assets;
+use App\Support\Theming\Theme;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -29,6 +31,7 @@ $application = Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
         then: function (): void {
+            Route::group([], __DIR__.'/../routes/theme.php');
             Route::group([], __DIR__.'/../routes/install.php');
         },
     )
@@ -84,8 +87,7 @@ $application = Application::configure(basePath: dirname(__DIR__))
                 'status' => $status,
                 'branding' => [
                     ...config('filebeam.branding'),
-                    'default_logo_url' => asset('brand/filebeam-logo-header.svg'),
-                    'default_mark_url' => asset('brand/filebeam-mark.svg'),
+                    ...app(Assets::class)->branding(app(Theme::class)->palette(false)),
                 ],
             ])->toResponse($request)->setStatusCode($status);
 

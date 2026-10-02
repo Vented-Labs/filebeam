@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Filesystem\Filesystem;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use LogicException;
@@ -12,6 +13,9 @@ use Symfony\Component\HttpFoundation\Request;
 
 abstract class TestCase extends BaseTestCase
 {
+    /** @var list<string> */
+    private array $themeDirectories = [];
+
     protected function setUp(): void
     {
         $this->resetTrustedRequestState();
@@ -24,6 +28,10 @@ abstract class TestCase extends BaseTestCase
         try {
             parent::tearDown();
         } finally {
+            foreach ($this->themeDirectories as $directory) {
+                (new Filesystem)->deleteDirectory($directory);
+            }
+            $this->themeDirectories = [];
             $this->resetTrustedRequestState();
         }
     }
@@ -33,6 +41,9 @@ abstract class TestCase extends BaseTestCase
         $app = parent::createApplication();
         // PHP tests must not depend on a developer's running SSR process.
         $app['config']->set('inertia.ssr.enabled', false);
+        $themeDirectory = $app->storagePath('framework/testing/themes-'.bin2hex(random_bytes(8)));
+        $this->themeDirectories[] = $themeDirectory;
+        $app['config']->set('theme.storage_directory', $themeDirectory);
         $connection = $app['config']->get('database.default');
         $database = $app['config']->get("database.connections.{$connection}.database");
 

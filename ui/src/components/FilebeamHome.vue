@@ -808,16 +808,16 @@ onBeforeUnmount(() => {
     gap: 0.75rem;
     margin: 0 1.5rem 0.9375rem;
     padding: 0.75rem;
-    border: 1px solid #ffffff08;
+    border: 1px solid var(--fb-line-soft);
     border-radius: 0.625rem;
     color: var(--fb-text-muted);
-    background: #ffffff03;
+    background: var(--fb-wash-03);
     font-size: 0.75rem;
 }
 .prism-inline-status--error {
-    border-color: #ad71813d;
+    border-color: var(--fb-alert-border);
     color: var(--fb-danger);
-    background: #38252b55;
+    background: var(--fb-alert-surface);
 }
 .prism-inline-status > span {
     min-width: 0;

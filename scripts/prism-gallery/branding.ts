@@ -4,6 +4,7 @@ const branding = {
     name: 'Filebeam',
     logo_url: null,
     default_logo_url: '/brand/filebeam-logo-header.svg',
+    default_light_logo_url: '/brand/filebeam-logo-header-on-light.svg',
     default_mark_url: '/brand/filebeam-mark.svg',
     favicon_url: null,
     version: 'gallery',

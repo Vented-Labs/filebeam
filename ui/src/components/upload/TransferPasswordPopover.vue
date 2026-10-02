@@ -174,7 +174,7 @@ function generatePassword(): void {
     align-items: center;
     gap: 0.5625rem;
     padding: 0 0.6875rem;
-    border: 1px solid #44374f;
+    border: 1px solid var(--fb-settings-border);
     border-radius: var(--fb-radius-control);
     color: var(--fb-text-muted);
     background: var(--fb-surface-sunken);
@@ -195,13 +195,13 @@ function generatePassword(): void {
     white-space: nowrap;
 }
 .password-trigger:hover:not(:disabled) {
-    border-color: #7f668e;
-    background: #1d1727;
+    border-color: var(--fb-password-hover-border);
+    background: var(--fb-password-hover-surface);
 }
 .password-trigger[data-state='open'] {
-    border-color: #ab8ac4;
-    background: #201828;
-    outline: 2px solid #b391d4;
+    border-color: var(--fb-password-open-border);
+    background: var(--fb-password-open-surface);
+    outline: 2px solid var(--fb-password-focus);
     outline-offset: 2px;
 }
 .password-trigger--invalid {
@@ -223,10 +223,10 @@ function generatePassword(): void {
     width: min(19.375rem, calc(100vw - 1rem));
     box-sizing: border-box;
     padding: 1.0625rem;
-    border: 1px solid #5b496c;
+    border: 1px solid var(--fb-password-menu-border);
     border-radius: 1rem;
     color: var(--fb-text);
-    background: #25202f;
+    background: var(--fb-password-menu-surface);
     box-shadow: var(--fb-shadow-popover);
     transform-origin: var(--reka-popover-content-transform-origin);
     animation: fb-menu-in var(--fb-duration-menu-in) var(--fb-ease);
@@ -251,7 +251,7 @@ function generatePassword(): void {
 .password-popover__input .fb-input {
     height: 2.75rem;
     padding-right: 2.75rem;
-    border-color: #6c587d;
+    border-color: var(--fb-password-input-border);
     border-radius: 0.5625rem;
 }
 .password-popover__reveal {
@@ -271,7 +271,7 @@ function generatePassword(): void {
 }
 .password-popover__reveal:hover {
     color: var(--fb-text);
-    background: #ffffff09;
+    background: var(--fb-wash-09);
 }
 .password-popover__help {
     display: flex;

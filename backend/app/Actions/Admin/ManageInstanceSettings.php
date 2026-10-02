@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace App\Actions\Admin;
 
+use App\Enums\Feature;
 use App\Models\AdminAudit;
 use App\Models\InstanceSetting;
 use App\Models\User;
+use App\Support\FeatureAvailability;
 use App\Support\InstanceSettings;
 use App\Support\InstanceSettingValue;
+use App\Support\Theming\Theme;
 use App\Support\TransportPolicy;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
@@ -42,6 +45,9 @@ class ManageInstanceSettings
         $normalizedValues = [];
 
         foreach ($values as $key => $value) {
+            if ($key === 'primary_color' && $value !== null && $value !== '' && ! app(FeatureAvailability::class)->available(Feature::CustomThemes)) {
+                throw ValidationException::withMessages([$key => 'Custom themes require the PHP GD extension.']);
+            }
             if ($settings->environmentValue($key) !== null) {
                 throw ValidationException::withMessages([$key => 'This setting is controlled by the environment and cannot be overridden in Admin.']);
             }
@@ -85,6 +91,10 @@ class ManageInstanceSettings
                 ]);
             }
         });
+
+        if (array_key_exists('primary_color', $normalizedValues)) {
+            app(Theme::class)->remember();
+        }
     }
 
     /**

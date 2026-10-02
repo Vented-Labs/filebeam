@@ -25,7 +25,9 @@ function submit(): void {
     <main class="invitation-page">
         <Head title="Accept invitation" />
         <section class="invitation-card">
-            <div class="invitation-card__emblem"><Icon name="user" :size="24" /></div>
+            <div class="invitation-card__emblem">
+                <Icon name="user" :size="24" />
+            </div>
             <p class="invitation-card__eyebrow">Filebeam invitation</p>
             <h1>Create your account</h1>
             <p class="invitation-card__intro">
@@ -123,7 +125,7 @@ function submit(): void {
     width: 3.25rem;
     height: 3.25rem;
     place-items: center;
-    border: 1px solid #78598666;
+    border: 1px solid var(--fb-card-border);
     border-radius: 0.875rem;
     color: var(--fb-accent-text);
     background: var(--fb-selected-surface);

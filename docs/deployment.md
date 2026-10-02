@@ -46,7 +46,36 @@ Configure outgoing SMTP during onboarding or under **Admin > Instance settings >
 
 Operator environment configuration takes precedence as a whole connection: setting any of `MAIL_MAILER`, `MAIL_URL`, `MAIL_SCHEME`, `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, or `MAIL_EHLO_DOMAIN` locks SMTP editing and prevents mixing database credentials with environment connection values. Containers also support `MAIL_PASSWORD_FILE`. Keep an explicit `MAIL_MAILER=log` to disable outbound delivery. To use Admin-managed SMTP on an existing deployment, remove transport variables from both the process environment and `.env`, then rebuild configuration and restart persistent workers. `MAIL_FROM_ADDRESS` and `MAIL_FROM_NAME` independently override sender fields without locking the connection. Environment changes require rebuilding cached configuration; Admin changes do not.
 
-Set `FILEBEAM_OG_IMAGE_URL` to an absolute HTTPS URL for a publicly accessible 1200x630 PNG to use one social-preview image for all supported public Filebeam pages. This is useful for custom branding because runtime branding changes do not regenerate the default artwork. Rebuild Laravel's configuration cache after changing the setting. Filebeam does not fetch the override; social crawlers request it directly.
+### Themes and optional PHP capabilities
+
+Set **Admin > Instance settings > Branding > Primary color** to generate the web
+and admin palettes, built-in logos, favicons, email colors, and social images.
+Changes apply without rebuilding frontend assets. `FILEBEAM_PRIMARY_COLOR="#008877"`
+overrides and locks the setting; rebuild Laravel's configuration cache after
+changing environment values. Clearing the Admin field restores Filebeam colors.
+
+Custom colors require GD in web PHP and notification workers. Official Docker
+images include it. Feature availability is detected automatically from PHP
+extensions; Admin explains missing requirements. Without GD, Filebeam uses its
+default light/dark themes and artwork while retaining the saved custom color.
+Restart PHP and notification workers after enabling GD to restore customization.
+GD is optional for installation and upgrades.
+
+The public interface initially follows the operating system. **About > Appearance**
+offers Light, Dark, and System choices, remembered in that browser. Admin retains
+its own appearance selector. Emails retain their light-body presentation and
+social cards retain their dark presentation, both using the instance palette.
+
+Generated images and the error-page fallback are stored under
+`backend/storage/app/themes`. Keep this directory writable and persistent across
+deployments; versioned image URLs can remain in previously sent emails. Image
+generation uses PHP only. Built-in default artwork ships with the package.
+
+Explicit `FILEBEAM_LOGO_URL`, `FILEBEAM_FAVICON_URL`, and `FILEBEAM_OG_IMAGE_URL`
+overrides retain their supplied colors. The social-image override must be an
+absolute HTTPS URL for a publicly accessible 1200x630 PNG. Rebuild Laravel's
+configuration cache after changing it. Filebeam does not fetch the override;
+social crawlers request it directly.
 
 See [WebRTC transfers](webrtc.md) before enabling the storage-free WebRTC driver. It covers STUN/TURN credentials, shared-cache signaling requirements, peer/relay warnings, limits, and the HTTP fallback behavior.
 
@@ -63,6 +92,7 @@ Back up these items together before upgrades or maintenance:
 
 - `backend/.env`, including `APP_KEY` and installation state.
 - `backend/storage/app/installation`.
+- `backend/storage/app/themes`, including assets referenced by previously sent emails.
 - The selected database.
 - All configured ciphertext storage, including local transfer storage or S3-compatible buckets.
 

@@ -119,12 +119,12 @@ function selected(event: Event): void {
     transform: translateY(-5px);
 }
 .file-pond:not(.file-pond--compact):hover::after {
-    border-color: #a99bb624;
-    background: #ffffff01;
+    border-color: var(--fb-dropzone-border);
+    background: var(--fb-wash-01);
 }
 .file-pond--dragging::after {
-    border-color: #9c79be77;
-    background: #ffffff03;
+    border-color: var(--fb-dropzone-hover-border);
+    background: var(--fb-wash-03);
 }
 .file-pond__empty {
     position: relative;
@@ -150,13 +150,13 @@ function selected(event: Event): void {
     width: 4.5rem;
     height: 5.375rem;
     place-items: center;
-    border: 1px solid #63517188;
+    border: 1px solid var(--fb-dropzone-mark-border);
     border-radius: 0.8125rem;
     color: var(--fb-text-muted);
-    background: linear-gradient(145deg, #2e2639, #211b2b);
+    background: var(--fb-dropzone-mark);
     box-shadow:
-        inset 0 1px 0 #ffffff0d,
-        0 9px 17px #0002;
+        inset 0 1px 0 var(--fb-shadow-highlight),
+        0 9px 17px var(--fb-shadow-soft);
     transition: transform var(--fb-duration-pane) var(--fb-ease-hover);
 }
 .file-pond__card--left {
@@ -176,11 +176,11 @@ function selected(event: Event): void {
     left: 5.1875rem;
     width: 5.375rem;
     height: 6.125rem;
-    border-color: #9b79b573;
-    background: linear-gradient(140deg, #3d2c4c, #2c2138);
+    border-color: var(--fb-dropzone-mark-hover-border);
+    background: var(--fb-dropzone-mark-hover);
     box-shadow:
-        inset 0 1px 0 #ffffff16,
-        0 12px 18px #0003;
+        inset 0 1px 0 var(--fb-shadow-highlight-hover),
+        0 12px 18px var(--fb-shadow-medium);
 }
 .file-pond__card--main :deep(.fb-brand) {
     padding: 0;
@@ -198,11 +198,11 @@ function selected(event: Event): void {
     width: 1.5rem;
     height: 1.5rem;
     place-items: center;
-    border: 1px solid #665576;
+    border: 1px solid var(--fb-control-border);
     border-radius: 999px;
     color: var(--fb-accent-text);
-    background: #211d2a;
-    box-shadow: 0 2px 5px #0004;
+    background: var(--fb-surface-raised);
+    box-shadow: 0 2px 5px var(--fb-shadow-strong);
 }
 .file-pond__empty h1 {
     margin: 0;

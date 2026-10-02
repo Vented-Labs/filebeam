@@ -1,4 +1,25 @@
-import { createInertiaApp } from '@inertiajs/vue3';
+import { createInertiaApp, router } from '@inertiajs/vue3';
+
+if (typeof document !== 'undefined')
+    router.on('navigate', ({ detail }) => {
+        const theme = detail.page.props.theme as
+            | {
+                  primary: string;
+                  css: string;
+                  chrome: { dark: string; light: string };
+              }
+            | undefined;
+        const style = document.getElementById('filebeam-theme');
+        if (!theme || !style) return;
+        style.textContent = theme.css;
+        style.dataset.primary = theme.primary;
+        const chrome = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+        if (chrome) {
+            chrome.dataset.fbDark = theme.chrome.dark;
+            chrome.dataset.fbLight = theme.chrome.light;
+        }
+        window.filebeamAppearance?.refresh();
+    });
 
 const appName =
     typeof document === 'undefined'

@@ -108,7 +108,8 @@ match ($mode) {
         $path = $GLOBALS['argv'][2] ?? '';
         @file_get_contents(BASE_URL.$path, false, requestContext([]));
         preg_match('~\s(\d{3})\s~', $http_response_header[0] ?? '', $match);
-        in_array((int) ($match[1] ?? 0), [403, 404], true) || fail("{$path} was not protected");
+        $status = (int) ($match[1] ?? 0);
+        in_array($status, [403, 404], true) || fail("{$path} was not protected (HTTP {$status})");
     })(),
     'env-equals' => (function (): void {
         require_once '/opt/filebeam/backend/vendor/autoload.php';

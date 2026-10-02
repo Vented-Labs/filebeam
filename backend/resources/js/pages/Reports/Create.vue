@@ -28,24 +28,29 @@ const submit = (): void => {
         <Head title="Report a transfer" />
 
         <div
-            class="rounded-2xl border border-violet-400/20 bg-[#100d25]/90 p-6 shadow-2xl shadow-black/20 sm:p-8"
+            class="rounded-2xl border border-[var(--fb-report-border)] bg-[var(--fb-report-surface)] p-6 shadow-2xl shadow-[color:var(--fb-shadow-tooltip)] sm:p-8"
         >
             <template v-if="created">
-                <h1 class="text-2xl font-semibold text-white">Thank you</h1>
-                <p class="mt-3 leading-6 text-violet-100/70">
+                <h1 class="text-2xl font-semibold text-[var(--fb-report-heading)]">Thank you</h1>
+                <p class="mt-3 leading-6 text-[var(--fb-report-description)]">
                     Your report has been received and will be reviewed.
                 </p>
             </template>
 
             <template v-else>
-                <h1 class="text-2xl font-semibold text-white">Report a transfer</h1>
-                <p class="mt-3 leading-6 text-violet-100/70">
+                <h1 class="text-2xl font-semibold text-[var(--fb-report-heading)]">
+                    Report a transfer
+                </h1>
+                <p class="mt-3 leading-6 text-[var(--fb-report-description)]">
                     Provide the transfer identifier and details that help us review the report. Do
                     not send decryption keys, passwords, or attachments.
                 </p>
 
                 <form class="mt-7 space-y-5" @submit.prevent="submit">
-                    <label class="block text-sm font-medium text-violet-100" for="transfer_id">
+                    <label
+                        class="block text-sm font-medium text-[var(--fb-report-label)]"
+                        for="transfer_id"
+                    >
                         Transfer identifier
                         <input
                             id="transfer_id"
@@ -56,12 +61,15 @@ const submit = (): void => {
                         />
                         <span
                             v-if="form.errors.transfer_id"
-                            class="mt-1 block text-sm text-rose-300"
+                            class="mt-1 block text-sm text-[var(--fb-report-error)]"
                             >{{ form.errors.transfer_id }}</span
                         >
                     </label>
 
-                    <label class="block text-sm font-medium text-violet-100" for="category">
+                    <label
+                        class="block text-sm font-medium text-[var(--fb-report-label)]"
+                        for="category"
+                    >
                         Category
                         <select
                             id="category"
@@ -79,12 +87,15 @@ const submit = (): void => {
                         </select>
                         <span
                             v-if="form.errors.category"
-                            class="mt-1 block text-sm text-rose-300"
+                            class="mt-1 block text-sm text-[var(--fb-report-error)]"
                             >{{ form.errors.category }}</span
                         >
                     </label>
 
-                    <label class="block text-sm font-medium text-violet-100" for="description">
+                    <label
+                        class="block text-sm font-medium text-[var(--fb-report-label)]"
+                        for="description"
+                    >
                         Description
                         <textarea
                             id="description"
@@ -95,14 +106,17 @@ const submit = (): void => {
                         />
                         <span
                             v-if="form.errors.description"
-                            class="mt-1 block text-sm text-rose-300"
+                            class="mt-1 block text-sm text-[var(--fb-report-error)]"
                             >{{ form.errors.description }}</span
                         >
                     </label>
 
-                    <label class="block text-sm font-medium text-violet-100" for="reporter_email">
+                    <label
+                        class="block text-sm font-medium text-[var(--fb-report-label)]"
+                        for="reporter_email"
+                    >
                         Email address
-                        <span class="font-normal text-violet-200/60">(optional)</span>
+                        <span class="font-normal text-[var(--fb-report-optional)]">(optional)</span>
                         <input
                             id="reporter_email"
                             v-model="form.reporter_email"
@@ -112,7 +126,7 @@ const submit = (): void => {
                         />
                         <span
                             v-if="form.errors.reporter_email"
-                            class="mt-1 block text-sm text-rose-300"
+                            class="mt-1 block text-sm text-[var(--fb-report-error)]"
                             >{{ form.errors.reporter_email }}</span
                         >
                     </label>

@@ -34,9 +34,9 @@ defineProps<{ items: ManifestItem[] }>();
     align-items: center;
     gap: 0.75rem;
     padding: 0.5rem 0.75rem;
-    border: 1px solid #ffffff08;
+    border: 1px solid var(--fb-line-soft);
     border-radius: 0.6875rem;
-    background: #ffffff03;
+    background: var(--fb-wash-03);
 }
 .download-list__icon {
     display: grid;

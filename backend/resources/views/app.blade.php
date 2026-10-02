@@ -5,7 +5,9 @@
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="application-name" content="{{ config('filebeam.branding.name') }}">
 
-        @php($socialPreview = app(\App\Support\SocialPreview::class)->for(request()))
+        @php
+            $socialPreview = app(\App\Support\SocialPreview::class)->for(request());
+        @endphp
         @if ($socialPreview)
             <meta property="og:type" content="website">
             <meta property="og:site_name" content="{{ config('filebeam.branding.name') }}">
@@ -29,18 +31,22 @@
             @endif
         @endif
 
+        @php
+            $themeAssets = app(\App\Support\Theming\Assets::class);
+            $themePalette = app(\App\Support\Theming\Theme::class)->palette(! request()->is('install', 'install/*'));
+        @endphp
         @if ($faviconUrl = config('filebeam.branding.favicon_url'))
             <link rel="icon" href="{{ $faviconUrl }}">
         @else
-            <link rel="icon" href="{{ asset('favicon.ico') }}" sizes="16x16 32x32 48x48 64x64">
-            <link rel="icon" type="image/png" sizes="32x32" href="{{ asset('favicon-32x32.png') }}">
-            <link rel="icon" type="image/png" sizes="16x16" href="{{ asset('favicon-16x16.png') }}">
-            <link rel="icon" type="image/svg+xml" sizes="any" href="{{ asset('favicon.svg') }}">
-            <link rel="apple-touch-icon" sizes="180x180" href="{{ asset('apple-touch-icon.png') }}">
-            <meta name="theme-color" content="#0B0914">
+            <link rel="icon" href="{{ $themeAssets->url('favicon.ico', $themePalette) }}" sizes="16x16 32x32 48x48 64x64">
+            <link rel="icon" type="image/png" sizes="32x32" href="{{ $themeAssets->url('favicon-32.png', $themePalette) }}">
+            <link rel="icon" type="image/png" sizes="16x16" href="{{ $themeAssets->url('favicon-16.png', $themePalette) }}">
+            <link rel="icon" type="image/svg+xml" sizes="any" href="{{ $themeAssets->url('favicon.svg', $themePalette) }}">
+            <link rel="apple-touch-icon" sizes="180x180" href="{{ $themeAssets->url('apple-touch-icon.png', $themePalette) }}">
         @endif
 
         @vite(['resources/css/app.css', 'resources/js/app.ts', "resources/js/pages/{$page['component']}.vue"])
+        <x-theme-head :database="! request()->is('install', 'install/*')" />
         <x-inertia::head>
             <title>{{ config('filebeam.branding.name') }}</title>
         </x-inertia::head>

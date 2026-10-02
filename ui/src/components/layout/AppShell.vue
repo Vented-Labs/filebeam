@@ -14,6 +14,7 @@ import {
     DropdownMenuTrigger,
 } from 'reka-ui';
 import BrandLogo from '../brand/BrandLogo.vue';
+import AppearanceSelect from './AppearanceSelect.vue';
 import AppLink from '../primitives/AppLink.vue';
 import AuthLink from '../auth/AuthLink.vue';
 import CliFooterLauncher from '../cli/CliFooterLauncher.vue';
@@ -243,6 +244,7 @@ function goHome(event: MouseEvent): void {
                     <DialogDescription class="fb-dialog__description">{{
                         activeInformation.description
                     }}</DialogDescription>
+                    <AppearanceSelect v-if="activeInformation.title === 'About'" />
                     <DialogClose class="fb-dialog__close" aria-label="Close dialog"
                         ><Icon name="x" :size="18"
                     /></DialogClose>

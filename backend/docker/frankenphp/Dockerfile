@@ -14,7 +14,7 @@ ARG WWWGROUP=1000
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates curl git gosu supervisor unzip build-essential pkg-config libssl-dev \
-    && install-php-extensions pdo_pgsql pdo_sqlite redis pcntl bcmath intl zip \
+    && install-php-extensions pdo_pgsql pdo_sqlite redis pcntl bcmath intl zip gd \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=node /usr/local/bin/node /usr/local/bin/node

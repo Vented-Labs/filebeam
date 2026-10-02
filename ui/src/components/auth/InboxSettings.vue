@@ -551,7 +551,7 @@ onBeforeUnmount(() => {
     align-items: center;
     gap: 0.875rem;
     padding-bottom: 1.375rem;
-    border-bottom: 1px solid #ffffff0a;
+    border-bottom: 1px solid var(--fb-line-strong);
 }
 .inbox-settings__header-icon,
 .inbox-settings__status-icon,
@@ -564,7 +564,7 @@ onBeforeUnmount(() => {
 .inbox-settings__header-icon {
     width: 2.75rem;
     height: 2.75rem;
-    border: 1px solid #78598666;
+    border: 1px solid var(--fb-card-border);
     border-radius: 0.75rem;
 }
 .inbox-settings__heading h2 {
@@ -651,9 +651,9 @@ onBeforeUnmount(() => {
     grid-template-columns: 2.5rem minmax(0, 1fr);
     gap: 0.75rem;
     padding: 0.875rem;
-    border: 1px solid #6d518044;
+    border: 1px solid var(--fb-inbox-key-border);
     border-radius: 0.75rem;
-    background: #251b2d;
+    background: var(--fb-inbox-key-surface);
 }
 .inbox-settings__status-icon {
     width: 2.5rem;
@@ -680,7 +680,7 @@ onBeforeUnmount(() => {
     justify-content: space-between;
     gap: 1rem;
     padding-block: 0.875rem;
-    border-bottom: 1px solid #ffffff08;
+    border-bottom: 1px solid var(--fb-line-soft);
 }
 .inbox-settings__setting-row strong,
 .inbox-settings__setting-row small {
@@ -717,9 +717,9 @@ onBeforeUnmount(() => {
     align-items: center;
     gap: 0.875rem 1rem;
     padding: 1.25rem;
-    border: 1px dashed #685276;
+    border: 1px dashed var(--fb-inbox-empty-border);
     border-radius: 0.875rem;
-    background: #ffffff02;
+    background: var(--fb-wash-02);
 }
 .inbox-settings__activation > span {
     width: 3rem;
@@ -809,7 +809,7 @@ onBeforeUnmount(() => {
     cursor: pointer;
 }
 .inbox-settings__custody-card:hover {
-    border-color: #725b80;
+    border-color: var(--fb-inbox-button-border);
     transform: translateY(-1px);
 }
 .inbox-settings__custody-card:focus-within {
@@ -817,7 +817,7 @@ onBeforeUnmount(() => {
     outline-offset: 2px;
 }
 .inbox-settings__custody-card--selected {
-    border-color: #806199;
+    border-color: var(--fb-inbox-button-hover-border);
     background: var(--fb-selected-surface);
 }
 .inbox-settings__custody-icon {
@@ -827,7 +827,7 @@ onBeforeUnmount(() => {
     place-items: center;
     border-radius: 0.625rem;
     color: var(--fb-accent-text);
-    background: #ffffff07;
+    background: var(--fb-wash-07);
 }
 .inbox-settings__custody-card strong,
 .inbox-settings__custody-card strong + span {
@@ -888,7 +888,7 @@ onBeforeUnmount(() => {
     display: grid;
     gap: 0.75rem;
     padding-top: 1rem;
-    border-top: 1px solid #ffffff0a;
+    border-top: 1px solid var(--fb-line-strong);
 }
 .inbox-settings__key-form > label {
     color: var(--fb-text);

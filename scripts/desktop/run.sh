@@ -23,7 +23,9 @@ cache_root=$(CDPATH='' cd -- "$cache_root" && pwd)
 [[ ! -L $cache_root && $(stat -c '%u' "$cache_root") == $(id -u) ]] || { printf 'Desktop cache must be a directory owned by the current user: %s\n' "$cache_root" >&2; exit 1; }
 chmod 700 "$cache_root" "$cache_root/cargo" "$cache_root/target" "$cache_root/locks"
 
-image=${FILEBEAM_DESKTOP_IMAGE:-filebeam-desktop:rust-1.98.0}
+# Restored Docker images must match the recipe used by the Cargo cache generation.
+tooling_key=$(sha256sum "$root/docker/desktop/Dockerfile" | cut -c1-12)
+image=${FILEBEAM_DESKTOP_IMAGE:-filebeam-desktop:rust-1.98.0-$tooling_key}
 build_image=${FILEBEAM_DESKTOP_BUILD_IMAGE:-auto}
 case $build_image in
     auto|true|false) ;;

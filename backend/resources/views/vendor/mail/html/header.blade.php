@@ -6,10 +6,10 @@
     $configuredExtension = is_string($configuredPath) ? strtolower(pathinfo($configuredPath, PATHINFO_EXTENSION)) : null;
     $logoUrl = in_array($configuredExtension, ['gif', 'jpg', 'jpeg', 'png'], true)
         ? url($configuredLogo)
-        : (empty($configuredLogo) ? asset('brand/filebeam-mark-email.png') : null);
+        : (empty($configuredLogo) ? app(\App\Support\Theming\Assets::class)->url('email.png') : null);
 @endphp
 <tr>
-<td class="header" align="center" bgcolor="#0b0914">
+<td class="header" align="center" bgcolor="{{ app(\App\Support\Theming\Theme::class)->palette()->color('#0b0914') }}">
 <a href="{{ $url }}" class="brand-link">
 @if ($logoUrl !== null)
 <img src="{{ $logoUrl }}" class="logo" width="32" height="32" alt="" />

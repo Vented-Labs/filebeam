@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Support\Installation;
 
+use App\Enums\Feature;
+use App\Support\FeatureAvailability;
 use Illuminate\Cache\FileStore;
 use Illuminate\Cache\RedisStore;
 use Illuminate\Filesystem\Filesystem;
@@ -97,7 +99,7 @@ class CacheConfiguration
     public function test(array $input): void
     {
         $cache = $this->validate($input);
-        if ($cache['driver'] === 'redis' && ! extension_loaded('redis')) {
+        if ($cache['driver'] === 'redis' && ! app(FeatureAvailability::class)->available(Feature::RedisCache)) {
             throw ValidationException::withMessages(['cache.driver' => 'The PHP Redis extension is required for Redis cache.']);
         }
         $key = 'installation-probe:'.bin2hex(random_bytes(16));

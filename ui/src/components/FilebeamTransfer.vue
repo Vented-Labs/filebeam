@@ -419,7 +419,7 @@ function makeOutgoingInert(element: Element): void {
 .transfer-content__emblem {
     display: grid;
     place-items: center;
-    border: 1px solid #78598666;
+    border: 1px solid var(--fb-card-border);
     color: var(--fb-accent-text);
     background: var(--fb-selected-surface);
 }
@@ -443,7 +443,7 @@ function makeOutgoingInert(element: Element): void {
     align-items: start;
     gap: 1rem;
     padding-bottom: 1.5rem;
-    border-bottom: 1px solid #ffffff0a;
+    border-bottom: 1px solid var(--fb-line-strong);
 }
 .transfer-content__emblem {
     width: 3.5rem;

@@ -1,12 +1,16 @@
 name: Prepare PHP application
 description: Install PHP dependencies and prepare an isolated Laravel environment
+inputs:
+  gd:
+    description: Enable the optional custom-theme image capability
+    default: 'true'
 runs:
   using: composite
   steps:
     - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240
       with:
         php-version: '8.5'
-        extensions: mbstring, dom, curl, sodium, zip, pdo_sqlite, pdo_mysql, pdo_pgsql, redis
+        extensions: mbstring, dom, curl, sodium, zip, pdo_sqlite, pdo_mysql, pdo_pgsql, redis, ${{ inputs.gd == 'true' && 'gd' || ':gd' }}
         coverage: none
     - name: Locate Composer cache
       id: composer-cache

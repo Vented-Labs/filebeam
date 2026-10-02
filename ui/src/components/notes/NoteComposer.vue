@@ -135,7 +135,7 @@ function formatBytes(value: number): string {
 }
 .note-composer__frame {
     overflow: hidden;
-    border: 1px solid #44384f;
+    border: 1px solid var(--fb-note-border);
     border-radius: 0.8125rem;
     background: var(--fb-surface-sunken);
 }
@@ -146,7 +146,7 @@ function formatBytes(value: number): string {
     gap: 1rem;
     padding: 0.625rem 0.75rem;
     border-bottom: 1px solid var(--fb-border);
-    background: radial-gradient(ellipse at 30% 0%, #a679ff12, transparent 72%), #211b2b;
+    background: var(--fb-note-surface);
 }
 .note-composer__title {
     display: flex;
@@ -217,7 +217,7 @@ function formatBytes(value: number): string {
     padding: 0.5rem 0.75rem;
     border-top: 1px solid var(--fb-border);
     color: var(--fb-text-subtle);
-    background: #1a1422;
+    background: var(--fb-note-tab-surface);
     font-size: 0.625rem;
 }
 .note-composer__footer > span:first-child {

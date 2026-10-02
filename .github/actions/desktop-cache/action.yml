@@ -1,0 +1,52 @@
+name: Desktop Cargo cache
+description: Restore target-specific native Cargo state with compatible dependency fallbacks
+inputs:
+  target:
+    description: Rust target triple
+    required: true
+  seed:
+    description: Address the trusted dependency-generation seed
+    default: 'false'
+  lookup-only:
+    description: Check availability without downloading the archive
+    default: 'false'
+outputs:
+  cache-hit:
+    value: ${{ steps.restore.outputs.cache-hit }}
+    description: Whether the exact generation is already cached
+  key:
+    value: ${{ steps.restore.outputs.cache-primary-key }}
+    description: Immutable key for saving this build
+  paths:
+    value: ${{ steps.paths.outputs.paths }}
+    description: Cargo directories actually used by the target
+runs:
+  using: composite
+  steps:
+    - id: paths
+      shell: bash
+      run: |
+        if [[ "$RUNNER_OS" == Linux ]]; then
+          cache="$RUNNER_TEMP/filebeam-desktop"
+          printf 'FILEBEAM_DESKTOP_CACHE_DIR=%s\n' "$cache" >> "$GITHUB_ENV"
+          printf 'paths<<FILEBEAM_PATHS\n%s/cargo/registry\n%s/cargo/git\n%s/target\nFILEBEAM_PATHS\n' "$cache" "$cache" "$cache" >> "$GITHUB_OUTPUT"
+        else
+          printf 'paths<<FILEBEAM_PATHS\n~/.cargo/registry\n~/.cargo/git\ndesktop/target\nFILEBEAM_PATHS\n' >> "$GITHUB_OUTPUT"
+        fi
+    - id: identity
+      shell: bash
+      env:
+        PREFIX: desktop-v3-${{ runner.os }}-${{ inputs.target }}-rust1.98.0-${{ runner.os == 'Linux' && hashFiles('docker/desktop/Dockerfile', 'scripts/desktop/run.sh') || 'native' }}
+        DEPENDENCIES: ${{ hashFiles('desktop/Cargo.lock', 'desktop/Cargo.toml', 'crates/client-core/Cargo.toml', 'crates/client-config/Cargo.toml', 'crates/client-updater/Cargo.toml', 'crates/encryption/Cargo.toml', 'crates/transfer/Cargo.toml', 'crates/transfer-native/Cargo.toml', 'scripts/desktop/ci-build.sh') }}-${{ runner.os == 'Linux' && hashFiles('crates/cli/Cargo.lock', 'crates/cli/Cargo.toml', 'crates/client-core/Cargo.lock', 'scripts/desktop/ci-e2e.sh') || 'native' }}
+        SOURCE: ${{ inputs.seed == 'true' && 'seed' || hashFiles('desktop/src/**', 'desktop/assets/**', 'desktop/packaging/**', 'desktop/build.rs', 'desktop/examples/**', 'crates/client-core/src/**', 'crates/client-core/examples/**', 'crates/client-config/src/**', 'crates/client-updater/src/**', 'crates/encryption/src/**', 'crates/transfer/src/**', 'crates/transfer-native/src/**', 'crates/cli/src/**', 'crates/cli/build.rs') }}
+      run: |
+        printf 'prefix=%s\ndependencies=%s\nkey=%s-%s-%s\n' "$PREFIX" "$DEPENDENCIES" "$PREFIX" "$DEPENDENCIES" "$SOURCE" >> "$GITHUB_OUTPUT"
+    - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      id: restore
+      with:
+        path: ${{ steps.paths.outputs.paths }}
+        key: ${{ steps.identity.outputs.key }}
+        lookup-only: ${{ inputs.lookup-only }}
+        restore-keys: |
+          ${{ steps.identity.outputs.prefix }}-${{ steps.identity.outputs.dependencies }}-
+          ${{ steps.identity.outputs.prefix }}-

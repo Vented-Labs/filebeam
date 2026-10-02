@@ -30,6 +30,11 @@ BASE_URL=http://127.0.0.1:8000 npm run test:browser
 
 Install Chromium first with `npx playwright install chromium`. Sail sources `backend/.env`, so passing `SAIL_APP_URL` only as a shell environment variable does not override the value in that file.
 
+After building assets, `npm run test:theme` starts an isolated SQLite application
+and checks system appearance and instance-wide color changes. It requires PHP GD
+and Chromium; set `THEME_PORT` if its default port 8033 is occupied. Existing browser
+tests explicitly use dark appearance; theme tests cover both modes.
+
 Sail captures outgoing development email in Mailpit. Open [http://localhost:8025](http://localhost:8025) after running `./sail up -d`; the default `.env.example` mail settings also reach Mailpit from host-side Artisan commands. Override `FORWARD_MAILPIT_PORT` or `FORWARD_MAILPIT_DASHBOARD_PORT` if either port is already in use.
 
 Use `backend/composer.json` for PHP commands and root `package.json` for JavaScript commands. Run the narrowest relevant checks before proposing a change.
@@ -65,6 +70,15 @@ web or CLI jobs. The separate `Android acceptance` workflow is manual-only so
 its optional 4 GiB fixture work is never imposed on ordinary PRs.
 
 ### Blacksmith caching
+
+Desktop Cargo caches separate targets and build environments, reuse compatible
+dependencies across lockfile changes, and retain partial builds under separate keys.
+The `Desktop dependency cache` workflow seeds trusted `master` caches when build
+inputs change, or when manually dispatched on `master`. An exact seed hit skips
+downloads, toolchain setup, and compilation. Rust/WASM and Beam reuse their existing
+master and scheduled runs. Keep Blacksmith **Branch Protected Caches** enabled:
+PR caches must remain PR-scoped and must never populate trusted release caches.
+Compare runner-rate-weighted build time, including cache seeding, when tuning CI.
 
 - Checkouts use `useblacksmith/checkout`, retaining the requested source ref and fetch settings. Container-mounted source checkouts use `dissociate: true` so Git objects remain accessible inside Docker.
 - Production, Sail, and CLI tooling builds use `useblacksmith/setup-docker-builder` with a separate cache key per Dockerfile. Production variants share their common layers, and CI/release builds share the same workload key. Blacksmith handles architecture separation and builder cleanup; avoid replacing or pruning the managed builder before its post-job cache save.

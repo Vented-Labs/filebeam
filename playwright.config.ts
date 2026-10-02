@@ -5,6 +5,7 @@ export default defineConfig({
     fullyParallel: false,
     timeout: 150_000,
     use: {
+        colorScheme: 'dark',
         baseURL: process.env.BASE_URL ?? 'http://localhost:8000',
         trace: 'retain-on-failure',
         screenshot: 'only-on-failure',

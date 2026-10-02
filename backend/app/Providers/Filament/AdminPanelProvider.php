@@ -9,6 +9,9 @@ use App\Filament\Pages\Dashboard;
 use App\Filament\Pages\StaffProfile;
 use App\Support\Icons\FilamentIcons;
 use App\Support\Icons\IconsaxLoadingIndicator;
+use App\Support\Theming\Assets;
+use App\Support\Theming\Palette;
+use App\Support\Theming\Theme;
 use BladeUI\Icons\Factory as BladeIconFactory;
 use Filament\Auth\MultiFactor\App\AppAuthentication;
 use Filament\Enums\ThemeMode;
@@ -19,6 +22,7 @@ use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
 use Filament\Panel;
 use Filament\PanelProvider;
+use Filament\Support\Colors\Color;
 use Filament\Support\Contracts\LoadingIndicator;
 use Filament\View\PanelsRenderHook;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
@@ -56,7 +60,7 @@ class AdminPanelProvider extends PanelProvider
             ->brandLogo(fn () => view('components.brand.admin-logo'))
             ->darkModeBrandLogo(fn () => view('components.brand.admin-logo', ['dark' => true]))
             ->brandLogoHeight('2rem')
-            ->favicon(fn (): string => config('filebeam.branding.favicon_url') ?: asset('favicon.svg'))
+            ->favicon(fn (): string => config('filebeam.branding.favicon_url') ?: app(Assets::class)->url('favicon.svg'))
             ->viteTheme('resources/css/filament/admin/theme.css')
             ->darkMode()
             ->themeSwitcher()
@@ -70,9 +74,18 @@ class AdminPanelProvider extends PanelProvider
             ->multiFactorAuthentication([
                 AppAuthentication::make()->recoverable()->brandName(config('filebeam.branding.name').' Admin'),
             ])
-            ->colors([
-                'primary' => '#7c3aed',
-            ])
+            ->colors(function (): array {
+                $palette = app(Theme::class)->palette();
+                if ($palette->primary === Palette::DEFAULT_PRIMARY) {
+                    return ['primary' => '#7c3aed'];
+                }
+                $gray = [];
+                foreach (Color::Zinc as $shade => $value) {
+                    $gray[$shade] = $palette->color(Color::convertToHex($value));
+                }
+
+                return ['primary' => Color::generatePalette($palette->primary), 'gray' => $gray];
+            })
             ->icons([
                 ...FilamentIcons::aliases(),
                 'filebeam-alert' => 'filebeam-alert',
@@ -83,6 +96,10 @@ class AdminPanelProvider extends PanelProvider
                 Dashboard::class,
             ])
             ->discoverWidgets(in: app_path('Filament/Widgets'), for: 'App\Filament\Widgets')
+            ->renderHook(
+                PanelsRenderHook::HEAD_END,
+                fn () => view('components.theme-head'),
+            )
             ->renderHook(
                 PanelsRenderHook::CONTENT_START,
                 fn (): string => Blade::render('<livewire:scheduler-heartbeat-alert />'),

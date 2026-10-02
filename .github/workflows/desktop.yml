@@ -55,7 +55,7 @@ jobs:
         run: |
           if [[ "${{ github.event_name }}" != pull_request ]]; then printf 'relevant=true\n' >> "$GITHUB_OUTPUT"; exit 0; fi
           paths=$(git diff --name-only "$BASE" HEAD)
-          if grep -Eq '^(desktop/|crates/|backend/|icons/|docker/desktop/|scripts/(desktop|cli|native)/|scripts/release/|\.github/workflows/(desktop|release)\.yml$)' <<< "$paths"; then value=true; else value=false; fi
+          if grep -Eq '^(desktop/|crates/|backend/|icons/|docker/desktop/|scripts/(desktop|cli|native)/|scripts/release/|\.github/actions/(desktop-cache|setup-php)/|\.github/workflows/(desktop|desktop-cache|release)\.yml$)' <<< "$paths"; then value=true; else value=false; fi
           printf 'relevant=%s\n' "$value" >> "$GITHUB_OUTPUT"
 
   targets:
@@ -82,6 +82,12 @@ jobs:
     steps:
       - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with: {persist-credentials: false, dissociate: true, ref: '${{ needs.validate.outputs.commit || github.event.pull_request.head.sha }}'}
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
+        with:
+          persist-credentials: false
+          ref: ${{ github.workflow_sha }}
+          path: .ci-workflow
+          sparse-checkout: .github/actions
       - name: Install Rust 1.98 and native build dependencies
         if: runner.os != 'Linux'
         shell: bash
@@ -95,18 +101,10 @@ jobs:
             choco install llvm nsis --no-progress --yes
             cygpath -w '/c/Program Files (x86)/NSIS' >> "$GITHUB_PATH"
           fi
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - uses: ./.ci-workflow/.github/actions/desktop-cache
         id: cargo-cache
         with:
-          path: |
-            ~/.cache/filebeam/desktop
-            ~/.cargo/registry
-            ~/.cargo/git
-            desktop/target
-          key: desktop-v2-${{ matrix.target }}-rust1.98.0-${{ hashFiles('desktop/Cargo.lock', 'crates/**/Cargo.lock', 'desktop/Cargo.toml', 'crates/**/Cargo.toml', 'docker/desktop/Dockerfile') }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            desktop-v2-${{ matrix.target }}-rust1.98.0-${{ hashFiles('desktop/Cargo.lock', 'crates/**/Cargo.lock', 'desktop/Cargo.toml', 'crates/**/Cargo.toml', 'docker/desktop/Dockerfile') }}-${{ github.sha }}-
-            desktop-v2-${{ matrix.target }}-rust1.98.0-${{ hashFiles('desktop/Cargo.lock', 'crates/**/Cargo.lock', 'desktop/Cargo.toml', 'crates/**/Cargo.toml', 'docker/desktop/Dockerfile') }}-
+          target: ${{ matrix.target }}
       - name: Build and test in the bounded Linux container
         if: runner.os == 'Linux'
         run: bash scripts/desktop/run.sh bash scripts/desktop/ci-build.sh '${{ matrix.target }}' dist/desktop
@@ -165,12 +163,9 @@ jobs:
         if: always() && steps.cargo-cache.outcome == 'success' && steps.cargo-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: |
-            ~/.cache/filebeam/desktop
-            ~/.cargo/registry
-            ~/.cargo/git
-            desktop/target
-          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
+          path: ${{ steps.cargo-cache.outputs.paths }}
+          # A partial build must not occupy the immutable completed-build key.
+          key: ${{ job.status == 'success' && steps.cargo-cache.outputs.key || format('{0}-partial-{1}', steps.cargo-cache.outputs.key, github.run_id) }}
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: desktop-${{ matrix.os }}-${{ matrix.arch }}-${{ needs.validate.outputs.tag || github.event.pull_request.head.sha }}

@@ -5,7 +5,7 @@ ENV LOG_CHANNEL=stdout LOG_STACK=stdout LOG_EMERGENCY_PATH=php://stdout
 
 COPY docker/production/apt.conf /etc/apt/apt.conf.d/80-filebeam-network
 RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
-    && install-php-extensions pdo_sqlite pdo_pgsql pdo_mysql redis-6.3.0 sodium pcntl posix intl bcmath zip \
+    && install-php-extensions pdo_sqlite pdo_pgsql pdo_mysql redis-6.3.0 sodium pcntl posix intl bcmath zip gd \
     && rm -rf /var/lib/apt/lists/*
 
 FROM composer:2@sha256:d8f6343d3fae98107426bc49163ccad46ef85aabd4a27d80a74401fab4aba332 AS composer

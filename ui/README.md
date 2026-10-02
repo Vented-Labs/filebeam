@@ -23,3 +23,11 @@ cannot read the clipboard directly, a paste field opens for its native Paste
 command. Image availability depends on the browser and clipboard source; use
 **Choose files** when the browser cannot expose the image. Sharing still requires
 the Send action.
+
+## Theme tokens
+
+Color roles are defined in `backend/resources/themes/default.css` and consumed as
+`--fb-*` CSS variables. `App\Support\Theming\Palette` generates runtime palettes
+from those defaults. Keep component colors, interaction states, and decorative
+effects in tokens; the default dark values are the visual compatibility baseline.
+Appearance changes preserve mounted components and editor state.
