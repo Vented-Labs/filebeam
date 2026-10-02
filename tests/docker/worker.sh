@@ -112,7 +112,9 @@ wait_healthy
 wait_worker_mode
 docker exec --user 10001:10001 "$container" sh -ec 'test -d /storage/primary; test ! -w /opt/filebeam/backend; touch /storage/primary/.worker-fixture'
 worker_client seed
-worker_client runtime
+runtime_output=$(worker_client runtime)
+[[ $runtime_output == *filebeam-container-log-check* ]] || { printf '%s\n' 'Application Log output did not reach stdout' >&2; exit 1; }
+printf '%s\n' "$runtime_output"
 
 docker exec "$container" sh -ec 'test "$FILEBEAM_THREADS" = 2; test "$MAX_REQUESTS" = 100000'
 worker_pid=$(docker exec "$container" sh -ec 'pgrep -x frankenphp | tr "\n" " "')

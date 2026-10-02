@@ -142,6 +142,11 @@ function runtime(): void
     $expected = (getenv('FILEBEAM_DATA_DIR') ?: '/data').'/app/updates';
     config('filebeam.updates.state_path') === $expected || fail('update state escaped the data volume');
     is_dir($expected) && is_writable($expected) || fail('update state is not writable on the data volume');
+    config('logging.default') === 'stdout' || fail('default application logs do not use stdout');
+    config('logging.channels.stack.channels') === ['stdout'] || fail('default stack does not use stdout');
+    config('logging.channels.emergency.path') === 'php://stdout' || fail('emergency logs do not use stdout');
+    Illuminate\Support\Facades\Log::info('filebeam-container-log-check');
+    ! file_exists(storage_path('logs/laravel.log')) || fail('application created laravel.log');
     fwrite(STDOUT, "worker-runtime: persistent_update_state=ok container_self_updates=blocked\n");
 }
 

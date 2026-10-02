@@ -10,6 +10,7 @@ use App\Models\Filestore;
 use App\Models\InstanceSetting;
 use App\Models\Plan;
 use App\Models\User;
+use App\Support\SmtpSettings;
 use Database\Seeders\PlanSeeder;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Artisan;
@@ -114,6 +115,9 @@ readonly class CompleteInstallation
                     InstanceSetting::query()->updateOrCreate(['key' => $key], ['value' => $enabled]);
                 }
                 AdminAudit::query()->firstOrCreate(['actor_id' => $admin->id, 'action' => 'installation.completed', 'target_type' => User::class, 'target_id' => (string) $admin->id], ['changes' => ['installation_id' => $installationId]]);
+                if (! app(SmtpSettings::class)->managed()) {
+                    app(SmtpSettings::class)->store($validated['smtp'] ?? null);
+                }
             });
             DB::table('installation_records')->where('installation_id', $installationId)->update(['completed_at' => now(), 'updated_at' => now()]);
             $this->optimizer->handle();

@@ -10,15 +10,19 @@ use App\Models\User;
 use App\Support\InstanceSettings as InstanceSettingsResolver;
 use App\Support\InstanceSettingValue;
 use App\Support\LinkUrl;
+use App\Support\SmtpSettings;
 use BackedEnum;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 use Throwable;
 use UnitEnum;
 
@@ -65,6 +69,7 @@ class InstanceSettings extends Page
             $data[$key] ??= config($settings->definition($key)['fallback']);
         }
 
+        $data['smtp'] = app(SmtpSettings::class)->form();
         $this->form->fill($data);
     }
 
@@ -77,6 +82,28 @@ class InstanceSettings extends Page
 
         return $schema
             ->components([
+                Section::make('SMTP mail')
+                    ->description(app(SmtpSettings::class)->managed()
+                        ? 'Source: environment. Mail transport is locked by the operator.'
+                        : 'Configure outgoing email. Disabling saved SMTP settings removes them and restores the default mail configuration.')
+                    ->disabled(app(SmtpSettings::class)->managed())
+                    ->schema([
+                        Toggle::make('smtp.enabled')->label('Use saved SMTP settings'),
+                        TextInput::make('smtp.host')->label('SMTP host')->maxLength(253),
+                        TextInput::make('smtp.port')->label('SMTP port')->integer()->minValue(1)->maxValue(65535),
+                        Select::make('smtp.security')->label('Connection security')
+                            ->options(['starttls' => 'STARTTLS (required)', 'tls' => 'TLS (implicit)', 'none' => 'None'])->native(false),
+                        TextInput::make('smtp.username')->label('SMTP username')->maxLength(1024)->autocomplete('off'),
+                        TextInput::make('smtp.password')->label('SMTP password')->password()->maxLength(4096)
+                            ->autocomplete('new-password')->helperText('Leave blank to keep the saved password.'),
+                        Toggle::make('smtp.clear_password')->label('Clear saved SMTP password'),
+                        TextInput::make('smtp.from_address')->label('Sender email address')->email()->maxLength(254)
+                            ->disabled(config('smtp.from_address') !== null)
+                            ->helperText(config('smtp.from_address') !== null ? 'Source: environment; this setting is locked.' : null),
+                        TextInput::make('smtp.from_name')->label('Sender name')->maxLength(255)
+                            ->disabled(config('smtp.from_name') !== null)
+                            ->helperText(config('smtp.from_name') !== null ? 'Source: environment; this setting is locked.' : null),
+                    ])->columns(['default' => 1, 'sm' => 2]),
                 Section::make('Feature availability')
                     ->description('Choose Inherit to use the PHP fallback. Environment values always take precedence.')
                     ->schema(array_map(function (string $key, array $definition) use ($settings): Select {
@@ -193,7 +220,17 @@ class InstanceSettings extends Page
                 : ($state[$key] ?? null);
         }
 
-        app(ManageInstanceSettings::class)->update($actor, $values);
+        DB::transaction(function () use ($actor, $values, $state): void {
+            app(ManageInstanceSettings::class)->update($actor, $values);
+            if (! app(SmtpSettings::class)->managed()) {
+                try {
+                    app(SmtpSettings::class)->update($actor, $state['smtp']);
+                } catch (ValidationException $exception) {
+                    throw ValidationException::withMessages(collect($exception->errors())
+                        ->mapWithKeys(static fn (array $messages, string $key): array => ['data.'.$key => $messages])->all());
+                }
+            }
+        });
         $this->fillForm();
 
         Notification::make()->title('Instance settings updated')->success()->send();
