@@ -97,7 +97,7 @@ test.describe('WebRTC live transfers', () => {
                     buffer: file.buffer,
                 })),
             );
-            await page.getByLabel('Attach note', { exact: true }).check();
+            await page.getByRole('switch', { name: 'Attach note', exact: true }).click();
             await page
                 .getByRole('textbox', { name: 'Secure note editor', exact: true })
                 .fill('PRIVATE_LIVE_ATTACHMENT 🦀\n');

@@ -17,6 +17,7 @@ import AnimatedHeight from './layout/AnimatedHeight.vue';
 import AnimatedReveal from './layout/AnimatedReveal.vue';
 import TrustFeatures from './layout/TrustFeatures.vue';
 import NoteComposer from './notes/NoteComposer.vue';
+import AttachedNoteToggle from './notes/AttachedNoteToggle.vue';
 import { validateAttachedNote, MAX_ATTACHED_NOTE_BYTES } from '../lib/attached-note';
 import FilePond from './upload/FilePond.vue';
 import FileQueue from './upload/FileQueue.vue';
@@ -41,11 +42,13 @@ const mode = ref<'files' | 'note'>('files');
 const note = ref('');
 const noteTitle = ref('');
 const attachNote = ref(false);
+const attachmentSubmitted = ref(false);
 const attachedText = ref('');
 const attachedTitle = ref('');
 const attachedLanguage = ref('plain');
 const attachedError = computed(() => {
     if (mode.value !== 'files' || !attachNote.value) return '';
+    if (!attachedText.value.length) return 'Write a note or turn off Attach note before sending.';
     try {
         validateAttachedNote({
             text: attachedText.value,
@@ -56,6 +59,9 @@ const attachedError = computed(() => {
     } catch (reason) {
         return reason instanceof Error ? reason.message : 'Invalid attached note.';
     }
+});
+watch(attachNote, () => {
+    attachmentSubmitted.value = false;
 });
 const noteComposer = ref<InstanceType<typeof NoteComposer>>();
 const language = ref('plain');
@@ -137,7 +143,7 @@ const canUpload = computed(() => {
         maximumBytes.value === null || activeCiphertextBytes.value <= maximumBytes.value;
     return (
         hasContent.value &&
-        !attachedError.value &&
+        (!attachedError.value || attachedText.value.length === 0) &&
         bytesAllowed &&
         countAllowed &&
         enabledDrivers.value.includes(driver.value) &&
@@ -287,6 +293,10 @@ function onDrop(event: DragEvent): void {
         filesUpload.addFiles(event.dataTransfer.files);
 }
 async function submit(turbo = false): Promise<void> {
+    if (mode.value === 'files' && attachNote.value) {
+        attachmentSubmitted.value = true;
+        if (attachedError.value) return;
+    }
     if (driver.value === 'webrtc') {
         if (!webRtcSupported) {
             activeUpload.value.error.value = 'WebRTC is not supported by this browser.';
@@ -350,6 +360,7 @@ function resetActive(): void {
     webrtcConsent.value = false;
     if (mode.value === 'files') {
         attachNote.value = false;
+        attachmentSubmitted.value = false;
         attachedText.value = '';
         attachedTitle.value = '';
         attachedLanguage.value = 'plain';
@@ -597,6 +608,13 @@ onBeforeUnmount(() => {
                                             @choose="chooseFiles"
                                             @files="addFiles"
                                         >
+                                            <template #actions>
+                                                <AttachedNoteToggle
+                                                    v-model="attachNote"
+                                                    :disabled="isBusy"
+                                                    compact
+                                                />
+                                            </template>
                                             <FileQueue
                                                 :entries="filesUpload.entries.value"
                                                 :disabled="isBusy"
@@ -604,24 +622,11 @@ onBeforeUnmount(() => {
                                                 @remove="filesUpload.removeFile"
                                             />
                                         </FilePond>
-                                        <div
-                                            v-if="filesUpload.entries.value.length || attachNote"
-                                            class="px-6 py-3"
-                                        >
-                                            <label class="flex items-center gap-2"
-                                                ><input
-                                                    v-model="attachNote"
-                                                    type="checkbox"
-                                                    :disabled="isBusy"
-                                                />Attach note</label
-                                            >
-                                            <p
-                                                v-if="attachNote"
-                                                class="mt-2 text-sm text-[var(--fb-text-muted)]"
-                                            >
-                                                The note uses this transfer's encryption and expiry.
-                                            </p>
-                                        </div>
+                                        <AttachedNoteToggle
+                                            v-if="filesUpload.entries.value.length"
+                                            v-model="attachNote"
+                                            :disabled="isBusy"
+                                        />
                                         <NoteComposer
                                             v-if="attachNote"
                                             v-model="attachedText"
@@ -633,7 +638,10 @@ onBeforeUnmount(() => {
                                             id-prefix="attached-note"
                                         />
                                         <p
-                                            v-if="attachedError"
+                                            v-if="
+                                                attachedError &&
+                                                (attachmentSubmitted || attachedText.length > 0)
+                                            "
                                             role="alert"
                                             class="px-6 pb-3 text-sm text-[var(--fb-danger)]"
                                         >

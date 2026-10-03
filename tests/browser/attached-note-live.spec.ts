@@ -13,7 +13,7 @@ test('live file attachment unlocks without contacting a peer', async ({
         mimeType: 'text/plain',
         buffer: Buffer.from('Live file bytes'),
     });
-    await page.getByLabel('Attach note', { exact: true }).check();
+    await page.getByRole('switch', { name: 'Attach note', exact: true }).click();
     await page
         .getByRole('textbox', { name: 'Secure note editor', exact: true })
         .fill('Live encrypted attachment 🦀\n');

@@ -32,9 +32,14 @@ const emit = defineEmits<{ logout: [] }>();
                 <h1>Account</h1>
                 <p>Manage your identity, receiving link, and browser-held encryption keys.</p>
             </div>
-            <Button variant="secondary" @click="emit('logout')">
-                <Icon name="logout" :size="16" />Sign out
-            </Button>
+            <div class="account-panel__actions">
+                <AppLink href="/account/history" class="fb-button fb-button--secondary"
+                    ><Icon name="clock" :size="16" />View transfer history</AppLink
+                >
+                <Button variant="secondary" @click="emit('logout')">
+                    <Icon name="logout" :size="16" />Sign out
+                </Button>
+            </div>
         </header>
         <div class="account-panel__grid">
             <aside class="account-panel__identity">
@@ -85,9 +90,6 @@ const emit = defineEmits<{ logout: [] }>();
             </aside>
             <InboxSettings :user="user" />
         </div>
-        <AppLink href="/account/history" class="fb-text-link mt-6 inline-block"
-            >View transfer history</AppLink
-        >
     </section>
 </template>
 
@@ -104,6 +106,13 @@ const emit = defineEmits<{ logout: [] }>();
     justify-content: space-between;
     gap: 2rem;
     margin-bottom: 1.5rem;
+}
+.account-panel__actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: end;
+    gap: 0.625rem;
 }
 .account-panel__header h1 {
     margin: 0;
@@ -203,6 +212,12 @@ const emit = defineEmits<{ logout: [] }>();
     }
 }
 @media (max-width: 460px) {
+    .account-panel__header {
+        flex-wrap: wrap;
+    }
+    .account-panel__actions {
+        justify-content: start;
+    }
     .account-panel__header {
         gap: 1rem;
     }

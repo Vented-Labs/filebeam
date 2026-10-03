@@ -112,7 +112,7 @@ async function sendToInbox(
         mimeType: 'text/plain',
         buffer: Buffer.from(marker),
     });
-    await sender.getByLabel('Attach note', { exact: true }).check();
+    await sender.getByRole('switch', { name: 'Attach note', exact: true }).click();
     await sender
         .getByRole('textbox', { name: 'Secure note editor', exact: true })
         .fill('PRIVATE_INBOX_ATTACHMENT 🦀\n');

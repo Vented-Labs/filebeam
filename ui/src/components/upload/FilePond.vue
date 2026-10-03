@@ -69,6 +69,7 @@ function selected(event: Event): void {
                 <Button class="file-pond__choose" :disabled="disabled" @click="emit('choose')">
                     <Icon name="folder" :size="17" />Choose files<Icon name="arrow-up" :size="17" />
                 </Button>
+                <slot name="actions" />
             </div>
             <small>
                 <span>Or drag and drop anywhere</span>

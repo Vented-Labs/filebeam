@@ -23,7 +23,7 @@ for (const { turbo, password } of [
             mimeType: 'text/plain',
             buffer: Buffer.from('File bytes'),
         });
-        await page.getByLabel('Attach note', { exact: true }).check();
+        await page.getByRole('switch', { name: 'Attach note', exact: true }).click();
         await page.locator('#attached-note-title').fill('PRIVATE_NOTE_TITLE');
         await page.getByRole('textbox', { name: 'Secure note editor', exact: true }).fill(text);
         await page
@@ -112,15 +112,46 @@ test('invalid attached draft is preserved and cannot start a transfer', async ({
     await page
         .locator('#filebeam-picker')
         .setInputFiles({ name: 'file.txt', mimeType: 'text/plain', buffer: Buffer.from('file') });
-    await page.getByLabel('Attach note', { exact: true }).check();
-    await expect(page.getByRole('button', { name: 'Send encrypted', exact: true })).toBeDisabled();
+    await page.getByRole('switch', { name: 'Attach note', exact: true }).click();
+    await expect(page.getByRole('alert')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Send encrypted', exact: true })).toBeEnabled();
+    let creations = 0;
+    page.on('request', (request) => {
+        if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/v1/transfers')
+            creations++;
+    });
+    await page.getByRole('button', { name: 'Send encrypted', exact: true }).click();
+    await expect(page.getByRole('alert')).toContainText('Write a note');
+    expect(creations).toBe(0);
     await page
         .getByRole('textbox', { name: 'Secure note editor', exact: true })
         .fill('🦀'.repeat(16385));
     await expect(page.getByRole('alert')).toContainText('64 KiB');
     await expect(page.getByRole('button', { name: 'Send encrypted', exact: true })).toBeDisabled();
-    await page.getByLabel('Attach note', { exact: true }).uncheck();
+    await page.getByRole('switch', { name: 'Attach note', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Send encrypted', exact: true })).toBeEnabled();
-    await page.getByLabel('Attach note', { exact: true }).check();
+    await page.getByRole('switch', { name: 'Attach note', exact: true }).click();
     await expect(page.getByRole('button', { name: 'Send encrypted', exact: true })).toBeDisabled();
+});
+
+test('the initial Files screen exposes an attachment composer before file selection', async ({
+    page,
+}) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('/');
+    const toggle = page.getByRole('switch', { name: 'Attach note', exact: true });
+    await expect(toggle).toBeVisible();
+    await toggle.click();
+    await page
+        .getByRole('textbox', { name: 'Secure note editor', exact: true })
+        .fill('Instructions prepared first');
+    await expect(page.getByRole('button', { name: 'Send encrypted', exact: true })).toBeDisabled();
+    await page
+        .locator('#filebeam-picker')
+        .setInputFiles({ name: 'file.txt', mimeType: 'text/plain', buffer: Buffer.from('file') });
+    await expect(page.getByRole('switch', { name: 'Attach note', exact: true })).toBeChecked();
+    await expect(
+        page.getByRole('textbox', { name: 'Secure note editor', exact: true }),
+    ).toContainText('Instructions prepared first');
+    await expect(page.getByRole('button', { name: 'Send encrypted', exact: true })).toBeEnabled();
 });

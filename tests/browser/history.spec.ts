@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-for (const width of [1280, 390]) {
+for (const width of [1280, 390, 320]) {
     test(`account history manages opaque outgoing transfers at ${width}px`, async ({
         page,
         context,
@@ -55,8 +55,9 @@ for (const width of [1280, 390]) {
             await expect(row).toContainText('Available');
             await expect(row).not.toContainText('opaque-history-browser-fixture');
             await row.getByRole('button', { name: 'Extend', exact: true }).click();
-            await row.getByLabel('Total retention (hours)').fill('2');
-            await row.getByRole('button', { name: 'Save retention' }).click();
+            const retention = page.getByRole('dialog', { name: 'Extend transfer retention' });
+            await retention.getByLabel('Total retention (hours)').fill('2');
+            await retention.getByRole('button', { name: 'Save retention' }).click();
             await expect(row.getByRole('button', { name: 'Extend', exact: true })).toBeVisible();
             const metadata = await request.get('/api/native/v1/history');
             expect(
@@ -64,15 +65,20 @@ for (const width of [1280, 390]) {
                     (entry: { id: string }) => entry.id === transfer.id,
                 ).retention_hours,
             ).toBe(2);
-            await page.getByLabel('Type', { exact: true }).selectOption('note');
+            await page.getByRole('combobox', { name: 'Type', exact: true }).click();
+            await page.getByRole('option', { name: 'Notes', exact: true }).click();
             await expect(
                 page.getByText('No outgoing transfers match these filters.'),
             ).toBeVisible();
             await expect(page.getByLabel('Type', { exact: true })).toHaveCount(1);
-            await page.getByLabel('Type', { exact: true }).selectOption('files');
+            await page.getByRole('combobox', { name: 'Type', exact: true }).click();
+            await page.getByRole('option', { name: 'Files', exact: true }).click();
             await expect(row).toBeVisible();
             await row.getByRole('button', { name: 'Delete', exact: true }).click();
-            await row.getByRole('button', { name: 'Confirm deletion' }).click();
+            await page
+                .getByRole('dialog', { name: 'Delete this transfer?' })
+                .getByRole('button', { name: 'Confirm deletion' })
+                .click();
             await expect(row).toContainText(/Awaiting cleanup|Deleted/);
             await expect(row.getByRole('button', { name: 'Extend', exact: true })).toHaveCount(0);
             expect(

@@ -79,7 +79,7 @@ test('CLI verifies pending and completed turbo downloads without Content-Length'
             mimeType: 'application/octet-stream',
             buffer: payload,
         });
-        await page.getByLabel('Attach note', { exact: true }).check();
+        await page.getByRole('switch', { name: 'Attach note', exact: true }).click();
         await page
             .getByRole('textbox', { name: 'Secure note editor', exact: true })
             .fill('Turbo attachment 🦀\n');
@@ -221,7 +221,7 @@ test('built CLI and browser exchange real encrypted files through the Laravel AP
         await page
             .locator('#filebeam-picker')
             .setInputFiles({ name: 'from-browser.txt', mimeType: 'text/plain', buffer: payload });
-        await page.getByLabel('Attach note', { exact: true }).check();
+        await page.getByRole('switch', { name: 'Attach note', exact: true }).click();
         await page
             .getByRole('textbox', { name: 'Secure note editor', exact: true })
             .fill('Browser attachment 🦀\n');
