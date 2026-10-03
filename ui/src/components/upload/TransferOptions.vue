@@ -154,6 +154,11 @@ function setRetention(value: unknown): void {
                         :disabled="disabled"
                         aria-label="Send to Friend"
                 /></label>
+                <AnimatedReveal
+                    :show="sendToFriend && mode === 'files'"
+                    class="transfer-options__recipient"
+                    ><slot name="recipient"
+                /></AnimatedReveal>
                 <AnimatedReveal :show="mode === 'note'">
                     <label class="transfer-options__preference">
                         <span>
@@ -173,10 +178,6 @@ function setRetention(value: unknown): void {
                 </AnimatedReveal>
             </div>
         </div>
-
-        <AnimatedReveal :show="sendToFriend && mode === 'files'" class="transfer-options__recipient"
-            ><slot name="recipient"
-        /></AnimatedReveal>
 
         <AnimatedReveal :show="!recipient && !includeKey">
             <div class="transfer-options__key-hint" role="status">
@@ -227,8 +228,8 @@ function setRetention(value: unknown): void {
 
 <style scoped>
 .transfer-options__recipient {
-    padding: 0.25rem 1.5rem;
-    margin-bottom: 1.125rem;
+    padding: 0.25rem;
+    margin-top: 0.375rem;
 }
 .transfer-options {
     border-top: 1px solid var(--fb-line-soft);
