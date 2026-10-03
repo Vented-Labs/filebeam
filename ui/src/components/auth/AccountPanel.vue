@@ -85,6 +85,9 @@ const emit = defineEmits<{ logout: [] }>();
             </aside>
             <InboxSettings :user="user" />
         </div>
+        <AppLink href="/account/history" class="fb-text-link mt-6 inline-block"
+            >View transfer history</AppLink
+        >
     </section>
 </template>
 

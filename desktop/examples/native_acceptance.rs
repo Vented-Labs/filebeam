@@ -18,6 +18,9 @@ fn main() -> Result<()> {
     let root = tempfile::tempdir().context("create private acceptance root")?;
     configure(root.path(), &instance)?;
     let client = DesktopClient::new(Some(root.path().to_owned()))?;
+    if std::env::var_os("FILEBEAM_NATIVE_ACCEPTANCE_HISTORY").is_some() {
+        account_history(&client, root.path()).context("account history")?;
+    }
     basic_prepared_receive(&client, root.path()).context("prepared subset")?;
     password_separate_key(&client, root.path()).context("password separate key")?;
     zip_unicode_collision(&client, root.path()).context("ZIP Unicode collision")?;
@@ -35,6 +38,86 @@ fn configure(home: &Path, instance: &str) -> Result<()> {
             "schema_version = 1\n[server]\nurl = {instance:?}\n[updates]\nauto_update = false\n[transfers]\nmemory_limit_mib = 64\nmax_concurrency = 1\n"
         ),
     )?;
+    Ok(())
+}
+
+fn account_history(client: &DesktopClient, root: &Path) -> Result<()> {
+    let suffix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_millis()
+        % 1_000_000_000;
+    client.dispatch(ClientCommand::Register {
+        username: format!("desktop_{suffix}"),
+        name: None,
+        email: format!("desktop-history-{suffix}@example.test"),
+        password: "Native8!History".into(),
+    })?;
+    wait_snapshot(client, |snapshot| {
+        snapshot.account.authenticated.then_some(())
+    })?;
+    let source = root.join("history.bin");
+    fs::write(&source, deterministic(1024))?;
+    let before = job_ids(client);
+    client.dispatch(ClientCommand::SendFiles(SendFiles {
+        paths: vec![source],
+        directory_mode: DirectoryMode::Individual,
+        transport: SendTransport::Http,
+        retention_hours: Some(1),
+        turbo: false,
+        include_key: true,
+        password: None,
+        recipient: None,
+    }))?;
+    let link = complete_link(client, &before)?;
+    let id = link
+        .split('#')
+        .next()
+        .context("share URL missing")?
+        .rsplit('/')
+        .next()
+        .context("transfer ID missing")?
+        .to_owned();
+    client.dispatch(ClientCommand::RefreshHistory {
+        filter: Default::default(),
+        cursor: None,
+    })?;
+    wait_snapshot(client, |snapshot| {
+        snapshot
+            .history
+            .page
+            .data
+            .iter()
+            .find(|entry| entry.id == id && entry.can_extend)
+            .cloned()
+    })?;
+    client.dispatch(ClientCommand::ExtendHistory {
+        id: id.clone(),
+        retention_hours: 2,
+    })?;
+    wait_snapshot(client, |snapshot| {
+        snapshot
+            .history
+            .page
+            .data
+            .iter()
+            .find(|entry| entry.id == id && entry.retention_hours == 2)
+            .cloned()
+    })?;
+    client.dispatch(ClientCommand::DeleteHistory { id: id.clone() })?;
+    wait_snapshot(client, |snapshot| {
+        snapshot
+            .history
+            .page
+            .data
+            .iter()
+            .find(|entry| entry.id == id && !entry.can_delete && !entry.can_extend)
+            .cloned()
+    })?;
+    client.dispatch(ClientCommand::Logout)?;
+    wait_snapshot(client, |snapshot| {
+        (!snapshot.account.authenticated && snapshot.history.page.data.is_empty()).then_some(())
+    })?;
+    println!("PASS native desktop authenticated upload/history/extend/delete/logout");
     Ok(())
 }
 

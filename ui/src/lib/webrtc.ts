@@ -355,6 +355,7 @@ export async function startWebRtcSender(options: {
     chunkBytes: number;
     onActivity?: (message: string) => void;
     onSessions?: (sessions: Array<{ id: string; status: string; progress: number }>) => void;
+    onExpiry?: (expiresAt: string) => void;
     onError?: (error: Error) => void;
     onEnded?: (error: Error) => void;
 }): Promise<WebRtcSender> {
@@ -485,7 +486,11 @@ export async function startWebRtcSender(options: {
         while (!signal.aborted) {
             try {
                 const response = await api<
-                    ApiResponse<{ sessions: Session[]; ice_servers: RTCIceServer[] }>
+                    ApiResponse<{
+                        sessions: Session[];
+                        ice_servers: RTCIceServer[];
+                        expires_at?: string;
+                    }>
                 >(
                     endpoint(options.transferId, '/sessions'),
                     { headers: { 'X-Filebeam-Upload-Token': options.uploadToken } },
@@ -499,6 +504,7 @@ export async function startWebRtcSender(options: {
                 if (!data || !Array.isArray(data.sessions) || !Array.isArray(data.ice_servers))
                     throw new Error('Unable to poll WebRTC sessions.');
                 failures = 0;
+                if (typeof data.expires_at === 'string') options.onExpiry?.(data.expires_at);
                 const currentSessions = new Set(data.sessions.map((session) => session.id));
                 for (const [id, peer] of peers) {
                     if (!currentSessions.has(id)) {

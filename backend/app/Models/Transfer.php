@@ -7,6 +7,7 @@ namespace App\Models;
 use App\Enums\TransferDelivery;
 use App\Enums\TransferDriver;
 use App\Enums\TransferKind;
+use App\Enums\TransferRemovalReason;
 use App\Enums\TransferStatus;
 use Carbon\CarbonImmutable;
 use Database\Factories\TransferFactory;
@@ -29,6 +30,8 @@ use Illuminate\Database\Eloquent\Relations\HasManyThrough;
  * @property CarbonImmutable|null $completed_at
  * @property string|null $encrypted_descriptor
  * @property CarbonImmutable $expires_at
+ * @property CarbonImmutable|null $published_at
+ * @property TransferRemovalReason|null $removal_reason
  * @property list<int>|null $filestore_ids
  */
 #[Fillable([
@@ -59,6 +62,8 @@ use Illuminate\Database\Eloquent\Relations\HasManyThrough;
     'webrtc_claimed_session_id',
     'completed_at',
     'expires_at',
+    'published_at',
+    'removal_reason',
 ])]
 #[Hidden(['upload_token_hash', 'delete_token_hash', 'read_token_hash', 'monitor_token_hash', 'join_token_hash'])]
 class Transfer extends Model
@@ -134,6 +139,13 @@ class Transfer extends Model
 
     /** @param Builder<self> $query */
     #[Scope]
+    protected function ownedBy(Builder $query, int $ownerId): void
+    {
+        $query->where('owner_id', $ownerId);
+    }
+
+    /** @param Builder<self> $query */
+    #[Scope]
     protected function availableAndUnexpired(Builder $query): void
     {
         $query->where('status', TransferStatus::Available)
@@ -159,6 +171,8 @@ class Transfer extends Model
             'burn_on_read' => 'boolean',
             'completed_at' => 'immutable_datetime',
             'expires_at' => 'immutable_datetime',
+            'published_at' => 'immutable_datetime',
+            'removal_reason' => TransferRemovalReason::class,
         ];
     }
 }

@@ -11,6 +11,7 @@ use App\Models\TransferChunk;
 use App\Models\TransferChunkLocation;
 use App\Models\TransferChunkUpload;
 use App\Models\TransferItem;
+use App\Models\User;
 use App\Support\FilestoreRegistry;
 use Database\Seeders\FilestoreSeeder;
 use Illuminate\Contracts\Filesystem\Filesystem;
@@ -50,7 +51,7 @@ test('the pruning command queues expired transfers for idempotent deletion', fun
 
 test('a failed ciphertext deletion leaves the transfer deleting for queue retry', function () {
     Storage::fake('transfers');
-    $transfer = Transfer::factory()->create(['status' => TransferStatus::Deleting]);
+    $transfer = Transfer::factory()->create(['status' => TransferStatus::Deleting, 'owner_id' => User::factory()->create()->id]);
     $item = TransferItem::factory()->for($transfer)->create();
     $chunk = TransferChunk::factory()->for($item, 'item')->create();
     $location = TransferChunkLocation::factory()->for($chunk, 'chunk')->create();
@@ -64,6 +65,7 @@ test('a failed ciphertext deletion leaves the transfer deleting for queue retry'
     expect(fn () => (new DeleteTransfer($transfer->id))->handle())->toThrow(RuntimeException::class);
 
     expect($transfer->refresh()->status)->toBe(TransferStatus::Deleting);
+    $this->assertDatabaseCount('transfer_history_entries', 0);
 });
 
 test('a cleanup job never touches storage for a non-deleting transfer', function () {

@@ -12,6 +12,7 @@ pub struct DesktopSnapshot {
     pub account: AccountSnapshot,
     pub jobs: Vec<JobSnapshot>,
     pub inbox: Vec<InboxItem>,
+    pub history: HistorySnapshot,
     /// Authenticated receive preparations. Filenames appear only after the
     /// encrypted manifest has been validated by the native receiver.
     pub receive_previews: Vec<ReceivePreview>,
@@ -170,6 +171,14 @@ pub struct InboxItem {
     /// Server item identifiers are metadata only; filenames remain encrypted.
     pub item_ids: Vec<String>,
 }
+
+#[derive(Clone, Default)]
+pub struct HistorySnapshot {
+    pub page: filebeam_client_core::services::HistoryPage,
+    pub filter: filebeam_client_core::services::HistoryFilter,
+    pub error: Option<String>,
+    pub revision: u64,
+}
 #[derive(Clone)]
 pub struct InvitationSnapshot {
     pub token: String,
@@ -292,6 +301,17 @@ pub enum ClientCommand {
     ReloadSettings,
     Refresh,
     RefreshInbox,
+    RefreshHistory {
+        filter: filebeam_client_core::services::HistoryFilter,
+        cursor: Option<String>,
+    },
+    DeleteHistory {
+        id: String,
+    },
+    ExtendHistory {
+        id: String,
+        retention_hours: u64,
+    },
     GenerateReceivingKey {
         password: Option<String>,
         replace: bool,
@@ -428,6 +448,9 @@ impl ClientCommand {
     pub fn operation(&self) -> &'static str {
         match self {
             Self::ReloadSettings => "reload settings",
+            Self::RefreshHistory { .. } => "load history",
+            Self::DeleteHistory { .. } => "delete history transfer",
+            Self::ExtendHistory { .. } => "extend history transfer",
             Self::GenerateReceivingKey { .. } => "generate receiving key",
             Self::ImportReceivingKey { .. } => "import receiving key",
             Self::UnlockReceivingKey { .. } => "unlock receiving key",

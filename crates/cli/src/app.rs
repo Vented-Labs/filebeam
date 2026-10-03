@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{config::Config, protocol, update, uploads::DirectoryMode};
-use filebeam_client_core::services::{NoteCreate, ServiceClient};
+use filebeam_client_core::services::NoteCreate;
 #[allow(unused_imports)]
 pub use filebeam_transfer_native::control::{
     Cancelled, Control, PeerConsent, PeerFailed, Phase, Progress, Prompt, PromptKind, SecretKind,
@@ -121,7 +121,7 @@ impl Job {
                 ),
                 Request::Revoke { id } => { let notes = filebeam_client_core::services::note_management::NoteManagementStore::for_root(worker.transfer_home()); if notes.contains(&id) { notes.action(&id, filebeam_client_core::services::note_management::NoteManagementAction::Revoke) } else { protocol::revoke_upload(&id, worker) }.map(|_| vec![id]) },
                 Request::EndLive { id } => { let notes = filebeam_client_core::services::note_management::NoteManagementStore::for_root(worker.transfer_home()); if notes.contains(&id) { notes.action(&id, filebeam_client_core::services::note_management::NoteManagementAction::EndLive) } else { protocol::end_live(&id, worker) }.map(|_| vec![id]) },
-                Request::NoteLive(request) => ServiceClient::new(&instance)?
+                Request::NoteLive(request) => crate::services::client(&config, &instance)?
                     .notes()
                     .create_live(request, worker, worker.cancelled.clone(), Some(filebeam_client_core::services::note_management::NoteManagementStore::for_root(worker.transfer_home())))
                     .map(|note| vec![note.link]),

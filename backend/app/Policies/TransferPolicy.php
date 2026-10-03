@@ -9,6 +9,11 @@ use App\Models\User;
 
 class TransferPolicy
 {
+    public function manageHistory(User $user, Transfer $transfer): bool
+    {
+        return $user->suspended_at === null && $transfer->owner_id === $user->id;
+    }
+
     public function viewAny(User $user): bool
     {
         return $user->isStaff();

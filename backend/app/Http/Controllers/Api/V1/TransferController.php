@@ -4,15 +4,16 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Actions\Transfers\RemoveTransfer;
 use App\Enums\TransferDelivery;
 use App\Enums\TransferDriver;
 use App\Enums\TransferKind;
+use App\Enums\TransferRemovalReason;
 use App\Enums\TransferStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\CompleteTransferRequest;
 use App\Http\Requests\StoreTransferRequest;
 use App\Http\Resources\TransferResource;
-use App\Jobs\DeleteTransfer;
 use App\Models\AccountKeyBundle;
 use App\Models\Filestore;
 use App\Models\Plan;
@@ -438,10 +439,7 @@ class TransferController extends Controller
             $lockedTransfer = Transfer::query()->lockForUpdate()->findOrFail($transfer->id);
             $this->authorizeCapability($lockedTransfer->delete_token_hash, request()->header('X-Filebeam-Delete-Token'));
 
-            if ($lockedTransfer->status !== TransferStatus::Deleting) {
-                $lockedTransfer->update(['status' => TransferStatus::Deleting]);
-                DB::afterCommit(fn (): mixed => DeleteTransfer::dispatch($lockedTransfer->id));
-            }
+            app(RemoveTransfer::class)->handle($lockedTransfer, TransferRemovalReason::Deleted);
         });
 
         if ($transfer->driver === TransferDriver::WebRtc) {
@@ -481,8 +479,7 @@ class TransferController extends Controller
                             && Capability::matches((string) ($claimed['token_hash'] ?? ''), $sessionToken),
                         403,
                     );
-                    $lockedTransfer->update(['status' => TransferStatus::Deleting]);
-                    DB::afterCommit(fn (): mixed => DeleteTransfer::dispatch($lockedTransfer->id));
+                    app(RemoveTransfer::class)->handle($lockedTransfer, TransferRemovalReason::Burned);
                 });
                 Cache::forget("filebeam:webrtc:{$transfer->id}:sessions");
                 Cache::forget("filebeam:webrtc:{$transfer->id}:sender");
@@ -504,8 +501,7 @@ class TransferController extends Controller
 
             if ($lockedTransfer->status !== TransferStatus::Deleting) {
                 abort_unless(in_array($lockedTransfer->status, [TransferStatus::Available, TransferStatus::Live], true), 404);
-                $lockedTransfer->update(['status' => TransferStatus::Deleting]);
-                DB::afterCommit(fn (): mixed => DeleteTransfer::dispatch($lockedTransfer->id));
+                app(RemoveTransfer::class)->handle($lockedTransfer, TransferRemovalReason::Burned);
             }
         });
 

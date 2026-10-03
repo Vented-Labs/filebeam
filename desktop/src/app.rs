@@ -33,6 +33,7 @@ use crate::{
     theme,
     views::{
         account::{AccountPanel, InboxPanel},
+        history::HistoryPanel,
         receive::ReceivePanel,
         send::SendPanel,
         settings::SettingsPanel,
@@ -531,24 +532,27 @@ enum Destination {
     Receive,
     Transfers,
     Inbox,
+    History,
     Settings,
     Account,
 }
 
-const DESTINATIONS: [(&str, &str, Destination); 6] = [
+const DESTINATIONS: [(&str, &str, Destination); 7] = [
     ("Send", "icons/arrow-up.svg", Destination::Send),
     ("Receive", "icons/arrow-down.svg", Destination::Receive),
     ("Transfers", "icons/transfers.svg", Destination::Transfers),
     ("Inbox", "icons/archive.svg", Destination::Inbox),
+    ("History", "icons/transfers.svg", Destination::History),
     ("Settings", "icons/menu.svg", Destination::Settings),
     ("Account", "icons/user.svg", Destination::Account),
 ];
 
-const PRIMARY_DESTINATIONS: [(&str, &str, Destination); 4] = [
+const PRIMARY_DESTINATIONS: [(&str, &str, Destination); 5] = [
     ("Send", "icons/arrow-up.svg", Destination::Send),
     ("Receive", "icons/arrow-down.svg", Destination::Receive),
     ("Transfers", "icons/transfers.svg", Destination::Transfers),
     ("Inbox", "icons/archive.svg", Destination::Inbox),
+    ("History", "icons/transfers.svg", Destination::History),
 ];
 
 pub struct DesktopShell {
@@ -558,6 +562,7 @@ pub struct DesktopShell {
     receive: Entity<ReceivePanel>,
     transfers: Entity<TransfersPanel>,
     inbox: Entity<InboxPanel>,
+    history: Entity<HistoryPanel>,
     account: Entity<AccountPanel>,
     settings: Entity<SettingsPanel>,
     command_palette: Entity<CommandState>,
@@ -637,6 +642,7 @@ impl DesktopShell {
         let receive = cx.new(|cx| ReceivePanel::new(client.clone(), home.clone(), window, cx));
         let transfers = cx.new(|cx| TransfersPanel::new(client.clone(), home.clone(), window, cx));
         let inbox = cx.new(|cx| InboxPanel::new(client.clone(), window, cx));
+        let history = cx.new(|cx| HistoryPanel::new(client.clone(), window, cx));
         let account = cx.new(|cx| AccountPanel::new(client.clone(), window, cx));
         let settings = cx.new(|cx| SettingsPanel::new(client.clone(), home, window, cx));
         let command_palette = cx.new(|cx| CommandState::new(window, cx));
@@ -744,6 +750,7 @@ impl DesktopShell {
             receive,
             transfers,
             inbox,
+            history,
             account,
             settings,
             command_palette,
@@ -839,6 +846,13 @@ impl DesktopShell {
         self.destination = destination;
         if destination == Destination::Inbox {
             let _ = self.client.dispatch(ClientCommand::RefreshInbox);
+        }
+        if destination == Destination::History {
+            let filter = self.client.snapshot().history.filter;
+            let _ = self.client.dispatch(ClientCommand::RefreshHistory {
+                filter,
+                cursor: None,
+            });
         }
         if destination == Destination::Account {
             let _ = self.client.dispatch(ClientCommand::Refresh);
@@ -1190,6 +1204,7 @@ impl Render for DesktopShell {
             Destination::Receive => self.receive.clone().into_any_element(),
             Destination::Transfers => self.transfers.clone().into_any_element(),
             Destination::Inbox => self.inbox.clone().into_any_element(),
+            Destination::History => self.history.clone().into_any_element(),
             Destination::Settings => self.settings.clone().into_any_element(),
             Destination::Account => self.account.clone().into_any_element(),
         };

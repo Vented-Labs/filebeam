@@ -64,6 +64,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// List and manage outgoing transfers owned by your signed-in account.
+    History {
+        #[command(subcommand)]
+        command: HistoryCommand,
+    },
     /// Encrypt and upload files or directories.
     Up {
         files: Vec<PathBuf>,
@@ -240,6 +245,30 @@ enum InboxCommand {
     },
 }
 
+#[derive(clap::Subcommand)]
+enum HistoryCommand {
+    List {
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        kind: Option<String>,
+        #[arg(long)]
+        driver: Option<String>,
+        #[arg(long)]
+        cursor: Option<String>,
+        #[arg(long, default_value_t = 25, value_parser = clap::value_parser!(u32).range(1..=100))]
+        limit: u32,
+    },
+    /// Delete the encrypted transfer for all recipients.
+    Delete { id: String },
+    /// Set total retention from completion/publication, not from now.
+    Extend {
+        id: String,
+        #[arg(long)]
+        retention_hours: u64,
+    },
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum Transport {
     Http,
@@ -326,6 +355,8 @@ fn main() -> Result<()> {
                 uploads::DirectoryMode::Ask
             };
             let mut options = transport.upload_options(turbo, password, retention_hours)?;
+            options.authentication =
+                services::client(&config, &instance)?.upload_authentication()?;
             if let Some(username) = username {
                 if turbo || password || transport == Transport::Webrtc {
                     anyhow::bail!("username delivery requires HTTP without --turbo or --password");
@@ -364,6 +395,54 @@ fn main() -> Result<()> {
             }
         }
         Some(Command::Update) => println!("{}", update::check(&config)?),
+        Some(Command::History { command }) => {
+            let client = services::client(&config, &instance)?;
+            match command {
+                HistoryCommand::List {
+                    status,
+                    kind,
+                    driver,
+                    cursor,
+                    limit,
+                } => {
+                    let page = client.history().list(
+                        &filebeam_client_core::services::HistoryFilter {
+                            status,
+                            kind,
+                            driver,
+                        },
+                        cursor.as_deref(),
+                        limit,
+                    )?;
+                    for entry in page.data {
+                        output::result(&services::history_row(&entry), cli.plain)?;
+                    }
+                    if let Some(cursor) = page.next_cursor {
+                        eprintln!("Older entries: beam history list --cursor {cursor}");
+                    }
+                }
+                HistoryCommand::Delete { id } => {
+                    client.history().delete(&id)?;
+                    output::result(
+                        "Deletion scheduled; the history summary remains for 90 days after cleanup.",
+                        cli.plain,
+                    )?;
+                }
+                HistoryCommand::Extend {
+                    id,
+                    retention_hours,
+                } => {
+                    let update = client.history().extend(&id, retention_hours)?;
+                    output::result(
+                        &format!(
+                            "{}\t{}\t{}",
+                            update.id, update.retention_hours, update.expires_at
+                        ),
+                        cli.plain,
+                    )?;
+                }
+            }
+        }
         Some(Command::Transfers) => {
             for transfer in protocol::saved_transfers(&config.home.join("transfers"))? {
                 println!(

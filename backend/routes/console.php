@@ -39,6 +39,7 @@ Schedule::call(function (): void {
 })->name('filebeam:scheduler-heartbeat')->everyMinute();
 
 Schedule::command('filebeam:prune-transfers')->everyFifteenMinutes()->withoutOverlapping();
+Schedule::command('filebeam:prune-transfer-history')->daily()->withoutOverlapping();
 
 Schedule::call(function (): void {
     $lock = new ActivityLock(storage_path('app/update-activity.lock'));

@@ -217,6 +217,24 @@ impl Worker {
             ClientCommand::ReloadSettings => self.reload_settings(),
             ClientCommand::Refresh => self.refresh_account(),
             ClientCommand::RefreshInbox => self.refresh_inbox(),
+            ClientCommand::RefreshHistory { filter, cursor } => {
+                self.refresh_history(filter, cursor.as_deref())
+            }
+            ClientCommand::DeleteHistory { id } => {
+                let result = self.service()?.history().delete(&id);
+                self.finish_history_action(result)
+            }
+            ClientCommand::ExtendHistory {
+                id,
+                retention_hours,
+            } => {
+                let result = self
+                    .service()?
+                    .history()
+                    .extend(&id, retention_hours)
+                    .map(|_| ());
+                self.finish_history_action(result)
+            }
             ClientCommand::GenerateReceivingKey {
                 password,
                 replace,
@@ -432,11 +450,7 @@ impl Worker {
             }
             None => None,
         };
-        let authentication = if recipient.is_some() {
-            UploadAuthentication::SessionCookie(self.service()?.cookie_context()?)
-        } else {
-            UploadAuthentication::Anonymous
-        };
+        let authentication = self.service()?.upload_authentication()?;
         let password = Zeroizing::new(request.password);
         let options = UploadOptions {
             snapshot_paths: Vec::new(),
@@ -839,7 +853,9 @@ impl Worker {
             }
             // A public discovery remains useful when an old account cookie expires.
             Err(error) if is_auth_error(&error) => {
-                lock(&self.snapshot).account = AccountSnapshot::default();
+                let mut snapshot = lock(&self.snapshot);
+                snapshot.account = AccountSnapshot::default();
+                snapshot.history = HistorySnapshot::default();
                 Ok(())
             }
             Err(error) => Err(error),
@@ -889,7 +905,12 @@ impl Worker {
         if !driver.enabled {
             bail!("the selected transport is not enabled by this instance")
         }
-        if request.recipient.is_none() && !policy.anonymous_uploads {
+        if !policy.anonymous_uploads
+            && matches!(
+                self.service()?.upload_authentication()?,
+                UploadAuthentication::Anonymous
+            )
+        {
             bail!("this instance requires an authenticated account for sharing")
         }
         if let Some(hours) = request.retention_hours
@@ -1144,6 +1165,7 @@ impl Worker {
         };
         snapshot.account = AccountSnapshot::default();
         snapshot.inbox.clear();
+        snapshot.history = HistorySnapshot::default();
         Ok(())
     }
     fn reload_settings(&mut self) -> Result<()> {
@@ -1179,6 +1201,44 @@ impl Worker {
             })
             .collect();
         Ok(())
+    }
+
+    fn refresh_history(
+        &mut self,
+        filter: filebeam_client_core::services::HistoryFilter,
+        cursor: Option<&str>,
+    ) -> Result<()> {
+        let service = self.service()?;
+        let result = service.account().session().and_then(|session| {
+            self.set_account(session);
+            service.history().list(&filter, cursor, 25)
+        });
+        let mut snapshot = lock(&self.snapshot);
+        snapshot.history.filter = filter;
+        snapshot.history.revision += 1;
+        match result {
+            Ok(page) => {
+                snapshot.history.page = page;
+                snapshot.history.error = None;
+                Ok(())
+            }
+            Err(error) => {
+                snapshot.history.page = Default::default();
+                snapshot.history.error = Some(format!("{error:#}"));
+                Err(error)
+            }
+        }
+    }
+
+    fn finish_history_action(&mut self, result: Result<()>) -> Result<()> {
+        if let Err(error) = result {
+            let mut snapshot = lock(&self.snapshot);
+            snapshot.history.error = Some(format!("{error:#}"));
+            snapshot.history.revision += 1;
+            return Err(error);
+        }
+        let filter = lock(&self.snapshot).history.filter.clone();
+        self.refresh_history(filter, None)
     }
     fn inspect_inbox(&mut self, id: &str) -> Result<()> {
         let metadata = self.service()?.account().inbox_metadata(id)?;
@@ -1262,10 +1322,14 @@ impl Worker {
         self.state.clear_session()?;
         self.service = None;
         lock(&self.snapshot).account = AccountSnapshot::default();
+        lock(&self.snapshot).history = HistorySnapshot::default();
         Ok(())
     }
     fn set_account(&self, session: filebeam_client_core::services::AccountSession) {
         let mut snapshot = lock(&self.snapshot);
+        if snapshot.account.email.as_deref() != Some(session.email.as_str()) {
+            snapshot.history = HistorySnapshot::default();
+        }
         snapshot.account = AccountSnapshot {
             authenticated: true,
             email: Some(session.email),

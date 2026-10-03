@@ -12,6 +12,21 @@ Filebeam is free and open-source software by [Vented](https://vented.com), relea
 - Encrypted recipient delivery, expiry, deletion, and best-effort burn-on-read notes.
 - Private local or S3-compatible ciphertext storage, with distributed or replicated placement.
 - Account administration, registration controls, cron-driven background work, scheduled cleanup, and a release updater.
+- Account-owned outgoing transfer history on web, desktop, and CLI, with deletion and retention extension.
+
+## Transfer history
+
+Signed-in transfers appear under **Account → History** on the web and **History**
+on desktop. History shows operational metadata, not filenames, note content, or
+share-link keys. Removed-transfer summaries remain for 90 days after cleanup;
+deleting an account removes its summaries. Existing anonymous transfers are not
+claimed when you sign in.
+
+Extensions set total retention from HTTP completion or first WebRTC publication,
+subject to the owner's current plan. WebRTC also retains the instance live-session
+cap and requires the sender to keep running. Expired, burned, deleting, or ended
+transfers cannot be revived. Scheduled cleanup and history pruning use the normal
+Laravel scheduler, including on shared hosting.
 
 ## Setup
 

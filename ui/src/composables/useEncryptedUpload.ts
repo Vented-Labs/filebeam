@@ -322,6 +322,7 @@ export function useEncryptedUpload(
 
     async function upload(options: {
         mode: TransferMode;
+        accountOwned?: boolean;
         turbo?: boolean;
         note?: string;
         title?: string;
@@ -449,7 +450,10 @@ export function useEncryptedUpload(
                 uploadController.signal,
                 {
                     method: 'POST',
-                    headers: csrfHeaders(true),
+                    headers: {
+                        ...csrfHeaders(true),
+                        ...(options.accountOwned ? { 'X-Filebeam-Require-Account': '1' } : {}),
+                    },
                     body: JSON.stringify({
                         kind: options.mode,
                         driver: selectedDriver,
@@ -653,6 +657,10 @@ export function useEncryptedUpload(
                             selection_count: uploadEntries.length,
                             all_files: true,
                         }));
+                    },
+                    onExpiry: (expiresAt) => {
+                        if (share.value?.transferId === created.data.id)
+                            share.value.expiresAt = expiresAt;
                     },
                 });
                 ensureActive(jobId);

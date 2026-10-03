@@ -4,10 +4,11 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers;
 
+use App\Actions\Transfers\RemoveTransfer;
 use App\Enums\TransferDelivery;
+use App\Enums\TransferRemovalReason;
 use App\Enums\TransferStatus;
 use App\Http\Resources\TransferResource;
-use App\Jobs\DeleteTransfer;
 use App\Models\Transfer;
 use App\Models\TransferChunk;
 use App\Models\TransferItem;
@@ -88,10 +89,7 @@ class InboxController extends Controller
         $this->transfer($request, $transfer);
         DB::transaction(function () use ($transfer): void {
             $locked = Transfer::query()->lockForUpdate()->findOrFail($transfer->id);
-            if ($locked->status !== TransferStatus::Deleting) {
-                $locked->update(['status' => TransferStatus::Deleting]);
-                DB::afterCommit(fn (): mixed => DeleteTransfer::dispatch($locked->id));
-            }
+            app(RemoveTransfer::class)->handle($locked, TransferRemovalReason::Deleted);
         });
 
         return response()->json(status: 202);

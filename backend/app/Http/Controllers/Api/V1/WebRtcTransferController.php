@@ -40,7 +40,7 @@ class WebRtcTransferController extends Controller
             abort_unless(app(TransportPolicy::class)->allows(TransferDriver::WebRtc), 404);
             $maximum = $locked->created_at->addHours((int) config('filebeam.webrtc.live_max_hours', 24));
             $retention = now()->addHours($locked->retention_hours);
-            $locked->update(['encrypted_manifest' => $manifest, 'status' => TransferStatus::Live, 'expires_at' => $retention->lessThan($maximum) ? $retention : $maximum]);
+            $locked->update(['encrypted_manifest' => $manifest, 'status' => TransferStatus::Live, 'published_at' => now(), 'expires_at' => $retention->lessThan($maximum) ? $retention : $maximum]);
         });
         $this->pulseSender($transfer);
 
