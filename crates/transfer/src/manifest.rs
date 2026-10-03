@@ -195,6 +195,17 @@ fn is_windows_device_name(name: &str) -> bool {
             && matches!(stem.as_bytes()[3], b'1'..=b'9'))
 }
 
+fn base64url_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'A'..=b'Z' => Some(byte - b'A'),
+        b'a'..=b'z' => Some(byte - b'a' + 26),
+        b'0'..=b'9' => Some(byte - b'0' + 52),
+        b'-' => Some(62),
+        b'_' => Some(63),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -230,16 +241,5 @@ mod tests {
         );
         value["attached_note"] = serde_json::json!({"text":42,"language":"plain"});
         assert!(serde_json::from_value::<Manifest>(value).is_err());
-    }
-}
-
-fn base64url_value(byte: u8) -> Option<u8> {
-    match byte {
-        b'A'..=b'Z' => Some(byte - b'A'),
-        b'a'..=b'z' => Some(byte - b'a' + 26),
-        b'0'..=b'9' => Some(byte - b'0' + 52),
-        b'-' => Some(62),
-        b'_' => Some(63),
-        _ => None,
     }
 }
