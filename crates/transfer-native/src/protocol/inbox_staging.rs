@@ -320,6 +320,31 @@ pub fn fetch(store: &Store, cookie: &str, control: &Control) -> Result<()> {
     }
 }
 
+pub fn export(
+    store: &Store,
+    private_key: &[u8],
+    output: &Path,
+    control: &Control,
+) -> Result<Vec<String>> {
+    let saved = store
+        .load::<Staging>()?
+        .context("inbox staging record is empty")?;
+    if saved.state != "staged-locked" {
+        bail!("inbox ciphertext has not finished staging");
+    }
+    let bundle = &saved.metadata.recipient_key.bundle;
+    let master = zeroize::Zeroizing::new(filebeam_encryption::open_recipient_envelope(
+        private_key,
+        &super::decode(&saved.metadata.recipient_key.encrypted_key)?,
+        format!(
+            "filebeam:recipient:v1:{}:{}:{}",
+            saved.metadata.id, bundle.user_id, bundle.id
+        )
+        .as_bytes(),
+    )?);
+    super::download::export_staged(store, &saved.metadata, &master, output, control)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -435,29 +460,4 @@ mod tests {
             identity("https://one.example", 2, "transfer")
         );
     }
-}
-
-pub fn export(
-    store: &Store,
-    private_key: &[u8],
-    output: &Path,
-    control: &Control,
-) -> Result<Vec<String>> {
-    let saved = store
-        .load::<Staging>()?
-        .context("inbox staging record is empty")?;
-    if saved.state != "staged-locked" {
-        bail!("inbox ciphertext has not finished staging");
-    }
-    let bundle = &saved.metadata.recipient_key.bundle;
-    let master = zeroize::Zeroizing::new(filebeam_encryption::open_recipient_envelope(
-        private_key,
-        &super::decode(&saved.metadata.recipient_key.encrypted_key)?,
-        format!(
-            "filebeam:recipient:v1:{}:{}:{}",
-            saved.metadata.id, bundle.user_id, bundle.id
-        )
-        .as_bytes(),
-    )?);
-    super::download::export_staged(store, &saved.metadata, &master, output, control)
 }
