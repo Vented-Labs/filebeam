@@ -50,7 +50,11 @@ async function register(page: Page): Promise<{ username: string; email: string }
         await page.waitForTimeout(Math.min(60, Math.max(1, delay)) * 1000 + 250);
         await page.getByLabel('Password', { exact: true }).fill(accountPassword);
         await page.getByLabel('Confirm password', { exact: true }).fill(accountPassword);
-        registration = page.waitForResponse(candidate => candidate.request().method() === 'POST' && new URL(candidate.url()).pathname === '/register');
+        registration = page.waitForResponse(
+            (candidate) =>
+                candidate.request().method() === 'POST' &&
+                new URL(candidate.url()).pathname === '/register',
+        );
         await page.getByRole('button', { name: 'Create account', exact: true }).click();
         response = await registration;
     }

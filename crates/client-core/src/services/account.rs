@@ -9,11 +9,11 @@ use filebeam_transfer::manifest::{Manifest, ManifestServerItem, validate_manifes
 use reqwest::{Url, blocking::Client};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::io::Read;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
-use std::io::Read;
 use zeroize::Zeroizing;
 
 use super::client::url;

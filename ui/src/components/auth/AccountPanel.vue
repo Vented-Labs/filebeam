@@ -33,7 +33,9 @@ const emit = defineEmits<{ logout: [] }>();
         class="account-panel"
     >
         <template #actions>
-            <AppLink href="/account/history" class="fb-button fb-button--secondary"><Icon name="clock" :size="16" />View transfer history</AppLink>
+            <AppLink href="/account/history" class="fb-button fb-button--secondary"
+                ><Icon name="clock" :size="16" />View transfer history</AppLink
+            >
             <Button variant="secondary" @click="emit('logout')">
                 <Icon name="logout" :size="16" />Sign out
             </Button>
