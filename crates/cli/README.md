@@ -18,6 +18,32 @@ In the full-screen interface, use `1`, `2`, and `3` to switch between Send,
 Receive, and Transfers. When editing a field, press `Esc` first to return to
 page shortcuts.
 
+### Account history
+
+After `beam account login EMAIL`, new file and note shares use the signed-in
+account, including link and live shares. An expired saved session requires a new
+login; Beam does not silently switch to anonymous sharing.
+
+```sh
+beam history list
+beam history list --kind files --status available --driver http
+beam history list --cursor CURSOR
+beam history extend TRANSFER_ID --retention-hours 48
+beam history delete TRANSFER_ID
+```
+
+History lists outgoing account-owned transfer IDs, type, transport, state, item
+count, encrypted bytes, and expiry. `--limit` accepts 1–100 entries (default 25).
+Filters must be repeated when requesting another page. Extension sets total
+retention from completion/publication, capped by the current account plan and,
+for WebRTC, the instance live-session limit. It cannot revive expired or ended
+shares. Deletion removes access for everyone; minimal summaries remain for 90
+days after cleanup.
+
+In the full-screen interface, press `p` for History list/delete/extend actions.
+`beam transfers` remains the local resume-job list; account history works across
+devices and does not recover filenames or share-link keys.
+
 ### Paste on Send
 
 Paste text with your terminal's paste shortcut to open the Notes composer. Press

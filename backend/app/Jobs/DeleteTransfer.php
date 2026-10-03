@@ -9,6 +9,7 @@ use App\Enums\TransferStatus;
 use App\Models\Transfer;
 use App\Support\ChunkStaging;
 use App\Support\FilestoreRegistry;
+use App\Support\TransferHistory;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Cache;
@@ -46,7 +47,7 @@ class DeleteTransfer implements ShouldQueue
         if ($transfer->driver === TransferDriver::WebRtc) {
             Cache::forget("filebeam:webrtc:{$transfer->id}:sessions");
             Cache::forget("filebeam:webrtc:{$transfer->id}:sender");
-            $transfer->delete();
+            $this->finish();
 
             return;
         }
@@ -68,6 +69,11 @@ class DeleteTransfer implements ShouldQueue
             }
         }
 
+        $this->finish();
+    }
+
+    private function finish(): void
+    {
         DB::transaction(function (): void {
             $transfer = Transfer::query()->lockForUpdate()->find($this->transferId);
 
@@ -75,6 +81,7 @@ class DeleteTransfer implements ShouldQueue
                 return;
             }
 
+            app(TransferHistory::class)->archive($transfer);
             $transfer->delete();
         }, attempts: 3);
     }

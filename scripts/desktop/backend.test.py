@@ -79,7 +79,8 @@ $app->handleRequest(Illuminate\\Http\\Request::capture());
                "FILEBEAM_CREATIONS_PER_HOUR": "300", "FILEBEAM_WRITES_PER_MINUTE": "3000",
                "FILEBEAM_READS_PER_MINUTE": "3000", "FILEBEAM_ACCEPTANCE_INSTANCE": origin,
                "FILEBEAM_ACCEPTANCE_RESULTS": str(state / "native"), "NO_COLOR": "1",
-               "FILEBEAM_TEST_BACKEND": str(ROOT / "backend")}
+                "FILEBEAM_TEST_BACKEND": str(ROOT / "backend"),
+                "FILEBEAM_NATIVE_ACCEPTANCE_HISTORY": "1"}
         with (state / "server.log").open("w+") as log:
             try:
                 run(["php", "artisan", "migrate", "--seed", "--force", "--no-interaction"], env, stdout=log, stderr=log)
@@ -118,6 +119,21 @@ $app->handleRequest(Illuminate\\Http\\Request::capture());
                     assert (destination / source.name).read_bytes() == source.read_bytes()
                     assert "auto_update = false" in (home / "config.toml").read_text()
                     print("PASS CLI migrated-config upload/download hash")
+                    run([*cli, "account", "register", f"history_{port}", f"history-{port}@example.test", "--password-stdin"], env,
+                        input="Native8!History\n", capture_output=True, text=True)
+                    owned = run([*cli, "up", str(source), "--retention-hours", "1"], env, capture_output=True, text=True)
+                    identifier = owned.stdout.strip().split("#")[0].rsplit("/", 1)[-1]
+                    history = run([*cli, "history", "list"], env, capture_output=True, text=True)
+                    assert identifier in history.stdout
+                    extended = run([*cli, "history", "extend", identifier, "--retention-hours", "2"], env, capture_output=True, text=True)
+                    assert identifier in extended.stdout
+                    run([*cli, "history", "delete", identifier], env, capture_output=True, text=True)
+                    archived = run([*cli, "history", "list", "--status", "deleted"], env, capture_output=True, text=True)
+                    assert identifier in archived.stdout
+                    run([*cli, "account", "logout"], env, capture_output=True, text=True)
+                    denied = subprocess.run([*cli, "history", "list"], cwd=ROOT / "backend", env=env, capture_output=True, text=True, timeout=30)
+                    assert denied.returncode != 0
+                    print("PASS CLI authenticated upload/history/extend/delete/logout")
                 if args.browser_test:
                     subprocess.run([
                         "npx", "playwright", "test", *args.browser_test, "--workers=1",

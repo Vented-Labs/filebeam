@@ -16,6 +16,7 @@ use App\Http\Controllers\Auth\RegisteredUserController;
 use App\Http\Controllers\FileReportController;
 use App\Http\Controllers\InboxController;
 use App\Http\Controllers\NativeAccountController;
+use App\Http\Controllers\TransferHistoryController;
 use App\Http\Middleware\EnsureAnonymousTransferUploadsAreEnabled;
 use App\Http\Middleware\ProtectAuthenticatedTransferCreation;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
@@ -116,6 +117,9 @@ Route::prefix('native/v1')->middleware([EncryptCookies::class, AddQueuedCookiesT
     Route::post('/reports', [FileReportController::class, 'store'])->middleware('throttle:file-reports');
     Route::delete('/session', [AuthenticatedSessionController::class, 'destroy'])->middleware('auth');
     Route::middleware('auth')->group(function (): void {
+        Route::get('/history', [TransferHistoryController::class, 'index'])->middleware('throttle:transfer-reading');
+        Route::delete('/history/{id}', [TransferHistoryController::class, 'destroy'])->whereUlid('id')->middleware('throttle:transfer-writing');
+        Route::patch('/history/{id}/retention', [TransferHistoryController::class, 'extend'])->whereUlid('id')->middleware('throttle:transfer-writing');
         Route::get('/session', [NativeAccountController::class, 'session']);
         Route::get('/inbox', [NativeAccountController::class, 'inbox']);
         Route::get('/inbox/unread-count', [NativeAccountController::class, 'inboxUnreadCount']);

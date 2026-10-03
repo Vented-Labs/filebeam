@@ -7,6 +7,7 @@ use App\Http\Controllers\AppleAppSiteAssociationController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\InboxController;
 use App\Http\Controllers\ReceiveController;
+use App\Http\Controllers\TransferHistoryController;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
@@ -36,6 +37,9 @@ Route::get('/updater/probe', function (): JsonResponse {
 })->name('updater.probe');
 
 Route::middleware('auth')->group(function (): void {
+    Route::get('/account/history', [TransferHistoryController::class, 'index'])->name('history.index');
+    Route::delete('/account/history/{id}', [TransferHistoryController::class, 'destroy'])->whereUlid('id')->middleware('throttle:transfer-writing')->name('history.destroy');
+    Route::patch('/account/history/{id}/retention', [TransferHistoryController::class, 'extend'])->whereUlid('id')->middleware('throttle:transfer-writing')->name('history.extend');
     Route::get('/account/keys', [AccountKeyController::class, 'index'])->name('account.keys.index');
     Route::post('/account/keys', [AccountKeyController::class, 'store'])->middleware('throttle:account-key-writing')->name('account.keys.store');
     Route::patch('/account/keys/{bundle}', [AccountKeyController::class, 'update'])->name('account.keys.update');

@@ -9,6 +9,10 @@ use filebeam_transfer::manifest::{Manifest, ManifestServerItem, validate_manifes
 use reqwest::{Url, blocking::Client};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use zeroize::Zeroizing;
 
 use super::client::url;
@@ -17,6 +21,7 @@ use super::client::url;
 pub struct AccountService {
     instance: Url,
     http: Client,
+    account_intent: Arc<AtomicBool>,
 }
 #[derive(Clone, Debug, Deserialize)]
 pub struct AccountSession {
@@ -151,8 +156,12 @@ struct ManifestEnvelope {
 }
 
 impl AccountService {
-    pub(crate) fn new(instance: Url, http: Client) -> Self {
-        Self { instance, http }
+    pub(crate) fn new(instance: Url, http: Client, account_intent: Arc<AtomicBool>) -> Self {
+        Self {
+            instance,
+            http,
+            account_intent,
+        }
     }
     pub fn login(&self, email: &str, password: &str, remember: bool) -> Result<AccountSession> {
         let response = self
@@ -198,10 +207,12 @@ impl AccountService {
         if response.status().as_u16() != 201 {
             bail!("native registration returned {}", response.status());
         }
-        response
+        let session = response
             .json::<Api<AccountSession>>()
-            .context("decode native registration")
-            .map(|v| v.data)
+            .context("decode native registration")?
+            .data;
+        self.account_intent.store(true, Ordering::Relaxed);
+        Ok(session)
     }
     pub fn logout(&self) -> Result<()> {
         let response = self
@@ -214,10 +225,13 @@ impl AccountService {
         if response.status().as_u16() != 204 {
             bail!("native logout returned {}", response.status());
         }
+        self.account_intent.store(false, Ordering::Relaxed);
         Ok(())
     }
     pub fn session(&self) -> Result<AccountSession> {
-        self.get("api/native/v1/session")
+        let session = self.get("api/native/v1/session")?;
+        self.account_intent.store(true, Ordering::Relaxed);
+        Ok(session)
     }
     pub fn inbox(&self) -> Result<Vec<InboxTransfer>> {
         self.get("api/native/v1/inbox")
@@ -312,14 +326,16 @@ impl AccountService {
         email: &str,
         password: &str,
     ) -> Result<AccountSession> {
-        self.post(
+        let session = self.post(
             &format!("api/native/v1/invitations/{token}"),
             serde_json::json!({
                 "username": username, "name": name, "email": email,
                 "password": password, "password_confirmation": password,
             }),
             201,
-        )
+        )?;
+        self.account_intent.store(true, Ordering::Relaxed);
+        Ok(session)
     }
     pub fn report(
         &self,
@@ -349,6 +365,7 @@ impl AccountService {
         if response.status().as_u16() != 202 {
             bail!("native account deletion returned {}", response.status());
         }
+        self.account_intent.store(false, Ordering::Relaxed);
         response
             .json::<Api<AccountDeletion>>()
             .context("decode native account deletion")

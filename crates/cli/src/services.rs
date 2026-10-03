@@ -61,6 +61,19 @@ pub fn client(config: &Config, instance: &str) -> Result<ServiceClient> {
     ServiceClient::new_with_cookie_context(instance, cookies.as_deref())
 }
 
+pub fn history_row(entry: &filebeam_client_core::services::HistoryEntry) -> String {
+    format!(
+        "{}\t{}\t{}\t{}\t{}\t{}\t{}",
+        entry.id,
+        entry.kind,
+        entry.driver,
+        entry.status,
+        entry.item_count,
+        entry.ciphertext_bytes.max(entry.declared_ciphertext_bytes),
+        entry.expires_at
+    )
+}
+
 pub fn save_session(config: &Config, instance: &str, client: &ServiceClient) -> Result<()> {
     let cookies = client
         .cookie_context()

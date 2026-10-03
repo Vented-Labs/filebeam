@@ -1,4 +1,5 @@
 pub mod account;
+pub mod history;
 pub mod page;
 pub mod receive;
 pub mod send;

@@ -45,6 +45,7 @@ pub struct NotesService {
     http: Client,
     async_http: reqwest::Client,
     consumed: Arc<Mutex<HashSet<String>>>,
+    account_intent: Arc<AtomicBool>,
 }
 #[derive(Clone, Debug, Deserialize)]
 pub struct NoteMetadata {
@@ -201,15 +202,21 @@ struct DigestValue {
 }
 
 impl NotesService {
-    pub(crate) fn new(instance: Url, http: Client, cookies: Arc<Jar>) -> Self {
+    pub(crate) fn new(
+        instance: Url,
+        http: Client,
+        cookies: Arc<Jar>,
+        account_intent: Arc<AtomicBool>,
+    ) -> Self {
         Self {
             instance,
             http,
             async_http: reqwest::Client::builder()
-                .cookie_provider(cookies)
+                .cookie_provider(cookies.clone())
                 .build()
                 .expect("create async note client"),
             consumed: Arc::new(Mutex::new(HashSet::new())),
+            account_intent,
         }
     }
 
@@ -267,6 +274,7 @@ impl NotesService {
     }
 
     pub fn create(&self, request: NoteCreate) -> Result<CreatedNote> {
+        let account_owned = self.validate_session()?;
         validate_create(&request)?;
         let policy = self.policy()?;
         let chunk_bytes =
@@ -289,6 +297,11 @@ impl NotesService {
         let reservation = self
             .http
             .post(url(&self.instance, "api/v1/transfers")?)
+            .header("Sec-Fetch-Site", "same-origin")
+            .header(
+                "X-Filebeam-Require-Account",
+                if account_owned { "1" } else { "0" },
+            )
             .json(&serde_json::json!({
                 "kind":"note", "driver":"http", "protocol_version":1, "chunk_bytes":chunk_bytes,
                 "retention_hours":request.retention_hours, "burn_on_read":request.burn_on_read,
@@ -463,6 +476,7 @@ impl NotesService {
         management: Option<NoteManagementStore>,
         created_id: Option<Arc<Mutex<Option<String>>>>,
     ) -> Result<CreatedNote> {
+        let account_owned = self.validate_session()?;
         validate_create(&request)?;
         if !control.webrtc_relay_only() {
             control.request_peer_consent(self.instance.origin().ascii_serialization())?;
@@ -488,6 +502,11 @@ impl NotesService {
         let reservation = self
             .http
             .post(url(&self.instance, "api/v1/transfers")?)
+            .header("Sec-Fetch-Site", "same-origin")
+            .header(
+                "X-Filebeam-Require-Account",
+                if account_owned { "1" } else { "0" },
+            )
             .json(&serde_json::json!({
                 "kind":"note", "driver":"webrtc", "protocol_version":1, "chunk_bytes":chunk_bytes,
                 "retention_hours":request.retention_hours, "burn_on_read":request.burn_on_read,
@@ -986,6 +1005,20 @@ impl NotesService {
     }
 }
 impl NotesService {
+    fn validate_session(&self) -> Result<bool> {
+        let account_owned = self.account_intent.load(Ordering::Relaxed);
+        if account_owned {
+            super::AccountService::new(
+                self.instance.clone(),
+                self.http.clone(),
+                self.account_intent.clone(),
+            )
+            .session()
+            .context("sign in again before sharing")?;
+        }
+        Ok(account_owned)
+    }
+
     fn policy(&self) -> Result<Info> {
         let response = self
             .http

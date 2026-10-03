@@ -14,6 +14,7 @@ class ProtectAuthenticatedTransferCreation
     /** @param Closure(Request): Response $next */
     public function handle(Request $request, Closure $next): Response
     {
+        abort_if($request->header('X-Filebeam-Require-Account') === '1' && $request->user() === null, 401, 'Sign in again before sharing.');
         // The public API remains usable without a session. Cookie-authenticated creation is stateful.
         if ($request->user() === null) {
             return $next($request);

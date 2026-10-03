@@ -2197,6 +2197,10 @@ fn client(control: &Control, authentication: &super::UploadAuthentication) -> Re
             value.set_sensitive(true);
             headers.insert(COOKIE, value);
             headers.insert(
+                HeaderName::from_static("x-filebeam-require-account"),
+                HeaderValue::from_static("1"),
+            );
+            headers.insert(
                 HeaderName::from_static("sec-fetch-site"),
                 HeaderValue::from_static("same-origin"),
             );

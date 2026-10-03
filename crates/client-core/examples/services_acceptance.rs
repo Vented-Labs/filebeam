@@ -284,6 +284,7 @@ fn account_inbox_round_trip(instance: &str) -> Result<()> {
         DirectoryMode::Individual,
         UploadOptions {
             authentication: UploadAuthentication::SessionCookie(cookie),
+            retention_hours: Some(1),
             recipient: Some(UploadRecipient {
                 username: recipient.username,
                 user_id: recipient.id,
@@ -337,6 +338,31 @@ fn account_inbox_round_trip(instance: &str) -> Result<()> {
         .is_err(),
         "a non-recipient account read inbox ciphertext"
     );
+    let history = sender.history().list(&Default::default(), None, 25)?;
+    ensure!(
+        history
+            .data
+            .iter()
+            .any(|entry| entry.id == transfer.id && entry.can_extend && entry.delivery == "inbox"),
+        "sender history omitted its inbox delivery"
+    );
+    ensure!(
+        !receiver
+            .history()
+            .list(&Default::default(), None, 25)?
+            .data
+            .iter()
+            .any(|entry| entry.id == transfer.id),
+        "received delivery leaked into outgoing history"
+    );
+    let update = sender.history().extend(&transfer.id, 2)?;
+    ensure!(update.retention_hours == 2, "history extension failed");
+    sender.history().delete(&transfer.id)?;
+    ensure!(
+        receiver.account().inbox_metadata(&transfer.id).is_err(),
+        "history deletion left recipient access available"
+    );
+    println!("native-account-history-list-extend-delete=passed");
     receiver.account().logout()?;
     ensure!(
         receiver.account().session().is_err(),

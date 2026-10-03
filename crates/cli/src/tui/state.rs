@@ -27,6 +27,9 @@ pub enum NativeAction {
     NoteOpen,
     InboxList,
     InboxDownload,
+    HistoryList,
+    HistoryDelete,
+    HistoryExtend,
     Recipient,
     Revoke,
     EndLive,
@@ -45,11 +48,14 @@ pub enum NativeAction {
 }
 
 impl NativeAction {
-    pub const ALL: [Self; 19] = [
+    pub const ALL: [Self; 22] = [
         Self::NoteCreate,
         Self::NoteOpen,
         Self::InboxList,
         Self::InboxDownload,
+        Self::HistoryList,
+        Self::HistoryDelete,
+        Self::HistoryExtend,
         Self::Recipient,
         Self::Revoke,
         Self::EndLive,
@@ -72,6 +78,9 @@ impl NativeAction {
             Self::NoteOpen => "Note: open",
             Self::InboxList => "Inbox: list",
             Self::InboxDownload => "Inbox: download",
+            Self::HistoryList => "History: list",
+            Self::HistoryDelete => "History: delete transfer",
+            Self::HistoryExtend => "History: extend retention",
             Self::Recipient => "Recipient: resolve",
             Self::Revoke => "Transfer: revoke",
             Self::EndLive => "Transfer: end live",
@@ -100,6 +109,15 @@ impl NativeAction {
             ],
             Self::NoteOpen => &[("link", false), ("password (optional)", true)],
             Self::InboxDownload => &[("delivery id", false), ("output folder", false)],
+            Self::HistoryList => &[("cursor (optional)", false)],
+            Self::HistoryDelete => &[
+                ("server transfer id", false),
+                ("type DELETE to remove for everyone", false),
+            ],
+            Self::HistoryExtend => &[
+                ("server transfer id", false),
+                ("total retention hours", false),
+            ],
             Self::Recipient => &[("username", false)],
             Self::Revoke | Self::EndLive => &[("transfer id", false)],
             Self::Login => &[("email", false), ("password", true)],
@@ -136,6 +154,9 @@ impl NativeAction {
             Self::NoteOpen => "Note opened",
             Self::InboxList => "Inbox loaded",
             Self::InboxDownload => "Delivery downloaded",
+            Self::HistoryList => "History loaded",
+            Self::HistoryDelete => "Deletion scheduled",
+            Self::HistoryExtend => "Retention updated",
             Self::Recipient => "Recipient found",
             Self::Revoke => "Transfer revoked",
             Self::EndLive => "Live transfer ended",
@@ -434,8 +455,18 @@ impl State {
                     self.toast("Choose a file with Space to get started");
                     return;
                 }
+                let authentication = match services::client(&self.config, &self.instance)
+                    .and_then(|client| client.upload_authentication())
+                {
+                    Ok(authentication) => authentication,
+                    Err(error) => {
+                        self.toast(error.to_string());
+                        return;
+                    }
+                };
                 if let Some(Ok(info)) = &self.info {
-                    if !info.anonymous_uploads_enabled
+                    if (!info.anonymous_uploads_enabled
+                        && matches!(authentication, protocol::UploadAuthentication::Anonymous))
                         || !info.enabled_drivers.iter().any(|driver| driver == "http")
                     {
                         self.toast("This instance is not accepting anonymous HTTP uploads");
@@ -462,6 +493,7 @@ impl State {
                             .cloned()
                             .collect(),
                         turbo,
+                        authentication,
                         ..Default::default()
                     },
                 )
@@ -1161,6 +1193,31 @@ fn native_action(
     let client = services::client(config, instance)?;
     let account = client.account();
     match action {
+        NativeAction::HistoryList => {
+            let page = client.history().list(
+                &Default::default(),
+                (!v[0].is_empty()).then_some(v[0].as_str()),
+                25,
+            )?;
+            let mut rows = page
+                .data
+                .iter()
+                .map(services::history_row)
+                .collect::<Vec<_>>();
+            if let Some(cursor) = page.next_cursor {
+                rows.push(format!("Older entries cursor: {cursor}"));
+            }
+            Ok(rows)
+        }
+        NativeAction::HistoryDelete => {
+            anyhow::ensure!(v[1] == "DELETE", "deletion requires typing DELETE");
+            client.history().delete(&v[0])?;
+            Ok(vec!["Deletion scheduled".into()])
+        }
+        NativeAction::HistoryExtend => {
+            let update = client.history().extend(&v[0], v[1].parse()?)?;
+            Ok(vec![format!("Expires {}", update.expires_at)])
+        }
         NativeAction::NoteCreate => Ok(vec![
             client
                 .notes()

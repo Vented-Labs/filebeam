@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Actions\Admin;
 
+use App\Enums\TransferRemovalReason;
 use App\Enums\TransferStatus;
 use App\Jobs\DeleteTransfer;
 use App\Models\AdminAudit;
@@ -33,7 +34,7 @@ class RequestTransferTakedown
             }
 
             $previousStatus = $transfer->status;
-            $transfer->update(['status' => TransferStatus::Deleting]);
+            $transfer->update(['status' => TransferStatus::Deleting, 'removal_reason' => TransferRemovalReason::Removed]);
 
             AdminAudit::query()->create([
                 'actor_id' => $actor->id,

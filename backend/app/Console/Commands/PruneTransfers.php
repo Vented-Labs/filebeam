@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Console\Commands;
 
+use App\Enums\TransferRemovalReason;
 use App\Enums\TransferStatus;
 use App\Jobs\DeleteTransfer;
 use App\Models\Transfer;
@@ -84,7 +85,10 @@ class PruneTransfers extends Command
                             }
 
                             if ($lockedTransfer->status !== TransferStatus::Deleting) {
-                                $lockedTransfer->update(['status' => TransferStatus::Deleting]);
+                                $lockedTransfer->update([
+                                    'removal_reason' => $lockedTransfer->status === TransferStatus::Pending ? TransferRemovalReason::Abandoned : TransferRemovalReason::Expired,
+                                    'status' => TransferStatus::Deleting,
+                                ]);
                             } else {
                                 $lockedTransfer->touch();
                             }

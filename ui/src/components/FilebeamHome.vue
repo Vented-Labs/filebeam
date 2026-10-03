@@ -279,6 +279,7 @@ async function submit(turbo = false): Promise<void> {
     const uploader = activeUpload.value;
     await uploader.upload({
         mode: mode.value,
+        accountOwned: !!props.user,
         note: note.value,
         title: noteTitle.value,
         language: language.value,
