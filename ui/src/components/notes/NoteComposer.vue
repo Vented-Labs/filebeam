@@ -23,6 +23,7 @@ const props = defineProps<{
     maximumBytes: number | null;
     retentionHours: number;
     title: string;
+    idPrefix?: string;
 }>();
 const emit = defineEmits<{
     'update:modelValue': [value: string];
@@ -45,12 +46,14 @@ function formatBytes(value: number): string {
             <div class="note-composer__toolbar">
                 <div class="note-composer__title">
                     <Icon name="note" :size="15" />
-                    <label for="note-title" class="sr-only">Note title (optional)</label>
+                    <label :for="`${idPrefix ?? 'note'}-title`" class="sr-only"
+                        >Note title (optional)</label
+                    >
                     <input
-                        id="note-title"
+                        :id="`${idPrefix ?? 'note'}-title`"
                         :value="title"
                         :disabled="disabled"
-                        maxlength="160"
+                        :maxlength="idPrefix === 'attached-note' ? undefined : 160"
                         autocomplete="off"
                         placeholder="Untitled note"
                         class="fb-note-title"

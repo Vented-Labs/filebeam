@@ -22,12 +22,14 @@ def run(arguments, env, **kwargs):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--desktop", required=True, type=Path)
-    parser.add_argument("--services", required=True, type=Path)
+    parser.add_argument("--desktop", type=Path)
+    parser.add_argument("--services", type=Path)
+    parser.add_argument("--background", type=Path)
     parser.add_argument("--cli", type=Path)
     parser.add_argument("--browser-test", action="append", default=[])
+    parser.add_argument("--webrtc", action="store_true")
     args = parser.parse_args()
-    for path in [args.desktop, args.services, args.cli]:
+    for path in [args.desktop, args.services, args.background, args.cli]:
         if path is not None and not path.is_file():
             parser.error(f"missing native binary: {path}")
     artifacts = ROOT / ".filebeam" / "test-results"
@@ -73,7 +75,8 @@ $app->handleRequest(Illuminate\\Http\\Request::capture());
                "FILEBEAM_CONTAINER": "true", "FILEBEAM_VARIANT": "light", "FILEBEAM_DATA_DIR": str(state),
                "FILEBEAM_FILESYSTEMS": "transfers", "FILEBEAM_FILESTORE_ROOT": str(state / "filestore"),
                "FILEBEAM_STAGING_ROOT": str(state / "staging"),
-               "FILEBEAM_ENABLED_TRANSFER_DRIVERS": '["http"]', "FILEBEAM_DEFAULT_TRANSFER_DRIVER": "http",
+                "FILEBEAM_ENABLED_TRANSFER_DRIVERS": '["http","webrtc"]' if args.webrtc else '["http"]', "FILEBEAM_DEFAULT_TRANSFER_DRIVER": "http",
+                "FILEBEAM_WEBRTC_ICE_SERVERS": "[]", "FILEBEAM_WEBRTC_TESTS": "1" if args.webrtc else "0",
                "FILEBEAM_ANONYMOUS_UPLOADS_ENABLED": "true", "FILEBEAM_REGISTRATION_ENABLED": "true",
                "FILEBEAM_USERNAME_ROUTING_ENABLED": "true", "CHUNK_MAX_SIZE": "65552",
                "FILEBEAM_CREATIONS_PER_HOUR": "300", "FILEBEAM_WRITES_PER_MINUTE": "3000",
@@ -103,8 +106,12 @@ $app->handleRequest(Illuminate\\Http\\Request::capture());
                             log.seek(0)
                             raise RuntimeError("backend did not start:\n" + log.read())
                         time.sleep(.1)
-                run([str(args.desktop.resolve()), origin], env)
-                run([str(args.services.resolve()), "all"], env)
+                if args.desktop:
+                    run([str(args.desktop.resolve()), origin], env)
+                if args.services:
+                    run([str(args.services.resolve()), "all"], env)
+                if args.background:
+                    run([str(args.background.resolve())], {**env, "FILEBEAM_ACCEPTANCE_ALLOW_HTTP": "1"})
                 if args.cli:
                     home = state / "cli-home"
                     home.mkdir()
@@ -112,13 +119,34 @@ $app->handleRequest(Illuminate\\Http\\Request::capture());
                         f'check_updates = false\n[server]\nurl = "{origin}"\n')
                     source = state / "cli-source.bin"
                     source.write_bytes(bytes(range(251)) * 1000)
+                    note = state / "attachment.md"
+                    note.write_text("# PRIVATE_ATTACHED_NOTE\nUnicode 🦀\t\n", encoding="utf-8")
                     cli = [str(args.cli.resolve()), "--home", str(home), "--plain"]
-                    uploaded = run([*cli, "up", str(source)], env, capture_output=True, text=True)
+                    uploaded = run([*cli, "up", str(source), "--note-file", str(note), "--note-title", "Read first", "--note-language", "markdown"], env, capture_output=True, text=True)
                     destination = state / "cli-download"
-                    run([*cli, "down", uploaded.stdout.strip(), "--output", str(destination)], env)
+                    note_output = state / "received-note.md"
+                    run([*cli, "down", uploaded.stdout.strip(), "--output", str(destination), "--note-output", str(note_output)], env)
                     assert (destination / source.name).read_bytes() == source.read_bytes()
+                    assert note_output.read_bytes() == note.read_bytes()
+                    repeated = subprocess.run([*cli, "down", uploaded.stdout.strip(), "--output", str(destination), "--note-output", str(note_output)], cwd=ROOT / "backend", env=env, capture_output=True, timeout=60)
+                    assert repeated.returncode != 0
+                    assert note_output.read_bytes() == note.read_bytes()
+                    stdin_note = "Exact stdin note 🦀\n\t"
+                    stdin_upload = run([*cli, "up", str(source), "--note-file", "-"], env, input=stdin_note, capture_output=True, text=True)
+                    stdout_note = run([*cli, "down", stdin_upload.stdout.strip(), "--output", str(state / "stdin-download"), "--note-output", "-"], env, capture_output=True, text=True)
+                    assert stdout_note.stdout == stdin_note
+                    username = f"cli_note_{port}"
+                    run([*cli, "account", "register", username, "cli-note@example.test", "--password-stdin"], env, input="CLI8!Attachment", capture_output=True, text=True)
+                    run([*cli, "account", "key-setup", "--custody", "self"], env, capture_output=True, text=True)
+                    run([*cli, "up", str(source), "--username", username, "--note-file", str(note)], env, capture_output=True, text=True)
+                    inbox = run([*cli, "inbox", "list"], env, capture_output=True, text=True)
+                    delivery_id = inbox.stdout.strip().split("\n")[0].split("\t")[0]
+                    inbox_note = state / "inbox-note.md"
+                    run([*cli, "inbox", "download", delivery_id, "--output", str(state / "inbox-download"), "--note-output", str(inbox_note)], env, capture_output=True, text=True)
+                    assert inbox_note.read_bytes() == note.read_bytes()
                     assert "auto_update = false" in (home / "config.toml").read_text()
-                    print("PASS CLI migrated-config upload/download hash")
+                    print("PASS CLI migrated-config upload/download hash and attached note")
+                    run([*cli, "account", "logout"], env, capture_output=True, text=True)
                     run([*cli, "account", "register", f"history_{port}", f"history-{port}@example.test", "--password-stdin"], env,
                         input="Native8!History\n", capture_output=True, text=True)
                     owned = run([*cli, "up", str(source), "--retention-hours", "1"], env, capture_output=True, text=True)
@@ -138,7 +166,7 @@ $app->handleRequest(Illuminate\\Http\\Request::capture());
                     subprocess.run([
                         "npx", "playwright", "test", *args.browser_test, "--workers=1",
                         "--output=" + str(artifacts / "native-backend-browser"),
-                    ], cwd=ROOT, env={**env, "BASE_URL": origin}, check=True, timeout=450)
+                     ], cwd=ROOT, env={**env, "BASE_URL": origin, **({"BROWSER_TEST_CLI_BINARY": str(args.cli.resolve())} if args.cli else {})}, check=True, timeout=450)
             finally:
                 server.terminate()
                 server.wait(timeout=10)

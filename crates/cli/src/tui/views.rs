@@ -81,6 +81,47 @@ pub fn render(
         dim(area, buffer, theme);
         cursor = secret(area, buffer, state, theme);
     }
+    if state.attachment_preview
+        && state.prompt.is_none()
+        && let Some(note) = &state.received_attachment
+    {
+        dim(area, buffer, theme);
+        let inner = paint::card(
+            centered(area, 100, area.height.saturating_sub(4)),
+            buffer,
+            theme,
+            false,
+        );
+        paint::line(
+            at(inner, 0, 1),
+            buffer,
+            Line::styled(
+                format!(
+                    "Attached note · {} · {}",
+                    clean(note.title.as_deref().unwrap_or("Untitled")),
+                    clean(&note.language)
+                ),
+                theme.strong(),
+            ),
+        );
+        Paragraph::new(
+            note.text
+                .split('\n')
+                .map(clean)
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+        .style(theme.strong())
+        .wrap(Wrap { trim: false })
+        .scroll((state.attachment_scroll, 0))
+        .render(at(inner, 2, inner.height.saturating_sub(4)), buffer);
+        paint::line(
+            at(inner, inner.height.saturating_sub(1), 1),
+            buffer,
+            Line::styled("↑/↓ scroll · c copy · Esc close · o reopen", theme.dim()),
+        );
+        cursor = None;
+    }
     cursor
 }
 
@@ -211,10 +252,12 @@ fn send(area: Rect, buffer: &mut Buffer, state: &mut State, theme: Theme) -> Opt
         at(area, 0, 1),
         buffer,
         Line::styled(
-            if state.send_notes {
+            if state.attachment_mode {
+                "Files + attached note · Enter saves draft · n switch"
+            } else if state.send_notes {
                 "Files / [Notes] · n switch · v Paste"
             } else {
-                "[Files] / Notes · n switch · v Paste"
+                "[Files] / Notes · n switch · v Paste · a attach note"
             },
             theme.strong(),
         ),
@@ -1061,13 +1104,29 @@ fn note_composer(
     paint::line(
         at(area, 0, 1),
         buffer,
-        Line::styled(format!("{} / 5 · {label}", index + 1), theme.dim()),
+        Line::styled(
+            format!(
+                "{} / {} · {label}{}",
+                index + 1,
+                if state.attachment_mode { 3 } else { 5 },
+                if state.attachment_mode {
+                    " · attached to files"
+                } else {
+                    ""
+                }
+            ),
+            theme.dim(),
+        ),
     );
     paint::line(
         at(area, area.height.saturating_sub(1), 1),
         buffer,
         Line::styled(
-            if state.note_editing {
+            if state.attachment_mode && state.note_editing {
+                "Shift+Tab field · Esc done · Ctrl+Enter save draft"
+            } else if state.attachment_mode {
+                "e edit · Tab next field · Enter save draft"
+            } else if state.note_editing {
                 "Shift+Tab field · Esc done · Ctrl+Enter share"
             } else {
                 "e edit · Tab next field · Enter share"

@@ -8,8 +8,6 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   test:
-    # Mobile CI is paused pending device QA.
-    if: false
     name: iOS build and tests (iOS ${{ matrix.os }})
     runs-on: blacksmith-6vcpu-macos-15
     timeout-minutes: 55

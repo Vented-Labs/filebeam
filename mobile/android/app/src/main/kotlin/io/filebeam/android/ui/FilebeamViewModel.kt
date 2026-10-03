@@ -293,6 +293,7 @@ class FilebeamViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun canSubmitFiles(): Boolean {
+        if (sendDraft.attachedNote?.attachmentError() != null) return false
         val policy = (activeSendDiscovery as? SendDiscoveryState.Ready)?.policy ?: return false
         if (!policy.anonymousUploads && !hasSessionFor(policy.key)) return false
         if (transport !in policy.enabledTransports) return false
@@ -323,7 +324,7 @@ class FilebeamViewModel(application: Application) : AndroidViewModel(application
         val driver = sendDraft.driver ?: policy.defaultDriver
         coordinator.upload(UploadRequest(sendDraft.sources.map(SelectedSource::uri), transportForDriver(driver), archive, turboTransfer, passwordProtected,
             retentionHours(retentionHours).getOrNull(), recipients = recipient.username.takeIf(String::isNotBlank)?.let(::listOf) ?: emptyList(), recipient = recipient.identity,
-            includeKeyInLink = sendDraft.includeKeyInLink, driver = driver))
+            includeKeyInLink = sendDraft.includeKeyInLink, driver = driver, attachedNote = sendDraft.attachedNote?.let { io.filebeam.rust.AttachedNote(it.body, it.title.takeIf(String::isNotEmpty), it.language) }))
         navigate(Destination.Transfers)
     }
 
@@ -350,6 +351,7 @@ class FilebeamViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch { app.settings.save(next) }
     }
 
+    fun updateAttachedNote(note: NoteDraft?) { updateSend { it.copy(attachedNote = note) } }
     private fun updateSend(transform: (SendDraft) -> SendDraft) { sendDraft = transform(sendDraft); persistDrafts() }
     private fun persistDrafts() {
         draftRevision++
@@ -357,6 +359,7 @@ class FilebeamViewModel(application: Application) : AndroidViewModel(application
     }
     private fun restore(value: JSONObject) {
         sendDraft = SendDraft(
+            attachedNote = value.optJSONObject("attachedNote")?.let { NoteDraft(title = it.optString("title"), body = it.optString("body"), language = it.optString("language", "plain")) },
             sources = value.optJSONArray("sources")?.let { array -> (0 until array.length()).map { index -> array.getJSONObject(index) }.map { source ->
                 SelectedSource(Uri.parse(source.getString("uri")), source.getString("identity"), source.getString("name"), source.optLong("size").takeIf { source.has("size") }, source.optString("path").takeIf(String::isNotBlank), source.optString("error").takeIf(String::isNotBlank))
             } } ?: emptyList(),
@@ -377,6 +380,7 @@ class FilebeamViewModel(application: Application) : AndroidViewModel(application
         return SelectedSource(uri, identity, name, size, path, error)
     }
     private fun SendDraft.toJson() = JSONObject().put("sources", JSONArray(sources.map { source -> JSONObject().put("uri", source.uri).put("identity", source.identity).put("name", source.displayName).putOpt("size", source.sizeBytes).putOpt("path", source.relativePath).putOpt("error", source.error) }))
+        .putOpt("attachedNote", attachedNote?.let { JSONObject().put("title", it.title).put("body", it.body).put("language", it.language) })
         .put("transport", transport.name).put("archive", archive).put("turbo", turbo).put("password", passwordProtected).put("retention", retentionHours).put("recipient", recipient.username).put("includeKey", includeKeyInLink).putOpt("driver", driver).put("sendContent", sendContent.name)
         .putOpt("recipientIdentity", recipient.identity?.let { identity -> JSONObject().put("username", identity.username).put("origin", identity.origin).put("id", identity.id.toString()).put("bundle", identity.accountKeyBundleId.toString()).put("publicKey", identity.publicKey) })
     private fun NoteDraft.toJson() = JSONObject().put("title", title).put("body", body).put("passwordEnabled", passwordEnabled).put("retention", retentionHours).put("language", language).put("burn", burnAfterRead).put("live", live).put("includeKey", includeKeyInLink).putOpt("driver", driver)

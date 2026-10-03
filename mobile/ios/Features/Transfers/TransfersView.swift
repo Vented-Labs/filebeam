@@ -130,6 +130,7 @@ struct DynamicTransferDetailView: View {
     var body: some View {
         List {
             Section("Status") { ReceiveProgress(snapshot: snapshot) }
+            if let note = model.receivedAttachments[snapshot.id] { Section("Attached note") { AttachedNoteView(note: note) } }
             if let activity { ActivitySection(activity: activity) }
             verifiedResult
             actions

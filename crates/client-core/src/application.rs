@@ -141,8 +141,8 @@ struct StoredJob {
 }
 
 enum EntryJob {
-    Running(ManagedJob),
-    Stored(StoredJob),
+    Running(Box<ManagedJob>),
+    Stored(Box<StoredJob>),
 }
 
 impl EntryJob {
@@ -399,7 +399,7 @@ impl ClientRuntime {
                 Entry {
                     kind,
                     origin: None,
-                    job: EntryJob::Running(ManagedJob::new(job)),
+                    job: EntryJob::Running(Box::new(ManagedJob::new(job))),
                     export: ExportState::NotVerified,
                     recovered_actions: None,
                 },
@@ -427,9 +427,11 @@ impl ClientRuntime {
         } else {
             JobState::Failed
         };
-        let mut progress = crate::control::Progress::default();
-        progress.done = detail.done;
-        progress.total = Some(detail.total);
+        let progress = crate::control::Progress {
+            done: detail.done,
+            total: Some(detail.total),
+            ..Default::default()
+        };
         let export = if detail.verified_privately {
             ExportState::AwaitingDestination {
                 paths: detail.verified_paths.clone(),
@@ -455,7 +457,7 @@ impl ClientRuntime {
                 Entry {
                     kind,
                     origin: detail.origin,
-                    job: EntryJob::Stored(StoredJob {
+                    job: EntryJob::Stored(Box::new(StoredJob {
                         snapshot: JobSnapshot {
                             state,
                             checkpoint_id: Some(detail.id),
@@ -468,7 +470,7 @@ impl ClientRuntime {
                             peer_warning: None,
                             secret_retry: None,
                         },
-                    }),
+                    })),
                     export,
                     recovered_actions: Some(actions),
                 },
@@ -608,7 +610,7 @@ impl ClientRuntime {
                         Entry {
                             kind,
                             origin: snapshot.origin,
-                            job: EntryJob::Running(ManagedJob::new(job)),
+                            job: EntryJob::Running(Box::new(ManagedJob::new(job))),
                             export: snapshot.export,
                             recovered_actions: None,
                         },

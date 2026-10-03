@@ -53,6 +53,15 @@ struct SendComposerView: View {
             }
             HStack { Button(model.drafts.files.sources.isEmpty ? "Choose files" : "Add more") { pickerAllowsFolders = false; showingPicker = true }.buttonStyle(.bordered); Button("Choose folder") { pickerAllowsFolders = true; showingPicker = true }.buttonStyle(.bordered) }
             Button { showingOptions = true } label: { Label(fileSummary, systemImage: "slider.horizontal.3") }.buttonStyle(.bordered)
+            Toggle("Attach note", isOn: Binding(get: { model.drafts.files.options.attachedNote != nil }, set: { model.drafts.files.options.attachedNote = $0 ? AttachedNoteDraft() : nil }))
+            if model.drafts.files.options.attachedNote != nil {
+                Text("The note uses this transfer's encryption and expiry.").font(.footnote).foregroundStyle(.secondary)
+                TextField("Note title (optional)", text: attachmentBinding(\.title))
+                Picker("Note language", selection: attachmentBinding(\.language)) { ForEach(NoteLanguage.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) } }
+                TextEditor(text: attachmentBinding(\.text)).font(.system(.body, design: .monospaced)).frame(minHeight: 200).autocorrectionDisabled().textInputAutocapitalization(.never)
+                Text("\(model.drafts.files.options.attachedNote?.text.utf8.count ?? 0) / 65536 bytes").font(.footnote)
+                if let error = model.drafts.files.options.attachedNote?.validationError { InlineNotice(text: error) }
+            }
         }
     }
 
@@ -66,6 +75,13 @@ struct SendComposerView: View {
         }
     }
 
+    private func attachmentBinding<Value>(_ path: WritableKeyPath<AttachedNoteDraft, Value>) -> Binding<Value> {
+        Binding(get: { (model.drafts.files.options.attachedNote ?? AttachedNoteDraft())[keyPath: path] }, set: { value in
+            var draft = model.drafts.files.options.attachedNote ?? AttachedNoteDraft()
+            draft[keyPath: path] = value
+            model.drafts.files.options.attachedNote = draft
+        })
+    }
     private var fileSummary: String { "\(model.drafts.files.options.transport == .http ? "HTTP" : "WebRTC") · \(model.drafts.files.options.includeKeyInLink ? "Key in link" : "Key separate")" }
     private var noteSummary: String { "\(model.drafts.note.options.live ? "WebRTC" : "HTTP") · \(model.drafts.note.options.includeKeyInLink ? "Key in link" : "Key separate")" }
     private func sourceDescription(_ source: FileSource) -> String { switch source.state { case .ready: return source.sizeBytes.map(\.filebeamBytes) ?? "Size pending"; case .sizePending: return "Size pending"; case .importing: return "Preparing"; case let .importFailed(error): return error } }

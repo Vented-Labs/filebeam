@@ -137,6 +137,16 @@ fn basic_prepared_receive(client: &DesktopClient, root: &Path) -> Result<()> {
             .cloned()
     })
     .context("prepare receive")?;
+    let note = preview
+        .attached_note
+        .as_ref()
+        .context("attachment missing on manifest unlock")?;
+    if note.text != "Desktop attachment 🦀\n"
+        || note.title.as_deref() != Some("Read first")
+        || note.language != "markdown"
+    {
+        bail!("desktop attachment did not round trip");
+    }
     let operation_id = preview.operation_id.context("prepared operation missing")?;
     let selected = preview
         .items
@@ -345,6 +355,11 @@ fn send(
     include_key: bool,
 ) -> Result<()> {
     client.dispatch(ClientCommand::SendFiles(SendFiles {
+        attached_note: Some(filebeam_client_core::protocol::AttachedNote {
+            text: "Desktop attachment 🦀\n".into(),
+            title: Some("Read first".into()),
+            language: "markdown".into(),
+        }),
         paths,
         directory_mode: if archive {
             DirectoryMode::Zip

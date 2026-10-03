@@ -201,6 +201,7 @@ impl TransferClient {
             instance,
             paths,
             UploadOptions {
+                attached_note: None,
                 transport,
                 turbo: false,
                 archive,
@@ -520,6 +521,14 @@ pub(crate) fn source_spec(
 }
 
 pub(crate) fn upload_options(options: UploadOptions) -> Result<protocol::UploadOptions> {
+    let attached_note = options.attached_note.map(|note| protocol::AttachedNote {
+        text: note.text,
+        title: note.title,
+        language: note.language,
+    });
+    if let Some(note) = &attached_note {
+        note.validate().map_err(invalid)?;
+    }
     if options.turbo
         && (!matches!(options.transport, Transport::Http) || options.recipient.is_some())
     {
@@ -557,6 +566,7 @@ pub(crate) fn upload_options(options: UploadOptions) -> Result<protocol::UploadO
         }
     };
     Ok(protocol::UploadOptions {
+        attached_note,
         snapshot_paths: Vec::new(),
         transport: match options.transport {
             Transport::Http => protocol::Transport::Http,

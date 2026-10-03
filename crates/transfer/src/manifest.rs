@@ -1,13 +1,61 @@
 use crate::{AEAD_TAG_BYTES, MAX_CHUNKS, MAX_CIPHERTEXT_BYTES};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Manifest {
     #[serde(default)]
+    pub attached_note: Option<AttachedNote>,
+    #[serde(default)]
     pub join_token: Option<String>,
     pub version: u8,
     pub items: Vec<ManifestItem>,
+}
+
+pub const MAX_ATTACHED_NOTE_BYTES: usize = 64 * 1024;
+
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttachedNote {
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    pub language: String,
+}
+
+impl std::fmt::Debug for AttachedNote {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("AttachedNote([redacted])")
+    }
+}
+
+impl AttachedNote {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.text.is_empty() || self.text.len() > MAX_ATTACHED_NOTE_BYTES {
+            return Err("attached note text must contain 1 byte to 64 KiB of UTF-8".into());
+        }
+        if self
+            .title
+            .as_ref()
+            .is_some_and(|title| title.chars().count() > 160)
+        {
+            return Err("attached note title must contain at most 160 characters".into());
+        }
+        if !matches!(
+            self.language.as_str(),
+            "plain"
+                | "php"
+                | "dotenv"
+                | "javascript"
+                | "typescript"
+                | "json"
+                | "markdown"
+                | "css"
+                | "html"
+        ) {
+            return Err("unsupported attached note language".into());
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -41,6 +89,9 @@ pub fn validate_manifest(
     chunk_bytes: u64,
     server_items: &[ManifestServerItem],
 ) -> Result<(), String> {
+    if let Some(note) = &manifest.attached_note {
+        note.validate()?;
+    }
     if driver == "webrtc" && !manifest.join_token.as_deref().is_some_and(valid_capability) {
         return Err("live manifest has an invalid join token".into());
     }
@@ -142,6 +193,44 @@ fn is_windows_device_name(name: &str) -> bool {
         || (stem.len() == 4
             && (stem.starts_with("COM") || stem.starts_with("LPT"))
             && matches!(stem.as_bytes()[3], b'1'..=b'9'))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn attachment_limits_count_utf8_bytes_and_unicode_title_characters() {
+        let mut note = AttachedNote {
+            text: "🦀".repeat(16_384),
+            title: Some("🦀".repeat(160)),
+            language: "markdown".into(),
+        };
+        note.validate().unwrap();
+        note.text.push('x');
+        assert!(note.validate().is_err());
+        note.text = " \n\t".into();
+        note.title.as_mut().unwrap().push('x');
+        assert!(note.validate().is_err());
+        note.title = None;
+        note.validate().unwrap();
+        assert!(!format!("{note:?}").contains(&note.text));
+        note.language = "executable".into();
+        assert!(note.validate().is_err());
+    }
+
+    #[test]
+    fn old_manifests_remain_readable_and_malformed_attachments_fail() {
+        let mut value = serde_json::json!({"version":1,"items":[]});
+        assert!(
+            serde_json::from_value::<Manifest>(value.clone())
+                .unwrap()
+                .attached_note
+                .is_none()
+        );
+        value["attached_note"] = serde_json::json!({"text":42,"language":"plain"});
+        assert!(serde_json::from_value::<Manifest>(value).is_err());
+    }
 }
 
 fn base64url_value(byte: u8) -> Option<u8> {

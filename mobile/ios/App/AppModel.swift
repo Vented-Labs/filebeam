@@ -27,6 +27,7 @@ final class AppModel {
     var receiveInput = ""
     var receiveError: String?
     var receiveJob: TransferSnapshot?
+    var receivedAttachments: [TransferJobID: AttachedNoteDraft] = [:]
     var activePrompt: PromptContext?
     var pendingReceiveRoute: ReceiveRouteConfirmation?
     var pendingNoteInspection: NoteInspection?
@@ -370,6 +371,7 @@ final class AppModel {
     func refresh(jobID: TransferJobID) async {
         do {
             let snapshot = try await service.snapshot(jobID: jobID)
+            if let note = try await service.attachedNote(jobID: jobID) { receivedAttachments[jobID] = note }
             if snapshot.kind == .note, (snapshot.phase == .verifiedAwaitingExport || snapshot.phase == .complete), let note = try await service.takeVerifiedNote(jobID: jobID) {
                 verifiedNotes[jobID] = note
                 accept(snapshot.withVerifiedNote(note))

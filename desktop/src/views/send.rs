@@ -43,6 +43,10 @@ enum Transport {
 
 /// The retained composer. It owns drafts and picker state; rendering only projects that state.
 pub struct SendPanel {
+    attach_note: bool,
+    attached_title: Entity<InputState>,
+    attached_editor: Entity<EditorState>,
+    attached_language: Entity<SelectState<Vec<&'static str>>>,
     client: Arc<DesktopClient>,
     window_handle: AnyWindowHandle,
     #[allow(dead_code)]
@@ -125,6 +129,27 @@ impl SendPanel {
         let notes = Preferences::new(&policy, window, cx);
         let note_title = cx.new(|cx| InputState::new(window, cx).placeholder("Untitled note"));
         let note_editor = cx.new(|cx| EditorState::new(window, cx).language("text"));
+        let attached_title =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Attached note title (optional)"));
+        let attached_editor = cx.new(|cx| EditorState::new(window, cx).language("text"));
+        let attached_language = cx.new(|cx| {
+            SelectState::new(
+                vec![
+                    "plain",
+                    "php",
+                    "dotenv",
+                    "javascript",
+                    "typescript",
+                    "json",
+                    "markdown",
+                    "css",
+                    "html",
+                ],
+                Some(gpui_component::IndexPath::default()),
+                window,
+                cx,
+            )
+        });
         let language = cx.new(|cx| {
             SelectState::new(
                 vec![
@@ -150,6 +175,10 @@ impl SendPanel {
         let inspector_width = crate::platform::preferences::load(&home).inspector_width;
 
         let mut panel = Self {
+            attach_note: false,
+            attached_title,
+            attached_editor,
+            attached_language,
             client,
             window_handle: window.window_handle(),
             home,
@@ -179,6 +208,7 @@ impl SendPanel {
             &self.notes.password,
             &self.notes.recipient,
             &self.note_title,
+            &self.attached_title,
         ] {
             cx.subscribe(input, |this, _, event: &InputEvent, cx| match event {
                 InputEvent::Change => {
@@ -219,6 +249,30 @@ impl SendPanel {
         )
         .detach();
         let editor = self.note_editor.clone();
+        cx.subscribe(&self.attached_editor, |this, _, _: &InputEvent, cx| {
+            this.status = None;
+            cx.notify();
+        })
+        .detach();
+        let attached_editor = self.attached_editor.clone();
+        cx.subscribe(
+            &self.attached_language,
+            move |_, _, event: &SelectEvent<Vec<&'static str>>, cx| {
+                if let SelectEvent::Confirm(Some(language)) = event {
+                    attached_editor.update(cx, |editor, cx| {
+                        editor.set_highlighter(
+                            if *language == "plain" {
+                                "plaintext"
+                            } else {
+                                language
+                            },
+                            cx,
+                        )
+                    });
+                }
+            },
+        )
+        .detach();
         cx.subscribe(
             &self.language,
             move |_, _, event: &SelectEvent<Vec<&'static str>>, cx| {
@@ -306,7 +360,7 @@ impl SendPanel {
         }
         let preferences = self.active_preferences();
         let snapshot = self.client.snapshot();
-        let command = match build_command_for_policy(
+        let mut command = match build_command_for_policy(
             self.mode,
             self.paths.clone(),
             self.note_editor.read(cx).value().to_string(),
@@ -328,6 +382,27 @@ impl SendPanel {
                 return;
             }
         };
+        if let ClientCommand::SendFiles(files) = &mut command
+            && self.attach_note
+        {
+            let note = filebeam_client_core::protocol::AttachedNote {
+                text: self.attached_editor.read(cx).value().to_string(),
+                title: self.optional_text(&self.attached_title, cx),
+                language: self
+                    .attached_language
+                    .read(cx)
+                    .selected_value()
+                    .copied()
+                    .unwrap_or("plain")
+                    .into(),
+            };
+            if let Err(error) = note.validate() {
+                self.status = Some(error);
+                cx.notify();
+                return;
+            }
+            files.attached_note = Some(note);
+        }
         self.status = match self.client.dispatch(command) {
             Ok(()) => Some("Queued for local encryption. Your draft remains available.".into()),
             Err(error) => {
@@ -891,6 +966,7 @@ fn build_command_for_policy(
                 return Err("This instance requires an authenticated account for sharing.".into());
             }
             Ok(ClientCommand::SendFiles(SendFiles {
+                attached_note: None,
                 paths,
                 directory_mode: if preferences.zip_directories {
                     DirectoryMode::Zip
@@ -1498,6 +1574,15 @@ impl Render for SendPanel {
                             })
                                     .into_any_element(),
                             )
+                            .child(Button::new("attach-note").label(if self.attach_note { "Remove attached note" } else { "Attach note" }).ghost().on_click(cx.listener(|this, _, _, cx| { this.attach_note = !this.attach_note; cx.notify(); })))
+                            .when(self.attach_note, |this| this.child(
+                                div().p(px(16.)).flex().flex_col().gap(px(8.))
+                                    .child("The note uses this transfer's encryption and expiry.")
+                                    .child(Input::new(&self.attached_title).id("attached-note-title"))
+                                    .child(Select::new(&self.attached_language).id("attached-note-language"))
+                                    .child(Editor::new(&self.attached_editor).aria_label("Attached note contents").h(px(180.)))
+                                    .child(format!("{} / 65536 UTF-8 bytes", self.attached_editor.read(cx).value().len()))
+                            ))
                             .into_any_element()
                     } else {
                         let note_characters = self.note_editor.read(cx).value().chars().count();

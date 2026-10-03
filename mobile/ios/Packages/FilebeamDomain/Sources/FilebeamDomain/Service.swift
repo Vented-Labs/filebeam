@@ -42,6 +42,7 @@ public protocol FilebeamService: Sendable {
     func startInboxReceive(_ request: InboxReceiveRequest) async throws -> TransferSnapshot
     func resumeInboxReceive(_ request: InboxResumeRequest) async throws -> TransferSnapshot
     func snapshot(jobID: TransferJobID) async throws -> TransferSnapshot
+    func attachedNote(jobID: TransferJobID) async throws -> AttachedNoteDraft?
     func transferActivity(checkpointID: String) async throws -> TransferActivity
     func savedTransfers() async throws -> [TransferRecord]
     func pause(jobID: TransferJobID) async throws
@@ -90,6 +91,7 @@ public protocol FilebeamService: Sendable {
 }
 
 public extension FilebeamService {
+    func attachedNote(jobID: TransferJobID) async throws -> AttachedNoteDraft? { nil }
     /// Existing adapters remain source-compatible while they migrate their local export catalog.
     func recordExport(jobID: TransferJobID, paths: [String]) async throws { throw FilebeamDomainError.storage("The export receipt could not be retained.") }
     func inspectPayload(instance: FilebeamInstance, input: String) async throws -> TransferInspection { throw FilebeamDomainError.unavailable("Transfer inspection is not available in this build.") }

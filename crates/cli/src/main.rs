@@ -93,10 +93,20 @@ enum Command {
         /// Deliver to one validated account username. This requires HTTP without Turbo or password protection.
         #[arg(long)]
         username: Option<String>,
+        /// Attach UTF-8 text from a file, or use - to read standard input (64 KiB maximum).
+        #[arg(long)]
+        note_file: Option<PathBuf>,
+        #[arg(long, requires = "note_file")]
+        note_title: Option<String>,
+        #[arg(long, requires = "note_file")]
+        note_language: Option<String>,
     },
     /// Download and verify a shared link.
     Down {
         link: String,
+        /// Save the attached note to a new file, or use - for stdout.
+        #[arg(long)]
+        note_output: Option<PathBuf>,
         #[arg(short, long, default_value = ".")]
         output: PathBuf,
     },
@@ -105,7 +115,12 @@ enum Command {
     /// List resumable transfers stored on this device.
     Transfers,
     /// Resume a saved transfer.
-    Resume { id: String },
+    Resume {
+        id: String,
+        /// Export the attached note after a resumed download; - writes to stdout.
+        #[arg(long)]
+        note_output: Option<PathBuf>,
+    },
     /// Discard a saved transfer and its local resume state.
     Cancel { id: String },
     /// Revoke the remote upload using its durable delete capability.
@@ -240,6 +255,9 @@ enum InboxCommand {
     /// Decrypt metadata and download a delivery with the stored custody key.
     Download {
         id: String,
+        /// Export the attached note to a new file; - writes to stdout.
+        #[arg(long)]
+        note_output: Option<PathBuf>,
         #[arg(short, long, default_value = ".")]
         output: PathBuf,
     },
@@ -341,6 +359,9 @@ fn main() -> Result<()> {
             zip,
             individual,
             username,
+            note_file,
+            note_title,
+            note_language,
         }) => {
             if files.is_empty() {
                 anyhow::bail!("provide at least one file or directory");
@@ -357,6 +378,24 @@ fn main() -> Result<()> {
             let mut options = transport.upload_options(turbo, password, retention_hours)?;
             options.authentication =
                 services::client(&config, &instance)?.upload_authentication()?;
+            if let Some(path) = note_file {
+                let text = if path == std::path::Path::new("-") {
+                    services::read_note_text(std::io::stdin(), "attached note")?
+                } else {
+                    services::read_note_text(
+                        std::fs::File::open(&path)
+                            .with_context(|| format!("read note input {}", path.display()))?,
+                        "attached note",
+                    )?
+                };
+                let note = protocol::AttachedNote {
+                    text,
+                    title: note_title,
+                    language: note_language.unwrap_or_else(|| "plain".into()),
+                };
+                note.validate().map_err(anyhow::Error::msg)?;
+                options.attached_note = Some(note);
+            }
             if let Some(username) = username {
                 if turbo || password || transport == Transport::Webrtc {
                     anyhow::bail!("username delivery requires HTTP without --turbo or --password");
@@ -382,16 +421,29 @@ fn main() -> Result<()> {
                 output::result(&link, cli.plain)?;
             }
         }
-        Some(Command::Down { link, output }) => {
+        Some(Command::Down {
+            link,
+            output,
+            note_output,
+        }) => {
+            let note_stdout = note_output.as_deref() == Some(std::path::Path::new("-"));
             let paths = inline::run(
                 &config,
                 &instance,
-                app::Request::Download { link, output },
+                app::Request::Download {
+                    link,
+                    output,
+                    note_output,
+                },
                 cli.plain,
                 cli.accept_peer_address_exposure,
             )?;
             for path in paths {
-                output::result(&path, cli.plain)?;
+                if note_stdout {
+                    eprintln!("{}", presentation::clean(&path));
+                } else {
+                    output::result(&path, cli.plain)?;
+                }
             }
         }
         Some(Command::Update) => println!("{}", update::check(&config)?),
@@ -451,7 +503,8 @@ fn main() -> Result<()> {
                 );
             }
         }
-        Some(Command::Resume { id }) => {
+        Some(Command::Resume { id, note_output }) => {
+            let note_stdout = note_output.as_deref() == Some(std::path::Path::new("-"));
             let transfer = protocol::saved_transfers(&config.home.join("transfers"))?
                 .into_iter()
                 .find(|transfer| transfer.id == id)
@@ -461,17 +514,25 @@ fn main() -> Result<()> {
                 "download" => app::Direction::Download,
                 _ => unreachable!("saved transfer direction is validated"),
             };
+            if note_output.is_some() && direction != app::Direction::Download {
+                anyhow::bail!("attached-note exports require a downloaded transfer");
+            }
             for value in inline::run(
                 &config,
                 &instance,
                 app::Request::Resume {
+                    note_output,
                     id: transfer.id,
                     direction,
                 },
                 cli.plain,
                 cli.accept_peer_address_exposure,
             )? {
-                output::result(&value, cli.plain)?;
+                if note_stdout {
+                    eprintln!("{}", presentation::clean(&value));
+                } else {
+                    output::result(&value, cli.plain)?;
+                }
             }
         }
         Some(Command::Cancel { id }) => {
@@ -507,7 +568,9 @@ fn main() -> Result<()> {
             InboxCommand::Download {
                 id,
                 output: destination,
+                note_output,
             } => {
+                let note_stdout = note_output.as_deref() == Some(std::path::Path::new("-"));
                 let client = services::client(&config, &instance)?;
                 let key = services::stored_private_key(&config, &instance)?;
                 let metadata = client.account().inbox_metadata(&id)?;
@@ -520,6 +583,7 @@ fn main() -> Result<()> {
                     &config,
                     &instance,
                     app::Request::InboxDownload {
+                        note_output,
                         id,
                         output: destination,
                         key: key.to_vec(),
@@ -528,7 +592,11 @@ fn main() -> Result<()> {
                     cli.plain,
                     cli.accept_peer_address_exposure,
                 )? {
-                    output::result(&path, cli.plain)?;
+                    if note_stdout {
+                        eprintln!("{}", presentation::clean(&path));
+                    } else {
+                        output::result(&path, cli.plain)?;
+                    }
                 }
             }
         },
@@ -820,7 +888,7 @@ mod tests {
         .unwrap();
         assert_eq!(cli.max_concurrency, Some(4));
         assert!(cli.webrtc_relay_only);
-        assert!(matches!(cli.command, Some(Command::Resume { id }) if id == "job-1"));
+        assert!(matches!(cli.command, Some(Command::Resume { id, .. }) if id == "job-1"));
         assert!(Cli::try_parse_from(["beam", "--memory-limit-mib", "32", "transfers"]).is_err());
     }
 

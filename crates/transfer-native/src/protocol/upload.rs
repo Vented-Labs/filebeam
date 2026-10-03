@@ -67,6 +67,8 @@ const WEBRTC_MAX_PEERS: usize = 8;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) struct UploadJob {
+    #[serde(default)]
+    sealed_attached_note: Option<String>,
     pub version: u8,
     pub id: String,
     pub direction: String,
@@ -187,6 +189,8 @@ struct Recipient {
 
 #[derive(Serialize)]
 struct TurboDescriptor<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    attached_note: Option<super::AttachedNote>,
     version: u8,
     purpose: &'a str,
     chunk_bytes: u64,
@@ -738,8 +742,17 @@ async fn run_new(
                 .map(|source| (file.name.clone(), source))
         })
         .collect::<Result<Vec<_>>>()?;
+    if let Some(note) = &options.attached_note {
+        note.validate().map_err(anyhow::Error::msg)?;
+        let manifest = serde_json::json!({"version":1,"attached_note":note,"items":sources.iter().map(|(name, source)| serde_json::json!({"id":"0".repeat(26),"name":name,"type":"application/octet-stream","size":source.bytes,"nonce_prefix":"0".repeat(22),"chunk_count":source.bytes.div_ceil(info.chunk_bytes).max(1),"digest":{"algorithm":"sha256","value":"0".repeat(64)}})).collect::<Vec<_>>()});
+        let plain_bytes = serde_json::to_vec(&manifest)?.len();
+        if ((plain_bytes + 16) * 4).div_ceil(3) + 512 > 524_288 {
+            bail!("encrypted transfer metadata exceeds 512 KiB; shorten the note or filenames");
+        }
+    }
     control.totals(total, sources.len());
     let mut job = UploadJob {
+        sealed_attached_note: None,
         version: 1,
         id: store
             .path()
@@ -785,6 +798,10 @@ async fn run_new(
         items: Vec::new(),
         chunks: Vec::new(),
     };
+    if let Some(note) = &options.attached_note {
+        unlock_job(&mut job, control)?;
+        seal_attached_note(&mut job, note)?;
+    }
     store.save(&job)?; // The job exists before the non-idempotent reservation request.
     let create = Create {
         kind: "files",
@@ -875,6 +892,9 @@ async fn run_new(
         });
     }
     store.save(&job)?; // Reservation credentials and nonce material are durable before encryption.
+    if job.sealed_attached_note.is_some() {
+        encrypted_manifest(&job, control)?;
+    }
     job.state = "preparing".into();
     store.save(&job)?;
     control.set_checkpoint_id(job.id.clone());
@@ -2527,6 +2547,9 @@ fn encrypted_manifest(job: &UploadJob, control: &Control) -> Result<String> {
         .as_deref()
         .context("upload was not reserved")?;
     let mut manifest = serde_json::json!({"version":1,"items":job.items.iter().map(|i| serde_json::json!({"id":i.id,"name":i.name,"type":"application/octet-stream","size":i.bytes,"nonce_prefix":i.nonce_prefix,"chunk_count":i.chunk_count,"digest":{"algorithm":"sha256","value":i.digest}})).collect::<Vec<_>>()});
+    if let Some(note) = open_attached_note(job)? {
+        manifest["attached_note"] = serde_json::to_value(note)?;
+    }
     if job.driver == "webrtc" {
         manifest["join_token"] = serde_json::Value::String(
             job.join_token
@@ -2557,7 +2580,48 @@ fn encrypted_manifest(job: &UploadJob, control: &Control) -> Result<String> {
             "parallelism": 1,
         });
     }
-    Ok(serde_json::to_string(&envelope)?)
+    bounded_envelope(&envelope)
+}
+
+fn open_attached_note(job: &UploadJob) -> Result<Option<super::AttachedNote>> {
+    let Some(sealed) = &job.sealed_attached_note else {
+        return Ok(None);
+    };
+    let envelope: super::Envelope = serde_json::from_str(sealed)?;
+    let plain = filebeam_encryption::decrypt_manifest(
+        &job.master_key,
+        &decode(&envelope.nonce_prefix)?,
+        &decode(&envelope.ciphertext)?,
+        format!("filebeam:local:v1:{}:attached-note", job.id).as_bytes(),
+    )?;
+    let note: super::AttachedNote = serde_json::from_slice(&plain)?;
+    note.validate().map_err(anyhow::Error::msg)?;
+    Ok(Some(note))
+}
+
+fn seal_attached_note(job: &mut UploadJob, note: &super::AttachedNote) -> Result<()> {
+    note.validate().map_err(anyhow::Error::msg)?;
+    let prefix = generate_nonce_prefix()?;
+    let plain = serde_json::to_vec(note)?;
+    let cipher = encrypt_manifest(
+        &job.master_key,
+        &prefix,
+        &plain,
+        format!("filebeam:local:v1:{}:attached-note", job.id).as_bytes(),
+    )?;
+    job.sealed_attached_note = Some(
+        serde_json::json!({"v":1,"nonce_prefix":encode(&prefix),"ciphertext":encode(&cipher)})
+            .to_string(),
+    );
+    Ok(())
+}
+
+fn bounded_envelope(envelope: &serde_json::Value) -> Result<String> {
+    let value = serde_json::to_string(envelope)?;
+    if value.len() > 524_288 {
+        bail!("encrypted transfer metadata exceeds 512 KiB; shorten the note or filenames");
+    }
+    Ok(value)
 }
 
 fn turbo_descriptor(job: &UploadJob, transfer: &str, control: &Control) -> Result<String> {
@@ -2565,6 +2629,7 @@ fn turbo_descriptor(job: &UploadJob, transfer: &str, control: &Control) -> Resul
         bail!("Turbo requires an anonymous HTTP file transfer");
     }
     let descriptor = TurboDescriptor {
+        attached_note: open_attached_note(job)?,
         version: 1,
         purpose: "turbo-descriptor",
         chunk_bytes: job.chunk_bytes,
@@ -2604,7 +2669,7 @@ fn turbo_descriptor(job: &UploadJob, transfer: &str, control: &Control) -> Resul
             "parallelism": 1,
         });
     }
-    Ok(serde_json::to_string(&envelope)?)
+    bounded_envelope(&envelope)
 }
 
 async fn publish_turbo_descriptor(
@@ -2692,6 +2757,7 @@ mod background_tests {
             .into_owned();
         let checksum = hex::encode(Sha256::digest([7_u8; 17]));
         UploadJob {
+            sealed_attached_note: None,
             version: 1,
             id,
             direction: "upload".into(),
@@ -2909,6 +2975,7 @@ mod tests {
     #[test]
     fn checkpoint_header_has_the_generic_upload_summary_fields() {
         let job = UploadJob {
+            sealed_attached_note: None,
             version: 1,
             id: "job".into(),
             direction: "upload".into(),
@@ -2955,6 +3022,7 @@ mod tests {
 
     fn job(state: &str) -> UploadJob {
         UploadJob {
+            sealed_attached_note: None,
             version: 1,
             id: "job".into(),
             direction: "upload".into(),
@@ -3056,6 +3124,46 @@ mod tests {
         assert_eq!(select_retention(24, &[6, 24], None).unwrap(), 24);
         assert_eq!(select_retention(24, &[6, 24], Some(6)).unwrap(), 6);
         assert!(select_retention(24, &[6, 24], Some(72)).is_err());
+    }
+
+    #[test]
+    fn attached_note_is_sealed_in_checkpoint_and_bound_to_the_job() {
+        let note = super::super::AttachedNote {
+            text: "PRIVATE_ATTACHMENT_MARKER\n🦀\t".into(),
+            title: Some("PRIVATE_TITLE_MARKER".into()),
+            language: "markdown".into(),
+        };
+        let mut saved = job("preparing");
+        saved.master_key = saved.share_key.clone();
+        seal_attached_note(&mut saved, &note).unwrap();
+        let checkpoint = serde_json::to_string(&saved).unwrap();
+        assert!(!checkpoint.contains("PRIVATE_ATTACHMENT_MARKER"));
+        assert!(!checkpoint.contains("PRIVATE_TITLE_MARKER"));
+        let mut restored: UploadJob = serde_json::from_str(&checkpoint).unwrap();
+        assert!(open_attached_note(&restored).is_err());
+        restored.master_key = restored.share_key.clone();
+        assert_eq!(open_attached_note(&restored).unwrap(), Some(note));
+        let envelope: super::super::Envelope =
+            serde_json::from_str(&encrypted_manifest(&restored, &Control::test_factory()).unwrap())
+                .unwrap();
+        let plain = filebeam_encryption::decrypt_manifest(
+            &restored.master_key,
+            &decode(&envelope.nonce_prefix).unwrap(),
+            &decode(&envelope.ciphertext).unwrap(),
+            format!(
+                "filebeam:v1:{}:manifest:manifest",
+                restored.transfer_id.as_ref().unwrap()
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        assert!(
+            String::from_utf8(plain)
+                .unwrap()
+                .contains("PRIVATE_ATTACHMENT_MARKER")
+        );
+        restored.id.push('x');
+        assert!(open_attached_note(&restored).is_err());
     }
 
     #[test]

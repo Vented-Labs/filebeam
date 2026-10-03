@@ -112,6 +112,10 @@ async function sendToInbox(
         mimeType: 'text/plain',
         buffer: Buffer.from(marker),
     });
+    await sender.getByLabel('Attach note', { exact: true }).check();
+    await sender
+        .getByRole('textbox', { name: 'Secure note editor', exact: true })
+        .fill('PRIVATE_INBOX_ATTACHMENT 🦀\n');
     await sender.getByRole('button', { name: 'Send encrypted' }).click();
     await expect(sender.getByRole('heading', { name: 'Files sent' })).toBeVisible({
         timeout: 30_000,
@@ -155,6 +159,7 @@ for (const custody of ['password', 'self'] as const) {
         const { transfer, filename, sentBodies } = await sendToInbox(browser, username, marker);
         expect(sentBodies.join('\n')).not.toContain(marker);
         expect(sentBodies.join('\n')).not.toContain(filename);
+        expect(sentBodies.join('\n')).not.toContain('PRIVATE_INBOX_ATTACHMENT');
 
         const outsiderContext = await browser.newContext();
         contexts.push(outsiderContext);
@@ -165,6 +170,7 @@ for (const custody of ['password', 'self'] as const) {
         await expect(page.getByRole('link', { name: '1 encrypted file' })).toBeVisible();
         await page.getByRole('link', { name: '1 encrypted file' }).click();
         await expect(page.getByRole('heading', { name: 'Unlock received files' })).toBeVisible();
+        await expect(page.getByTestId('attached-note')).toHaveCount(0);
         await expect(
             page.getByLabel(custody === 'password' ? 'Key password' : 'Private key export'),
         ).toBeVisible();
@@ -187,6 +193,8 @@ for (const custody of ['password', 'self'] as const) {
         await secretInput.fill(secret);
         await page.getByRole('button', { name: 'Unlock files' }).click();
         await expect(page.getByText(filename, { exact: true })).toBeVisible();
+        await expect(page.getByTestId('attached-note')).toContainText('PRIVATE_INBOX_ATTACHMENT');
+        expect(chunkRequests).toHaveLength(0);
         expect(unlockBodies.join('\n')).not.toContain(secret);
 
         const download = page.waitForEvent('download');

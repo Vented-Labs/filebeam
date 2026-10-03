@@ -1,5 +1,10 @@
 import { computed, onBeforeUnmount, ref, toValue, type MaybeRefOrGetter, type Ref } from 'vue';
 import type { FilebeamConfig, PublicRecipient, TransferDriver } from '../types';
+import {
+    checkAttachedMetadataSize,
+    validateAttachedNote,
+    type AttachedNote,
+} from '../lib/attached-note';
 import { sealRecipientKey } from '../lib/account-crypto';
 import type { DownloadSession, ShareResult, TransferMode, UploadEntry } from '../upload-types';
 import {
@@ -325,6 +330,7 @@ export function useEncryptedUpload(
         accountOwned?: boolean;
         turbo?: boolean;
         note?: string;
+        attachedNote?: AttachedNote;
         title?: string;
         language?: string;
         password: string;
@@ -336,6 +342,15 @@ export function useEncryptedUpload(
     }): Promise<void> {
         const config = toValue(configuration);
         const selectedDriver = driver.value;
+        let attachedNote: AttachedNote | undefined;
+        try {
+            attachedNote = options.attachedNote
+                ? validateAttachedNote(options.attachedNote)
+                : undefined;
+        } catch (reason) {
+            error.value = reason instanceof Error ? reason.message : 'Invalid attached note.';
+            return;
+        }
         if (!enabledTransferDrivers(config).includes(selectedDriver)) {
             error.value = 'This transfer method is disabled by the server.';
             return;
@@ -375,6 +390,22 @@ export function useEncryptedUpload(
               ]
             : entries.value;
         const limits = transferLimits(config, selectedDriver);
+        try {
+            if (attachedNote)
+                checkAttachedMetadataSize(
+                    attachedNote,
+                    uploadEntries.map((entry) => ({
+                        name: entry.name,
+                        type: entry.type,
+                        size: entry.file.size,
+                    })),
+                    config.chunk_bytes,
+                );
+        } catch (reason) {
+            error.value =
+                reason instanceof Error ? reason.message : 'Transfer metadata is too large.';
+            return;
+        }
         const maximum =
             options.mode === 'note' ? limits.maximum_note_bytes : limits.maximum_transfer_bytes;
         const encryptedSize = uploadEntries.reduce(
@@ -580,6 +611,7 @@ export function useEncryptedUpload(
                     joinToken: created.data.join_token,
                     readToken: created.data.read_token,
                     noteTitle: options.mode === 'note' ? options.title : undefined,
+                    attachedNote,
                     noteLanguage: options.mode === 'note' ? options.language : undefined,
                 });
                 const metadata = await ready;
@@ -871,6 +903,7 @@ export function useEncryptedUpload(
                 salt: prepared.salt,
                 noteLanguage: options.mode === 'note' ? options.language : null,
                 noteTitle: options.mode === 'note' ? options.title : undefined,
+                attachedNote,
                 readToken: created.data.read_token,
             });
             const finished = await finishedResult;

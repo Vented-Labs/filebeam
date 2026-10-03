@@ -207,6 +207,11 @@ fn exercise_turbo(
 
 fn options(password: bool, archive: bool, turbo: bool) -> UploadOptions {
     UploadOptions {
+        attached_note: Some(filebeam_client_ffi::AttachedNote {
+            text: "Background attachment 🦀\n\t".into(),
+            title: Some("Read first".into()),
+            language: "markdown".into(),
+        }),
         transport: Transport::Http,
         turbo,
         archive,
@@ -311,6 +316,15 @@ fn download_descriptors(
     let checkpoint = prepared
         .checkpoint_id
         .ok_or("download preparation did not return a checkpoint")?;
+    let note = job
+        .attached_note()
+        .ok_or("attached note missing before background file download")?;
+    if note.text != "Background attachment 🦀\n\t"
+        || note.title.as_deref() != Some("Read first")
+        || note.language != "markdown"
+    {
+        return Err("background attachment does not match its encrypted source".into());
+    }
     drop(job);
     drop(background);
     drop(client);

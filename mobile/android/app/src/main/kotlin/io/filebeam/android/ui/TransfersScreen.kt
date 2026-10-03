@@ -39,6 +39,9 @@ import io.filebeam.android.ui.design.EmptyErrorState
 import io.filebeam.android.ui.design.FilebeamSpace
 import io.filebeam.android.ui.design.ProductionGroupCard
 import io.filebeam.rust.JobState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun TransfersScreen(model: FilebeamViewModel, state: TransferUiState, start: (() -> Unit) -> Unit, saveFile: (String) -> Unit, retrySave: (String) -> Unit) {
@@ -105,6 +108,17 @@ fun TransfersScreen(model: FilebeamViewModel, state: TransferUiState, start: (()
 fun TransferReceiptContent(state: TransferUiState, pause: () -> Unit, saveFile: (String) -> Unit) {
     val snapshot = state.snapshot
     val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
+    var exportText by remember { mutableStateOf<String?>(null) }
+    val exportScope = androidx.compose.runtime.rememberCoroutineScope()
+    val noteExport = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("text/plain")) { uri ->
+        val text = exportText
+        exportText = null
+        if (uri != null && text != null) exportScope.launch {
+            val result = withContext(Dispatchers.IO) { runCatching { context.contentResolver.openOutputStream(uri)?.use { it.write(text.toByteArray(Charsets.UTF_8)) } ?: error("Unable to open note destination") } }
+            result.onFailure { android.widget.Toast.makeText(context, it.message ?: "Unable to save note", android.widget.Toast.LENGTH_LONG).show() }
+        }
+    }
     ProductionGroupCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(FilebeamSpace.Large), verticalArrangement = Arrangement.spacedBy(FilebeamSpace.Medium)) {
             Text(stringResource(phaseLabel(state)), style = MaterialTheme.typography.titleLarge)
@@ -119,6 +133,15 @@ fun TransferReceiptContent(state: TransferUiState, pause: () -> Unit, saveFile: 
             }
             snapshot?.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             snapshot?.peerWarning?.let { Text(it) }
+            state.attachedNote?.let { note ->
+                Text(note.title ?: stringResource(R.string.attached_note), style = MaterialTheme.typography.titleMedium)
+                Text(note.language, style = MaterialTheme.typography.labelSmall)
+                androidx.compose.foundation.text.selection.SelectionContainer { Text(note.text, fontFamily = if (note.language == "plain") null else androidx.compose.ui.text.font.FontFamily.Monospace) }
+                Row(horizontalArrangement = Arrangement.spacedBy(FilebeamSpace.XSmall)) {
+                    TextButton(onClick = { clipboard.setText(AnnotatedString(note.text)) }) { Text(stringResource(R.string.copy_note)) }
+                    TextButton(onClick = { exportText = note.text; noteExport.launch("attached-note.txt") }) { Text(stringResource(R.string.save_note)) }
+                }
+            }
             state.sharePresentation?.let { share ->
                 Text(share.link, style = MaterialTheme.typography.bodySmall)
                 share.separateKey?.let { key ->

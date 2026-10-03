@@ -9,6 +9,8 @@
 - HKDF-SHA-256 derives per-item keys with info `filebeam:v1:item-key:${transferId}:${itemId}`. XChaCha20-Poly1305 encrypts chunks and manifests with a random 16-byte nonce prefix; the chunk index completes the 24-byte nonce and the manifest reserves `u64::MAX`.
 - The authenticated associated data is `filebeam:v1:${transferId}:${itemId}:${index}`. Transfer and item IDs are canonical uppercase ULIDs; manifests use `manifest` for both item ID and index.
 - Every file manifest entry includes a SHA-256 plaintext digest. The digest remains in the authenticated encrypted manifest and is checked before a downloaded file is committed.
+- File manifests may contain `attached_note: { text, title?, language }`. The body is 1–65,536 UTF-8 bytes; titles are at most 160 Unicode scalar values. Supported languages are `plain`, `php`, `dotenv`, `javascript`, `typescript`, `json`, `markdown`, `css`, and `html`. All fields are encrypted with the files' transfer key. Turbo descriptors carry the same attachment, which must match the final manifest exactly. The existing 512 KiB encrypted-envelope bound also applies, including JSON and base64 expansion.
+- Attachments are authenticated and readable on metadata unlock, before file downloads. Their password, expiry, and revocation belong to the file transfer. Older readers can download the files while ignoring the optional attachment field.
 
 ## Recipients And Key Custody
 

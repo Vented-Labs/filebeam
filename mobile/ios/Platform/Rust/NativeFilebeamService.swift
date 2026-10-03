@@ -56,6 +56,7 @@ public final class NativeFilebeamService: FilebeamService, @unchecked Sendable {
         var inboxCredentials: (workingKey: Data, cookie: String)? = nil
         var selectionItems: [TransferSelectionItem] = []
         var selectionPromptID: UInt64? = nil
+        var attachedNote: AttachedNoteDraft? = nil
     }
     private enum BackgroundStage { case preparing, selecting, network, finalizing, failed(String), paused }
     private struct PreparationResult: Sendable { let complete: Bool; let failed: Bool; let paused: Bool; let checkpointID: String?; let error: String? }
@@ -69,6 +70,7 @@ public final class NativeFilebeamService: FilebeamService, @unchecked Sendable {
         let includeKey: Bool
         let selectionItems: [TransferSelectionItem]?
         let selectionPromptID: UInt64?
+        var attachedNote: AttachedNoteDraft? = nil
     }
 
     private let queue = DispatchQueue(label: "io.filebeam.native.ffi", qos: .utility)
@@ -140,6 +142,7 @@ public final class NativeFilebeamService: FilebeamService, @unchecked Sendable {
                     let stage: BackgroundStage = status.awaitingUnlock ? .failed("Unlock the device and retry this background transfer.") : association.selectionItems == nil ? .network : .selecting
                     let transport: FilebeamDomain.Transport = status.transport == "webrtc" ? .webRTC : .http
                     jobs[association.jobID] = Job(handle: .backgroundOnly, transferID: association.remoteID.map { TransferID($0) }, password: nil, direction: direction, kind: association.kind, transport: transport, verifiedNote: nil, includeKey: association.includeKey, origin: association.origin, backgroundStage: stage, backgroundProgress: (status.done, status.total), inboxCredentials: nil, selectionItems: association.selectionItems ?? [], selectionPromptID: association.selectionPromptID)
+                    jobs[association.jobID]?.attachedNote = association.attachedNote
                 } catch {
                     // Do not claim recoverable background state when its sealed key is unavailable.
                     let direction: FilebeamDomain.TransferDirection = association.direction == .upload ? .upload : association.direction == .inboxDownload ? .inboxDownload : .download
@@ -220,7 +223,7 @@ public final class NativeFilebeamService: FilebeamService, @unchecked Sendable {
                 guard ({ if case .preparing? = job.backgroundStage { return true }; if case .selecting? = job.backgroundStage { return true }; return false }()) else { throw FilebeamDomainError.invalidInput("Background preparation has already been handled.") }
                 let direction: NativeBackgroundDirection = job.direction == .upload ? .upload : job.direction == .inboxDownload ? .inboxDownload : .download
                 let status = try self.client.backgroundTransfer().status(transferId: checkpointID)
-                let association = BackgroundAssociation(jobID: jobID, origin: job.origin, remoteID: status.remoteId ?? job.transferID?.rawValue, checkpointID: checkpointID, kind: job.kind, direction: direction, includeKey: job.includeKey, selectionItems: nil, selectionPromptID: nil)
+                let association = BackgroundAssociation(jobID: jobID, origin: job.origin, remoteID: status.remoteId ?? job.transferID?.rawValue, checkpointID: checkpointID, kind: job.kind, direction: direction, includeKey: job.includeKey, selectionItems: nil, selectionPromptID: nil, attachedNote: job.attachedNote)
                 self.backgroundAssociations[checkpointID] = association
                 try self.saveBackgroundAssociations()
                 job.backgroundStage = .network
@@ -264,6 +267,10 @@ public final class NativeFilebeamService: FilebeamService, @unchecked Sendable {
             let items = try await ffi { () -> [TransferSelectionItem] in
                 let job = try self.job(jobID)
                 guard job.direction != .upload else { return [] }
+                if case let .transfer(native) = job.handle, let note = native.attachedNote() {
+                    let draft = AttachedNoteDraft(text: note.text, title: note.title ?? "", language: NoteLanguage(rawValue: note.language) ?? .plain)
+                    self.lock.withLock { self.jobs[jobID]?.attachedNote = draft }
+                }
                 return try self.client.backgroundTransfer().downloadItems(checkpointId: checkpointID).map { TransferSelectionItem(id: $0.id, name: $0.name, size: $0.size) }
             }
             if items.count <= 1 {
@@ -276,7 +283,7 @@ public final class NativeFilebeamService: FilebeamService, @unchecked Sendable {
                 guard var job = self.jobs[jobID], case .preparing? = job.backgroundStage else { throw FilebeamDomainError.invalidInput("Background preparation is no longer active.") }
                 let status = try self.client.backgroundTransfer().status(transferId: checkpointID)
                 let promptID = self.backgroundPromptID(jobID: jobID)
-                let association = BackgroundAssociation(jobID: jobID, origin: job.origin, remoteID: status.remoteId ?? job.transferID?.rawValue, checkpointID: checkpointID, kind: job.kind, direction: job.direction == .inboxDownload ? .inboxDownload : .download, includeKey: job.includeKey, selectionItems: items, selectionPromptID: promptID)
+                let association = BackgroundAssociation(jobID: jobID, origin: job.origin, remoteID: status.remoteId ?? job.transferID?.rawValue, checkpointID: checkpointID, kind: job.kind, direction: job.direction == .inboxDownload ? .inboxDownload : .download, includeKey: job.includeKey, selectionItems: items, selectionPromptID: promptID, attachedNote: job.attachedNote)
                 self.backgroundAssociations[checkpointID] = association
                 try self.saveBackgroundAssociations()
                 job.backgroundStage = .selecting
@@ -421,7 +428,7 @@ public final class NativeFilebeamService: FilebeamService, @unchecked Sendable {
         let id = try await ffi { () -> TransferJobID in
             let service = try self.services(request.instance); let cookie = try? service.accountCookieContext()
             let recipient = request.options.recipient.map { UploadRecipient(username: $0.username, userId: $0.userID, accountKeyBundleId: $0.keyBundleID, publicKey: $0.publicKey) }
-            let options = UploadOptions(transport: request.options.transport == .http ? .http : .webRtc, turbo: request.options.turbo, archive: request.options.archive, password: request.options.passwordEnabled, retentionHours: request.options.retentionHours, authentication: UploadAuthentication(bearerToken: nil, sessionCookie: cookie), recipient: recipient)
+            let options = UploadOptions(attachedNote: request.options.attachedNote.map { AttachedNote(text: $0.text, title: $0.title.isEmpty ? nil : $0.title, language: $0.language.rawValue) }, transport: request.options.transport == .http ? .http : .webRtc, turbo: request.options.turbo, archive: request.options.archive, password: request.options.passwordEnabled, retentionHours: request.options.retentionHours, authentication: UploadAuthentication(bearerToken: nil, sessionCookie: cookie), recipient: recipient)
             let background = self.lock.withLock { self.backgroundExecutor != nil } && request.options.transport == .http
             let sources = try request.sources.map { source -> UploadSource in
                 let attributes = try FileManager.default.attributesOfItem(atPath: source.location)
@@ -518,6 +525,15 @@ public final class NativeFilebeamService: FilebeamService, @unchecked Sendable {
                 self.lock.withLock { self.jobs[jobID] = job }
             }
             return self.map(native, id: jobID, job: job)
+        }
+    }
+    public func attachedNote(jobID: TransferJobID) async throws -> AttachedNoteDraft? {
+        try await ffi {
+            let job = try self.job(jobID)
+            if case let .transfer(native) = job.handle, let note = native.attachedNote() {
+                return AttachedNoteDraft(text: note.text, title: note.title ?? "", language: NoteLanguage(rawValue: note.language) ?? .plain)
+            }
+            return job.attachedNote
         }
     }
     public func savedTransfers() async throws -> [TransferRecord] {

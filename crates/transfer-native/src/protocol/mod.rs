@@ -469,6 +469,8 @@ fn http_driver() -> String {
     "http".into()
 }
 
+pub use filebeam_transfer::manifest::AttachedNote;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Transport {
     #[default]
@@ -478,6 +480,7 @@ pub enum Transport {
 
 #[derive(Clone, Default)]
 pub struct UploadOptions {
+    pub attached_note: Option<AttachedNote>,
     /// Ephemeral local sources to copy into the private job before checkpointing.
     pub snapshot_paths: Vec<PathBuf>,
     pub transport: Transport,
@@ -515,6 +518,9 @@ pub fn upload(
     options: UploadOptions,
     control: &Control,
 ) -> Result<String> {
+    if let Some(note) = &options.attached_note {
+        note.validate().map_err(anyhow::Error::msg)?;
+    }
     if options.turbo && (options.transport != Transport::Http || options.recipient.is_some()) {
         bail!("Turbo requires HTTP file uploads without an inbox recipient");
     }
@@ -549,6 +555,9 @@ pub fn upload_sources(
     options: UploadOptions,
     control: &Control,
 ) -> Result<String> {
+    if let Some(note) = &options.attached_note {
+        note.validate().map_err(anyhow::Error::msg)?;
+    }
     if options.turbo && (options.transport != Transport::Http || options.recipient.is_some()) {
         bail!("Turbo requires HTTP file uploads without an inbox recipient");
     }
@@ -898,6 +907,7 @@ mod tests {
             transfer_capabilities: TransferCapabilities::default(),
         };
         let manifest = Manifest {
+            attached_note: None,
             join_token: None,
             version: 1,
             items: vec![ManifestItem {

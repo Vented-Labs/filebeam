@@ -32,6 +32,7 @@ public struct InstancePolicy: Codable, Hashable, Sendable {
 public enum SendPolicy {
     public static func validate(_ draft: FileDraft, policy: InstancePolicy, isAuthenticated: Bool) -> [DraftValidation] {
         var result: [DraftValidation] = []
+        if let error = draft.options.attachedNote?.validationError { result.append(.blocked(error)) }
         if draft.sources.isEmpty { result.append(.blocked("Select at least one file.")) }
         for source in draft.sources {
             switch source.state {

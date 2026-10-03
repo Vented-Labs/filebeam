@@ -27,6 +27,7 @@ public struct Recipient: Codable, Hashable, Sendable, Identifiable {
 }
 
 public struct FileTransferOptions: Codable, Hashable, Sendable {
+    public var attachedNote: AttachedNoteDraft?
     public var transport: Transport
     public var turbo: Bool
     public var archive: Bool
@@ -35,7 +36,8 @@ public struct FileTransferOptions: Codable, Hashable, Sendable {
     public var recipient: Recipient?
     public var includeKeyInLink: Bool
     public var driver: String?
-    public init(transport: Transport = .http, turbo: Bool = false, archive: Bool = false, passwordEnabled: Bool = false, retentionHours: UInt64? = nil, recipient: Recipient? = nil, includeKeyInLink: Bool = true, driver: String? = nil) {
+    public init(transport: Transport = .http, turbo: Bool = false, archive: Bool = false, passwordEnabled: Bool = false, retentionHours: UInt64? = nil, recipient: Recipient? = nil, includeKeyInLink: Bool = true, driver: String? = nil, attachedNote: AttachedNoteDraft? = nil) {
+        self.attachedNote = attachedNote
         self.transport = transport; self.turbo = turbo; self.archive = archive; self.passwordEnabled = passwordEnabled; self.retentionHours = retentionHours; self.recipient = recipient; self.includeKeyInLink = includeKeyInLink; self.driver = driver
     }
 }
@@ -48,6 +50,18 @@ public struct FileDraft: Codable, Hashable, Sendable, Identifiable {
 }
 
 public enum NoteLanguage: String, Codable, CaseIterable, Sendable { case plain, php, dotenv, javascript, typescript, json, markdown, css, html }
+
+public struct AttachedNoteDraft: Codable, Hashable, Sendable {
+    public var text: String
+    public var title: String
+    public var language: NoteLanguage
+    public init(text: String = "", title: String = "", language: NoteLanguage = .plain) { self.text = text; self.title = title; self.language = language }
+    public var validationError: String? {
+        if text.isEmpty || text.utf8.count > 65536 { return "Attached note must contain 1 byte to 64 KiB of UTF-8." }
+        if title.unicodeScalars.count > 160 { return "Attached note title must contain at most 160 characters." }
+        return nil
+    }
+}
 
 public struct NoteOptions: Codable, Hashable, Sendable {
     public var live: Bool

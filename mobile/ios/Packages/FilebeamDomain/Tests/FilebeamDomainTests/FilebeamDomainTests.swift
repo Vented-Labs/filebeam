@@ -2,6 +2,26 @@ import XCTest
 @testable import FilebeamDomain
 
 final class FilebeamDomainTests: XCTestCase {
+    func testAttachedNoteUsesUtf8BoundsAndSurvivesDraftRoundTrip() throws {
+        var note = AttachedNoteDraft(text: String(repeating: "🦀", count: 16384), title: String(repeating: "🦀", count: 160), language: .markdown)
+        XCTAssertNil(note.validationError)
+        let draft = FileDraft(options: .init(attachedNote: note))
+        XCTAssertEqual(try JSONDecoder().decode(FileDraft.self, from: JSONEncoder().encode(draft)), draft)
+        note.text += "x"
+        XCTAssertNotNil(note.validationError)
+        note.text = " \n\t"
+        note.title += "x"
+        XCTAssertNotNil(note.validationError)
+        note.title = ""
+        XCTAssertNil(note.validationError)
+        note.text = ""
+        XCTAssertNotNil(note.validationError)
+    }
+
+    func testOlderFileOptionsDecodeWithoutAnAttachment() throws {
+        let encoded = try JSONEncoder().encode(FileTransferOptions())
+        XCTAssertNil(try JSONDecoder().decode(FileTransferOptions.self, from: encoded).attachedNote)
+    }
     private let instance = FilebeamInstance(origin: "https://one.example")!
     private var policy: InstancePolicy {
         InstancePolicy(instance: instance, anonymousUploads: true, enabledTransports: [.http, .webRTC], defaultDriver: "http", chunkBytes: 64, retentionOptionsHours: [24], drivers: [

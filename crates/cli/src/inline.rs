@@ -68,10 +68,26 @@ pub fn run(
     let mut surface = InlineSurface::default();
     let mut seen = Vec::new();
     let mut announced_links = Vec::new();
+    let mut note_shown = false;
     loop {
         view.tick(job.control.snapshot(), !theme.motion, Instant::now());
         view.cancelling = job.control.cancelled.load(Ordering::Relaxed);
         let outcome = job.poll();
+        if interactive
+            && !note_shown
+            && let Some(note) = job.control.attached_note()
+        {
+            surface.clear()?;
+            eprintln!(
+                "Attached note: {} ({})",
+                clean(note.title.as_deref().unwrap_or("Untitled")),
+                clean(&note.language)
+            );
+            for line in note.text.split('\n') {
+                eprintln!("{}", clean(line));
+            }
+            note_shown = true;
+        }
         while let Ok(event) = job.events.try_recv() {
             if let TransferEvent::ShareReady(share) = event
                 && !announced_links.contains(&share.share_url)

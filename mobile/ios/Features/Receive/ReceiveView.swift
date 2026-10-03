@@ -14,6 +14,7 @@ struct ReceiveView: View {
                     PasteButton(payloadType: String.self) { strings in if let string = strings.first { model.receiveInput = string } }.buttonStyle(.bordered)
                     if let error = model.receiveError { InlineNotice(text: error) }
                     if let job = model.receiveJob { ReceiveProgress(snapshot: job) }
+                    if let job = model.receiveJob, let note = model.receivedAttachments[job.id] { AttachedNoteView(note: note) }
                     PrimaryActionButton(title: "Download and verify", disabled: model.receiveInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) { Task { await model.inspectAndReceive() } }
                 }.frame(maxWidth: 640).padding()
             }.navigationTitle("Receive")
@@ -120,6 +121,40 @@ struct VerifiedNoteView: View {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(filename).txt")
         try? Data(note.text.utf8).write(to: url, options: .atomic)
         exportDocument = ExportDocument(url: url)
+    }
+}
+
+struct AttachedNoteView: View {
+    let note: AttachedNoteDraft
+    @State private var exportDocument: ExportDocument?
+    @State private var exportDirectory: URL?
+    @State private var exportError: String?
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(note.title.isEmpty ? "Attached note" : note.title).font(.headline)
+            Text(note.language.rawValue).font(.caption).foregroundStyle(.secondary)
+            Text(note.text).font(note.language == .plain ? .body : .system(.body, design: .monospaced)).textSelection(.enabled)
+            HStack {
+                Button("Copy note") { UIPasteboard.general.string = note.text }
+                Button("Save note") {
+                    do {
+                        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+                        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                        exportDirectory = directory
+                        let url = directory.appendingPathComponent("attached-note.txt")
+                        try Data(note.text.utf8).write(to: url, options: [.atomic, .completeFileProtection])
+                        exportDocument = ExportDocument(url: url)
+                    } catch { cleanupExport(); exportError = error.localizedDescription }
+                }
+            }
+            if let exportError { InlineNotice(text: exportError) }
+        }
+        .sheet(item: $exportDocument, onDismiss: { cleanupExport() }) { document in DocumentExportSheet(urls: [document.url]) { _ in cleanupExport() } }
+    }
+    private func cleanupExport() {
+        if let directory = exportDirectory { try? FileManager.default.removeItem(at: directory) }
+        exportDirectory = nil
+        exportDocument = nil
     }
 }
 

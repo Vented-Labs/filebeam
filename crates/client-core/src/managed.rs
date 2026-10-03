@@ -98,6 +98,9 @@ pub struct ManagedJob {
 }
 
 impl ManagedJob {
+    pub fn attached_note(&self) -> Option<filebeam_transfer_native::protocol::AttachedNote> {
+        self.job.control.attached_note()
+    }
     pub fn new(job: Job) -> Self {
         Self {
             job,
