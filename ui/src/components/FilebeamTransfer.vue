@@ -4,6 +4,7 @@ import { cancelAccountCrypto, openRecipientKey } from '../lib/account-crypto';
 import type { FilebeamConfig } from '../types';
 import { useEncryptedDownload } from '../composables/useEncryptedDownload';
 import NoteViewer from './notes/NoteViewer.vue';
+import { saveAttachedNote } from '../lib/attached-note';
 import Button from './primitives/Button.vue';
 import Icon from './primitives/Icon.vue';
 import DownloadList from './download/DownloadList.vue';
@@ -245,6 +246,27 @@ function makeOutgoingInert(element: Element): void {
                                     <slot name="report" :transfer-id="transferId" />
                                 </div>
                             </header>
+                            <section
+                                v-if="download.manifest.value.attached_note"
+                                class="my-5 space-y-3"
+                                data-testid="attached-note"
+                            >
+                                <h2 class="font-semibold">
+                                    {{
+                                        download.manifest.value.attached_note.title ||
+                                        'Attached note'
+                                    }}
+                                </h2>
+                                <NoteViewer
+                                    :content="download.manifest.value.attached_note.text"
+                                    :language="download.manifest.value.attached_note.language"
+                                />
+                                <Button
+                                    variant="secondary"
+                                    @click="saveAttachedNote(download.manifest.value.attached_note)"
+                                    >Save note</Button
+                                >
+                            </section>
                             <p
                                 v-if="download.transfer.value.burn_on_read"
                                 class="mt-4 rounded-xl border border-[var(--fb-warning)] bg-[var(--fb-surface-raised)] p-3 text-sm text-[var(--fb-warning)]"

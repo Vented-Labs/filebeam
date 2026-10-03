@@ -130,6 +130,7 @@ struct Worker {
 }
 
 struct PreparedReceive {
+    attached_note: Option<protocol::AttachedNote>,
     link: String,
     output: PathBuf,
     source: PreparedReceiveSource,
@@ -453,6 +454,7 @@ impl Worker {
         let authentication = self.service()?.upload_authentication()?;
         let password = Zeroizing::new(request.password);
         let options = UploadOptions {
+            attached_note: request.attached_note,
             snapshot_paths: Vec::new(),
             transport: if request.transport == SendTransport::Live {
                 Transport::WebRtc
@@ -531,6 +533,7 @@ impl Worker {
                 lock(&prepared).insert(
                     id.clone(),
                     PreparedReceive {
+                        attached_note: control.attached_note(),
                         link,
                         output,
                         source: PreparedReceiveSource::Public,
@@ -547,6 +550,7 @@ impl Worker {
             .receive_previews
             .retain(|preview| preview.link != link);
         lock(&self.snapshot).receive_previews.push(ReceivePreview {
+            attached_note: None,
             operation_id: None,
             link,
             kind: ReceiveKind::Note,
@@ -1443,6 +1447,7 @@ impl Worker {
                 lock(&self.prepared_receives)
                     .iter()
                     .map(|(operation_id, prepared)| ReceivePreview {
+                        attached_note: prepared.attached_note.clone(),
                         operation_id: Some(operation_id.clone()),
                         link: prepared.link.clone(),
                         kind: ReceiveKind::File,

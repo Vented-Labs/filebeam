@@ -27,34 +27,6 @@ impl NativeRuntime {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::path::PathBuf;
-
-    fn config(state_directory: &str) -> ClientConfig {
-        ClientConfig {
-            state_directory: state_directory.into(),
-            memory_budget_mib: 64,
-            max_concurrency: 1,
-            relay_only: false,
-            allow_http: false,
-        }
-    }
-
-    #[test]
-    fn runtimes_keep_their_own_profile_settings_while_sharing_the_scheduler() {
-        let first = NativeRuntime::new(config("first-profile")).unwrap();
-        let second = NativeRuntime::new(config("second-profile")).unwrap();
-        assert_eq!(first.settings.state_home, PathBuf::from("first-profile"));
-        assert_eq!(second.settings.state_home, PathBuf::from("second-profile"));
-        assert_eq!(
-            second._application.transfer_settings().state_home,
-            PathBuf::from("second-profile")
-        );
-    }
-}
-
 impl NativeRuntime {
     fn build(
         config: ClientConfig,
@@ -108,5 +80,33 @@ impl NativeRuntime {
         self.scheduler
             .try_reserve_service_memory(bytes)
             .map_err(operation)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn config(state_directory: &str) -> ClientConfig {
+        ClientConfig {
+            state_directory: state_directory.into(),
+            memory_budget_mib: 64,
+            max_concurrency: 1,
+            relay_only: false,
+            allow_http: false,
+        }
+    }
+
+    #[test]
+    fn runtimes_keep_their_own_profile_settings_while_sharing_the_scheduler() {
+        let first = NativeRuntime::new(config("first-profile")).unwrap();
+        let second = NativeRuntime::new(config("second-profile")).unwrap();
+        assert_eq!(first.settings.state_home, PathBuf::from("first-profile"));
+        assert_eq!(second.settings.state_home, PathBuf::from("second-profile"));
+        assert_eq!(
+            second._application.transfer_settings().state_home,
+            PathBuf::from("second-profile")
+        );
     }
 }

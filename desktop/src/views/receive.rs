@@ -302,6 +302,10 @@ impl ReceivePanel {
         let Some((_, text)) = self.note_text.clone() else {
             return;
         };
+        self.save_note_text(text, cx);
+    }
+
+    fn save_note_text(&mut self, text: String, cx: &mut Context<Self>) {
         let receiver = cx.prompt_for_new_path(&self.home, Some("filebeam-note.txt"));
         cx.spawn(async move |this, cx| {
             let Ok(Ok(Some(path))) = receiver.await else {
@@ -664,6 +668,41 @@ impl ReceivePanel {
                                 .border_1()
                                 .border_color(p.border)
                                 .child(div().child("Validated manifest"))
+                                .when_some(preview.attached_note.clone(), |this, note| {
+                                    let copy_text = note.text.clone();
+                                    let save_text = note.text.clone();
+                                    this.child(div().mt(px(12.)).child(
+                                        note.title.unwrap_or_else(|| "Attached note".into()),
+                                    ))
+                                    .child(div().text_size(px(11.)).child(note.language))
+                                    .child(div().p(px(10.)).bg(p.raised).child(note.text))
+                                    .child(
+                                        Button::new(receive_element_id(
+                                            "copy-attachment",
+                                            &operation_id,
+                                        ))
+                                        .label("Copy note")
+                                        .on_click(
+                                            cx.listener(move |_, _, _, cx| {
+                                                cx.write_to_clipboard(ClipboardItem::new_string(
+                                                    copy_text.clone(),
+                                                ))
+                                            }),
+                                        ),
+                                    )
+                                    .child(
+                                        Button::new(receive_element_id(
+                                            "save-attachment",
+                                            &operation_id,
+                                        ))
+                                        .label("Save note")
+                                        .on_click(
+                                            cx.listener(move |panel, _, _, cx| {
+                                                panel.save_note_text(save_text.clone(), cx)
+                                            }),
+                                        ),
+                                    )
+                                })
                                 .child(
                                     Button::new(receive_element_id("select-all", &operation_id))
                                         .label("Select all")

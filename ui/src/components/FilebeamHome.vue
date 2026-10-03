@@ -17,6 +17,8 @@ import AnimatedHeight from './layout/AnimatedHeight.vue';
 import AnimatedReveal from './layout/AnimatedReveal.vue';
 import TrustFeatures from './layout/TrustFeatures.vue';
 import NoteComposer from './notes/NoteComposer.vue';
+import AttachedNoteToggle from './notes/AttachedNoteToggle.vue';
+import { validateAttachedNote, MAX_ATTACHED_NOTE_BYTES } from '../lib/attached-note';
 import FilePond from './upload/FilePond.vue';
 import FileQueue from './upload/FileQueue.vue';
 import TransferOptions from './upload/TransferOptions.vue';
@@ -39,6 +41,28 @@ const props = defineProps<{
 const mode = ref<'files' | 'note'>('files');
 const note = ref('');
 const noteTitle = ref('');
+const attachNote = ref(false);
+const attachmentSubmitted = ref(false);
+const attachedText = ref('');
+const attachedTitle = ref('');
+const attachedLanguage = ref('plain');
+const attachedError = computed(() => {
+    if (mode.value !== 'files' || !attachNote.value) return '';
+    if (!attachedText.value.length) return 'Write a note or turn off Attach note before sending.';
+    try {
+        validateAttachedNote({
+            text: attachedText.value,
+            title: attachedTitle.value,
+            language: attachedLanguage.value,
+        });
+        return '';
+    } catch (reason) {
+        return reason instanceof Error ? reason.message : 'Invalid attached note.';
+    }
+});
+watch(attachNote, () => {
+    attachmentSubmitted.value = false;
+});
 const noteComposer = ref<InstanceType<typeof NoteComposer>>();
 const language = ref('plain');
 const filePassword = ref('');
@@ -119,6 +143,7 @@ const canUpload = computed(() => {
         maximumBytes.value === null || activeCiphertextBytes.value <= maximumBytes.value;
     return (
         hasContent.value &&
+        (!attachedError.value || attachedText.value.length === 0) &&
         bytesAllowed &&
         countAllowed &&
         enabledDrivers.value.includes(driver.value) &&
@@ -268,6 +293,10 @@ function onDrop(event: DragEvent): void {
         filesUpload.addFiles(event.dataTransfer.files);
 }
 async function submit(turbo = false): Promise<void> {
+    if (mode.value === 'files' && attachNote.value) {
+        attachmentSubmitted.value = true;
+        if (attachedError.value) return;
+    }
     if (driver.value === 'webrtc') {
         if (!webRtcSupported) {
             activeUpload.value.error.value = 'WebRTC is not supported by this browser.';
@@ -281,6 +310,14 @@ async function submit(turbo = false): Promise<void> {
         mode: mode.value,
         accountOwned: !!props.user,
         note: note.value,
+        attachedNote:
+            mode.value === 'files' && attachNote.value
+                ? {
+                      text: attachedText.value,
+                      ...(attachedTitle.value ? { title: attachedTitle.value } : {}),
+                      language: attachedLanguage.value,
+                  }
+                : undefined,
         title: noteTitle.value,
         language: language.value,
         password: selectedPassword.value,
@@ -322,6 +359,11 @@ function resetActive(): void {
         : (enabledDrivers.value[0] ?? 'http');
     webrtcConsent.value = false;
     if (mode.value === 'files') {
+        attachNote.value = false;
+        attachmentSubmitted.value = false;
+        attachedText.value = '';
+        attachedTitle.value = '';
+        attachedLanguage.value = 'plain';
         filePassword.value = '';
         fileIncludeKey.value = true;
         fileRetentionHours.value = props.config.file_retention_hours;
@@ -566,6 +608,13 @@ onBeforeUnmount(() => {
                                             @choose="chooseFiles"
                                             @files="addFiles"
                                         >
+                                            <template #actions>
+                                                <AttachedNoteToggle
+                                                    v-model="attachNote"
+                                                    :disabled="isBusy"
+                                                    compact
+                                                />
+                                            </template>
                                             <FileQueue
                                                 :entries="filesUpload.entries.value"
                                                 :disabled="isBusy"
@@ -573,6 +622,31 @@ onBeforeUnmount(() => {
                                                 @remove="filesUpload.removeFile"
                                             />
                                         </FilePond>
+                                        <AttachedNoteToggle
+                                            v-if="filesUpload.entries.value.length"
+                                            v-model="attachNote"
+                                            :disabled="isBusy"
+                                        />
+                                        <NoteComposer
+                                            v-if="attachNote"
+                                            v-model="attachedText"
+                                            v-model:title="attachedTitle"
+                                            v-model:language="attachedLanguage"
+                                            :disabled="isBusy"
+                                            :maximum-bytes="MAX_ATTACHED_NOTE_BYTES"
+                                            :retention-hours="fileRetentionHours"
+                                            id-prefix="attached-note"
+                                        />
+                                        <p
+                                            v-if="
+                                                attachedError &&
+                                                (attachmentSubmitted || attachedText.length > 0)
+                                            "
+                                            role="alert"
+                                            class="px-6 pb-3 text-sm text-[var(--fb-danger)]"
+                                        >
+                                            {{ attachedError }}
+                                        </p>
                                     </div>
                                 </Transition>
                                 <Transition name="prism-mode-card">

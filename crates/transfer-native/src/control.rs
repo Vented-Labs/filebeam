@@ -223,6 +223,7 @@ pub struct TransferSettings {
 
 #[derive(Clone)]
 pub struct Control {
+    attached_note: Arc<Mutex<Option<filebeam_transfer::manifest::AttachedNote>>>,
     progress: Arc<Mutex<Progress>>,
     checkpoint_id: Arc<Mutex<Option<String>>>,
     pub cancelled: Arc<AtomicBool>,
@@ -238,6 +239,7 @@ impl Control {
         let memory = MemoryBudget::new(settings.memory_budget);
         Self {
             progress: Arc::new(Mutex::new(Progress::default())),
+            attached_note: Arc::new(Mutex::new(None)),
             checkpoint_id: Arc::new(Mutex::new(None)),
             cancelled: Arc::new(AtomicBool::new(false)),
             prompts,
@@ -277,6 +279,16 @@ impl Control {
             return Err(Cancelled.into());
         }
         Ok(())
+    }
+    pub fn set_attached_note(&self, note: Option<filebeam_transfer::manifest::AttachedNote>) {
+        *self.attached_note.lock().unwrap_or_else(|e| e.into_inner()) = note;
+    }
+    /// Authenticated display content, separate from operational progress snapshots.
+    pub fn attached_note(&self) -> Option<filebeam_transfer::manifest::AttachedNote> {
+        self.attached_note
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
     pub fn transfer_home(&self) -> PathBuf {
         self.settings.state_home.clone()

@@ -55,6 +55,7 @@ import java.io.File
 import java.util.UUID
 
 data class TransferUiState(
+    val attachedNote: io.filebeam.rust.AttachedNote? = null,
     val busy: Boolean = false,
     val phase: String = "preparing",
     val preparedBytes: Long = 0,
@@ -97,6 +98,7 @@ data class UploadRequest(
     val recipient: ValidatedRecipient? = null,
     val includeKeyInLink: Boolean = true,
     val driver: String,
+    val attachedNote: io.filebeam.rust.AttachedNote? = null,
 )
 
 /** Process-scoped owner. Activities collect state; Android jobs/services execute work. */
@@ -169,6 +171,7 @@ class TransferCoordinator(
             .putOpt("account", request.account).put("recipients", JSONArray(request.recipients))
             .put("includeKey", request.includeKeyInLink)
             .put("driver", request.driver)
+            .putOpt("attachedNote", request.attachedNote?.let { JSONObject().put("text", it.text).putOpt("title", it.title).put("language", it.language) })
             .putOpt("recipient", request.recipient?.let { recipient -> JSONObject().put("username", recipient.username).put("origin", recipient.origin)
                 .put("id", recipient.id.toString()).put("bundle", recipient.accountKeyBundleId.toString()).put("publicKey", recipient.publicKey) })
             .put("instance", config.instance).put("relay", config.relayOnly)
@@ -386,6 +389,7 @@ class TransferCoordinator(
                             UploadRecipient(expected.getString("username"), expected.getString("id").toULong(), expected.getString("bundle").toULong(), expected.getString("publicKey"))
                         }
                         val options = UploadOptions(
+                            attachedNote = request.optJSONObject("attachedNote")?.let { io.filebeam.rust.AttachedNote(it.getString("text"), it.optString("title").takeIf(String::isNotEmpty), it.getString("language")) },
                             transport = if (live) Transport.WEB_RTC else Transport.HTTP,
                             archive = request.optBoolean("archive"),
                             turbo = request.optBoolean("turbo"),
@@ -445,7 +449,8 @@ class TransferCoordinator(
                             .getOrNull()?.let { SharePresentation(it.link, it.separateKey) }
                     } else SharePresentation(raw)
                 }
-                mutable.update { it.copy(snapshot = snapshot, phase = snapshot.phase, current = current, sharePresentation = share,
+                val attachedNote = withContext(Dispatchers.IO) { active!!.attachedNote() }
+                mutable.update { it.copy(snapshot = snapshot, phase = snapshot.phase, current = current, sharePresentation = share, attachedNote = attachedNote,
                     capabilities = JobCapabilities(canPause = current.actions.pause)) }
                 if (snapshot.state !in listOf(JobState.RUNNING, JobState.PAUSING)) {
                     withContext(Dispatchers.IO) {

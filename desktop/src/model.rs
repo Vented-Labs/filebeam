@@ -187,6 +187,7 @@ pub struct InvitationSnapshot {
 }
 #[derive(Clone)]
 pub struct ReceivePreview {
+    pub attached_note: Option<filebeam_client_core::protocol::AttachedNote>,
     /// Native checkpoint ID for a prepared file receive. Notes have no ID
     /// because opening them is a separate, consent-bearing operation.
     pub operation_id: Option<String>,
@@ -482,6 +483,7 @@ impl ClientCommand {
 }
 
 pub struct SendFiles {
+    pub attached_note: Option<filebeam_client_core::protocol::AttachedNote>,
     pub paths: Vec<PathBuf>,
     pub directory_mode: DirectoryMode,
     pub transport: SendTransport,

@@ -93,7 +93,7 @@ android {
         warningsAsErrors = true
         // Updates are reviewed in the pinned version catalog. A new upstream
         // release must not change the outcome of an otherwise identical build.
-        disable += setOf("GradleDependency", "NewerVersionAvailable")
+        disable += setOf("GradleDependency", "NewerVersionAvailable", "AndroidGradlePluginVersion")
     }
 }
 

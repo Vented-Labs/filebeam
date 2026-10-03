@@ -44,6 +44,31 @@ In the full-screen interface, press `p` for History list/delete/extend actions.
 `beam transfers` remains the local resume-job list; account history works across
 devices and does not recover filenames or share-link keys.
 
+### Attached notes
+
+Attach a UTF-8 note to files with:
+
+```sh
+beam up report.pdf --note-file instructions.md --note-title "Read first" --note-language markdown
+beam down '<share-link>' --note-output received-note.md
+```
+
+`--note-file -` reads stdin. Bodies are limited to 64 KiB; title and language
+are encrypted alongside the body. HTTP, Turbo, WebRTC, ZIP, and recipient file
+delivery use the same attachment format and file-transfer lifetime.
+
+Interactive downloads preview the note on unlock. Scripted downloads expose it
+only with `--note-output`; `--note-output -` writes the exact body to stdout and
+keeps file-result paths on stderr. File exports create a new destination and
+never overwrite an existing one.
+`beam inbox download` and resumed downloads also accept `--note-output`.
+
+In the full-screen Files composer, press `a` to edit an attached note. Press
+`Esc`, then `Enter` to save the draft and return to Files; another `Enter` sends
+the files and attachment together. Clearing the body removes the attachment.
+Received notes open a scrollable preview; `c` copies and `Esc` closes it. Press
+`o` during a transfer or on its receipt to reopen the preview.
+
 ### Paste on Send
 
 Paste text with your terminal's paste shortcut to open the Notes composer. Press
@@ -91,7 +116,6 @@ share links. The CLI applies its `--memory-limit-mib` budget to managed
 transfer buffers; this is not a process-RSS limit. Ciphertext artifacts and
 WebRTC framing are size-bounded.
 
-Native WebRTC supports file links only. Notes, burn-on-read notes, and
-account-key inbox delivery are unsupported. In particular, the native download
-path requires ordinary manifest items and cannot currently turn an itemless
-note payload into a synthetic item.
+The native file-transfer engine supports WebRTC file links and their attached
+notes. Standalone notes use the dedicated Notes composer or `beam note`
+commands. WebRTC account-key inbox delivery is unsupported.

@@ -135,6 +135,13 @@ impl TransferJob {
             expiry_known: false,
         }
     }
+    pub fn attached_note(&self) -> Option<crate::AttachedNote> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .attached_note()
+            .map(Into::into)
+    }
     pub fn respond(&self, prompt_id: u64, value: String) -> Result<()> {
         self.inner
             .lock()

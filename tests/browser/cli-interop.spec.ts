@@ -79,6 +79,10 @@ test('CLI verifies pending and completed turbo downloads without Content-Length'
             mimeType: 'application/octet-stream',
             buffer: payload,
         });
+        await page.getByRole('switch', { name: 'Attach note', exact: true }).click();
+        await page
+            .getByRole('textbox', { name: 'Secure note editor', exact: true })
+            .fill('Turbo attachment 🦀\n');
         const creation = page.waitForResponse(
             (response) =>
                 response.request().method() === 'POST' &&
@@ -93,7 +97,17 @@ test('CLI verifies pending and completed turbo downloads without Content-Length'
         const output = join(directory, 'pending');
         const download = run(
             binary,
-            ['--home', join(directory, 'home'), '--plain', 'down', link.href, '--output', output],
+            [
+                '--home',
+                join(directory, 'home'),
+                '--plain',
+                'down',
+                link.href,
+                '--output',
+                output,
+                '--note-output',
+                join(directory, 'turbo-note.txt'),
+            ],
             {
                 env,
                 timeout: 90_000,
@@ -105,6 +119,33 @@ test('CLI verifies pending and completed turbo downloads without Content-Length'
             (error: unknown) => error,
         );
         await expect.poll(() => pendingChunks, { timeout: 30_000 }).toBeGreaterThan(0);
+        child.kill('SIGINT');
+        expect(await completion).toBeDefined();
+        const catalog = await run(
+            binary,
+            ['--home', join(directory, 'home'), '--plain', 'transfers'],
+            { env, timeout: 30_000 },
+        );
+        const jobID = catalog.stdout.trim().split('\n')[0].split('\t')[0];
+        expect(jobID).toMatch(/^[a-f0-9-]{36}$/);
+        const resumed = run(
+            binary,
+            [
+                '--home',
+                join(directory, 'home'),
+                '--plain',
+                'resume',
+                jobID,
+                '--note-output',
+                join(directory, 'turbo-note.txt'),
+            ],
+            { env, timeout: 90_000 },
+        );
+        child = resumed.child;
+        completion = resumed.then(
+            () => undefined,
+            (error: unknown) => error,
+        );
         releaseChunks();
         await expect.poll(() => receivedChunks, { timeout: 30_000 }).toBeGreaterThan(0);
         const metadata = await request.get(`/api/v1/transfers/${created!.id}`);
@@ -113,6 +154,9 @@ test('CLI verifies pending and completed turbo downloads without Content-Length'
         releaseCompletion();
         expect(await completion).toBeUndefined();
         expect(await readFile(join(output, 'turbo-cli.bin'))).toEqual(payload);
+        expect(await readFile(join(directory, 'turbo-note.txt'), 'utf8')).toBe(
+            'Turbo attachment 🦀\n',
+        );
         await run(
             binary,
             [
@@ -177,6 +221,10 @@ test('built CLI and browser exchange real encrypted files through the Laravel AP
         await page
             .locator('#filebeam-picker')
             .setInputFiles({ name: 'from-browser.txt', mimeType: 'text/plain', buffer: payload });
+        await page.getByRole('switch', { name: 'Attach note', exact: true }).click();
+        await page
+            .getByRole('textbox', { name: 'Secure note editor', exact: true })
+            .fill('Browser attachment 🦀\n');
         const creation = page.waitForResponse(
             (response) =>
                 response.request().method() === 'POST' &&
@@ -188,23 +236,56 @@ test('built CLI and browser exchange real encrypted files through the Laravel AP
         const link = await page.locator('#share-link').inputValue();
         await run(
             binary,
-            ['--home', home, '--plain', 'down', link, '--output', join(directory, 'download')],
+            [
+                '--home',
+                home,
+                '--plain',
+                'down',
+                link,
+                '--output',
+                join(directory, 'download'),
+                '--note-output',
+                join(directory, 'note.txt'),
+            ],
             {
                 env,
                 timeout: 60000,
             },
         );
         expect(await readFile(join(directory, 'download/from-browser.txt'))).toEqual(payload);
+        expect(await readFile(join(directory, 'note.txt'), 'utf8')).toBe('Browser attachment 🦀\n');
 
         const source = join(directory, 'from-cli.txt');
         await writeFile(source, payload);
-        const result = await run(binary, ['--home', home, '--plain', 'up', source], {
-            env,
-            timeout: 60000,
-        });
+        const note = join(directory, 'from-cli.md');
+        await writeFile(note, '# CLI attachment 🦀\n');
+        const result = await run(
+            binary,
+            [
+                '--home',
+                home,
+                '--plain',
+                'up',
+                source,
+                '--note-file',
+                note,
+                '--note-title',
+                'CLI title',
+                '--note-language',
+                'markdown',
+            ],
+            {
+                env,
+                timeout: 60000,
+            },
+        );
         const cliLink = result.stdout.trim();
         expect(cliLink.startsWith(baseURL!)).toBe(true);
         await page.goto(cliLink);
+        await expect(page.getByTestId('attached-note').getByRole('heading')).toHaveText(
+            'CLI title',
+        );
+        await expect(page.getByTestId('attached-note')).toContainText('CLI attachment');
         const download = page.waitForEvent('download');
         await page.getByRole('button', { name: 'Download files', exact: true }).click();
         expect(await readFile((await (await download).path())!)).toEqual(payload);

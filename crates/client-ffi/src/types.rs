@@ -17,6 +17,7 @@ pub enum Transport {
 /// Additive upload configuration. `start_upload` retains its historic defaults.
 #[derive(Clone, uniffi::Record)]
 pub struct UploadOptions {
+    pub attached_note: Option<AttachedNote>,
     pub transport: Transport,
     pub turbo: bool,
     pub archive: bool,
@@ -24,6 +25,23 @@ pub struct UploadOptions {
     pub retention_hours: Option<u64>,
     pub authentication: UploadAuthentication,
     pub recipient: Option<UploadRecipient>,
+}
+
+#[derive(Clone, uniffi::Record)]
+pub struct AttachedNote {
+    pub text: String,
+    pub title: Option<String>,
+    pub language: String,
+}
+
+impl From<filebeam_client_core::protocol::AttachedNote> for AttachedNote {
+    fn from(note: filebeam_client_core::protocol::AttachedNote) -> Self {
+        Self {
+            text: note.text,
+            title: note.title,
+            language: note.language,
+        }
+    }
 }
 
 #[derive(Clone, uniffi::Record)]

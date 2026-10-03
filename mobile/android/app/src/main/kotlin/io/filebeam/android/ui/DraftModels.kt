@@ -42,6 +42,7 @@ data class SendDraft(
     val driver: String? = null,
     /** Link presentation preference for files; independent from note sharing. */
     val includeKeyInLink: Boolean = true,
+    val attachedNote: NoteDraft? = null,
 )
 
 data class NoteDraft(
@@ -59,6 +60,13 @@ data class NoteDraft(
 )
 
 enum class SendContent { FILES, NOTES }
+
+fun NoteDraft.attachmentError(): String? = when {
+    body.isEmpty() || body.toByteArray(Charsets.UTF_8).size > 64 * 1024 -> "Attached note must contain 1 byte to 64 KiB of UTF-8"
+    title.codePointCount(0, title.length) > 160 -> "Attached note title must contain at most 160 characters"
+    language !in listOf("plain", "php", "dotenv", "javascript", "typescript", "json", "markdown", "css", "html") -> "Unsupported attached note language"
+    else -> null
+}
 
 internal fun shouldRestoreDraft(launchRevision: Long, currentRevision: Long) = launchRevision == currentRevision
 

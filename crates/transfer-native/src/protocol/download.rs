@@ -95,6 +95,8 @@ struct TurboJob {
 
 #[derive(Deserialize)]
 struct TurboDescriptor {
+    #[serde(default)]
+    attached_note: Option<AttachedNote>,
     version: u8,
     purpose: String,
     chunk_bytes: u64,
@@ -866,6 +868,7 @@ async fn async_run(
         manifest_for(&master, &link.id, &envelope, &transfer, &control)?
     };
     let live_join_token = live_join_token(&transfer, &manifest)?;
+    control.set_attached_note(manifest.attached_note.clone());
     let total = manifest
         .items
         .iter()
@@ -1024,6 +1027,7 @@ async fn async_resume(
         )?
     };
     let live_join_token = live_join_token(&transfer, &manifest)?;
+    control.set_attached_note(manifest.attached_note.clone());
     if manifest.items.len() != job.items.len() {
         bail!("saved download layout changed");
     }
@@ -2041,6 +2045,10 @@ fn turbo_descriptor_for(
     }
     let mut ids = HashSet::new();
     let mut value = serde_json::json!({"version": 1, "items": []});
+    if let Some(note) = descriptor.attached_note {
+        note.validate().map_err(anyhow::Error::msg)?;
+        value["attached_note"] = serde_json::to_value(note)?;
+    }
     for item in descriptor.items {
         let server = transfer
             .items
@@ -2135,6 +2143,19 @@ async fn finalize_turbo_manifest(
         .await?;
         if let Some(envelope) = transfer.encrypted_manifest.clone() {
             let manifest = manifest_for(master, &job.transfer_id, &envelope, &transfer, control)?;
+            let descriptor = turbo_descriptor_for(
+                master,
+                &job.transfer_id,
+                &job.turbo
+                    .as_ref()
+                    .context("missing Turbo descriptor")?
+                    .descriptor,
+                &transfer,
+                control,
+            )?;
+            if manifest.attached_note != descriptor.attached_note {
+                bail!("final manifest does not bind Turbo attached note");
+            }
             if manifest.items.len() != job.items.len() {
                 bail!("final manifest does not bind Turbo descriptor");
             }
@@ -2818,7 +2839,7 @@ mod tests {
     fn turbo_descriptor_binds_server_item_identity_before_chunks_arrive() {
         let key = vec![7; 32];
         let prefix = filebeam_encryption::generate_nonce_prefix().unwrap();
-        let descriptor = serde_json::json!({"version":1,"purpose":"turbo-descriptor","chunk_bytes":4,"items":[{
+        let descriptor = serde_json::json!({"version":1,"purpose":"turbo-descriptor","chunk_bytes":4,"attached_note":{"text":"Early note 🦀\n","title":"Read first","language":"markdown"},"items":[{
             "id":"item-a","name":"early.bin","type":"application/octet-stream","size":5,
             "nonce_prefix": URL_SAFE_NO_PAD.encode([3;16]),"chunk_count":2
         }]});
@@ -2859,6 +2880,20 @@ mod tests {
             "item-a"
         );
         let mut rebound = transfer;
+        assert_eq!(
+            turbo_descriptor_for(
+                &key,
+                "transfer",
+                &envelope,
+                &rebound,
+                &Control::test_factory()
+            )
+            .unwrap()
+            .attached_note
+            .unwrap()
+            .text,
+            "Early note 🦀\n"
+        );
         rebound.items[0].id = "other".into();
         assert!(
             turbo_descriptor_for(

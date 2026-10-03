@@ -210,4 +210,11 @@
     <string name="work_already_running">A transfer is already running.</string>
     <string name="background_unavailable">Android could not start this transfer. Keep Filebeam open and try again.</string>
     <string name="network_unavailable">Network unavailable. Waiting to reconnect.</string>
+    <string name="attach_note">Attach note</string>
+    <string name="remove_attached_note">Remove attached note</string>
+    <string name="attached_note">Attached note</string>
+    <string name="attached_note_lifetime">The note uses this transfer\'s encryption and expiry.</string>
+    <string name="attached_note_size">%1$d / 65536 bytes</string>
+    <string name="copy_note">Copy note</string>
+    <string name="save_note">Save note</string>
 </resources>

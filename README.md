@@ -9,6 +9,7 @@ Filebeam is free and open-source software by [Vented](https://vented.com), relea
 ## Features
 
 - Browser-side encrypted files and notes, with optional password protection.
+- Optional encrypted notes attached to file transfers, with title and syntax selection across web, CLI, desktop, Android, and iOS.
 - Encrypted recipient delivery, expiry, deletion, and best-effort burn-on-read notes.
 - Private local or S3-compatible ciphertext storage, with distributed or replicated placement.
 - Account administration, registration controls, cron-driven background work, scheduled cleanup, and a release updater.

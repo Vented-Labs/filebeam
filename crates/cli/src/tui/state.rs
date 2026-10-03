@@ -252,6 +252,11 @@ pub struct Receipt {
 }
 
 pub struct State {
+    pub attachment_mode: bool,
+    pub attachment: NativeForm,
+    pub received_attachment: Option<protocol::AttachedNote>,
+    pub attachment_preview: bool,
+    pub attachment_scroll: u16,
     pub send_notes: bool,
     pub note: NativeForm,
     pub note_editing: bool,
@@ -299,6 +304,11 @@ pub struct State {
 impl State {
     pub fn new(config: &Config, instance: &str, directory: PathBuf) -> Result<Self> {
         let mut state = Self {
+            attachment_mode: false,
+            attachment: NativeForm::note(),
+            received_attachment: None,
+            attachment_preview: false,
+            attachment_scroll: 0,
             send_notes: false,
             note: NativeForm::note(),
             note_editing: false,
@@ -431,6 +441,14 @@ impl State {
             return;
         }
         if self.mode == Mode::Send && self.send_notes {
+            if self.attachment_mode {
+                std::mem::swap(&mut self.note, &mut self.attachment);
+                self.attachment_mode = false;
+                self.send_notes = false;
+                self.note_editing = false;
+                self.toast("Attached note saved; Enter sends files, a edits the note");
+                return;
+            }
             if self.note.fields[2].value.is_empty() {
                 self.toast("Paste or write a note first");
                 return;
@@ -486,6 +504,25 @@ impl State {
                     self.selected.keys().cloned().collect(),
                     crate::uploads::DirectoryMode::Individual,
                     protocol::UploadOptions {
+                        attached_note: if self.attachment.fields[2].value.is_empty() {
+                            None
+                        } else {
+                            let note = protocol::AttachedNote {
+                                text: self.attachment.fields[2].value.clone(),
+                                title: Some(self.attachment.fields[0].value.clone())
+                                    .filter(|title| !title.is_empty()),
+                                language: if self.attachment.fields[1].value.is_empty() {
+                                    "plain".into()
+                                } else {
+                                    self.attachment.fields[1].value.clone()
+                                },
+                            };
+                            if let Err(error) = note.validate() {
+                                self.toast(error);
+                                return;
+                            }
+                            Some(note)
+                        },
                         snapshot_paths: self
                             .selected
                             .keys()
@@ -512,6 +549,7 @@ impl State {
                     return;
                 }
                 Request::Download {
+                    note_output: None,
                     link: self.link.value.trim().to_owned(),
                     output: expand_path(&self.destination.value),
                 }
@@ -538,6 +576,7 @@ impl State {
             }
         };
         self.begin(Request::Resume {
+            note_output: None,
             id: transfer.id.clone(),
             direction,
         });
@@ -561,6 +600,9 @@ impl State {
     }
 
     fn begin(&mut self, request: Request) {
+        self.received_attachment = None;
+        self.attachment_preview = false;
+        self.attachment_scroll = 0;
         self.transfer = Some(TransferView::new(request.direction()));
         self.receipt = None;
         self.receipt_scroll = 0;
@@ -590,6 +632,11 @@ impl State {
                 match result {
                     Ok(crate::clipboard::Content::Text(text)) => self.paste_note(&text),
                     Ok(crate::clipboard::Content::Image(file)) => {
+                        if self.attachment_mode {
+                            std::mem::swap(&mut self.note, &mut self.attachment);
+                            self.attachment_mode = false;
+                        }
+                        self.note_editing = false;
                         let path = file.path().to_owned();
                         let entry = Entry {
                             name: path.file_name().unwrap().to_string_lossy().into_owned(),
@@ -629,6 +676,12 @@ impl State {
         }
         if let Some(job) = &self.job {
             let result = job.poll();
+            if let Some(note) = job.control.attached_note() {
+                if self.received_attachment.is_none() {
+                    self.attachment_preview = true;
+                }
+                self.received_attachment = Some(note);
+            }
             while let Ok(event) = job.events.try_recv() {
                 if let TransferEvent::ShareReady(share) = event
                     && let Some(view) = &mut self.transfer
@@ -806,6 +859,9 @@ impl State {
             return Ok(false);
         }
         if self.job.is_some() {
+            if self.attachment_key(key)? {
+                return Ok(false);
+            }
             match key.code {
                 KeyCode::Char('?') => self.help = true,
                 KeyCode::Char('c') => self.copy_result()?,
@@ -814,6 +870,9 @@ impl State {
             return Ok(false);
         }
         if self.receipt.is_some() {
+            if self.attachment_key(key)? {
+                return Ok(false);
+            }
             match key.code {
                 KeyCode::Char('q') | KeyCode::Esc => return Ok(true),
                 KeyCode::Char('c') => self.copy_result()?,
@@ -858,11 +917,15 @@ impl State {
             }
             match key.code {
                 KeyCode::Esc => self.note_editing = false,
-                KeyCode::BackTab => self.note.field = (self.note.field + 4) % 5,
+                KeyCode::BackTab => {
+                    let count = if self.attachment_mode { 3 } else { 5 };
+                    self.note.field = (self.note.field + count - 1) % count;
+                }
                 KeyCode::Tab
                     if self.note.field != 2 || key.modifiers.contains(KeyModifiers::CONTROL) =>
                 {
-                    self.note.field = (self.note.field + 1) % 5
+                    self.note.field =
+                        (self.note.field + 1) % if self.attachment_mode { 3 } else { 5 }
                 }
                 KeyCode::Enter if key.modifiers.contains(KeyModifiers::CONTROL) => self.start(),
                 _ => self.note.fields[self.note.field].handle(key),
@@ -903,14 +966,25 @@ impl State {
             KeyCode::Enter if self.mode == Mode::Send && self.send_notes => self.start(),
             KeyCode::Char('v') if self.mode == Mode::Send => self.read_clipboard(),
             KeyCode::Char('n') if self.mode == Mode::Send => {
+                if self.attachment_mode {
+                    std::mem::swap(&mut self.note, &mut self.attachment);
+                    self.attachment_mode = false;
+                }
                 self.send_notes = !self.send_notes;
                 self.note_editing = false;
+            }
+            KeyCode::Char('a') if self.mode == Mode::Send && !self.send_notes => {
+                std::mem::swap(&mut self.note, &mut self.attachment);
+                self.attachment_mode = true;
+                self.send_notes = true;
+                self.note_editing = true;
+                self.note.field = 2;
             }
             KeyCode::Char('e') if self.mode == Mode::Send && self.send_notes => {
                 self.note_editing = true
             }
             KeyCode::Tab if self.mode == Mode::Send && self.send_notes => {
-                self.note.field = (self.note.field + 1) % 5;
+                self.note.field = (self.note.field + 1) % if self.attachment_mode { 3 } else { 5 };
                 self.note_editing = true;
             }
             KeyCode::Esc | KeyCode::Char('q') => return Ok(true),
@@ -1032,6 +1106,7 @@ impl State {
                     &values[0],
                 )?;
                 self.begin(Request::InboxDownload {
+                    note_output: None,
                     id: values[0].clone(),
                     output: expand_path(&values[1]),
                     key: key.to_vec(),
@@ -1169,6 +1244,35 @@ impl State {
             self.toast("Copy requested. Requires terminal clipboard support.");
         }
         Ok(())
+    }
+
+    fn attachment_key(&mut self, key: KeyEvent) -> Result<bool> {
+        if self.received_attachment.is_none() {
+            return Ok(false);
+        }
+        if !self.attachment_preview {
+            if key.code == KeyCode::Char('o') {
+                self.attachment_preview = true;
+                return Ok(true);
+            }
+            return Ok(false);
+        }
+        match key.code {
+            KeyCode::Esc | KeyCode::Enter | KeyCode::Char('o') => self.attachment_preview = false,
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.attachment_scroll = self.attachment_scroll.saturating_add(1)
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.attachment_scroll = self.attachment_scroll.saturating_sub(1)
+            }
+            KeyCode::Char('c') => {
+                let value = STANDARD.encode(&self.received_attachment.as_ref().unwrap().text);
+                write!(io::stdout(), "\x1b]52;c;{value}\x07")?;
+                io::stdout().flush()?;
+            }
+            _ => {}
+        }
+        Ok(true)
     }
 }
 
@@ -1335,6 +1439,25 @@ fn native_action(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn attachment_editor_preserves_standalone_draft_and_file_selection() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state =
+            State::new(&Config::default(), "http://127.0.0.1:1", dir.path().into()).unwrap();
+        state.note.fields[2].value = "Standalone note".into();
+        state.key(KeyCode::Char('a').into()).unwrap();
+        assert!(state.attachment_mode);
+        state.paste("Attached note 🦀\n");
+        state.key(KeyCode::Esc.into()).unwrap();
+        state.start();
+        assert!(!state.send_notes && !state.attachment_mode);
+        assert_eq!(state.note.fields[2].value, "Standalone note");
+        assert_eq!(state.attachment.fields[2].value, "Attached note 🦀\n");
+        assert!(state.job.is_none());
+        state.key(KeyCode::Char('a').into()).unwrap();
+        state.key(KeyCode::BackTab.into()).unwrap();
+        assert_eq!(state.note.field, 1);
+    }
     #[test]
     fn send_paste_keeps_both_drafts_and_respects_editing_and_overlays() {
         let dir = tempfile::tempdir().unwrap();

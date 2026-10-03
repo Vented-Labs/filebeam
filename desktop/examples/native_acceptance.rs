@@ -60,6 +60,7 @@ fn account_history(client: &DesktopClient, root: &Path) -> Result<()> {
     let before = job_ids(client);
     client.dispatch(ClientCommand::SendFiles(SendFiles {
         paths: vec![source],
+        attached_note: None,
         directory_mode: DirectoryMode::Individual,
         transport: SendTransport::Http,
         retention_hours: Some(1),
@@ -137,6 +138,16 @@ fn basic_prepared_receive(client: &DesktopClient, root: &Path) -> Result<()> {
             .cloned()
     })
     .context("prepare receive")?;
+    let note = preview
+        .attached_note
+        .as_ref()
+        .context("attachment missing on manifest unlock")?;
+    if note.text != "Desktop attachment 🦀\n"
+        || note.title.as_deref() != Some("Read first")
+        || note.language != "markdown"
+    {
+        bail!("desktop attachment did not round trip");
+    }
     let operation_id = preview.operation_id.context("prepared operation missing")?;
     let selected = preview
         .items
@@ -285,7 +296,14 @@ fn pause_resume(client: &DesktopClient, root: &Path) -> Result<()> {
     answer_secrets(client, "", "fixture password")?;
     let resumed = wait_resumed_upload(client, &before_send).context("complete resumed upload")?;
     if resumed.state != TransferState::Complete {
-        bail!("resumed upload failed");
+        bail!(
+            "resumed upload failed: {}",
+            resumed
+                .error
+                .as_ref()
+                .map(|error| error.detail.as_str())
+                .unwrap_or("unknown error")
+        );
     }
     println!("PASS pause-resume-checkpoint");
     Ok(())
@@ -345,6 +363,11 @@ fn send(
     include_key: bool,
 ) -> Result<()> {
     client.dispatch(ClientCommand::SendFiles(SendFiles {
+        attached_note: Some(filebeam_client_core::protocol::AttachedNote {
+            text: "Desktop attachment 🦀\n".into(),
+            title: Some("Read first".into()),
+            language: "markdown".into(),
+        }),
         paths,
         directory_mode: if archive {
             DirectoryMode::Zip

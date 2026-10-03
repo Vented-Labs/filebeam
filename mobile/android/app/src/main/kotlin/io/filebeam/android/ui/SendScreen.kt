@@ -51,6 +51,16 @@ fun SendScreen(model: FilebeamViewModel, busy: Boolean, pick: () -> Unit, pickTr
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = FilebeamSpace.Gutter), verticalArrangement = Arrangement.spacedBy(FilebeamSpace.Small)) {
             header()
             FileComposer(model, busy, policy, pick, pickTree)
+            androidx.compose.material3.OutlinedButton(enabled = !busy, onClick = { model.updateAttachedNote(if (model.sendDraft.attachedNote == null) NoteDraft() else null) }) {
+                Text(stringResource(if (model.sendDraft.attachedNote == null) R.string.attach_note else R.string.remove_attached_note))
+            }
+            model.sendDraft.attachedNote?.let { draft ->
+                Text(stringResource(R.string.attached_note_lifetime), style = MaterialTheme.typography.bodySmall)
+                io.filebeam.android.ui.send.NoteEditor(draft.title, draft.body, draft.language, !busy,
+                    { model.updateAttachedNote(draft.copy(title = it)) }, { model.updateAttachedNote(draft.copy(body = it)) }, { model.updateAttachedNote(draft.copy(language = it)) }, attached = true)
+                Text(stringResource(R.string.attached_note_size, draft.body.toByteArray(Charsets.UTF_8).size), style = MaterialTheme.typography.bodySmall)
+                draft.attachmentError()?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            }
         }
         FileSendDock(model, busy, send, Modifier.padding(horizontal = FilebeamSpace.Gutter))
     }

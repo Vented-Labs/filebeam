@@ -63,6 +63,7 @@ mod tests {
     #[test]
     fn upload_options_preserve_password_retention_and_transport() {
         let options = client::upload_options(UploadOptions {
+            attached_note: None,
             transport: Transport::WebRtc,
             archive: false,
             turbo: false,
@@ -87,6 +88,7 @@ mod tests {
     fn upload_options_reject_ambiguous_authentication_and_invalid_inbox_combinations() {
         assert!(
             client::upload_options(UploadOptions {
+                attached_note: None,
                 transport: Transport::Http,
                 archive: false,
                 turbo: false,
@@ -102,6 +104,7 @@ mod tests {
         );
         assert!(
             client::upload_options(UploadOptions {
+                attached_note: None,
                 transport: Transport::WebRtc,
                 archive: false,
                 turbo: true,
@@ -117,6 +120,7 @@ mod tests {
         );
         assert!(
             client::upload_options(UploadOptions {
+                attached_note: None,
                 transport: Transport::WebRtc,
                 archive: false,
                 turbo: false,

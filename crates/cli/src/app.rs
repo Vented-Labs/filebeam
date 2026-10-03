@@ -35,8 +35,10 @@ pub enum Request {
     Download {
         link: String,
         output: PathBuf,
+        note_output: Option<PathBuf>,
     },
     InboxDownload {
+        note_output: Option<PathBuf>,
         id: String,
         output: PathBuf,
         key: Vec<u8>,
@@ -51,6 +53,7 @@ pub enum Request {
     NoteLive(NoteCreate),
     Update,
     Resume {
+        note_output: Option<PathBuf>,
         id: String,
         direction: Direction,
     },
@@ -98,27 +101,22 @@ impl Job {
                     protocol::upload(&instance, &paths, mode, options, worker)
                         .map(|link| vec![link])
                 }
-                Request::Download { link, output } => {
-                    protocol::download(&instance, &link, &output, worker).map(|paths| {
-                        paths
-                            .into_iter()
-                            .map(|path| path.display().to_string())
-                            .collect()
-                    })
+                Request::Download { link, output, note_output } => {
+                    let paths = protocol::download(&instance, &link, &output, worker)?;
+                    export_attached_note(note_output, worker)?;
+                    Ok(paths.into_iter().map(|path| path.display().to_string()).collect())
                 }
                 Request::InboxDownload {
+                    note_output,
                     id,
                     output,
                     key,
                     cookie,
-                } => protocol::download_inbox(&instance, &id, &key, &cookie, &output, worker).map(
-                    |paths| {
-                        paths
-                            .into_iter()
-                            .map(|path| path.display().to_string())
-                            .collect()
-                    },
-                ),
+                } => {
+                    let paths = protocol::download_inbox(&instance, &id, &key, &cookie, &output, worker)?;
+                    export_attached_note(note_output, worker)?;
+                    Ok(paths.into_iter().map(|path| path.display().to_string()).collect())
+                }
                 Request::Revoke { id } => { let notes = filebeam_client_core::services::note_management::NoteManagementStore::for_root(worker.transfer_home()); if notes.contains(&id) { notes.action(&id, filebeam_client_core::services::note_management::NoteManagementAction::Revoke) } else { protocol::revoke_upload(&id, worker) }.map(|_| vec![id]) },
                 Request::EndLive { id } => { let notes = filebeam_client_core::services::note_management::NoteManagementStore::for_root(worker.transfer_home()); if notes.contains(&id) { notes.action(&id, filebeam_client_core::services::note_management::NoteManagementAction::EndLive) } else { protocol::end_live(&id, worker) }.map(|_| vec![id]) },
                 Request::NoteLive(request) => crate::services::client(&config, &instance)?
@@ -129,11 +127,35 @@ impl Job {
                     .phase(Phase::Updating)
                     .and_then(|_| update::check(&config))
                     .map(|value| vec![value]),
-                    Request::Resume { id, .. } => protocol::resume(&id, worker),
+                    Request::Resume { id, note_output, .. } => {
+                        let results = protocol::resume(&id, worker)?;
+                        export_attached_note(note_output, worker)?;
+                        Ok(results)
+                    }
                 }
             },
         ))
     }
+}
+
+fn export_attached_note(output: Option<PathBuf>, control: &Control) -> anyhow::Result<()> {
+    let Some(destination) = output else {
+        return Ok(());
+    };
+    let note = control.attached_note().ok_or_else(|| {
+        anyhow::anyhow!("this transfer has no attached note; files were downloaded")
+    })?;
+    use std::io::Write;
+    if destination == std::path::Path::new("-") {
+        std::io::stdout().write_all(note.text.as_bytes())?;
+    } else {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(destination)?
+            .write_all(note.text.as_bytes())?;
+    }
+    Ok(())
 }
 
 pub struct TransferView {
@@ -352,6 +374,7 @@ mod tests {
     fn resumed_jobs_keep_the_saved_direction() {
         assert_eq!(
             Request::Resume {
+                note_output: None,
                 id: "job".into(),
                 direction: Direction::Download,
             }

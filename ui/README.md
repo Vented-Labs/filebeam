@@ -11,6 +11,15 @@ npm run build
 
 The root build generates the encryption WebAssembly package before building the backend assets. Backend workspace commands alone do not rebuild it.
 
+## File attachments
+
+Select **Attach note** in Files to add a body, optional title, and syntax language.
+The attachment has a separate draft from standalone Notes and uses the files'
+encryption, password, expiry, and revocation. Recipients can read, copy, or save
+it immediately after unlocking the transfer, including pending Turbo shares.
+Bodies are limited to 64 KiB of UTF-8; removing the attachment preserves its
+editor draft until the file composer is reset.
+
 ## Clipboard input
 
 On the Send screen, paste text to open Notes or paste an image to add it to Files.

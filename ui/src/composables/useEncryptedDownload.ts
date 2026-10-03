@@ -1,4 +1,5 @@
 import { computed, onBeforeUnmount, ref, shallowRef } from 'vue';
+import { sameAttachedNote, validateAttachedNote, type AttachedNote } from '../lib/attached-note';
 import type { RecipientKey } from '../lib/account-crypto';
 import { decodeBase64Url } from '../lib/base64url';
 import {
@@ -57,6 +58,7 @@ export type ManifestItem = {
 };
 
 export type Manifest = {
+    attached_note?: AttachedNote;
     version: 1;
     items: ManifestItem[];
     language?: string;
@@ -118,6 +120,11 @@ function validateManifest(candidate: unknown, transfer: Transfer, descriptor = f
     if (!candidate || typeof candidate !== 'object')
         throw new Error('The decrypted manifest is invalid.');
     const value = candidate as Partial<Manifest>;
+    if (value.attached_note !== undefined) {
+        if (transfer.kind !== 'files')
+            throw new Error('Only file transfers can contain an attached note.');
+        value.attached_note = validateAttachedNote(value.attached_note);
+    }
     if (
         transfer.driver === 'webrtc' &&
         (typeof value.join_token !== 'string' || !/^[A-Za-z0-9]{64}$/.test(value.join_token))
@@ -759,6 +766,7 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
         const final = validateManifest(JSON.parse(String(decrypted.manifest)), completed);
         if (
             final.items.length !== earlyManifest.items.length ||
+            !sameAttachedNote(final.attached_note, earlyManifest.attached_note) ||
             earlyManifest.items.some((item, index) => {
                 const saved = final.items[index];
                 return (

@@ -1,4 +1,5 @@
 import initialize, * as wasm from '@filebeam/encryption';
+import { validateAttachedNote } from '../../../../ui/src/lib/attached-note';
 import { decodeBase64Url, encodeBase64Url } from '../../../../ui/src/lib/base64url';
 
 type EncryptionItem = { id: string; file: Blob; name: string; type: string };
@@ -57,6 +58,20 @@ function ready(): ReturnType<typeof initialize> {
 
 function itemKey(masterKey: Uint8Array, transferId: string, itemId: string): Uint8Array {
     return wasm.derive_item_key(masterKey, transferId, itemId);
+}
+
+function encryptMetadata(
+    key: Uint8Array,
+    prefix: Uint8Array,
+    plaintext: Uint8Array,
+    associatedData: Uint8Array,
+): Uint8Array {
+    const ciphertext = wasm.encrypt_manifest(key, prefix, plaintext, associatedData);
+    if (Math.ceil((ciphertext.length * 4) / 3) + 512 > 524288)
+        throw new Error(
+            'Encrypted transfer metadata exceeds 512 KiB; shorten the note or filenames.',
+        );
+    return ciphertext;
 }
 
 function reply(message: Record<string, unknown>, transfer?: Transferable[]): void {
@@ -243,8 +258,11 @@ context.onmessage = async (event: MessageEvent) => {
                     purpose: 'turbo-descriptor',
                     chunk_bytes: message.chunkBytes,
                     items: descriptorItems,
+                    ...(message.attachedNote
+                        ? { attached_note: validateAttachedNote(message.attachedNote) }
+                        : {}),
                 });
-                const descriptorCiphertext = wasm.encrypt_manifest(
+                const descriptorCiphertext = encryptMetadata(
                     masterKey,
                     descriptorPrefix,
                     encoder.encode(descriptor),
@@ -358,11 +376,14 @@ context.onmessage = async (event: MessageEvent) => {
             const manifest = JSON.stringify({
                 version: 1,
                 items: manifestItems,
+                ...(message.attachedNote
+                    ? { attached_note: validateAttachedNote(message.attachedNote) }
+                    : {}),
                 ...(message.noteTitle ? { title: message.noteTitle } : {}),
                 ...(message.readToken ? { read_token: message.readToken } : {}),
                 ...(message.noteLanguage ? { language: message.noteLanguage } : {}),
             });
-            const ciphertext = wasm.encrypt_manifest(
+            const ciphertext = encryptMetadata(
                 masterKey,
                 manifestPrefix,
                 encoder.encode(manifest),
@@ -486,11 +507,14 @@ context.onmessage = async (event: MessageEvent) => {
                 version: 1,
                 items: manifestItems,
                 join_token: message.joinToken,
+                ...(message.attachedNote
+                    ? { attached_note: validateAttachedNote(message.attachedNote) }
+                    : {}),
                 ...(message.noteTitle ? { title: message.noteTitle } : {}),
                 ...(message.readToken ? { read_token: message.readToken } : {}),
                 ...(message.noteLanguage ? { language: message.noteLanguage } : {}),
             });
-            const ciphertext = wasm.encrypt_manifest(
+            const ciphertext = encryptMetadata(
                 message.masterKey,
                 manifestPrefix,
                 encoder.encode(manifest),

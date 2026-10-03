@@ -20,6 +20,34 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/master') }}
 
 jobs:
+  mobile-changes:
+    name: Mobile affected paths
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    outputs:
+      android: ${{ steps.paths.outputs.android }}
+      ios: ${{ steps.paths.outputs.ios }}
+    steps:
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ inputs.ref || github.ref }}
+      - id: paths
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [[ "${{ github.event_name }}" != pull_request ]]; then
+            printf 'android=true\nios=true\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          paths=$(git diff --name-only "$BASE" HEAD)
+          shared='^(crates/(encryption|transfer|transfer-native|client-core|client-ffi)/|\.github/workflows/tests\.yml$)'
+          android=false
+          ios=false
+          if grep -Eq "$shared|^(mobile/android/|scripts/android/|docker/android/)" <<< "$paths"; then android=true; fi
+          if grep -Eq "$shared|^(mobile/ios/|scripts/ios/|\.github/workflows/ios-ci\.yml$)" <<< "$paths"; then ios=true; fi
+          printf 'android=%s\nios=%s\n' "$android" "$ios" >> "$GITHUB_OUTPUT"
+
   frontend:
     name: Frontend build and checks
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -84,7 +112,7 @@ jobs:
   rust:
     name: Rust
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
@@ -115,10 +143,65 @@ jobs:
           cargo test --manifest-path crates/transfer/Cargo.toml --locked
           cargo test --manifest-path crates/transfer-native/Cargo.toml --locked
           cargo test --manifest-path crates/transfer-wasm/Cargo.toml --locked
+      - name: Build native browser interoperability client
+        run: |
+          cargo build --manifest-path crates/cli/Cargo.toml --locked
+          cargo build --manifest-path crates/client-ffi/Cargo.toml --target-dir crates/cli/target --example background_acceptance --locked
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: test-browser-beam
+          path: crates/cli/target/debug/beam
+          if-no-files-found: error
+          retention-days: 1
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: test-browser-background
+          path: crates/cli/target/debug/examples/background_acceptance
+          if-no-files-found: error
+          retention-days: 1
+
+  native-browser:
+    name: Browser and native interoperability
+    needs: [frontend, rust]
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 15
+    steps:
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: ./.github/actions/setup-php
+      - uses: ./.github/actions/setup-node
+        with:
+          browser: 'true'
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: test-frontend
+          path: .
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: test-browser-beam
+          path: .filebeam/native-browser
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: test-browser-background
+          path: .filebeam/native-browser
+      - name: Test encrypted attachments and cross-client transfers
+        run: |
+          chmod +x .filebeam/native-browser/beam
+          chmod +x .filebeam/native-browser/background_acceptance
+          python3 scripts/desktop/backend.test.py --cli .filebeam/native-browser/beam --background .filebeam/native-browser/background_acceptance --webrtc --browser-test tests/browser/attached-note.spec.ts --browser-test tests/browser/attached-note-live.spec.ts --browser-test tests/browser/cli-interop.spec.ts
+      - if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: native-browser-failures
+          path: .filebeam/test-results/
+          include-hidden-files: true
+          if-no-files-found: ignore
 
   android:
-    # Mobile CI is paused pending device QA.
-    if: false
+    needs: mobile-changes
+    if: needs.mobile-changes.outputs.android == 'true'
     name: Android
     runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 45
@@ -177,7 +260,8 @@ jobs:
           retention-days: 7
 
   ios:
-    if: false
+    needs: mobile-changes
+    if: needs.mobile-changes.outputs.ios == 'true'
     name: iOS
     uses: ./.github/workflows/ios-ci.yml
     with:
@@ -559,12 +643,19 @@ jobs:
     # Keep this name in sync with the required GitHub Actions check on master.
     name: Test
     if: always()
-    needs: [frontend, rust, php-static, php, sail, small-chunks, distribution, themes]
+    needs: [mobile-changes, android, ios, native-browser, frontend, rust, php-static, php, sail, small-chunks, distribution, themes]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 5
     steps:
       - name: Require every test job to pass
         env:
           RESULTS: ${{ toJSON(needs) }}
+          ANDROID_REQUIRED: ${{ needs.mobile-changes.outputs.android }}
+          IOS_REQUIRED: ${{ needs.mobile-changes.outputs.ios }}
         run: |
-          jq -e 'length > 0 and all(.[]; .result == "success")' <<< "$RESULTS"
+          jq -e --arg android "$ANDROID_REQUIRED" --arg ios "$IOS_REQUIRED" '
+            all(to_entries[];
+              if .key == "android" and $android == "false" then .value.result == "skipped"
+              elif .key == "ios" and $ios == "false" then .value.result == "skipped"
+              else .value.result == "success" end)
+          ' <<< "$RESULTS"

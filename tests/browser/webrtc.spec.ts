@@ -97,6 +97,10 @@ test.describe('WebRTC live transfers', () => {
                     buffer: file.buffer,
                 })),
             );
+            await page.getByRole('switch', { name: 'Attach note', exact: true }).click();
+            await page
+                .getByRole('textbox', { name: 'Secure note editor', exact: true })
+                .fill('PRIVATE_LIVE_ATTACHMENT 🦀\n');
         }
         if (options.password) await setSenderPassword(page, options.password);
         await chooseDriver(page, 'webrtc');
@@ -197,6 +201,9 @@ test.describe('WebRTC live transfers', () => {
             });
         });
         await unlockLive(recipient, live.link, live.key);
+        await expect(recipient.getByTestId('attached-note')).toContainText(
+            'PRIVATE_LIVE_ATTACHMENT',
+        );
         const cli = recipient.getByRole('region', { name: 'Download with CLI' });
         await expect(cli.getByRole('textbox')).toHaveValue(`beam down '${live.link}'`);
         await cli.getByRole('button', { name: 'Install CLI' }).click();
