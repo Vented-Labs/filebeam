@@ -23,6 +23,7 @@ import FilePond from './upload/FilePond.vue';
 import FileQueue from './upload/FileQueue.vue';
 import TransferOptions from './upload/TransferOptions.vue';
 import TransferMethod from './upload/TransferMethod.vue';
+import ContactRecipientPicker from './upload/ContactRecipientPicker.vue';
 import TransferModeTabs from './upload/TransferModeTabs.vue';
 import ShareReady from './sharing/ShareReady.vue';
 import WebRtcConsent from './sharing/WebRtcConsent.vue';
@@ -38,6 +39,8 @@ const props = defineProps<{
     recipient?: PublicRecipient;
     user?: { name: string; username?: string | null } | null;
 }>();
+const chosenRecipient = ref<PublicRecipient>();
+const recipient = computed(() => props.recipient ?? chosenRecipient.value);
 const mode = ref<'files' | 'note'>('files');
 const note = ref('');
 const noteTitle = ref('');
@@ -73,7 +76,7 @@ const fileRetentionHours = ref(props.config.file_retention_hours);
 const noteRetentionHours = ref(props.config.note_retention_hours);
 const burnOnRead = ref(false);
 const enabledDrivers = computed(() =>
-    props.recipient
+    recipient.value
         ? enabledTransferDrivers(props.config).filter((driver) => driver === 'http')
         : enabledTransferDrivers(props.config),
 );
@@ -110,7 +113,7 @@ const canCreateTransfers = computed(
     () => Boolean(props.user) || props.config.anonymous_uploads_enabled,
 );
 const transfersAvailable = computed(
-    () => !props.recipient || enabledDrivers.value.includes('http'),
+    () => !recipient.value || enabledDrivers.value.includes('http'),
 );
 const isBusy = computed(
     () => deleting.value || filesUpload.isUploading.value || noteUpload.isUploading.value,
@@ -237,7 +240,7 @@ async function acceptPaste(content: PasteContent): Promise<void> {
         filesUpload.addFiles(content.files);
     } else if (content.text) {
         if (noteUpload.share.value) return;
-        if (props.recipient) {
+        if (recipient.value) {
             activeUpload.value.error.value =
                 'This recipient accepts files. Choose or paste a file instead.';
             return;
@@ -297,6 +300,11 @@ async function submit(turbo = false): Promise<void> {
         attachmentSubmitted.value = true;
         if (attachedError.value) return;
     }
+    if (recipient.value && (turbo || driver.value !== 'http' || selectedPassword.value)) {
+        activeUpload.value.error.value =
+            'Friend delivery requires HTTP without Turbo or a transfer password. Your draft is retained.';
+        return;
+    }
     if (driver.value === 'webrtc') {
         if (!webRtcSupported) {
             activeUpload.value.error.value = 'WebRTC is not supported by this browser.';
@@ -325,7 +333,7 @@ async function submit(turbo = false): Promise<void> {
         retentionHours:
             mode.value === 'files' ? fileRetentionHours.value : noteRetentionHours.value,
         burnOnRead: mode.value === 'note' && burnOnRead.value,
-        recipient: props.recipient,
+        recipient: recipient.value,
         turbo,
         webrtcConsent: webrtcConsent.value,
     });
@@ -521,6 +529,11 @@ onBeforeUnmount(() => {
             <TransferModeTabs v-else v-model="mode" :disabled="isBusy" />
 
             <section class="prism-composer" data-testid="prism-composer">
+                <ContactRecipientPicker
+                    v-if="user && !props.recipient && mode === 'files'"
+                    :disabled="isBusy || Boolean(activeShare)"
+                    @choose="chosenRecipient = $event"
+                />
                 <TransferMethod
                     v-model="driver"
                     :enabled-drivers="enabledDrivers"

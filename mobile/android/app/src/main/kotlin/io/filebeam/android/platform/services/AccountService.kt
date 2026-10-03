@@ -30,6 +30,15 @@ enum class KeyCustody { PASSWORD, SELF }
 data class AccountKeySituation(val activeBundleId: ULong?, val custody: KeyCustody?, val historicalBundleIds: List<ULong>, val replacementAcknowledgementRequired: Boolean)
 
 interface AccountService {
+    suspend fun contacts(): ContactsState = error("Contacts are unavailable")
+    suspend fun contactAction(username: String, action: String, canSend: Boolean? = null, autoDownload: Boolean? = null): ContactsState = error("Contacts are unavailable")
+    suspend fun receivingDefaults(policy: String, autoDownloadFriends: Boolean) { error("Receiving defaults are unavailable") }
+    suspend fun automaticReceiving(enabled: Boolean?): String = error("Automatic receiving is unavailable")
+    suspend fun syncAutomaticReceiving(): String = error("Automatic receiving is unavailable")
+    suspend fun restoreReceivingSession(instance: String) { error("Receiving session is unavailable") }
+    fun cancelAutomaticReceiving() {}
+    suspend fun verifyStagedInbox(id: String, bundleId: ULong, password: String?): List<String> = error("Staged files are unavailable")
+    suspend fun dismissStagedInbox(id: String) { error("Staged files are unavailable") }
     val state: StateFlow<ServiceState<AccountSummary>>
     suspend fun signIn(instance: String, username: String, password: String)
     suspend fun signUp(instance: String, username: String, name: String?, email: String, password: String)
@@ -69,7 +78,8 @@ class AccountSessionRegistry(private val allowHttp: Boolean, private val runtime
         services[origin] = NativeServices.newWithRuntimeCookieContext(origin, allowHttp, cookie, runtime)
         cookies[origin] = cookie
     }
-    @Synchronized fun clear(instance: String) { cookies.remove(normalizeOrigin(instance)) }
+    @Synchronized fun clear(instance: String) { val origin = normalizeOrigin(instance); cookies.remove(origin); services.remove(origin) }
+    @Synchronized fun cancelAutomaticReceivers() { services.values.forEach { it.accountCancelAutomaticReceiving() } }
 
     companion object {
         fun normalizeOrigin(value: String): String {
@@ -91,6 +101,51 @@ class NativeAccountService(
     private val mutable = MutableStateFlow<ServiceState<AccountSummary>>(ServiceState.Loading)
     override val state = mutable.asStateFlow()
 
+    override suspend fun contacts(): ContactsState {
+        val service = sessions.service(requireAccount().instance)
+        return withContext(Dispatchers.IO) { ContactsState.decode(service.accountContactsJson()) }
+    }
+    override suspend fun contactAction(username: String, action: String, canSend: Boolean?, autoDownload: Boolean?): ContactsState {
+        val service = sessions.service(requireAccount().instance)
+        return withContext(Dispatchers.IO) { ContactsState.decode(service.accountContactActionJson(username.trim().removePrefix("@").lowercase(), action, canSend, autoDownload)) }
+    }
+    override suspend fun receivingDefaults(policy: String, autoDownloadFriends: Boolean) {
+        val service = sessions.service(requireAccount().instance)
+        withContext(Dispatchers.IO) { service.accountReceivingDefaults(policy, autoDownloadFriends) }
+    }
+    override suspend fun automaticReceiving(enabled: Boolean?) = withContext(Dispatchers.IO) {
+        val service = sessions.service(requireAccount().instance)
+        if (enabled == false) service.accountCancelAutomaticReceiving()
+        val result = service.accountReceiverStateJson(enabled)
+        if (enabled == true) io.filebeam.android.platform.background.InboxDiscoveryService.schedule(context)
+        result
+    }
+    override suspend fun syncAutomaticReceiving() = withContext(Dispatchers.IO) { sessions.service(requireAccount().instance).accountReceiveAutomatically() }
+    override fun cancelAutomaticReceiving() {
+        sessions.cancelAutomaticReceivers()
+    }
+    override suspend fun restoreReceivingSession(instance: String) = withContext(Dispatchers.IO) {
+        val origin = AccountSessionRegistry.normalizeOrigin(instance)
+        if (sessions.cookie(origin) == null) {
+            val cookie = sessionStore(origin).load()?.optString("cookie")?.takeIf(String::isNotBlank) ?: error("Sign in before receiving files")
+            sessions.restore(origin, cookie)
+        }
+    }
+    override suspend fun verifyStagedInbox(id: String, bundleId: ULong, password: String?) = withContext(Dispatchers.IO) {
+        val account = requireAccount()
+        val service = sessions.service(account.instance)
+        val bundle = service.accountKeys().firstOrNull { it.id == bundleId } ?: error("The receiving key is unavailable")
+        val privateKey = privateKeyForInbox(bundle.id, bundle.userId, bundle.custodyMode, bundle.encryptedPrivateKey, bundle.publicKey, password)
+        try {
+            val destination = java.io.File(context.noBackupFilesDir, "verified-inbox/$id")
+            service.accountExportStagedInbox(id, privateKey, destination.absolutePath)
+        } finally { privateKey.fill(0) }
+    }
+    override suspend fun dismissStagedInbox(id: String) {
+        val service = sessions.service(requireAccount().instance)
+        withContext(Dispatchers.IO) { service.accountDismissStagedInbox(id) }
+    }
+
     override suspend fun signIn(instance: String, username: String, password: String) = withContext(Dispatchers.IO) {
         val origin = AccountSessionRegistry.normalizeOrigin(instance)
         val session = sessions.service(origin).accountLogin(username, password, true)
@@ -107,6 +162,9 @@ class NativeAccountService(
 
     override suspend fun resume(instance: String) = withContext(Dispatchers.IO) {
         val origin = AccountSessionRegistry.normalizeOrigin(instance)
+        if ((mutable.value as? ServiceState.Ready)?.value?.instance == origin) return@withContext
+        cancelAutomaticReceiving()
+        if ((mutable.value as? ServiceState.Ready)?.value?.instance != origin) mutable.value = ServiceState.Loading
         val persisted = sessionStore(origin).load() ?: return@withContext
         val cookie = persisted.optString("cookie").takeIf(String::isNotBlank) ?: return@withContext
         sessions.restore(origin, cookie)
@@ -116,6 +174,7 @@ class NativeAccountService(
 
     override suspend fun signOut() = withContext(Dispatchers.IO) {
         val account = requireAccount()
+        cancelAutomaticReceiving()
         sessions.service(account.instance).accountLogout()
         sessions.clear(account.instance)
         sessionStore(account.instance).clear()

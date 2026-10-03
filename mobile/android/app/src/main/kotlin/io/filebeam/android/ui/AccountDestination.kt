@@ -112,6 +112,7 @@ fun AccountDestination(
                 AccountPane.RESET -> { OutlinedTextField(email, { email = it }, label = { Text(stringResource(R.string.account_email)) }, modifier = Modifier.fillMaxWidth()); OutlinedTextField(token, { token = it }, label = { Text(stringResource(R.string.reset_token)) }, modifier = Modifier.fillMaxWidth()); OutlinedTextField(password, { password = it }, label = { Text(stringResource(R.string.new_password)) }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth()); Button(enabled = email.isNotBlank() && token.isNotBlank() && password.isNotBlank(), onClick = { scope.launch { runCatching { model.accounts.resetPassword(instance, email, token, password) }.onSuccess { password = "" }.onFailure { feedback = it.message } } }) { Text(stringResource(R.string.reset_password)) } }
             }
         }
+        if (state is ServiceState.Ready && state.value.instance == instance) ContactsSection(model, instance)
         feedback?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
     if (confirmExport) AlertDialog(onDismissRequest = { confirmExport = false }, title = { Text(stringResource(R.string.export_key)) }, text = { Text(stringResource(R.string.key_export_review)) }, confirmButton = { Button(onClick = { confirmExport = false; exportKey() }) { Text(stringResource(R.string.continue_action)) } }, dismissButton = { TextButton(onClick = { confirmExport = false }) { Text(stringResource(R.string.cancel)) } })

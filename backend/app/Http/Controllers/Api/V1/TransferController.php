@@ -28,6 +28,7 @@ use App\Support\ChunkStaging;
 use App\Support\EffectivePlan;
 use App\Support\FilestoreRegistry;
 use App\Support\InstanceSettings;
+use App\Support\ReceivingPermissions;
 use App\Support\TransportPolicy;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -134,6 +135,9 @@ class TransferController extends Controller
                     || ! $lockedRecipientBundle->is_active) {
                     throw ValidationException::withMessages(['recipient_username' => 'The receiving inbox is unavailable.']);
                 }
+                if (! app(ReceivingPermissions::class)->resolve($lockedRecipient, $request->user(), $request->user() !== null)['canSend']) {
+                    throw ValidationException::withMessages(['recipient_username' => 'The receiving inbox is unavailable.']);
+                }
             }
             $transfer = Transfer::query()->create([
                 'id' => $transferId,
@@ -141,6 +145,7 @@ class TransferController extends Controller
                 'delivery' => $lockedRecipient === null ? TransferDelivery::Link : TransferDelivery::Inbox,
                 'driver' => $driver,
                 'owner_id' => $request->user()?->getKey(),
+                'sender_authenticated' => $request->user() !== null,
                 'recipient_id' => $lockedRecipient?->getKey(),
                 'plan_id' => $plan->getKey(),
                 'filestore_ids' => $filestoreIds,
@@ -375,6 +380,7 @@ class TransferController extends Controller
                     $recipient !== null
                         && $recipient->suspended_at === null
                         && $recipient->inbox_enabled
+                        && app(ReceivingPermissions::class)->resolve($recipient, $lockedTransfer->owner, (bool) $lockedTransfer->sender_authenticated)['canSend']
                         && $bundle !== null
                         && $bundle->user_id === $recipient->id
                         && $bundle->is_active

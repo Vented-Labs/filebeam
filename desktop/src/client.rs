@@ -19,7 +19,7 @@ use filebeam_client_core::{
     ApplicationSettings, ClientRuntime, ExportState, JobAction, JobId, JobKind, PromptIdentity,
     PromptResponse, RUNTIME_ALLOWANCE_BYTES, Request, SchedulerLimits,
     TRANSIENT_MEMORY_ALLOWANCE_BYTES,
-    control::TransferSettings,
+    control::{Control, TransferSettings},
     protocol::{self, Transport, UploadAuthentication, UploadOptions, UploadRecipient},
     services::local_state::{LocalState, PendingKey},
     services::note_management::NoteManagementStore,
@@ -127,6 +127,8 @@ struct Worker {
     prepared_receives: Arc<Mutex<HashMap<String, PreparedReceive>>>,
     journal: DesktopJournal,
     next_message_id: u64,
+    inbox_receiver: Option<(Control, thread::JoinHandle<()>)>,
+    account_id: std::cell::Cell<u64>,
 }
 
 struct PreparedReceive {
@@ -188,6 +190,8 @@ impl Worker {
             prepared_receives: Arc::new(Mutex::new(HashMap::new())),
             journal,
             next_message_id: 0,
+            inbox_receiver: None,
+            account_id: std::cell::Cell::new(0),
         };
         worker.restore_saved()?;
         Ok(worker)
@@ -197,6 +201,7 @@ impl Worker {
         self.publish();
         // Discovery is public and must not depend on a saved account session.
         self.refresh_policy();
+        let _ = self.refresh_account();
         loop {
             match receiver.recv_timeout(Duration::from_millis(75)) {
                 Ok(command) => self.handle(command),
@@ -235,6 +240,87 @@ impl Worker {
                     .extend(&id, retention_hours)
                     .map(|_| ());
                 self.finish_history_action(result)
+            }
+            ClientCommand::RefreshContacts => self.refresh_contacts(),
+            ClientCommand::ContactAction {
+                username,
+                action,
+                can_send,
+                auto_download,
+            } => {
+                let contacts = self.service()?.account().contact_action(
+                    &username,
+                    &action,
+                    can_send,
+                    auto_download,
+                )?;
+                lock(&self.snapshot).contacts = Some(contacts);
+                Ok(())
+            }
+            ClientCommand::ReceivingDefaults {
+                policy,
+                auto_download,
+            } => {
+                self.service()?
+                    .account()
+                    .set_receiving_defaults(&policy, auto_download)?;
+                self.refresh_contacts()
+            }
+            ClientCommand::AutomaticReceiving(enabled) => {
+                if let Some((control, _)) = self.inbox_receiver.take() {
+                    control.cancel();
+                }
+                let service = self.service()?;
+                let id = self.local_account_id()?;
+                let root = self.config.home.join("transfers/inbox-staging");
+                let receiver = filebeam_client_core::services::inbox_receiver::InboxReceiver::open(
+                    &root,
+                    &service.instance(),
+                    id,
+                    filebeam_transfer_native::checkpoint::FilesystemSecretStore::for_state_root(
+                        &root,
+                    ),
+                )?;
+                receiver.set_enabled(enabled)?;
+                lock(&self.snapshot).auto_receiving = enabled;
+                drop(receiver);
+                self.start_inbox_receiver()
+            }
+            ClientCommand::SaveStagedInbox { id, destination } => {
+                let _memory = self
+                    .runtime
+                    .scheduler()
+                    .try_reserve_service_memory(64 * 1024 * 1024)?;
+                let service = self.service()?;
+                let account_id = self.local_account_id()?;
+                let key = self.state.load_private_key()?;
+                let root = self.config.home.join("transfers/inbox-staging");
+                let receiver = filebeam_client_core::services::inbox_receiver::InboxReceiver::open(
+                    &root,
+                    &service.instance(),
+                    account_id,
+                    filebeam_transfer_native::checkpoint::FilesystemSecretStore::for_state_root(
+                        &root,
+                    ),
+                )?;
+                let (sender, _) = mpsc::channel();
+                let control = Control::new(self.runtime.transfer_settings(), sender);
+                receiver.export(&id, &key, &destination, &control)?;
+                Ok(())
+            }
+            ClientCommand::DismissStagedInbox { id } => {
+                let root = self.config.home.join("transfers/inbox-staging");
+                let receiver = filebeam_client_core::services::inbox_receiver::InboxReceiver::open(
+                    &root,
+                    &self.service()?.instance(),
+                    self.local_account_id()?,
+                    filebeam_transfer_native::checkpoint::FilesystemSecretStore::for_state_root(
+                        &root,
+                    ),
+                )?;
+                receiver.dismiss(&id)?;
+                lock(&self.snapshot).staged_inbox = receiver.state()?.entries;
+                Ok(())
             }
             ClientCommand::GenerateReceivingKey {
                 password,
@@ -375,6 +461,9 @@ impl Worker {
                 .delete_account(&Zeroizing::new(current_password), &confirmation)
                 .map(|_| ()),
             ClientCommand::Shutdown { wait_ms } => {
+                if let Some((control, _)) = self.inbox_receiver.take() {
+                    control.cancel();
+                }
                 self.runtime.shutdown(Duration::from_millis(wait_ms));
                 Ok(())
             }
@@ -386,6 +475,15 @@ impl Worker {
             .clone()
             .map(Ok)
             .unwrap_or_else(|| self.state.load_client())
+    }
+    fn local_account_id(&self) -> Result<u64> {
+        let id = self.account_id.get();
+        if id != 0 {
+            return Ok(id);
+        }
+        self.state
+            .cached_account_id()?
+            .context("Sign in before receiving files")
     }
     fn runtime_job_id(&self, id: &str) -> Result<JobId> {
         id.parse::<u64>()
@@ -442,6 +540,12 @@ impl Worker {
         let recipient = match request.recipient {
             Some(username) => {
                 let recipient = self.service()?.account().recipient(&username)?;
+                if request
+                    .expected_recipient_id
+                    .is_some_and(|id| id != recipient.id)
+                {
+                    bail!("The saved contact account changed. Refresh contacts before sending.");
+                }
                 Some(UploadRecipient {
                     username: recipient.username,
                     user_id: recipient.id,
@@ -853,7 +957,9 @@ impl Worker {
         match self.service()?.account().session() {
             Ok(session) => {
                 self.set_account(session);
-                self.refresh_key_custody()
+                self.refresh_key_custody()?;
+                let _ = self.refresh_contacts();
+                self.start_inbox_receiver()
             }
             // A public discovery remains useful when an old account cookie expires.
             Err(error) if is_auth_error(&error) => {
@@ -1150,6 +1256,10 @@ impl Worker {
         Ok(())
     }
     fn change_instance(&mut self, url: String) -> Result<()> {
+        self.account_id.set(0);
+        if let Some((control, _)) = self.inbox_receiver.take() {
+            control.cancel();
+        }
         let url = normalize_server_url(&url)?;
         let config = Config::update(Some(self.config.home.clone()), |config| {
             config.server.url = url
@@ -1170,6 +1280,9 @@ impl Worker {
         snapshot.account = AccountSnapshot::default();
         snapshot.inbox.clear();
         snapshot.history = HistorySnapshot::default();
+        snapshot.contacts = None;
+        snapshot.auto_receiving = false;
+        snapshot.staged_inbox.clear();
         Ok(())
     }
     fn reload_settings(&mut self) -> Result<()> {
@@ -1244,6 +1357,73 @@ impl Worker {
         let filter = lock(&self.snapshot).history.filter.clone();
         self.refresh_history(filter, None)
     }
+    fn refresh_contacts(&mut self) -> Result<()> {
+        let contacts = self.service()?.account().contacts()?;
+        lock(&self.snapshot).contacts = Some(contacts);
+        Ok(())
+    }
+    fn start_inbox_receiver(&mut self) -> Result<()> {
+        if self
+            .inbox_receiver
+            .as_ref()
+            .is_some_and(|(_, worker)| !worker.is_finished())
+        {
+            return Ok(());
+        }
+        let service = self.service()?.clone();
+        let account_id = service.account().session()?.id;
+        let root = self.config.home.join("transfers/inbox-staging");
+        let secrets =
+            filebeam_transfer_native::checkpoint::FilesystemSecretStore::for_state_root(&root);
+        let receiver = filebeam_client_core::services::inbox_receiver::InboxReceiver::open(
+            &root,
+            &service.instance(),
+            account_id,
+            secrets.clone(),
+        )?;
+        let state = receiver.state()?;
+        {
+            let mut snapshot = lock(&self.snapshot);
+            snapshot.auto_receiving = state.enabled;
+            snapshot.staged_inbox = state.entries;
+        }
+        drop(receiver);
+        if !state.enabled {
+            return Ok(());
+        }
+        let (sender, _) = mpsc::channel();
+        let control = Control::new(self.runtime.transfer_settings(), sender);
+        let worker_control = control.clone();
+        let snapshot = self.snapshot.clone();
+        let worker = thread::spawn(move || {
+            while worker_control.check().is_ok() {
+                let result = filebeam_client_core::services::inbox_receiver::InboxReceiver::open(
+                    &root,
+                    &service.instance(),
+                    account_id,
+                    secrets.clone(),
+                )
+                .and_then(|receiver| receiver.sweep(&service, &worker_control));
+                if let Ok(state) = result {
+                    let mut snapshot = lock(&snapshot);
+                    if worker_control.check().is_ok()
+                        && snapshot.instance.url == service.instance()
+                        && snapshot.account.authenticated
+                    {
+                        snapshot.staged_inbox = state.entries;
+                    }
+                }
+                for _ in 0..60 {
+                    if worker_control.check().is_err() {
+                        return;
+                    }
+                    thread::sleep(Duration::from_secs(1));
+                }
+            }
+        });
+        self.inbox_receiver = Some((control, worker));
+        Ok(())
+    }
     fn inspect_inbox(&mut self, id: &str) -> Result<()> {
         let metadata = self.service()?.account().inbox_metadata(id)?;
         let mut snapshot = lock(&self.snapshot);
@@ -1256,6 +1436,9 @@ impl Worker {
         Ok(())
     }
     fn login(&mut self, email: String, password: String, remember: bool) -> Result<()> {
+        if let Some((control, _)) = self.inbox_receiver.take() {
+            control.cancel();
+        }
         let service = ServiceClient::new(&self.config.server.url)?;
         let session = service
             .account()
@@ -1268,6 +1451,8 @@ impl Worker {
         self.service = Some(service);
         self.set_account(session);
         self.refresh_policy();
+        let _ = self.refresh_contacts();
+        self.start_inbox_receiver()?;
         Ok(())
     }
     fn register(
@@ -1277,6 +1462,9 @@ impl Worker {
         email: String,
         password: String,
     ) -> Result<()> {
+        if let Some((control, _)) = self.inbox_receiver.take() {
+            control.cancel();
+        }
         let service = ServiceClient::new(&self.config.server.url)?;
         let session = service.account().register(
             &username,
@@ -1322,14 +1510,23 @@ impl Worker {
         Ok(())
     }
     fn logout(&mut self) -> Result<()> {
+        self.account_id.set(0);
+        if let Some((control, _)) = self.inbox_receiver.take() {
+            control.cancel();
+        }
         self.service()?.account().logout()?;
         self.state.clear_session()?;
         self.service = None;
-        lock(&self.snapshot).account = AccountSnapshot::default();
-        lock(&self.snapshot).history = HistorySnapshot::default();
+        let mut snapshot = lock(&self.snapshot);
+        snapshot.history = HistorySnapshot::default();
+        snapshot.account = AccountSnapshot::default();
+        snapshot.contacts = None;
+        snapshot.auto_receiving = false;
+        snapshot.staged_inbox.clear();
         Ok(())
     }
     fn set_account(&self, session: filebeam_client_core::services::AccountSession) {
+        self.account_id.set(session.id);
         let mut snapshot = lock(&self.snapshot);
         if snapshot.account.email.as_deref() != Some(session.email.as_str()) {
             snapshot.history = HistorySnapshot::default();
@@ -1490,6 +1687,14 @@ fn record_message(
     });
     if snapshot.messages.len() > MESSAGE_HISTORY_CAPACITY {
         snapshot.messages.remove(0);
+    }
+}
+
+impl Drop for Worker {
+    fn drop(&mut self) {
+        if let Some((control, _)) = self.inbox_receiver.take() {
+            control.cancel();
+        }
     }
 }
 

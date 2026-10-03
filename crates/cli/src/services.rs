@@ -20,10 +20,169 @@ use zeroize::Zeroizing;
 
 use crate::config::Config;
 
+pub fn contacts(
+    config: &Config,
+    instance: &str,
+    command: crate::ContactsCommand,
+    plain: bool,
+) -> Result<()> {
+    use crate::ContactsCommand as Command;
+    let client = client(config, instance)?;
+    let account = client.account();
+    let (contacts, requests_only) = match command {
+        Command::List => (account.contacts()?, false),
+        Command::Requests => (account.contacts()?, true),
+        Command::Set {
+            username,
+            can_send,
+            auto_download,
+        } => {
+            let current = account
+                .contacts()?
+                .contacts
+                .into_iter()
+                .find(|contact| contact.username == username.trim_start_matches('@'))
+                .context("accepted friend was not found")?;
+            (
+                account.contact_action(
+                    &username,
+                    "preferences",
+                    can_send.map_or(current.can_send, |value| value.value()),
+                    auto_download.map_or(current.auto_download, |value| value.value()),
+                )?,
+                false,
+            )
+        }
+        other => {
+            let (username, action) = match other {
+                Command::Request { username } => (username, "request"),
+                Command::Accept { username } => (username, "accept"),
+                Command::Decline { username } => (username, "decline"),
+                Command::Cancel { username } => (username, "cancel"),
+                Command::Remove { username } => (username, "remove"),
+                Command::Block { username } => (username, "block"),
+                Command::Unblock { username } => (username, "unblock"),
+                _ => unreachable!(),
+            };
+            (
+                account.contact_action(&username, action, None, None)?,
+                false,
+            )
+        }
+    };
+    for contact in contacts.contacts {
+        if requests_only && contact.status == "accepted" {
+            continue;
+        }
+        crate::output::result(
+            &format!(
+                "@{}\t{}\tcan-send={}\tauto-download={}",
+                contact.username,
+                contact.status,
+                contact.effective.can_send,
+                contact.effective.auto_download
+            ),
+            plain,
+        )?;
+    }
+    if !requests_only {
+        for contact in contacts.blocked {
+            crate::output::result(&format!("@{}\tblocked", contact.username), plain)?;
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn receiver(
+    config: &Config,
+    instance: &str,
+    account_id: u64,
+) -> Result<filebeam_client_core::services::inbox_receiver::InboxReceiver> {
+    let root = config.home.join("transfers/inbox-staging");
+    filebeam_client_core::services::inbox_receiver::InboxReceiver::open(
+        &root,
+        instance,
+        account_id,
+        filebeam_transfer_native::checkpoint::FilesystemSecretStore::for_state_root(&root),
+    )
+}
+pub(crate) fn receiver_control(config: &Config) -> filebeam_client_core::control::Control {
+    let (sender, _prompts) = std::sync::mpsc::channel();
+    filebeam_client_core::control::Control::new(
+        filebeam_client_core::control::TransferSettings {
+            state_home: config.home.join("transfers"),
+            memory_budget: config.memory_limit_mib * 1024 * 1024,
+            max_concurrency: config.max_concurrency,
+            client_user_agent: None,
+            webrtc_relay_only: true,
+            checkpoint_secret_store: None,
+            source_resolver: None,
+        },
+        sender,
+    )
+}
+pub fn watch_inbox(config: &Config, instance: &str, once: bool) -> Result<()> {
+    use std::sync::atomic::Ordering;
+    let client = client(config, instance)?;
+    let account_id = client.account().session()?.id;
+    let control = receiver_control(config);
+    let _interrupt = crate::terminal::watch_interrupt(control.cancelled.clone())?;
+    {
+        receiver(config, instance, account_id)?.set_enabled(true)?;
+    }
+    while !control.cancelled.load(Ordering::Relaxed) {
+        let state = receiver(config, instance, account_id)?.sweep(&client, &control);
+        match state {
+            Ok(state) => {
+                if once {
+                    println!("{}", serde_json::to_string(&state)?);
+                    return Ok(());
+                }
+            }
+            Err(error) if once => return Err(error),
+            Err(error) if !control.cancelled.load(Ordering::Relaxed) => {
+                eprintln!("Inbox receiving paused: {error}")
+            }
+            Err(_) => break,
+        }
+        for _ in 0..60 {
+            if control.cancelled.load(Ordering::Relaxed) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
+    }
+    Ok(())
+}
+pub fn staged_inbox(
+    config: &Config,
+    instance: &str,
+    id: Option<&str>,
+    output: Option<&Path>,
+) -> Result<()> {
+    let receiver = receiver(config, instance, cached_account_id(config, instance)?)?;
+    if let (Some(id), Some(output)) = (id, output) {
+        let key = stored_private_key(config, instance)?;
+        for path in receiver.export(id, &key, output, &receiver_control(config))? {
+            println!("{path}");
+        }
+    } else {
+        for entry in receiver.state()?.entries {
+            println!("{}\t{}\t{}", entry.id, entry.state, entry.bytes);
+        }
+    }
+    Ok(())
+}
+pub fn dismiss_staged(config: &Config, instance: &str, id: &str) -> Result<()> {
+    receiver(config, instance, cached_account_id(config, instance)?)?.dismiss(id)
+}
+
 #[derive(Serialize, Deserialize)]
 struct Session {
     origin: String,
     cookies: String,
+    #[serde(default)]
+    account_id: u64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -75,6 +234,7 @@ pub fn history_row(entry: &filebeam_client_core::services::HistoryEntry) -> Stri
 }
 
 pub fn save_session(config: &Config, instance: &str, client: &ServiceClient) -> Result<()> {
+    let account_id = client.account().session()?.id;
     let cookies = client
         .cookie_context()
         .context("login did not return a session cookie")?;
@@ -88,6 +248,7 @@ pub fn save_session(config: &Config, instance: &str, client: &ServiceClient) -> 
         &Session {
             origin: instance.into(),
             cookies,
+            account_id,
         },
     )
 }
@@ -99,6 +260,21 @@ pub fn clear_session(config: &Config, instance: &str) -> Result<()> {
         Store::discard(&root, &id)?;
     }
     Ok(())
+}
+
+pub(crate) fn cached_account_id(config: &Config, instance: &str) -> Result<u64> {
+    let cached = session_store(config, instance, false)?
+        .and_then(|store| store.load_named::<Session>("session").transpose())
+        .transpose()?;
+    if let Some(session) =
+        cached.filter(|session| session.origin == instance && session.account_id != 0)
+    {
+        return Ok(session.account_id);
+    }
+    client(config, instance)?
+        .account()
+        .session()
+        .map(|session| session.id)
 }
 
 pub fn stored_private_key(config: &Config, instance: &str) -> Result<Zeroizing<Vec<u8>>> {

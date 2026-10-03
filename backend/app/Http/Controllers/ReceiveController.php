@@ -6,6 +6,7 @@ namespace App\Http\Controllers;
 
 use App\Models\User;
 use App\Support\InstanceSettings;
+use App\Support\ReceivingPermissions;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -23,6 +24,7 @@ class ReceiveController extends Controller
             ->with('activeAccountKeyBundles')
             ->firstOrFail();
         $bundle = $recipient->activeAccountKeyBundles->sole();
+        abort_unless(app(ReceivingPermissions::class)->resolve($recipient, $request->user(), $request->user() !== null)['canSend'], 404);
 
         return Inertia::render('Receive', ['recipient' => [
             'id' => $recipient->id,

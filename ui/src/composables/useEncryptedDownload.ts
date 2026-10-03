@@ -1,5 +1,6 @@
 import { computed, onBeforeUnmount, ref, shallowRef } from 'vue';
 import { sameAttachedNote, validateAttachedNote, type AttachedNote } from '../lib/attached-note';
+import { cachedInboxChunk, cachedInboxTransfer } from '../lib/inbox-staging';
 import type { RecipientKey } from '../lib/account-crypto';
 import { decodeBase64Url } from '../lib/base64url';
 import {
@@ -548,14 +549,20 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
                     headers: { Accept: 'application/json' },
                     cache: 'no-store',
                 },
-            );
-            if (!response.ok || response.redirected)
+            ).catch(() => undefined);
+            const staged =
+                inbox && !response?.ok
+                    ? await cachedInboxTransfer(transferId).catch(() => undefined)
+                    : undefined;
+            if ((!response?.ok && !staged) || response?.redirected)
                 throw new Error(
-                    response.status === 404
+                    response?.status === 404
                         ? 'This transfer is unavailable or has expired.'
                         : 'Unable to load this transfer.',
                 );
-            const payload = (await response.json()) as { data: Transfer };
+            const payload = staged
+                ? { data: staged }
+                : ((await response!.json()) as { data: Transfer });
             if (
                 payload.data.id !== transferId ||
                 payload.data.protocol_version !== 1 ||
@@ -675,6 +682,14 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
         onWaiting?: () => void,
     ): Promise<ArrayBuffer> {
         if (!transfer.value) throw new Error('Transfer unavailable.');
+        if (inbox) {
+            const cached = await cachedInboxChunk(transferId, itemId, index).catch(() => undefined);
+            if (cached?.byteLength === expectedBytes) {
+                onProgress(expectedBytes);
+                onReady?.();
+                return cached;
+            }
+        }
         if (webrtc.value) {
             if (!webrtcConsent.value || !manifest.value?.join_token)
                 throw new Error('Acknowledge WebRTC IP address exposure before connecting.');

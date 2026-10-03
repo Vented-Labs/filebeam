@@ -71,6 +71,7 @@ pub struct SendPanel {
 struct Preferences {
     password: Entity<InputState>,
     recipient: Entity<InputState>,
+    chosen_contact: Option<(String, u64)>,
     lifetime: Entity<SelectState<Vec<LifetimeChoice>>>,
     lifetime_choices: Vec<LifetimeChoice>,
     transport: Transport,
@@ -97,6 +98,7 @@ impl Preferences {
                     .masked(true)
             }),
             recipient: cx.new(|cx| InputState::new(window, cx).placeholder("username")),
+            chosen_contact: None,
             lifetime: cx.new(move |cx| {
                 SelectState::new(
                     select_choices,
@@ -551,6 +553,20 @@ impl SendPanel {
         let lifetime_error =
             cx.new(|cx| LifetimeErrorHint::new(lifetime.clone(), lifetime_availability, cx));
         let recipient = preferences.recipient.clone();
+        let contacts = if self.mode == ComposerMode::Files {
+            self.client
+                .snapshot()
+                .contacts
+                .map(|data| {
+                    data.contacts
+                        .into_iter()
+                        .filter(|contact| contact.status == "accepted")
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         let reveal_password = preferences.reveal_password;
         let include_key = preferences.include_key;
         let turbo = preferences.turbo;
@@ -658,7 +674,25 @@ impl SendPanel {
                                     .id("sheet-transfer-recipient")
                                     .with_size(Size::Large)
                                     .h(px(38.)),
-                            ),
+                            )
+                            .children(contacts.iter().enumerate().map(|(index, contact)| {
+                                let username = contact.username.clone();
+                                let input = recipient.clone();
+                                let id = contact.id;
+                                let chooser = panel.clone();
+                                Button::new(("friend-recipient", index))
+                                    .label(format!("@{username}"))
+                                    .on_click(move |_, window, cx| {
+                                        input.update(cx, |input, cx| {
+                                            input.set_value(username.clone(), window, cx)
+                                        });
+                                        let _ = chooser.update(cx, |this, cx| {
+                                            this.active_preferences_mut().chosen_contact =
+                                                Some((username.clone(), id));
+                                            cx.notify();
+                                        });
+                                    })
+                            })),
                     ),
                 )
         });
@@ -812,6 +846,7 @@ fn unavailable_lifetime_error(
 struct PreferenceValues {
     password: String,
     recipient: String,
+    expected_recipient_id: Option<u64>,
     lifetime: String,
     transport: Transport,
     include_key: bool,
@@ -826,6 +861,11 @@ impl PreferenceValues {
         Self {
             password: value(&preferences.password),
             recipient: value(&preferences.recipient),
+            expected_recipient_id: preferences
+                .chosen_contact
+                .as_ref()
+                .filter(|(name, _)| name == value(&preferences.recipient).trim())
+                .map(|(_, id)| *id),
             lifetime: preferences
                 .lifetime
                 .read(cx)
@@ -983,6 +1023,7 @@ fn build_command_for_policy(
                 include_key: preferences.include_key,
                 password,
                 recipient,
+                expected_recipient_id: preferences.expected_recipient_id,
             }))
         }
         ComposerMode::Notes => {
@@ -2345,6 +2386,7 @@ mod tests {
         PreferenceValues {
             password: password.into(),
             recipient: recipient.into(),
+            expected_recipient_id: None,
             lifetime: "12".into(),
             transport: Transport::Http,
             include_key: true,

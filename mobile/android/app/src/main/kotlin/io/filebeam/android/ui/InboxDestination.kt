@@ -38,7 +38,7 @@ import kotlinx.coroutines.launch
 private enum class InboxFilter { ALL, UNREAD, SAVED }
 
 @Composable
-fun InboxDestination(model: FilebeamViewModel, instance: String) {
+fun InboxDestination(model: FilebeamViewModel, instance: String, saveFile: (String) -> Unit = {}) {
     val state = model.inbox.state.collectAsStateWithLifecycle().value
     val account = model.accounts.state.collectAsStateWithLifecycle().value
     val scope = rememberCoroutineScope()
@@ -50,6 +50,7 @@ fun InboxDestination(model: FilebeamViewModel, instance: String) {
     Column(Modifier.verticalScroll(rememberScrollState()).imePadding().padding(horizontal = FilebeamSpace.Gutter, vertical = FilebeamSpace.Medium), verticalArrangement = Arrangement.spacedBy(FilebeamSpace.Medium)) {
         Text(stringResource(R.string.inbox), style = MaterialTheme.typography.headlineSmall)
         Text(stringResource(R.string.inbox_opaque_description), style = MaterialTheme.typography.bodySmall)
+        if (account is ServiceState.Ready && account.value.instance == instance) StagedInboxSection(model, instance, saveFile)
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             InboxFilter.entries.forEach { value -> TextButton(onClick = { filter = value }) { Text(stringResource(value.label)) } }
         }

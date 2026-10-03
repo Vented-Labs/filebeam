@@ -85,10 +85,11 @@ async function sendToInbox(
     browser: Browser,
     username: string,
     marker: string,
+    authenticatedSender?: Page,
 ): Promise<{ sender: Page; transfer: CreatedTransfer; filename: string; sentBodies: string[] }> {
-    const senderContext = await browser.newContext();
-    contexts.push(senderContext);
-    const sender = await senderContext.newPage();
+    const senderContext = authenticatedSender ? undefined : await browser.newContext();
+    if (senderContext) contexts.push(senderContext);
+    const sender = authenticatedSender ?? (await senderContext!.newPage());
     const sentBodies: string[] = [];
     let transfer: CreatedTransfer | undefined;
     sender.on('request', (request) => {
@@ -123,6 +124,101 @@ async function sendToInbox(
     await expect.poll(() => transfer).toBeDefined();
     return { sender, transfer: transfer!, filename, sentBodies };
 }
+
+test('friends receive with inherited policies and keyless browser staging survives navigation', async ({
+    browser,
+    page,
+}) => {
+    await page.addInitScript(() => {
+        Object.defineProperty(window, 'showSaveFilePicker', {
+            value: undefined,
+            configurable: true,
+        });
+    });
+    const receiver = await register(page);
+    const privateKey = await activateInbox(page, 'self');
+    await expect(page.getByText('Secure inbox active', { exact: true })).toBeVisible();
+    const senderContext = await browser.newContext();
+    contexts.push(senderContext);
+    const sender = await senderContext.newPage();
+    const senderAccount = await register(sender);
+    await sender.goto('/account/contacts');
+    await sender.getByLabel('Add a friend by exact username').fill(`@${receiver.username}`);
+    await sender.getByRole('button', { name: 'Send friend request' }).click();
+    await expect(sender.getByRole('button', { name: 'Cancel request' })).toBeVisible();
+    await page.goto('/account/contacts');
+    await page.getByRole('button', { name: 'Accept', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Remove friend', exact: true })).toBeVisible();
+    const policyResponse = page.waitForResponse(
+        (response) =>
+            response.url().endsWith('/account/receiving') &&
+            response.request().method() === 'PATCH',
+    );
+    await page.getByLabel('Who can send me files').selectOption('friends');
+    expect((await policyResponse).status()).toBe(200);
+    const settingsResponse = page.waitForResponse(
+        (response) =>
+            response.url().endsWith('/account/receiving') &&
+            response.request().method() === 'PATCH',
+    );
+    await page.getByRole('switch', { name: /Automatically download from friends/ }).click();
+    expect((await settingsResponse).status()).toBe(200);
+    const marker = `offline-catch-up-${receiver.username}`;
+    const { transfer, filename } = await sendToInbox(browser, receiver.username, marker, sender);
+    await page.goto('/account/inbox');
+    const staging = page.waitForResponse((response) =>
+        response.url().endsWith(`/inbox/${transfer.id}/staging`),
+    );
+    await page.getByLabel('Automatically stage eligible friend deliveries in this browser').check();
+    expect((await staging).status()).toBe(200);
+    await expect
+        .poll(async () =>
+            page.evaluate(async (id) => {
+                const db = await new Promise<IDBDatabase>((resolve, reject) => {
+                    const request = indexedDB.open('filebeam-inbox-staging-v1', 1);
+                    request.onsuccess = () => resolve(request.result);
+                    request.onerror = () => reject(request.error);
+                });
+                const values = await new Promise<Array<{ key: string; complete?: boolean }>>(
+                    (resolve, reject) => {
+                        const request = db
+                            .transaction('ciphertext')
+                            .objectStore('ciphertext')
+                            .getAll();
+                        request.onsuccess = () => resolve(request.result);
+                        request.onerror = () => reject(request.error);
+                    },
+                );
+                db.close();
+                return values.some((value) => value.key.endsWith(`|${id}`) && value.complete);
+            }, transfer.id),
+        )
+        .toBe(true);
+    // A manual save must use retained ciphertext and still authenticate it.
+    await page.route('**/items/*/chunks/*', (route) => route.abort());
+    await page.route('**/account/inbox/*/metadata', (route) =>
+        route.fulfill({ status: 404, json: {} }),
+    );
+    await page.goto(`/account/inbox/staged/${transfer.id}`);
+    await page.getByLabel('Private key export').fill(privateKey!);
+    await page.getByRole('button', { name: 'Unlock files', exact: true }).click();
+    await expect(page.getByText(filename, { exact: true })).toBeVisible();
+    const download = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Download files', exact: true }).click();
+    const result = await download;
+    expect((await readFile((await result.path())!)).toString()).toBe(marker);
+    await page.goto('/account/inbox/staged');
+    await page.getByRole('button', { name: 'Remove local ciphertext' }).click();
+    await expect(page.getByText('No completed automatic downloads in this browser.')).toBeVisible();
+    await page.goto('/account/contacts');
+    await page.getByRole('button', { name: 'Block', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Unblock', exact: true })).toBeVisible();
+    await sender.goto(`/u/${receiver.username}`);
+    await expect(sender.getByRole('heading', { name: 'Send files to', exact: false })).toHaveCount(
+        0,
+    );
+    expect(senderAccount.username).not.toBe(receiver.username);
+});
 
 for (const custody of ['password', 'self'] as const) {
     test(`receives, privately unlocks, and downloads a ${custody}-custody inbox delivery`, async ({

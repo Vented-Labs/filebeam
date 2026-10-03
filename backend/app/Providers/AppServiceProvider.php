@@ -56,6 +56,11 @@ class AppServiceProvider extends ServiceProvider
             Limit::perMinute(120)->by('session:'.hash('sha256', (string) $request->header('X-Filebeam-Session-Token'))),
         ]);
         RateLimiter::for('account-key-writing', fn (Request $request): Limit => Limit::perMinute(5)->by((string) $request->user()?->getAuthIdentifier()));
+        RateLimiter::for('contact-writing', fn (Request $request): array => [
+            Limit::perMinute(60)->by('ip:'.$request->ip()),
+            Limit::perMinute(30)->by('account:'.$request->user()?->getAuthIdentifier()),
+            Limit::perMinute(10)->by('pair:'.$request->user()?->getAuthIdentifier().'|'.$request->route('username')),
+        ]);
     }
 
     protected function configureDefaults(): void

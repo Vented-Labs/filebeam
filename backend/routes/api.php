@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\V1\TurboTransferController;
 use App\Http\Controllers\Api\V1\WebRtcTransferController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Auth\RegisteredUserController;
+use App\Http\Controllers\ContactController;
 use App\Http\Controllers\FileReportController;
 use App\Http\Controllers\InboxController;
 use App\Http\Controllers\NativeAccountController;
@@ -120,6 +121,11 @@ Route::prefix('native/v1')->middleware([EncryptCookies::class, AddQueuedCookiesT
         Route::get('/history', [TransferHistoryController::class, 'index'])->middleware('throttle:transfer-reading');
         Route::delete('/history/{id}', [TransferHistoryController::class, 'destroy'])->whereUlid('id')->middleware('throttle:transfer-writing');
         Route::patch('/history/{id}/retention', [TransferHistoryController::class, 'extend'])->whereUlid('id')->middleware('throttle:transfer-writing');
+        Route::get('/contacts', [ContactController::class, 'index'])->middleware('throttle:transfer-reading');
+        Route::get('/contacts/{username}', [ContactController::class, 'lookup'])->where('username', '[a-z0-9_]{3,24}')->middleware('throttle:contact-writing');
+        Route::post('/contacts/{username}', [ContactController::class, 'mutate'])->where('username', '[a-z0-9_]{3,24}')->middleware('throttle:contact-writing');
+        Route::patch('/account/receiving', [ContactController::class, 'defaults']);
+        Route::get('/inbox/sync', [NativeAccountController::class, 'inboxSync'])->middleware('throttle:transfer-reading');
         Route::get('/session', [NativeAccountController::class, 'session']);
         Route::get('/inbox', [NativeAccountController::class, 'inbox']);
         Route::get('/inbox/unread-count', [NativeAccountController::class, 'inboxUnreadCount']);
@@ -130,6 +136,7 @@ Route::prefix('native/v1')->middleware([EncryptCookies::class, AddQueuedCookiesT
         Route::post('/account/email/verification-notification', [NativeAccountController::class, 'resendVerification'])->middleware('throttle:6,1');
         Route::post('/account/email/verify', [NativeAccountController::class, 'verifyEmail'])->middleware('throttle:6,1');
         Route::get('/inbox/{transfer}/metadata', [InboxController::class, 'metadata'])->middleware('throttle:transfer-reading');
+        Route::get('/inbox/{transfer}/staging', [InboxController::class, 'staging'])->middleware('throttle:transfer-reading');
         Route::get('/inbox/{transfer}/items/{item}/chunks/{position}', [InboxController::class, 'chunk'])
             ->whereNumber('position')
             ->scopeBindings()

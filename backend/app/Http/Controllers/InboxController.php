@@ -16,6 +16,7 @@ use App\Models\User;
 use App\Notifications\InboxTransferCompleted;
 use App\Support\ChunkResponse;
 use App\Support\InstanceSettings;
+use App\Support\ReceivingPermissions;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -75,9 +76,30 @@ class InboxController extends Controller
         ]]], 200, ['Cache-Control' => 'no-store']);
     }
 
+    public function staging(Request $request, Transfer $transfer): JsonResponse
+    {
+        $this->transfer($request, $transfer);
+        $recipient = $request->user();
+        assert($recipient instanceof User);
+        abort_unless(app(ReceivingPermissions::class)->resolve($recipient, $transfer->owner, (bool) $transfer->sender_authenticated)['autoDownload'], 409, 'Automatic receiving is disabled for this sender.');
+        $envelope = $transfer->keyEnvelopes()->recipient()->with('accountKeyBundle')->sole();
+
+        return response()->json(['data' => [...(new TransferResource($transfer->load('items')))->resolve(),
+            'recipient_key' => [
+                'bundle' => $envelope->accountKeyBundle->only('id', 'user_id', 'version', 'public_key', 'fingerprint'),
+                'encrypted_key' => $envelope->encrypted_key,
+            ],
+        ]], 200, ['Cache-Control' => 'no-store, private']);
+    }
+
     public function chunk(Request $request, Transfer $transfer, TransferItem $item, int $position, ChunkResponse $response): StreamedResponse
     {
         $this->transfer($request, $transfer);
+        if ($request->boolean('automatic')) {
+            $recipient = $request->user();
+            assert($recipient instanceof User);
+            abort_unless(app(ReceivingPermissions::class)->resolve($recipient, $transfer->owner, (bool) $transfer->sender_authenticated)['autoDownload'], 409);
+        }
         /** @var TransferChunk $chunk */
         $chunk = $item->chunks()->atPosition($position)->firstOrFail();
 

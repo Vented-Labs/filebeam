@@ -145,6 +145,12 @@ class FilebeamViewModel(application: Application) : AndroidViewModel(application
             refreshSendDiscovery()
         } }
         viewModelScope.launch { accounts.state.collect { refreshSendDiscovery() } }
+        viewModelScope.launch(Dispatchers.IO) {
+            while (true) {
+                runCatching { accounts.resume(settings.value.instance); accounts.syncAutomaticReceiving() }
+                kotlinx.coroutines.delay(60_000)
+            }
+        }
     }
 
     fun appendFiles(uris: List<Uri>, paths: Map<String, String> = emptyMap()) {
@@ -214,7 +220,7 @@ class FilebeamViewModel(application: Application) : AndroidViewModel(application
         return true
     }
 
-    fun validateRecipient() {
+    fun validateRecipient(expectedUserId: ULong? = null) {
         val name = sendDraft.recipient.username
         val revision = recipientRevision
         val conflict = sendDraft.recipientConflict()
@@ -225,9 +231,10 @@ class FilebeamViewModel(application: Application) : AndroidViewModel(application
             val sameRequest = recipientRevision == revision && sendDraft.recipient.username == name
             val currentOrigin = runCatching { AccountSessionRegistry.normalizeOrigin(settings.value.instance) }.getOrNull()
             if (!sameRequest || identity?.origin != currentOrigin) return@validateRecipient
+            val identityError = if (expectedUserId != null && identity?.id != expectedUserId) "The saved contact account changed. Refresh contacts before sending." else error
             updateSend {
-                it.copy(recipient = it.recipient.copy(status = if (error == null) RecipientStatus.VALIDATED else RecipientStatus.INVALID,
-                    error = error, identity = identity?.copy(revision = revision)))
+                it.copy(recipient = it.recipient.copy(status = if (identityError == null) RecipientStatus.VALIDATED else RecipientStatus.INVALID,
+                    error = identityError, identity = identity?.takeIf { identityError == null }?.copy(revision = revision)))
             }
         }
     }

@@ -137,6 +137,8 @@ pub struct NativeInvitation {
 pub struct NativeServices {
     pub(crate) inner: core::ServiceClient,
     pub(crate) runtime: Option<Arc<NativeRuntime>>,
+    automatic: std::sync::Mutex<Option<filebeam_client_core::control::Control>>,
+    account_id: std::sync::atomic::AtomicU64,
 }
 
 #[uniffi::export]
@@ -146,6 +148,8 @@ impl NativeServices {
         Ok(Self {
             inner: core::ServiceClient::new(&origin(&instance, allow_http)?).map_err(operation)?,
             runtime: None,
+            automatic: std::sync::Mutex::new(None),
+            account_id: std::sync::atomic::AtomicU64::new(0),
         })
     }
 
@@ -160,6 +164,8 @@ impl NativeServices {
             inner: core::ServiceClient::new_with_cookie_context(&instance, Some(&cookie_context))
                 .map_err(operation)?,
             runtime: None,
+            automatic: std::sync::Mutex::new(None),
+            account_id: std::sync::atomic::AtomicU64::new(0),
         })
     }
 
@@ -172,6 +178,8 @@ impl NativeServices {
         Ok(Self {
             inner: core::ServiceClient::new(&origin(&instance, allow_http)?).map_err(operation)?,
             runtime: Some(runtime),
+            automatic: std::sync::Mutex::new(None),
+            account_id: std::sync::atomic::AtomicU64::new(0),
         })
     }
 
@@ -187,6 +195,8 @@ impl NativeServices {
             inner: core::ServiceClient::new_with_cookie_context(&instance, Some(&cookie_context))
                 .map_err(operation)?,
             runtime: Some(runtime),
+            automatic: std::sync::Mutex::new(None),
+            account_id: std::sync::atomic::AtomicU64::new(0),
         })
     }
 
@@ -312,7 +322,7 @@ impl NativeServices {
         self.inner
             .account()
             .login(&email, &password, remember)
-            .map(account_session)
+            .map(|session| self.remember_session(session))
             .map_err(operation)
     }
 
@@ -326,7 +336,7 @@ impl NativeServices {
         self.inner
             .account()
             .register(&username, name.as_deref(), &email, &password)
-            .map(account_session)
+            .map(|session| self.remember_session(session))
             .map_err(operation)
     }
 
@@ -337,15 +347,200 @@ impl NativeServices {
     }
 
     pub fn account_logout(&self) -> Result<()> {
-        self.inner.account().logout().map_err(operation)
+        self.account_cancel_automatic_receiving();
+        self.inner.account().logout().map_err(operation)?;
+        self.account_id
+            .store(0, std::sync::atomic::Ordering::Relaxed);
+        Ok(())
     }
 
     pub fn account_session(&self) -> Result<AccountSession> {
         self.inner
             .account()
             .session()
-            .map(account_session)
+            .map(|session| self.remember_session(session))
             .map_err(operation)
+    }
+
+    pub fn account_contacts_json(&self) -> Result<String> {
+        self.inner
+            .account()
+            .contacts()
+            .and_then(|value| serde_json::to_string(&value).map_err(Into::into))
+            .map_err(operation)
+    }
+    pub fn account_contact_action_json(
+        &self,
+        username: String,
+        action: String,
+        can_send: Option<bool>,
+        auto_download: Option<bool>,
+    ) -> Result<String> {
+        self.inner
+            .account()
+            .contact_action(&username, &action, can_send, auto_download)
+            .and_then(|value| serde_json::to_string(&value).map_err(Into::into))
+            .map_err(operation)
+    }
+    pub fn account_receiving_defaults(&self, policy: String, auto_download: bool) -> Result<()> {
+        self.inner
+            .account()
+            .set_receiving_defaults(&policy, auto_download)
+            .map(|_| ())
+            .map_err(operation)
+    }
+    pub fn account_receiver_state_json(&self, enabled: Option<bool>) -> Result<String> {
+        if enabled == Some(false) {
+            self.account_cancel_automatic_receiving();
+        }
+        let runtime = self
+            .runtime
+            .as_ref()
+            .ok_or_else(|| crate::invalid("Inbox receiving requires a native runtime"))?;
+        let account_id = self.local_account_id()?;
+        let root = runtime.settings.state_home.join("inbox-staging");
+        let secrets = runtime
+            .settings
+            .checkpoint_secret_store
+            .clone()
+            .unwrap_or_else(|| {
+                filebeam_transfer_native::checkpoint::FilesystemSecretStore::for_state_root(&root)
+            });
+        let receiver = core::inbox_receiver::InboxReceiver::open(
+            &root,
+            &self.inner.instance(),
+            account_id,
+            secrets,
+        )
+        .map_err(operation)?;
+        let state = match enabled {
+            Some(value) => receiver.set_enabled(value),
+            None => receiver.state(),
+        }
+        .map_err(operation)?;
+        serde_json::to_string(&state).map_err(operation)
+    }
+    pub fn account_receive_automatically(&self) -> Result<String> {
+        let runtime = self
+            .runtime
+            .as_ref()
+            .ok_or_else(|| crate::invalid("Inbox receiving requires a native runtime"))?;
+        let (sender, _prompts) = std::sync::mpsc::channel();
+        let control = filebeam_client_core::control::Control::new(runtime.settings.clone(), sender);
+        {
+            let mut active = self
+                .automatic
+                .lock()
+                .map_err(|_| crate::invalid("Inbox receiving worker is unavailable"))?;
+            if active.is_some() {
+                return Err(crate::invalid("Inbox receiving is already running"));
+            }
+            *active = Some(control.clone());
+        }
+        let result = (|| {
+            let _memory = runtime.reserve_service_memory(32 * 1024 * 1024)?;
+            let session = self.inner.account().session().map_err(operation)?;
+            self.account_id
+                .store(session.id, std::sync::atomic::Ordering::Relaxed);
+            control.check().map_err(operation)?;
+            let root = runtime.settings.state_home.join("inbox-staging");
+            let secrets = runtime
+                .settings
+                .checkpoint_secret_store
+                .clone()
+                .unwrap_or_else(|| {
+                    filebeam_transfer_native::checkpoint::FilesystemSecretStore::for_state_root(
+                        &root,
+                    )
+                });
+            let receiver = core::inbox_receiver::InboxReceiver::open(
+                &root,
+                &self.inner.instance(),
+                session.id,
+                secrets,
+            )
+            .map_err(operation)?;
+            receiver
+                .sweep(&self.inner, &control)
+                .and_then(|value| serde_json::to_string(&value).map_err(Into::into))
+                .map_err(operation)
+        })();
+        if let Ok(mut active) = self.automatic.lock() {
+            *active = None;
+        }
+        result
+    }
+
+    pub fn account_cancel_automatic_receiving(&self) {
+        if let Ok(active) = self.automatic.lock()
+            && let Some(control) = &*active
+        {
+            control.cancel();
+        }
+    }
+
+    pub fn account_export_staged_inbox(
+        &self,
+        transfer_id: String,
+        private_key: Vec<u8>,
+        destination: String,
+    ) -> Result<Vec<String>> {
+        let runtime = self
+            .runtime
+            .as_ref()
+            .ok_or_else(|| crate::invalid("Inbox receiving requires a native runtime"))?;
+        let _memory = runtime.reserve_service_memory(64 * 1024 * 1024)?;
+        let account_id = self.local_account_id()?;
+        let root = runtime.settings.state_home.join("inbox-staging");
+        let secrets = runtime
+            .settings
+            .checkpoint_secret_store
+            .clone()
+            .unwrap_or_else(|| {
+                filebeam_transfer_native::checkpoint::FilesystemSecretStore::for_state_root(&root)
+            });
+        let receiver = core::inbox_receiver::InboxReceiver::open(
+            &root,
+            &self.inner.instance(),
+            account_id,
+            secrets,
+        )
+        .map_err(operation)?;
+        let (sender, _) = std::sync::mpsc::channel();
+        let control = filebeam_client_core::control::Control::new(runtime.settings.clone(), sender);
+        let private_key = Zeroizing::new(private_key);
+        receiver
+            .export(
+                &transfer_id,
+                &private_key,
+                std::path::Path::new(&destination),
+                &control,
+            )
+            .map_err(operation)
+    }
+
+    pub fn account_dismiss_staged_inbox(&self, transfer_id: String) -> Result<()> {
+        let runtime = self
+            .runtime
+            .as_ref()
+            .ok_or_else(|| crate::invalid("Inbox receiving requires a native runtime"))?;
+        let root = runtime.settings.state_home.join("inbox-staging");
+        let secrets = runtime
+            .settings
+            .checkpoint_secret_store
+            .clone()
+            .unwrap_or_else(|| {
+                filebeam_transfer_native::checkpoint::FilesystemSecretStore::for_state_root(&root)
+            });
+        core::inbox_receiver::InboxReceiver::open(
+            &root,
+            &self.inner.instance(),
+            self.local_account_id()?,
+            secrets,
+        )
+        .map_err(operation)?
+        .dismiss(&transfer_id)
+        .map_err(operation)
     }
 
     pub fn account_inbox(&self) -> Result<Vec<InboxTransfer>> {
@@ -407,7 +602,7 @@ impl NativeServices {
         self.inner
             .account()
             .accept_invitation(&token, &username, name.as_deref(), &email, &password)
-            .map(account_session)
+            .map(|session| self.remember_session(session))
             .map_err(operation)
     }
     pub fn account_report(
@@ -662,6 +857,24 @@ impl NativeServices {
                 version: recipient.version,
                 fingerprint: recipient.fingerprint,
             })
+    }
+}
+
+impl NativeServices {
+    fn remember_session(&self, session: core::AccountSession) -> AccountSession {
+        self.account_id
+            .store(session.id, std::sync::atomic::Ordering::Relaxed);
+        account_session(session)
+    }
+    fn local_account_id(&self) -> Result<u64> {
+        let id = self.account_id.load(std::sync::atomic::Ordering::Relaxed);
+        if id != 0 {
+            return Ok(id);
+        }
+        let session = self.inner.account().session().map_err(operation)?;
+        let id = session.id;
+        self.remember_session(session);
+        Ok(id)
     }
 }
 

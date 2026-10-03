@@ -29,6 +29,13 @@ public struct AccountDeletionResult: Codable, Hashable, Sendable { public let ac
 
 /// Bridge implementation delegates to UniFFI/current backend APIs. It must not synthesize success, policy, export, or background states.
 public protocol FilebeamService: Sendable {
+    func contacts(instance: FilebeamInstance) async throws -> ContactDirectory
+    func contactAction(instance: FilebeamInstance, username: String, action: String, canSend: Bool?, autoDownload: Bool?) async throws -> ContactDirectory
+    func receivingDefaults(instance: FilebeamInstance, policy: String, autoDownload: Bool) async throws
+    func inboxReceiver(instance: FilebeamInstance, enabled: Bool?) async throws -> InboxReceiverState
+    func receiveAutomatically(instance: FilebeamInstance) async throws -> InboxReceiverState
+    func exportStagedInbox(instance: FilebeamInstance, id: String, privateKey: Data, destination: String) async throws -> [String]
+    func dismissStagedInbox(instance: FilebeamInstance, id: String) async throws
     func discover(instance: FilebeamInstance) async throws -> InstancePolicy
     func inspectReceive(instance: FilebeamInstance, input: String) async throws -> InputRoute
     func inspectPayload(instance: FilebeamInstance, input: String) async throws -> TransferInspection
@@ -92,6 +99,13 @@ public protocol FilebeamService: Sendable {
 
 public extension FilebeamService {
     func attachedNote(jobID: TransferJobID) async throws -> AttachedNoteDraft? { nil }
+    func contacts(instance: FilebeamInstance) async throws -> ContactDirectory { throw FilebeamDomainError.unavailable("Contacts are unavailable on this instance.") }
+    func contactAction(instance: FilebeamInstance, username: String, action: String, canSend: Bool?, autoDownload: Bool?) async throws -> ContactDirectory { throw FilebeamDomainError.unavailable("Contacts are unavailable on this instance.") }
+    func receivingDefaults(instance: FilebeamInstance, policy: String, autoDownload: Bool) async throws { throw FilebeamDomainError.unavailable("Receiving defaults are unavailable.") }
+    func inboxReceiver(instance: FilebeamInstance, enabled: Bool?) async throws -> InboxReceiverState { throw FilebeamDomainError.unavailable("Automatic receiving is unavailable.") }
+    func receiveAutomatically(instance: FilebeamInstance) async throws -> InboxReceiverState { throw FilebeamDomainError.unavailable("Automatic receiving is unavailable.") }
+    func exportStagedInbox(instance: FilebeamInstance, id: String, privateKey: Data, destination: String) async throws -> [String] { throw FilebeamDomainError.unavailable("Staged receiving is unavailable.") }
+    func dismissStagedInbox(instance: FilebeamInstance, id: String) async throws { throw FilebeamDomainError.unavailable("Staged receiving is unavailable.") }
     /// Existing adapters remain source-compatible while they migrate their local export catalog.
     func recordExport(jobID: TransferJobID, paths: [String]) async throws { throw FilebeamDomainError.storage("The export receipt could not be retained.") }
     func inspectPayload(instance: FilebeamInstance, input: String) async throws -> TransferInspection { throw FilebeamDomainError.unavailable("Transfer inspection is not available in this build.") }

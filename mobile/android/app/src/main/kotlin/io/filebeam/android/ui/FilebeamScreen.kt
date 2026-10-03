@@ -159,7 +159,7 @@ private fun DestinationContent(
     DestinationRoute.Transfers, DestinationRoute.TransferDetail -> TransfersScreen(model, state, start, saveFile) { id ->
         model.retrySavedExport(id) { result -> result.onSuccess(saveFile).onFailure { model.coordinator.message(it.message) } }
     }
-    DestinationRoute.Inbox -> InboxDestination(model, instance)
+    DestinationRoute.Inbox -> InboxDestination(model, instance, saveFile)
     DestinationRoute.NoteViewer -> ReceiveScreen(model, state.busy) { start(model::startReceivedDownload) }
     DestinationRoute.Settings -> SettingsScreen(model, model::navigate)
     DestinationRoute.StorageUsage -> StorageUsageScreen { model.navigate(Destination.ReviewTransfers) }

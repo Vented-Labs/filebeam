@@ -13,14 +13,15 @@ use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
 };
+use std::io::Read;
 use zeroize::Zeroizing;
 
 use super::client::url;
 
 #[derive(Clone)]
 pub struct AccountService {
-    instance: Url,
-    http: Client,
+    pub(super) instance: Url,
+    pub(super) http: Client,
     account_intent: Arc<AtomicBool>,
 }
 #[derive(Clone, Debug, Deserialize)]
@@ -131,8 +132,8 @@ pub struct AccountDeletion {
     pub status: String,
 }
 #[derive(Deserialize)]
-struct Api<T> {
-    data: T,
+pub(super) struct Api<T> {
+    pub(super) data: T,
 }
 #[derive(Serialize)]
 struct Login<'a> {
@@ -458,7 +459,7 @@ impl AccountService {
         }
         Ok(())
     }
-    fn post<T: for<'a> Deserialize<'a>>(
+    pub(super) fn post<T: for<'a> Deserialize<'a>>(
         &self,
         path: &str,
         body: serde_json::Value,
@@ -491,17 +492,25 @@ impl AccountService {
         }
         Ok(())
     }
-    fn get<T: for<'a> Deserialize<'a>>(&self, path: &str) -> Result<T> {
+    pub(super) fn get<T: for<'a> Deserialize<'a>>(&self, path: &str) -> Result<T> {
         let response = self
             .http
             .get(url(&self.instance, path)?)
+            .header(reqwest::header::ACCEPT, "application/json")
             .send()
             .context("native account request")?;
         if !response.status().is_success() {
             bail!("native account request returned {}", response.status());
         }
+        let mut bytes = Vec::new();
         response
-            .json::<Api<T>>()
+            .take(2 * 1024 * 1024 + 1)
+            .read_to_end(&mut bytes)
+            .context("read native account response")?;
+        if bytes.len() > 2 * 1024 * 1024 {
+            bail!("native account response exceeds the control-plane limit");
+        }
+        serde_json::from_slice::<Api<T>>(&bytes)
             .context("decode native account response")
             .map(|v| v.data)
     }

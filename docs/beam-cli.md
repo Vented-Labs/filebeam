@@ -89,11 +89,16 @@ Use the same password input rules as Notes. `key-setup --custody self` (the defa
 
 ```sh
 beam up --username alice report.pdf
+beam to @alice report.pdf
 beam inbox list
 beam inbox download 01K... --output ./received
 ```
 
 `--username` resolves exactly one authenticated recipient and encrypts the transfer key to that account key. It requires HTTP and cannot be combined with Turbo or password protection. Inbox metadata stays locked until the stored custody key opens it; downloads use the authenticated inbox endpoint and a request-scoped key.
+
+See [Contacts and receiving](contacts.md) for mutual friend requests, account
+defaults, per-contact overrides, and private automatic receiving with
+`beam inbox watch`.
 
 ## End and revoke
 

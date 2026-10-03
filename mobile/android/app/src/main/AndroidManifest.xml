@@ -2,6 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -38,6 +39,7 @@
         </activity>
         <service android:name=".platform.background.TransferService"
             android:exported="false" android:foregroundServiceType="dataSync" />
+        <service android:name=".platform.background.InboxDiscoveryService" android:exported="false" android:permission="android.permission.BIND_JOB_SERVICE" />
         <service android:name=".platform.background.TransferJobService"
             android:exported="false" android:permission="android.permission.BIND_JOB_SERVICE" tools:targetApi="34" />
         <receiver android:name=".platform.background.TransferActionReceiver" android:exported="false" />

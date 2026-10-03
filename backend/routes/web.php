@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\AccountKeyController;
 use App\Http\Controllers\AppleAppSiteAssociationController;
+use App\Http\Controllers\ContactController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\InboxController;
 use App\Http\Controllers\ReceiveController;
@@ -40,12 +41,15 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/account/history', [TransferHistoryController::class, 'index'])->name('history.index');
     Route::delete('/account/history/{id}', [TransferHistoryController::class, 'destroy'])->whereUlid('id')->middleware('throttle:transfer-writing')->name('history.destroy');
     Route::patch('/account/history/{id}/retention', [TransferHistoryController::class, 'extend'])->whereUlid('id')->middleware('throttle:transfer-writing')->name('history.extend');
+    Route::get('/account/contacts', [ContactController::class, 'page'])->name('contacts.index');
     Route::get('/account/keys', [AccountKeyController::class, 'index'])->name('account.keys.index');
     Route::post('/account/keys', [AccountKeyController::class, 'store'])->middleware('throttle:account-key-writing')->name('account.keys.store');
     Route::patch('/account/keys/{bundle}', [AccountKeyController::class, 'update'])->name('account.keys.update');
     Route::patch('/account/inbox', [InboxController::class, 'update'])->name('account.inbox.update');
     Route::patch('/account/notifications', [InboxController::class, 'notifications'])->name('account.notifications.update');
     Route::get('/account/inbox', [InboxController::class, 'index'])->name('inbox.index');
+    Route::get('/account/inbox/staged', fn (): Response => Inertia::render('StagedInbox'))->name('inbox.staged');
+    Route::get('/account/inbox/staged/{transferId}', fn (string $transferId): Response => Inertia::render('InboxTransfer', ['transferId' => $transferId]))->whereUlid('transferId')->name('inbox.staged.show');
     Route::get('/account/inbox/{transfer}/items/{item}/chunks/{position}', [InboxController::class, 'chunk'])->whereNumber('position')->scopeBindings()->middleware('throttle:transfer-reading')->name('inbox.chunk');
     Route::get('/account/inbox/{transfer}/metadata', [InboxController::class, 'metadata'])->middleware('throttle:transfer-reading')->name('inbox.metadata');
     Route::get('/account/inbox/{transfer}', [InboxController::class, 'show'])->name('inbox.show');

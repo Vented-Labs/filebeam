@@ -22,6 +22,9 @@ final class NativeSession
             'inboxEnabled' => $user->inbox_enabled,
             'usernameRoutingEnabled' => app(InstanceSettings::class)->boolean('username_routing'),
             'notificationChannel' => $user->notification_channel ?? 'mail',
+            'receivingPolicy' => $user->receiving_policy->value,
+            'autoDownloadFriends' => $user->auto_download_friends,
+            'receivingRevision' => $user->receiving_revision,
         ];
     }
 }

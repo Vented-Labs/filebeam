@@ -380,6 +380,7 @@ fn send(
         include_key,
         password,
         recipient: None,
+        expected_recipient_id: None,
     }))
 }
 fn complete_link(client: &DesktopClient, before: &[String]) -> Result<String> {

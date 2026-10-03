@@ -13,6 +13,9 @@ pub struct DesktopSnapshot {
     pub jobs: Vec<JobSnapshot>,
     pub inbox: Vec<InboxItem>,
     pub history: HistorySnapshot,
+    pub contacts: Option<filebeam_client_core::services::Contacts>,
+    pub auto_receiving: bool,
+    pub staged_inbox: Vec<filebeam_client_core::services::inbox_receiver::StagedInbox>,
     /// Authenticated receive preparations. Filenames appear only after the
     /// encrypted manifest has been validated by the native receiver.
     pub receive_previews: Vec<ReceivePreview>,
@@ -313,6 +316,25 @@ pub enum ClientCommand {
         id: String,
         retention_hours: u64,
     },
+    RefreshContacts,
+    ContactAction {
+        username: String,
+        action: String,
+        can_send: Option<bool>,
+        auto_download: Option<bool>,
+    },
+    ReceivingDefaults {
+        policy: String,
+        auto_download: bool,
+    },
+    AutomaticReceiving(bool),
+    SaveStagedInbox {
+        id: String,
+        destination: PathBuf,
+    },
+    DismissStagedInbox {
+        id: String,
+    },
     GenerateReceivingKey {
         password: Option<String>,
         replace: bool,
@@ -452,6 +474,12 @@ impl ClientCommand {
             Self::RefreshHistory { .. } => "load history",
             Self::DeleteHistory { .. } => "delete history transfer",
             Self::ExtendHistory { .. } => "extend history transfer",
+            Self::RefreshContacts => "refresh contacts",
+            Self::ContactAction { .. } => "update contact",
+            Self::ReceivingDefaults { .. } => "receiving defaults",
+            Self::AutomaticReceiving(_) => "automatic receiving",
+            Self::SaveStagedInbox { .. } => "save staged inbox",
+            Self::DismissStagedInbox { .. } => "remove local staging",
             Self::GenerateReceivingKey { .. } => "generate receiving key",
             Self::ImportReceivingKey { .. } => "import receiving key",
             Self::UnlockReceivingKey { .. } => "unlock receiving key",
@@ -492,6 +520,7 @@ pub struct SendFiles {
     pub include_key: bool,
     pub password: Option<String>,
     pub recipient: Option<String>,
+    pub expected_recipient_id: Option<u64>,
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum DirectoryMode {

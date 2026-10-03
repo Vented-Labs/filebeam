@@ -74,6 +74,7 @@ public final class NativeFilebeamService: FilebeamService, @unchecked Sendable {
     }
 
     private let queue = DispatchQueue(label: "io.filebeam.native.ffi", qos: .utility)
+    private let receivingQueue = DispatchQueue(label: "io.filebeam.native.inbox-receiving", qos: .utility)
     private let lock = NSLock()
     private let secrets: any NativeSecretStorage
     private let recordStorage: (any NativeRecordStorage)?
@@ -679,6 +680,43 @@ public final class NativeFilebeamService: FilebeamService, @unchecked Sendable {
     public func verifyEmail(link: String) async throws { try await ffi { let route = InputRouter.route(link, selectedInstance: FilebeamInstance(origin: "https://invalid.invalid")!); guard case .verifyEmail = route, let url = URL(string: link), let scheme = url.scheme, let host = url.host, let instance = FilebeamInstance(origin: "\(scheme)://\(host)\(url.port.map { ":\($0)" } ?? "")") else { throw FilebeamDomainError.invalidInput("Invalid verification link.") }; let service = try self.services(instance); try service.accountVerifyEmailLink(link: link); try self.persist(service, origin: instance.origin) } }
     public func recipient(instance: FilebeamInstance, username: String) async throws -> DRecipient { try await ffi { let r = try self.services(instance).accountRecipient(username: username); return DRecipient(userID: r.id, username: r.username, keyBundleID: r.accountKeyBundleId, publicKey: r.publicKey, fingerprint: r.fingerprint) } }
     public func inbox(instance: FilebeamInstance) async throws -> [InboxItem] { try await ffi { try self.services(instance).accountInbox().map { InboxItem(id: TransferID($0.id), ciphertextBytes: $0.ciphertextBytes, itemCount: $0.itemCount, completedAt: self.date($0.completedAt), expiresAt: self.date($0.expiresAt)) } } }
+    public func contacts(instance: FilebeamInstance) async throws -> ContactDirectory {
+        try await ffi { try JSONDecoder().decode(ContactDirectory.self, from: Data(self.services(instance).accountContactsJson().utf8)) }
+    }
+    public func contactAction(instance: FilebeamInstance, username: String, action: String, canSend: Bool?, autoDownload: Bool?) async throws -> ContactDirectory {
+        try await ffi {
+            let value = try self.services(instance).accountContactActionJson(username: username.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "@", with: "").lowercased(), action: action, canSend: canSend, autoDownload: autoDownload)
+            return try JSONDecoder().decode(ContactDirectory.self, from: Data(value.utf8))
+        }
+    }
+    public func receivingDefaults(instance: FilebeamInstance, policy: String, autoDownload: Bool) async throws {
+        try await ffi { try self.services(instance).accountReceivingDefaults(policy: policy, autoDownload: autoDownload) }
+    }
+    public func inboxReceiver(instance: FilebeamInstance, enabled: Bool?) async throws -> InboxReceiverState {
+        try await ffi {
+            let service = try self.services(instance)
+            if enabled == false { service.accountCancelAutomaticReceiving() }
+            return try JSONDecoder().decode(InboxReceiverState.self, from: Data(service.accountReceiverStateJson(enabled: enabled).utf8))
+        }
+    }
+    public func receiveAutomatically(instance: FilebeamInstance) async throws -> InboxReceiverState {
+        try await withCheckedThrowingContinuation { continuation in
+            receivingQueue.async {
+                do { continuation.resume(returning: try JSONDecoder().decode(InboxReceiverState.self, from: Data(self.services(instance).accountReceiveAutomatically().utf8))) }
+                catch { continuation.resume(throwing: Self.error(error)) }
+            }
+        }
+    }
+    public func cancelAutomaticReceiving() {
+        let active = lock.withLock { Array(servicesByOrigin.values) }
+        for service in active { service.accountCancelAutomaticReceiving() }
+    }
+    public func exportStagedInbox(instance: FilebeamInstance, id: String, privateKey: Data, destination: String) async throws -> [String] {
+        try await ffi { try self.services(instance).accountExportStagedInbox(transferId: id, privateKey: privateKey, destination: destination) }
+    }
+    public func dismissStagedInbox(instance: FilebeamInstance, id: String) async throws {
+        try await ffi { try self.services(instance).accountDismissStagedInbox(transferId: id) }
+    }
     public func inboxUnreadCount(instance: FilebeamInstance) async throws -> InboxUnreadCount { try await ffi { InboxUnreadCount(count: try self.services(instance).accountInboxUnreadCount()) } }
     public func markInboxNotificationsRead(instance: FilebeamInstance) async throws { try await ffi { let service = try self.services(instance); try service.accountMarkInboxNotificationsRead(); try self.persist(service, origin: instance.origin) } }
     public func deleteInboxItem(instance: FilebeamInstance, transferID: TransferID) async throws { try await ffi { let service = try self.services(instance); try service.accountDeleteInboxItem(transferId: transferID.rawValue); try self.persist(service, origin: instance.origin) } }

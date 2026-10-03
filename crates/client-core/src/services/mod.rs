@@ -3,6 +3,8 @@
 mod account;
 mod client;
 mod history;
+pub mod contacts;
+pub mod inbox_receiver;
 pub mod local_state;
 pub mod note_management;
 mod notes;
@@ -16,6 +18,7 @@ pub use account::{
 };
 pub use client::ServiceClient;
 pub use history::{HistoryEntry, HistoryFilter, HistoryPage, HistoryService, RetentionUpdate};
+pub use contacts::{Contact, ContactIdentity, Contacts, ReceivingDefaults};
 pub use notes::{
     BurnResult, CreatedNote, NoteCreate, NoteInspection, NoteMetadata, NoteReceiveOptions,
     NoteTransport, NotesService, OpenedNote, PendingBurn, ReceivedNote,

@@ -17,6 +17,7 @@ import Input from '../primitives/Input.vue';
 import Switch from '../primitives/Switch.vue';
 import AnimatedHeight from '../layout/AnimatedHeight.vue';
 import AnimatedReveal from '../layout/AnimatedReveal.vue';
+import ReceivingDefaults from './ReceivingDefaults.vue';
 
 const props = defineProps<{
     user: {
@@ -265,6 +266,8 @@ onBeforeUnmount(() => {
                 <Icon name="folder" :size="16" />Open inbox
             </AppLink>
         </header>
+
+        <ReceivingDefaults />
 
         <AnimatedHeight class="inbox-settings__state-height">
             <Transition

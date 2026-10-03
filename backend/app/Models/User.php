@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Enums\ReceivingPolicy;
 use App\Enums\UserRole;
 use Database\Factories\UserFactory;
 use Filament\Auth\MultiFactor\App\Concerns\InteractsWithAppAuthentication;
@@ -38,9 +39,12 @@ use Illuminate\Support\Fluent;
  * @property UserRole $role
  * @property Carbon|null $suspended_at
  * @property string $notification_channel
+ * @property ReceivingPolicy $receiving_policy
+ * @property bool $auto_download_friends
+ * @property int $receiving_revision
  * @property Fluent<string, mixed>|null $settings
  */
-#[Fillable(['name', 'username', 'normalized_username', 'email', 'password', 'plan_id', 'inbox_enabled', 'notification_channel'])]
+#[Fillable(['name', 'username', 'normalized_username', 'email', 'password', 'plan_id', 'inbox_enabled', 'notification_channel', 'receiving_policy', 'auto_download_friends'])]
 #[Hidden(['password', 'remember_token', 'settings'])]
 class User extends Authenticatable implements FilamentUser, HasAppAuthentication, HasAppAuthenticationRecovery, MustVerifyEmail
 {
@@ -50,7 +54,7 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
     use InteractsWithAppAuthentication, InteractsWithAppAuthenticationRecovery;
 
     /** @var array<string, mixed> */
-    protected $attributes = ['role' => 'user'];
+    protected $attributes = ['role' => 'user', 'receiving_policy' => 'anyone', 'auto_download_friends' => false, 'receiving_revision' => 1];
 
     public function canAccessPanel(Panel $panel): bool
     {
@@ -126,6 +130,9 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
             'role' => UserRole::class,
             'suspended_at' => 'datetime',
             'settings' => AsFluent::class,
+            'receiving_policy' => ReceivingPolicy::class,
+            'auto_download_friends' => 'boolean',
+            'receiving_revision' => 'integer',
         ];
     }
 }

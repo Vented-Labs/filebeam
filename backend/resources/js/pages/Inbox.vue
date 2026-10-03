@@ -8,9 +8,14 @@ import Button from '../../../../ui/src/components/primitives/Button.vue';
 import Icon from '../../../../ui/src/components/primitives/Icon.vue';
 import { formatBytes } from '../../../../ui/src/lib/format';
 import { csrfHeaders } from '../../../../ui/src/lib/csrf';
+import {
+    browserReceivingEnabled,
+    enableBrowserReceiving,
+} from '../../../../ui/src/lib/inbox-staging';
+import { onMounted } from 'vue';
 
 defineOptions({ layout: RouteSurface });
-defineProps<{
+const props = defineProps<{
     transfers: Array<{
         id: string;
         ciphertext_bytes: number;
@@ -19,11 +24,19 @@ defineProps<{
         expires_at: string;
     }>;
     filebeam: FilebeamConfig;
-    auth: { user: { name: string; username?: string | null } };
+    auth: { user: { id: number; name: string; username?: string | null } };
 }>();
 const removing = ref('');
 const confirming = ref('');
 const error = ref('');
+const automatic = ref(false);
+onMounted(() => {
+    automatic.value = browserReceivingEnabled(props.auth.user.id);
+});
+function toggleAutomatic(event: Event): void {
+    automatic.value = (event.target as HTMLInputElement).checked;
+    enableBrowserReceiving(props.auth.user.id, automatic.value);
+}
 
 async function remove(id: string): Promise<void> {
     if (removing.value) return;
@@ -58,6 +71,20 @@ async function remove(id: string): Promise<void> {
             <p class="inbox-page__intro">
                 Received files stay encrypted until you unlock them. Filenames are never included in
                 notifications.
+            </p>
+            <label
+                ><input type="checkbox" :checked="automatic" @change="toggleAutomatic" />
+                Automatically stage eligible friend deliveries in this browser</label
+            >
+            <p class="inbox-page__intro">
+                Runs while Filebeam is open and catches up when you return. Unlock and save files
+                explicitly.
+                <AppLink href="/account/contacts" class="fb-text-link"
+                    >Manage friend permissions</AppLink
+                >
+                <AppLink href="/account/inbox/staged" class="fb-text-link"
+                    >Open privately staged files</AppLink
+                >
             </p>
             <AnimatedReveal :show="Boolean(error)">
                 <p role="alert" class="inbox-page__error">{{ error }}</p>
