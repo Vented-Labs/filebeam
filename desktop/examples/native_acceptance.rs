@@ -60,6 +60,7 @@ fn account_history(client: &DesktopClient, root: &Path) -> Result<()> {
     let before = job_ids(client);
     client.dispatch(ClientCommand::SendFiles(SendFiles {
         paths: vec![source],
+        attached_note: None,
         directory_mode: DirectoryMode::Individual,
         transport: SendTransport::Http,
         retention_hours: Some(1),
@@ -295,7 +296,14 @@ fn pause_resume(client: &DesktopClient, root: &Path) -> Result<()> {
     answer_secrets(client, "", "fixture password")?;
     let resumed = wait_resumed_upload(client, &before_send).context("complete resumed upload")?;
     if resumed.state != TransferState::Complete {
-        bail!("resumed upload failed");
+        bail!(
+            "resumed upload failed: {}",
+            resumed
+                .error
+                .as_ref()
+                .map(|error| error.detail.as_str())
+                .unwrap_or("unknown error")
+        );
     }
     println!("PASS pause-resume-checkpoint");
     Ok(())

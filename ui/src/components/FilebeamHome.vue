@@ -604,7 +604,10 @@ onBeforeUnmount(() => {
                                                 @remove="filesUpload.removeFile"
                                             />
                                         </FilePond>
-                                        <div class="px-6 py-3">
+                                        <div
+                                            v-if="filesUpload.entries.value.length || attachNote"
+                                            class="px-6 py-3"
+                                        >
                                             <label class="flex items-center gap-2"
                                                 ><input
                                                     v-model="attachNote"
@@ -612,7 +615,10 @@ onBeforeUnmount(() => {
                                                     :disabled="isBusy"
                                                 />Attach note</label
                                             >
-                                            <p class="mt-2 text-sm text-[var(--fb-text-muted)]">
+                                            <p
+                                                v-if="attachNote"
+                                                class="mt-2 text-sm text-[var(--fb-text-muted)]"
+                                            >
                                                 The note uses this transfer's encryption and expiry.
                                             </p>
                                         </div>
