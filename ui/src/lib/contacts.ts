@@ -19,25 +19,36 @@ export type Contacts = {
 };
 
 export async function contactRequest<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
-    const response = await fetch(`/api/native/v1/${path}`, {
-        method,
-        headers: csrfHeaders(true),
-        credentials: 'same-origin',
-        cache: 'no-store',
-        redirect: 'error',
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    });
-    const payload = (await response.json()) as {
+    const unavailable = 'The request could not be completed. Try again in a moment.';
+    let response: Response;
+    try {
+        response = await fetch(`/api/native/v1/${path}`, {
+            method,
+            headers: csrfHeaders(true),
+            credentials: 'same-origin',
+            cache: 'no-store',
+            redirect: 'error',
+            ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        });
+    } catch {
+        throw new Error(unavailable);
+    }
+    if (response.status === 401 || response.status === 419)
+        throw new Error('Your session has expired. Sign in again and try once more.');
+    if (response.status >= 500) throw new Error(unavailable);
+    const payload = (await response.json().catch(() => null)) as {
         data: T;
         message?: string;
         errors?: Record<string, string[]>;
-    };
-    if (!response.ok)
-        throw new Error(
-            Object.values(payload.errors ?? {}).flat()[0] ??
-                payload.message ??
-                'Could not update contacts.',
-        );
+    } | null;
+    if (!payload || typeof payload !== 'object') throw new Error(unavailable);
+    if (!response.ok) {
+        const message = Object.values(payload.errors ?? {}).flat()[0] ?? payload.message;
+        if (!message || /App\\|No query results|model \[/i.test(message))
+            throw new Error('This username or receiving inbox is unavailable on this instance.');
+        throw new Error(message);
+    }
+    if (!('data' in payload)) throw new Error(unavailable);
     return payload.data;
 }
 

@@ -58,6 +58,51 @@ test('contact mutations reject self requests and unauthorized transitions', func
     expect(Friendship::query()->count())->toBe(0);
 });
 
+test('recipient discovery conceals unavailable recipient states', function (): void {
+    $sender = User::factory()->create();
+    $message = 'This account or receiving inbox is unavailable on this instance. Check the username and try again.';
+    $unavailable = function (string $username) use ($sender, $message): void {
+        $this->actingAs($sender)->getJson('/api/native/v1/recipients/'.$username)->assertNotFound()
+            ->assertJsonPath('message', $message)->assertJsonMissingPath('data');
+    };
+
+    $unavailable('missing_user');
+    User::factory()->create(['username' => 'disabled', 'normalized_username' => 'disabled']);
+    $unavailable('disabled');
+    $missingKey = User::factory()->create(['username' => 'missingkey', 'normalized_username' => 'missingkey', 'inbox_enabled' => true]);
+    AccountKeyBundle::factory()->for($missingKey)->create(['is_active' => false]);
+    $unavailable('missingkey');
+    $suspended = User::factory()->create(['username' => 'suspended', 'normalized_username' => 'suspended', 'inbox_enabled' => true, 'suspended_at' => now()]);
+    AccountKeyBundle::factory()->for($suspended)->create();
+    $unavailable('suspended');
+    $blocked = User::factory()->create(['username' => 'blocked', 'normalized_username' => 'blocked', 'inbox_enabled' => true]);
+    AccountKeyBundle::factory()->for($blocked)->create();
+    ContactBlock::query()->create(['user_id' => $blocked->id, 'blocked_user_id' => $sender->id]);
+    $unavailable('blocked');
+    $denied = User::factory()->create(['username' => 'denied', 'normalized_username' => 'denied', 'inbox_enabled' => true, 'receiving_policy' => ReceivingPolicy::Nobody]);
+    AccountKeyBundle::factory()->for($denied)->create();
+    $unavailable('denied');
+});
+
+test('contact discovery conceals unavailable accounts while allowed recipient discovery returns identifiers', function (): void {
+    $owner = User::factory()->create(['username' => 'owner', 'normalized_username' => 'owner']);
+    $recipient = User::factory()->create(['username' => 'recipient', 'normalized_username' => 'recipient', 'inbox_enabled' => true, 'receiving_policy' => ReceivingPolicy::Authenticated]);
+    $bundle = AccountKeyBundle::factory()->for($recipient)->create();
+    $message = 'This account or receiving inbox is unavailable on this instance. Check the username and try again.';
+
+    $this->actingAs($owner)->getJson('/api/native/v1/contacts/missing_user')->assertNotFound()->assertJsonPath('message', $message)->assertJsonMissingPath('data');
+    $this->getJson('/api/native/v1/contacts/owner')->assertNotFound()->assertJsonPath('message', $message)->assertJsonMissingPath('data');
+    User::factory()->create(['username' => 'suspendedcontact', 'normalized_username' => 'suspendedcontact', 'suspended_at' => now()]);
+    $this->postJson('/api/native/v1/contacts/suspendedcontact', ['action' => 'request'])->assertNotFound()->assertJsonPath('message', $message)->assertJsonMissingPath('data');
+    ContactBlock::query()->create(['user_id' => $recipient->id, 'blocked_user_id' => $owner->id]);
+    $this->postJson('/api/native/v1/contacts/recipient', ['action' => 'request'])->assertNotFound()->assertJsonPath('message', $message)->assertJsonMissingPath('data');
+    ContactBlock::query()->where('user_id', $recipient->id)->delete();
+
+    $this->getJson('/api/native/v1/contacts/recipient')->assertOk()->assertJsonPath('data.id', $recipient->id);
+    $this->getJson('/api/native/v1/recipients/recipient')->assertOk()
+        ->assertJsonPath('data.id', $recipient->id)->assertJsonPath('data.account_key_bundle_id', $bundle->id);
+});
+
 test('suspended contacts remain removable and account deletion cascades relationship data', function (): void {
     $alice = User::factory()->create(['username' => 'alice', 'normalized_username' => 'alice']);
     $bob = User::factory()->create(['username' => 'bobby', 'normalized_username' => 'bobby']);

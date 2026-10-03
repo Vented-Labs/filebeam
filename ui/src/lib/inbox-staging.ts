@@ -214,6 +214,9 @@ export async function browserStagedTransfers(
 }
 export async function dismissBrowserStaging(id: number, transfer: string): Promise<void> {
     controller?.abort();
+    // An aborted sweep can still be finishing an IndexedDB write. Let it settle before
+    // recording the dismissal so it cannot restore the completed metadata afterward.
+    await running?.catch(() => undefined);
     const key = `${prefix(id)}${transfer}`;
     const db = await database();
     await new Promise<void>((resolve, reject) => {

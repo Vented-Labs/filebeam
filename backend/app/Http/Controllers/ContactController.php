@@ -20,6 +20,8 @@ use Inertia\Response;
 
 class ContactController extends Controller
 {
+    private const string CONTACT_UNAVAILABLE_MESSAGE = 'This account or receiving inbox is unavailable on this instance. Check the username and try again.';
+
     public function page(): Response
     {
         return Inertia::render('Contacts');
@@ -62,7 +64,7 @@ class ContactController extends Controller
         $owner = $request->user();
         assert($owner instanceof User);
         $other = $this->target($username);
-        abort_if($other->id === $owner->id || ContactBlock::query()->between($owner->id, $other->id)->exists(), 404);
+        abort_if($other->id === $owner->id || ContactBlock::query()->between($owner->id, $other->id)->exists(), 404, self::CONTACT_UNAVAILABLE_MESSAGE);
 
         return $this->json($this->identity($other));
     }
@@ -99,8 +101,8 @@ class ContactController extends Controller
             $users = User::query()->whereKey([$ownerId, $target->id])->orderBy('id')->lockForUpdate()->get()->keyBy('id');
             $owner = $users->get($ownerId);
             $other = $users->get($target->id);
-            abort_unless($owner instanceof User && $other instanceof User && $owner->suspended_at === null, 404);
-            abort_if(in_array($data['action'], ['request', 'accept'], true) && $other->suspended_at !== null, 404);
+            abort_unless($owner instanceof User && $other instanceof User && $owner->suspended_at === null, 404, self::CONTACT_UNAVAILABLE_MESSAGE);
+            abort_if(in_array($data['action'], ['request', 'accept'], true) && $other->suspended_at !== null, 404, self::CONTACT_UNAVAILABLE_MESSAGE);
             $friendship = Friendship::query()->between($ownerId, $other->id)->first();
             $action = $data['action'];
             if ($action === 'block') {
@@ -109,7 +111,7 @@ class ContactController extends Controller
             } elseif ($action === 'unblock') {
                 ContactBlock::query()->where('user_id', $ownerId)->where('blocked_user_id', $other->id)->delete();
             } else {
-                abort_if(ContactBlock::query()->between($ownerId, $other->id)->exists(), 404);
+                abort_if(ContactBlock::query()->between($ownerId, $other->id)->exists(), 404, self::CONTACT_UNAVAILABLE_MESSAGE);
                 if ($action === 'request') {
                     if ($friendship === null) {
                         Friendship::query()->create(['lower_user_id' => min($ownerId, $other->id), 'upper_user_id' => max($ownerId, $other->id), 'requester_id' => $ownerId]);
@@ -143,7 +145,10 @@ class ContactController extends Controller
 
     private function target(string $username, bool $active = true): User
     {
-        return User::query()->where('normalized_username', strtolower($username))->when($active, fn ($query) => $query->whereNull('suspended_at'))->firstOrFail();
+        $user = User::query()->where('normalized_username', strtolower($username))->when($active, fn ($query) => $query->whereNull('suspended_at'))->first();
+        abort_if($user === null, 404, self::CONTACT_UNAVAILABLE_MESSAGE);
+
+        return $user;
     }
 
     /** @return array{id: int, username: string, name: string} */

@@ -37,6 +37,8 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class NativeAccountController extends Controller
 {
+    private const string RECIPIENT_UNAVAILABLE_MESSAGE = 'This account or receiving inbox is unavailable on this instance. Check the username and try again.';
+
     public function policy(Request $request, EffectivePlan $plans, InstanceSettings $settings, TransportPolicy $transport, Branding $branding): JsonResponse
     {
         $user = $this->optionalUser($request);
@@ -226,10 +228,11 @@ class NativeAccountController extends Controller
 
     public function recipient(Request $request, string $username): JsonResponse
     {
-        abort_unless(app(InstanceSettings::class)->boolean('username_routing'), 404);
-        $recipient = User::query()->where('normalized_username', strtolower($username))->inboxEnabled()->whereHas('activeAccountKeyBundles')->with('activeAccountKeyBundles')->firstOrFail();
+        abort_unless(app(InstanceSettings::class)->boolean('username_routing'), 404, 'Sending to an account is unavailable on this instance.');
+        $recipient = User::query()->where('normalized_username', strtolower($username))->inboxEnabled()->whereHas('activeAccountKeyBundles')->with('activeAccountKeyBundles')->first();
+        abort_if($recipient === null, 404, self::RECIPIENT_UNAVAILABLE_MESSAGE);
         $bundle = $recipient->activeAccountKeyBundles->sole();
-        abort_unless(app(ReceivingPermissions::class)->resolve($recipient, $request->user(), $request->user() !== null)['canSend'], 404);
+        abort_unless(app(ReceivingPermissions::class)->resolve($recipient, $request->user(), $request->user() !== null)['canSend'], 404, self::RECIPIENT_UNAVAILABLE_MESSAGE);
 
         return response()->json(['data' => [
             'id' => $recipient->id, 'username' => $recipient->username, 'public_key' => $bundle->public_key,

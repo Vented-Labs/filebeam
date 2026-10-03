@@ -19,10 +19,18 @@ const props = defineProps<{
     disabled?: boolean;
     icon?: IconName;
     placeholder?: string;
+    describedBy?: string;
+    invalid?: boolean;
 }>();
 const value = defineModel<string>({ default: '' });
 const emit = defineEmits<{ change: [] }>();
 const attrs = useAttrs();
+const triggerAttrs = computed(() => ({
+    ...attrs,
+    'aria-label': props.label ?? attrs['aria-label'],
+    'aria-describedby': props.describedBy ?? attrs['aria-describedby'],
+    'aria-invalid': props.invalid || attrs['aria-invalid'] || undefined,
+}));
 const selectedLabel = computed(
     () => props.options.find((option) => option.value === value.value)?.label ?? props.placeholder,
 );
@@ -33,7 +41,7 @@ function update(next: unknown): void {
 </script>
 <template>
     <SelectRoot :model-value="value || '__all__'" :disabled="disabled" @update:model-value="update">
-        <SelectTrigger v-bind="attrs" :aria-label="label" class="fb-select-trigger account-select"
+        <SelectTrigger v-bind="triggerAttrs" class="fb-select-trigger account-select"
             ><Icon v-if="icon" :name="icon" :size="16" /><SelectValue
                 class="account-select__value"
                 >{{ selectedLabel }}</SelectValue
@@ -75,5 +83,8 @@ function update(next: unknown): void {
     text-overflow: ellipsis;
     text-align: left;
     white-space: nowrap;
+}
+.fb-select-content {
+    max-width: calc(100vw - 1rem);
 }
 </style>

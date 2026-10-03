@@ -161,12 +161,25 @@ test('friends receive with inherited policies and keyless browser staging surviv
     const sender = await senderContext.newPage();
     const senderAccount = await register(sender);
     await sender.goto('/account/contacts');
-    await sender.getByLabel('Add a friend by exact username').fill(`@${receiver.username}`);
-    await sender.getByRole('button', { name: 'Send friend request' }).click();
+    await sender.getByLabel('Username', { exact: true }).fill(`@${receiver.username}`);
+    await sender.getByRole('button', { name: 'Send request', exact: true }).click();
+    await sender.getByRole('tab', { name: 'Requests', exact: true }).click();
     await expect(sender.getByRole('button', { name: 'Cancel request' })).toBeVisible();
     await page.goto('/account/contacts');
+    await page.getByRole('tab', { name: /^Requests/ }).click();
     await page.getByRole('button', { name: 'Accept', exact: true }).click();
-    await expect(page.getByRole('button', { name: 'Remove friend', exact: true })).toBeVisible();
+    await page.getByRole('tab', { name: /^Friends/ }).click();
+    const friendIdentity = page
+        .getByRole('button')
+        .filter({ hasText: `@${senderAccount.username}` });
+    await expect(friendIdentity).toHaveAttribute('aria-expanded', 'false');
+    await friendIdentity.click();
+    await expect(friendIdentity).toHaveAttribute('aria-expanded', 'true');
+    await expect(
+        page.getByText(`Receiving from ${senderAccount.username}`, { exact: true }),
+    ).toBeVisible();
+    await friendIdentity.click();
+    await page.getByRole('button', { name: /Receiving preferences/ }).click();
     const policyResponse = page.waitForResponse(
         (response) =>
             response.url().endsWith('/account/receiving') &&
@@ -258,13 +271,21 @@ test('friends receive with inherited policies and keyless browser staging surviv
     const result = await download;
     expect((await readFile((await result.path())!)).toString()).toBe(marker);
     await page.goto('/account/inbox/staged');
-    while (await page.getByRole('button', { name: 'Remove local ciphertext' }).count()) {
-        await page.getByRole('button', { name: 'Remove local ciphertext' }).first().click();
-        await page.waitForTimeout(100);
+    const removals = page.getByRole('button', { name: 'Remove local ciphertext' });
+    await expect(removals.first()).toBeVisible();
+    while (await removals.count()) {
+        const count = await removals.count();
+        await removals.first().click();
+        await expect(removals).toHaveCount(count - 1);
     }
     await expect(page.getByText('No completed automatic downloads in this browser.')).toBeVisible();
     await page.goto('/account/contacts');
-    await page.getByRole('button', { name: 'Block', exact: true }).click();
+    await page
+        .getByRole('button', { name: `${senderAccount.username} actions`, exact: true })
+        .click();
+    await page.getByRole('menuitem', { name: 'Block account', exact: true }).click();
+    await page.getByRole('button', { name: 'Block account', exact: true }).click();
+    await page.getByRole('button', { name: /Blocked accounts/ }).click();
     await expect(page.getByRole('button', { name: 'Unblock', exact: true })).toBeVisible();
     await sender.goto(`/u/${receiver.username}`);
     await expect(sender.getByRole('heading', { name: 'Send files to', exact: false })).toHaveCount(
