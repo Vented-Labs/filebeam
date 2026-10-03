@@ -4,6 +4,7 @@ import { ref } from 'vue';
 withDefaults(
     defineProps<{
         invalid?: boolean;
+        describedBy?: string;
         modelValue?: string | number;
         value?: string | number;
     }>(),
@@ -20,6 +21,7 @@ defineExpose({ focus: (options?: FocusOptions) => input.value?.focus(options) })
         :value="modelValue ?? value ?? ''"
         class="fb-input"
         :aria-invalid="invalid || undefined"
+        :aria-describedby="describedBy"
         @input="emit('update:modelValue', ($event.target as HTMLInputElement).value)"
     />
 </template>

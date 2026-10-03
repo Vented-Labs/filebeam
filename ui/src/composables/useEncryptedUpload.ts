@@ -447,10 +447,7 @@ export function useEncryptedUpload(
         monitoringUnavailable.value = false;
         stopMonitoring();
         const turbo =
-            selectedDriver === 'http' &&
-            options.turbo === true &&
-            options.mode === 'files' &&
-            !options.recipient;
+            selectedDriver === 'http' && options.turbo === true && options.mode === 'files';
         status.value = 'uploading';
         progress.value = 0;
         activity.value = 'Preparing encryption';
@@ -511,7 +508,8 @@ export function useEncryptedUpload(
             if (selectedDriver === 'webrtc') liveReservation = created.data;
             if (turbo) {
                 turboReservation = created.data;
-                if (!created.data.monitor_token) throw new Error('Turbo Transfer is unavailable.');
+                if (!options.recipient && !created.data.monitor_token)
+                    throw new Error('Turbo Transfer is unavailable.');
             }
             if (created.data.chunk_bytes !== config.chunk_bytes)
                 throw new Error('The server did not apply the current encrypted chunk policy.');
@@ -774,14 +772,17 @@ export function useEncryptedUpload(
                                     },
                                     body: JSON.stringify({
                                         encrypted_descriptor: message.encryptedDescriptor,
+                                        ...(encryptedKey ? { encrypted_key: encryptedKey } : {}),
                                     }),
                                 },
                                 uploadController.signal,
                                 async () => undefined,
                             );
                             ensureActive(jobId);
-                            publishShare(created.data.expires_at);
-                            startMonitoring(created.data);
+                            if (!options.recipient) {
+                                publishShare(created.data.expires_at);
+                                startMonitoring(created.data);
+                            }
                             uploadWorker.postMessage({
                                 type: 'uploaded',
                                 token: message.token,

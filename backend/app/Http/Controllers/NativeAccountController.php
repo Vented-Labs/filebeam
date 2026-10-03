@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers;
 
 use App\Actions\Auth\AcceptInvitation;
+use App\Enums\TransferDelivery;
 use App\Enums\TransferStatus;
 use App\Enums\UserRole;
 use App\Http\Requests\Auth\AcceptInvitationRequest;
@@ -19,6 +20,7 @@ use App\Support\Branding;
 use App\Support\EffectivePlan;
 use App\Support\InstanceSettings;
 use App\Support\NativeSession;
+use App\Support\ReceivingPermissions;
 use App\Support\TransportPolicy;
 use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Auth\Events\Verified;
@@ -35,6 +37,8 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 class NativeAccountController extends Controller
 {
+    private const string RECIPIENT_UNAVAILABLE_MESSAGE = 'This account or receiving inbox is unavailable on this instance. Check the username and try again.';
+
     public function policy(Request $request, EffectivePlan $plans, InstanceSettings $settings, TransportPolicy $transport, Branding $branding): JsonResponse
     {
         $user = $this->optionalUser($request);
@@ -53,6 +57,8 @@ class NativeAccountController extends Controller
             'account' => [
                 'registrationEnabled' => $settings->boolean('registration'),
                 'usernameRoutingEnabled' => $settings->boolean('username_routing'),
+                'contactsVersion' => 1,
+                'inboxStagingVersion' => 1,
             ],
             'transfer' => [
                 'anonymousUploadsEnabled' => $settings->boolean('anonymous_uploads'),
@@ -220,16 +226,46 @@ class NativeAccountController extends Controller
         return response()->json(['data' => $data], 200, ['Cache-Control' => 'no-store, private']);
     }
 
-    public function recipient(string $username): JsonResponse
+    public function recipient(Request $request, string $username): JsonResponse
     {
-        abort_unless(app(InstanceSettings::class)->boolean('username_routing'), 404);
-        $recipient = User::query()->where('normalized_username', strtolower($username))->inboxEnabled()->whereHas('activeAccountKeyBundles')->with('activeAccountKeyBundles')->firstOrFail();
+        abort_unless(app(InstanceSettings::class)->boolean('username_routing'), 404, 'Sending to an account is unavailable on this instance.');
+        $recipient = User::query()->where('normalized_username', strtolower($username))->inboxEnabled()->whereHas('activeAccountKeyBundles')->with('activeAccountKeyBundles')->first();
+        abort_if($recipient === null, 404, self::RECIPIENT_UNAVAILABLE_MESSAGE);
         $bundle = $recipient->activeAccountKeyBundles->sole();
+        abort_unless(app(ReceivingPermissions::class)->resolve($recipient, $request->user(), $request->user() !== null)['canSend'], 404, self::RECIPIENT_UNAVAILABLE_MESSAGE);
 
         return response()->json(['data' => [
             'id' => $recipient->id, 'username' => $recipient->username, 'public_key' => $bundle->public_key,
             'account_key_bundle_id' => $bundle->id, 'version' => $bundle->version, 'fingerprint' => $bundle->fingerprint,
         ]], 200, ['Cache-Control' => 'no-store']);
+    }
+
+    public function inboxSync(Request $request): JsonResponse
+    {
+        $data = $request->validate(['after' => ['nullable', 'ulid'], 'limit' => ['sometimes', 'integer', 'min:1', 'max:100']]);
+        $user = $request->user();
+        assert($user instanceof User);
+        // Reconcile from the beginning on each sweep: an older reservation can
+        // become available after a newer transfer, so IDs are pagination only.
+        $limit = $data['limit'] ?? 50;
+        $transfers = $user->receivedTransfers()->where('delivery', TransferDelivery::Inbox)->availableAndUnexpired()
+            ->when(isset($data['after']), fn ($query) => $query->where('id', '>', $data['after']))
+            ->with('owner')->orderBy('id')->limit($limit + 1)->get();
+        $more = $transfers->count() > $limit;
+        $transfers = $transfers->take($limit);
+
+        return response()->json(['data' => [
+            'revision' => $user->receiving_revision,
+            'next' => $more ? $transfers->last()?->id : null,
+            'transfers' => $transfers->map(fn (Transfer $transfer): array => [
+                'id' => $transfer->id,
+                'ciphertext_bytes' => $transfer->ciphertext_bytes,
+                'item_count' => $transfer->item_count,
+                'expires_at' => $transfer->expires_at->toIso8601String(),
+                'sender' => $transfer->owner === null ? null : ['id' => $transfer->owner->id, 'username' => $transfer->owner->username],
+                'autoDownload' => app(ReceivingPermissions::class)->resolve($user, $transfer->owner, (bool) $transfer->sender_authenticated)['autoDownload'],
+            ])->values()->all(),
+        ]], 200, ['Cache-Control' => 'no-store, private']);
     }
 
     /**

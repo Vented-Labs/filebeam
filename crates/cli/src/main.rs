@@ -69,6 +69,22 @@ enum Command {
         #[command(subcommand)]
         command: HistoryCommand,
     },
+    /// Encrypt and deliver files to an account on the selected instance.
+    To {
+        #[arg(value_parser = directed_username)]
+        recipient: String,
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+        #[arg(long, conflicts_with = "individual")]
+        zip: bool,
+        #[arg(long, conflicts_with = "zip")]
+        individual: bool,
+    },
+    /// Manage mutual friends and your own incoming permissions.
+    Contacts {
+        #[command(subcommand)]
+        command: ContactsCommand,
+    },
     /// Encrypt and upload files or directories.
     Up {
         files: Vec<PathBuf>,
@@ -185,6 +201,13 @@ enum NoteCommand {
 
 #[derive(Subcommand)]
 enum AccountCommand {
+    /// Set account receiving defaults; automatic receiving is friends-only.
+    Receiving {
+        #[arg(long, value_parser = ["anyone", "authenticated", "friends", "nobody"])]
+        policy: String,
+        #[arg(long, action = clap::ArgAction::Set)]
+        auto_download: bool,
+    },
     /// Sign in and store the same-origin session in encrypted local state.
     Login {
         email: String,
@@ -250,6 +273,21 @@ enum AccountCommand {
 
 #[derive(Subcommand)]
 enum InboxCommand {
+    /// Receive eligible friend deliveries into private ciphertext staging until Ctrl+C.
+    Watch {
+        #[arg(long)]
+        once: bool,
+    },
+    /// List locally staged deliveries.
+    Staged,
+    /// Verify and save a staged delivery with the local receiving key.
+    Save {
+        id: String,
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+    /// Remove local staging and remember that this delivery was dismissed.
+    Dismiss { id: String },
     /// List private deliveries without decrypting their metadata.
     List,
     /// Decrypt metadata and download a delivery with the stored custody key.
@@ -285,6 +323,65 @@ enum HistoryCommand {
         #[arg(long)]
         retention_hours: u64,
     },
+}
+
+#[derive(Subcommand)]
+enum ContactsCommand {
+    List,
+    Requests,
+    Request {
+        username: String,
+    },
+    Accept {
+        username: String,
+    },
+    Decline {
+        username: String,
+    },
+    Cancel {
+        username: String,
+    },
+    Remove {
+        username: String,
+    },
+    Block {
+        username: String,
+    },
+    Unblock {
+        username: String,
+    },
+    Set {
+        username: String,
+        #[arg(long, value_enum)]
+        can_send: Option<ContactOverride>,
+        #[arg(long, value_enum)]
+        auto_download: Option<ContactOverride>,
+    },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum ContactOverride {
+    Inherit,
+    Allow,
+    Deny,
+}
+impl ContactOverride {
+    fn value(self) -> Option<bool> {
+        match self {
+            Self::Inherit => None,
+            Self::Allow => Some(true),
+            Self::Deny => Some(false),
+        }
+    }
+}
+
+fn directed_username(value: &str) -> std::result::Result<String, String> {
+    if !value.starts_with('@') {
+        return Err("Use @username for an account destination".into());
+    }
+    filebeam_client_core::services::contacts::contact_username(value)
+        .map(str::to_owned)
+        .map_err(|error| error.to_string())
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -350,6 +447,49 @@ fn main() -> Result<()> {
         None => config.server_url.clone(),
     };
     match cli.command {
+        Some(Command::To {
+            recipient,
+            files,
+            zip,
+            individual,
+        }) => {
+            let client = services::client(&config, &instance)?;
+            let target = client.account().recipient(&recipient)?;
+            let options = protocol::UploadOptions {
+                authentication: protocol::UploadAuthentication::SessionCookie(
+                    client.cookie_context()?,
+                ),
+                recipient: Some(protocol::UploadRecipient {
+                    username: target.username.clone(),
+                    user_id: target.id,
+                    account_key_bundle_id: target.account_key_bundle_id,
+                    public_key: target.public_key,
+                }),
+                ..Default::default()
+            };
+            let mode = if zip {
+                uploads::DirectoryMode::Zip
+            } else if individual {
+                uploads::DirectoryMode::Individual
+            } else if cli.plain || !std::io::stdin().is_terminal() {
+                uploads::DirectoryMode::RequireFlag
+            } else {
+                uploads::DirectoryMode::Ask
+            };
+            let receipts = inline::run(
+                &config,
+                &instance,
+                app::Request::Upload(files, mode, options),
+                cli.plain,
+                cli.accept_peer_address_exposure,
+            )?;
+            for receipt in receipts {
+                output::result(&format!("@{}\t{receipt}", target.username), cli.plain)?;
+            }
+        }
+        Some(Command::Contacts { command }) => {
+            services::contacts(&config, &instance, command, cli.plain)?
+        }
         Some(Command::Up {
             files,
             transport,
@@ -557,6 +697,12 @@ fn main() -> Result<()> {
             )?;
         }
         Some(Command::Inbox { command }) => match command {
+            InboxCommand::Watch { once } => services::watch_inbox(&config, &instance, once)?,
+            InboxCommand::Staged => services::staged_inbox(&config, &instance, None, None)?,
+            InboxCommand::Save { id, output } => {
+                services::staged_inbox(&config, &instance, Some(&id), Some(&output))?
+            }
+            InboxCommand::Dismiss { id } => services::dismiss_staged(&config, &instance, &id)?,
             InboxCommand::List => {
                 for item in services::client(&config, &instance)?.account().inbox()? {
                     output::result(
@@ -687,6 +833,15 @@ fn main() -> Result<()> {
             }
         }
         Some(Command::Account { command }) => match command {
+            AccountCommand::Receiving {
+                policy,
+                auto_download,
+            } => {
+                services::client(&config, &instance)?
+                    .account()
+                    .set_receiving_defaults(&policy, auto_download)?;
+                output::result("Receiving defaults saved.", cli.plain)?;
+            }
             AccountCommand::Login {
                 email,
                 password_file,
@@ -890,6 +1045,31 @@ mod tests {
         assert!(cli.webrtc_relay_only);
         assert!(matches!(cli.command, Some(Command::Resume { id, .. }) if id == "job-1"));
         assert!(Cli::try_parse_from(["beam", "--memory-limit-mib", "32", "transfers"]).is_err());
+    }
+
+    #[test]
+    fn account_destinations_and_contact_overrides_are_unambiguous() {
+        let cli = Cli::try_parse_from(["beam", "to", "@alice", "report.pdf"]).unwrap();
+        assert!(
+            matches!(cli.command, Some(Command::To { recipient, files, .. }) if recipient == "alice" && files == vec![std::path::PathBuf::from("report.pdf")])
+        );
+        assert!(Cli::try_parse_from(["beam", "to", "alice", "report.pdf"]).is_err());
+        assert!(Cli::try_parse_from(["beam", "to", "@alice@remote", "report.pdf"]).is_err());
+        assert!(Cli::try_parse_from(["beam", "to", "@alice"]).is_err());
+        assert!(
+            Cli::try_parse_from([
+                "beam",
+                "contacts",
+                "set",
+                "@alice",
+                "--can-send",
+                "inherit",
+                "--auto-download",
+                "deny"
+            ])
+            .is_ok()
+        );
+        assert!(Cli::try_parse_from(["beam", "inbox", "watch", "--once"]).is_ok());
     }
 
     #[test]

@@ -26,6 +26,8 @@ const props = defineProps<{
     mode: 'files' | 'note';
     uploading: boolean;
     recipient?: boolean;
+    canSendToFriend?: boolean;
+    fixedRecipient?: boolean;
 }>();
 
 const password = defineModel<string>('password', { required: true });
@@ -33,6 +35,7 @@ const includeKey = defineModel<boolean>('includeKey', { required: true });
 const retentionHours = defineModel<number>('retentionHours', { required: true });
 const burnOnRead = defineModel<boolean>('burnOnRead', { default: false });
 const driver = defineModel<TransferDriver>('driver', { required: true });
+const sendToFriend = defineModel<boolean>('sendToFriend', { default: false });
 const emit = defineEmits<{ submit: []; turbo: []; cancel: [] }>();
 const passwordInvalid = computed(
     () => password.value.length > 0 && Array.from(password.value).length < 8,
@@ -59,15 +62,15 @@ function setRetention(value: unknown): void {
     <section class="transfer-options" data-testid="prism-settings" aria-label="Transfer settings">
         <div
             class="transfer-options__grid"
-            :class="{ 'transfer-options__grid--recipient': recipient }"
+            :class="{ 'transfer-options__grid--recipient': fixedRecipient }"
             data-testid="prism-settings-controls"
             :inert="disabled || undefined"
         >
-            <div v-if="!recipient" class="transfer-options__field">
+            <div v-if="!fixedRecipient" class="transfer-options__field">
                 <label id="password-setting-label"> Password <span>optional</span> </label>
                 <TransferPasswordPopover
                     v-model="password"
-                    :disabled="disabled"
+                    :disabled="disabled || sendToFriend"
                     :invalid="passwordInvalid"
                     labelled-by="password-setting-label"
                 />
@@ -132,9 +135,9 @@ function setRetention(value: unknown): void {
                 </AnimatedReveal>
             </div>
 
-            <div v-if="!recipient" class="transfer-options__sharing">
+            <div v-if="!fixedRecipient" class="transfer-options__sharing">
                 <p class="transfer-options__label">Sharing preferences</p>
-                <label class="transfer-options__preference">
+                <label v-if="!sendToFriend" class="transfer-options__preference">
                     <span>Include key in link</span>
                     <Switch
                         v-model="includeKey"
@@ -142,6 +145,20 @@ function setRetention(value: unknown): void {
                         aria-label="Include key in link"
                     />
                 </label>
+                <label
+                    v-if="canSendToFriend && mode === 'files'"
+                    class="transfer-options__preference"
+                    ><span>Send to Friend</span
+                    ><Switch
+                        v-model="sendToFriend"
+                        :disabled="disabled"
+                        aria-label="Send to Friend"
+                /></label>
+                <AnimatedReveal
+                    :show="sendToFriend && mode === 'files'"
+                    class="transfer-options__recipient"
+                    ><slot name="recipient"
+                /></AnimatedReveal>
                 <AnimatedReveal :show="mode === 'note'">
                     <label class="transfer-options__preference">
                         <span>
@@ -181,7 +198,7 @@ function setRetention(value: unknown): void {
                 </Button>
                 <template v-else>
                     <Tooltip
-                        v-if="mode === 'files' && !recipient && driver === 'http'"
+                        v-if="mode === 'files' && driver === 'http'"
                         content="Share the link while files are still uploading."
                     >
                         <Button
@@ -210,6 +227,10 @@ function setRetention(value: unknown): void {
 </template>
 
 <style scoped>
+.transfer-options__recipient {
+    padding: 0.25rem;
+    margin-top: 0.375rem;
+}
 .transfer-options {
     border-top: 1px solid var(--fb-line-soft);
     background: var(--fb-settings-surface);

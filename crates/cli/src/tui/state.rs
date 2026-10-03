@@ -45,10 +45,17 @@ pub enum NativeAction {
     KeyPassword,
     KeyImport,
     KeyExport,
+    Contacts,
+    ContactAction,
+    ReceivingDefaults,
+    InboxSync,
+    InboxStaged,
+    InboxSave,
+    InboxDismiss,
 }
 
 impl NativeAction {
-    pub const ALL: [Self; 22] = [
+    pub const ALL: [Self; 29] = [
         Self::NoteCreate,
         Self::NoteOpen,
         Self::InboxList,
@@ -71,9 +78,23 @@ impl NativeAction {
         Self::KeyPassword,
         Self::KeyImport,
         Self::KeyExport,
+        Self::Contacts,
+        Self::ContactAction,
+        Self::ReceivingDefaults,
+        Self::InboxSync,
+        Self::InboxStaged,
+        Self::InboxSave,
+        Self::InboxDismiss,
     ];
     pub fn label(self) -> &'static str {
         match self {
+            Self::Contacts => "Contacts: list friends and requests",
+            Self::ContactAction => "Contacts: request, accept, block, or set permissions",
+            Self::ReceivingDefaults => "Account: receiving defaults",
+            Self::InboxSync => "Inbox: automatically stage eligible deliveries",
+            Self::InboxStaged => "Inbox: list privately staged files",
+            Self::InboxSave => "Inbox: verify and save staged files",
+            Self::InboxDismiss => "Inbox: remove local staging",
             Self::NoteCreate => "Note: create",
             Self::NoteOpen => "Note: open",
             Self::InboxList => "Inbox: list",
@@ -100,6 +121,21 @@ impl NativeAction {
     }
     pub fn fields(self) -> &'static [(&'static str, bool)] {
         match self {
+            Self::ContactAction => &[
+                ("@username", false),
+                (
+                    "request / accept / decline / cancel / remove / block / unblock / preferences",
+                    false,
+                ),
+                ("can send: inherit / allow / deny", false),
+                ("auto download: inherit / allow / deny", false),
+            ],
+            Self::ReceivingDefaults => &[
+                ("anyone / authenticated / friends / nobody", false),
+                ("auto download friends: on / off", false),
+            ],
+            Self::InboxSave => &[("delivery id", false), ("output folder", false)],
+            Self::InboxDismiss => &[("delivery id", false)],
             Self::NoteCreate => &[
                 ("title (optional)", false),
                 ("language", false),
@@ -150,6 +186,13 @@ impl NativeAction {
 
     fn completed(self) -> &'static str {
         match self {
+            Self::Contacts => "Contacts loaded",
+            Self::ContactAction => "Contact updated",
+            Self::ReceivingDefaults => "Receiving defaults saved",
+            Self::InboxSync => "Eligible deliveries staged",
+            Self::InboxStaged => "Staged files loaded",
+            Self::InboxSave => "Staged files verified and saved",
+            Self::InboxDismiss => "Local staging removed",
             Self::NoteCreate => "Note created",
             Self::NoteOpen => "Note opened",
             Self::InboxList => "Inbox loaded",
@@ -1351,6 +1394,72 @@ fn native_action(
                 format!("language: {}", note.language),
                 note.text,
             ])
+        }
+        NativeAction::InboxSync
+        | NativeAction::InboxStaged
+        | NativeAction::InboxSave
+        | NativeAction::InboxDismiss => {
+            let receiver = services::receiver(config, instance, account.session()?.id)?;
+            let control = services::receiver_control(config);
+            match action {
+                NativeAction::InboxSync => {
+                    receiver.set_enabled(true)?;
+                    receiver.sweep(&client, &control)?;
+                }
+                NativeAction::InboxSave => {
+                    return receiver.export(
+                        &v[0],
+                        &services::stored_private_key(config, instance)?,
+                        &expand_path(&v[1]),
+                        &control,
+                    );
+                }
+                NativeAction::InboxDismiss => {
+                    receiver.dismiss(&v[0])?;
+                }
+                _ => {}
+            }
+            Ok(receiver
+                .state()?
+                .entries
+                .into_iter()
+                .map(|entry| {
+                    format!(
+                        "{} {}: {} encrypted bytes",
+                        entry.id, entry.state, entry.bytes
+                    )
+                })
+                .collect())
+        }
+        NativeAction::Contacts => Ok(account
+            .contacts()?
+            .contacts
+            .into_iter()
+            .map(|contact| {
+                format!(
+                    "@{} {}: can send {}, auto-download {}",
+                    contact.username,
+                    contact.status,
+                    contact.effective.can_send,
+                    contact.effective.auto_download
+                )
+            })
+            .collect()),
+        NativeAction::ContactAction => {
+            let parse = |value: &str| -> Result<Option<bool>> {
+                match value {
+                    "" | "inherit" => Ok(None),
+                    "allow" => Ok(Some(true)),
+                    "deny" => Ok(Some(false)),
+                    _ => anyhow::bail!("Use inherit, allow, or deny"),
+                }
+            };
+            account.contact_action(&v[0], &v[1], parse(&v[2])?, parse(&v[3])?)?;
+            Ok(vec!["Contact updated".into()])
+        }
+        NativeAction::ReceivingDefaults => {
+            account.set_receiving_defaults(&v[0], v[1] == "on")?;
+            Ok(vec!["Receiving defaults saved".into()])
         }
         NativeAction::InboxList => Ok(account
             .inbox()?

@@ -1601,6 +1601,88 @@ fn publish_item(store_path: &Path, item: &SavedItem, index: usize) -> Result<()>
     Ok(())
 }
 
+pub(super) fn export_staged(
+    store: &Store,
+    metadata: &super::inbox_staging::Metadata,
+    master: &[u8],
+    output: &Path,
+    control: &Control,
+) -> Result<Vec<String>> {
+    let transfer: Transfer = serde_json::from_value(serde_json::to_value(metadata)?)?;
+    let envelope: Envelope = serde_json::from_str(&metadata.encrypted_manifest)?;
+    if envelope.v != 1 || envelope.salt.is_some() {
+        bail!("unsupported inbox manifest envelope");
+    }
+    let _memory = control.reserve_memory(manifest_crypto_bytes(envelope.ciphertext.len())?)?;
+    let plain = decrypt_manifest(
+        master,
+        &decode(&envelope.nonce_prefix)?,
+        &decode(&envelope.ciphertext)?,
+        aad(&metadata.id, "manifest", "manifest").as_bytes(),
+    )?;
+    let manifest: Manifest = serde_json::from_slice(&plain)?;
+    validate_manifest(&manifest, &transfer)?;
+    fs::create_dir_all(output)?;
+    let mut items = Vec::new();
+    let mut names = HashSet::new();
+    // Verify every file before publishing any of the selection.
+    for (position, item) in manifest.items.into_iter().enumerate() {
+        let name = safe_filename(&item.name);
+        let name = if names.insert(name.clone()) {
+            name
+        } else {
+            format!("{position}-{name}")
+        };
+        let mut saved = SavedItem {
+            id: item.id,
+            name: item.name,
+            size: item.size,
+            nonce_prefix: item.nonce_prefix,
+            chunk_count: item.chunk_count,
+            digest: item.digest.value,
+            target: collision_free(output, &name),
+            verified: vec![false; item.chunk_count as usize],
+            published: false,
+        };
+        // Rebuild private plaintext from ciphertext on each explicit save.
+        let path = plain_path(store.path(), position);
+        if path.exists() {
+            fs::remove_file(path)?;
+        }
+        for chunk in 0..saved.chunk_count {
+            control.check()?;
+            let _memory = control.reserve_memory(metadata.chunk_bytes.saturating_mul(2) + 16)?;
+            let ciphertext = fs::read(super::inbox_staging::artifact(store, position, chunk))?;
+            authenticate_and_write(AuthenticateAndWriteRequest {
+                base: store.path(),
+                item_index: position,
+                index: chunk,
+                chunk_bytes: metadata.chunk_bytes,
+                transfer_id: &metadata.id,
+                item: &saved,
+                master,
+                ciphertext,
+                retain_ciphertext: false,
+            })?;
+            saved.verified[chunk as usize] = true;
+        }
+        if fs::metadata(plain_path(store.path(), position))?.len() != saved.size
+            || sha256_file(&plain_path(store.path(), position))? != saved.digest
+        {
+            bail!("staged file failed whole-file verification");
+        }
+        items.push(saved);
+    }
+    for (position, item) in items.iter().enumerate() {
+        control.check()?;
+        publish_item(store.path(), item, position)?;
+    }
+    Ok(items
+        .iter()
+        .map(|item| item.target.display().to_string())
+        .collect())
+}
+
 /// Atomically publish a same-directory tempfile without replacing a name that
 /// appeared after collision selection. Linux and Windows have native rename
 /// primitives for this; tempfile's no-clobber implementation is retained for

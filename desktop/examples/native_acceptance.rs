@@ -68,6 +68,7 @@ fn account_history(client: &DesktopClient, root: &Path) -> Result<()> {
         include_key: true,
         password: None,
         recipient: None,
+        expected_recipient_id: None,
     }))?;
     let link = complete_link(client, &before)?;
     let id = link
@@ -380,6 +381,7 @@ fn send(
         include_key,
         password,
         recipient: None,
+        expected_recipient_id: None,
     }))
 }
 fn complete_link(client: &DesktopClient, before: &[String]) -> Result<String> {

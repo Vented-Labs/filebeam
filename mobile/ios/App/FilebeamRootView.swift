@@ -3,6 +3,7 @@ import UIKit
 import FilebeamDomain
 
 struct FilebeamRootView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @Bindable var model: AppModel
     let importSources: ([URL]) async -> [FileSource]
     @State private var draftSaveTask: Task<Void, Never>?
@@ -32,6 +33,15 @@ struct FilebeamRootView: View {
             }
         }
         .onDisappear { draftSaveTask?.cancel() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background { InboxBackgroundReceiving.schedule() }
+        }
+        .task(id: model.session?.id) {
+            while !Task.isCancelled && model.session != nil {
+                await model.refreshAutomaticInbox()
+                try? await Task.sleep(for: .seconds(60))
+            }
+        }
         .sheet(item: $model.activePrompt) { PromptSheet(model: model, context: $0) }
         .sheet(item: Binding(get: { model.externalRequests.active }, set: { _ in })) { request in ExternalRequestSheet(model: model, request: request) }
         .sheet(isPresented: Binding(get: { model.receipt != nil }, set: { if !$0 { model.receipt = nil } })) {

@@ -22,7 +22,10 @@ private final class SealedNativeRecordStorage: NativeRecordStorage, @unchecked S
 @main
 struct FilebeamApp: App {
     @UIApplicationDelegateAdaptor(FilebeamAppDelegate.self) private var appDelegate
-    var body: some Scene { WindowGroup { FilebeamAppContainer() } }
+    var body: some Scene {
+        WindowGroup { FilebeamAppContainer() }
+            .backgroundTask(.appRefresh(InboxBackgroundReceiving.identifier)) { await InboxBackgroundReceiving.run() }
+    }
 }
 
 private struct FilebeamAppContainer: View {

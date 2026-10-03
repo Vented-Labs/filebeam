@@ -14,9 +14,11 @@ import Button from '../primitives/Button.vue';
 import CopyButton from '../primitives/CopyButton.vue';
 import Icon from '../primitives/Icon.vue';
 import Input from '../primitives/Input.vue';
+import Select from '../primitives/Select.vue';
 import Switch from '../primitives/Switch.vue';
 import AnimatedHeight from '../layout/AnimatedHeight.vue';
 import AnimatedReveal from '../layout/AnimatedReveal.vue';
+import ReceivingDefaults from './ReceivingDefaults.vue';
 
 const props = defineProps<{
     user: {
@@ -244,6 +246,12 @@ async function updateNotification(): Promise<void> {
     }
 }
 
+function changeNotification(channel: string): void {
+    if (channel !== 'mail' && channel !== 'database') return;
+    notificationChannel.value = channel;
+    void updateNotification();
+}
+
 onMounted(loadBundles);
 onBeforeUnmount(() => {
     disposed = true;
@@ -265,6 +273,8 @@ onBeforeUnmount(() => {
                 <Icon name="folder" :size="16" />Open inbox
             </AppLink>
         </header>
+
+        <ReceivingDefaults />
 
         <AnimatedHeight class="inbox-settings__state-height">
             <Transition
@@ -314,16 +324,17 @@ onBeforeUnmount(() => {
                             class="inbox-settings__setting-row inbox-settings__setting-row--select"
                         >
                             <label for="notification-channel">New transfer notifications</label>
-                            <select
+                            <Select
                                 id="notification-channel"
-                                v-model="notificationChannel"
-                                class="fb-input inbox-settings__select"
+                                :model-value="notificationChannel"
+                                class="inbox-settings__select"
                                 :disabled="savingNotification"
-                                @change="updateNotification"
-                            >
-                                <option value="mail">Email</option>
-                                <option value="database">In-app</option>
-                            </select>
+                                :options="[
+                                    { value: 'mail', label: 'Email' },
+                                    { value: 'database', label: 'In-app' },
+                                ]"
+                                @update:model-value="changeNotification"
+                            />
                         </div>
                         <Button
                             variant="ghost"

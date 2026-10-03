@@ -5,9 +5,8 @@ declare(strict_types=1);
 namespace App\Http\Requests;
 
 use Illuminate\Contracts\Validation\ValidationRule;
-use Illuminate\Foundation\Http\FormRequest;
 
-class PublishTransferDescriptorRequest extends FormRequest
+class PublishTransferDescriptorRequest extends CompleteTransferRequest
 {
     /**
      * Determine if the user is authorized to make this request.
@@ -26,6 +25,7 @@ class PublishTransferDescriptorRequest extends FormRequest
     {
         return [
             'encrypted_descriptor' => ['required', 'string', 'max:524288'],
+            'encrypted_key' => ['nullable', 'string', 'regex:/\A[A-Za-z0-9_-]{107}\z/'],
         ];
     }
 }

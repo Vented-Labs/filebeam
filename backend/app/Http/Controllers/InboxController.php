@@ -10,12 +10,12 @@ use App\Enums\TransferRemovalReason;
 use App\Enums\TransferStatus;
 use App\Http\Resources\TransferResource;
 use App\Models\Transfer;
-use App\Models\TransferChunk;
 use App\Models\TransferItem;
 use App\Models\User;
 use App\Notifications\InboxTransferCompleted;
 use App\Support\ChunkResponse;
 use App\Support\InstanceSettings;
+use App\Support\ReceivingPermissions;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -75,11 +75,36 @@ class InboxController extends Controller
         ]]], 200, ['Cache-Control' => 'no-store']);
     }
 
-    public function chunk(Request $request, Transfer $transfer, TransferItem $item, int $position, ChunkResponse $response): StreamedResponse
+    public function staging(Request $request, Transfer $transfer): JsonResponse
     {
         $this->transfer($request, $transfer);
-        /** @var TransferChunk $chunk */
-        $chunk = $item->chunks()->atPosition($position)->firstOrFail();
+        abort_unless($transfer->status === TransferStatus::Available, 409);
+        $recipient = $request->user();
+        assert($recipient instanceof User);
+        abort_unless(app(ReceivingPermissions::class)->resolve($recipient, $transfer->owner, (bool) $transfer->sender_authenticated)['autoDownload'], 409, 'Automatic receiving is disabled for this sender.');
+        $envelope = $transfer->keyEnvelopes()->recipient()->with('accountKeyBundle')->sole();
+
+        return response()->json(['data' => [...(new TransferResource($transfer->load('items')))->resolve(),
+            'recipient_key' => [
+                'bundle' => $envelope->accountKeyBundle->only('id', 'user_id', 'version', 'public_key', 'fingerprint'),
+                'encrypted_key' => $envelope->encrypted_key,
+            ],
+        ]], 200, ['Cache-Control' => 'no-store, private']);
+    }
+
+    public function chunk(Request $request, Transfer $transfer, TransferItem $item, int $position, ChunkResponse $response): StreamedResponse|JsonResponse
+    {
+        $this->transfer($request, $transfer);
+        if ($request->boolean('automatic')) {
+            $recipient = $request->user();
+            assert($recipient instanceof User);
+            abort_unless(app(ReceivingPermissions::class)->resolve($recipient, $transfer->owner, (bool) $transfer->sender_authenticated)['autoDownload'], 409);
+        }
+        $chunk = $item->chunks()->atPosition($position)->first();
+        if ($chunk === null && $transfer->status === TransferStatus::Pending && $position < $item->chunk_count) {
+            return response()->json(['message' => 'This encrypted chunk is still uploading.'], 202, ['Retry-After' => '2', 'Cache-Control' => 'no-store, private']);
+        }
+        abort_if($chunk === null, 404);
 
         return $response->make($request, $chunk);
     }
@@ -100,13 +125,15 @@ class InboxController extends Controller
     {
         $transfers = [];
 
-        foreach ($user->receivedTransfers()->where('delivery', TransferDelivery::Inbox)->availableAndUnexpired()->latest('completed_at')->get() as $transfer) {
+        foreach ($user->receivedTransfers()->where('delivery', TransferDelivery::Inbox)->where('expires_at', '>', now())
+            ->where(fn ($query) => $query->where('status', TransferStatus::Available)->orWhere(fn ($query) => $query->where('status', TransferStatus::Pending)->whereNotNull('encrypted_descriptor')))->latest('created_at')->get() as $transfer) {
             $transfers[] = [
                 'id' => $transfer->id,
                 'ciphertext_bytes' => $transfer->ciphertext_bytes,
                 'item_count' => $transfer->item_count,
                 'completed_at' => $transfer->completed_at?->toIso8601String(),
                 'expires_at' => $transfer->expires_at->toIso8601String(),
+                'status' => $transfer->status->value,
             ];
         }
 
@@ -115,6 +142,12 @@ class InboxController extends Controller
 
     private function transfer(Request $request, Transfer $transfer): void
     {
-        abort_unless($transfer->recipient_id === $request->user()?->id && $transfer->delivery === TransferDelivery::Inbox && $transfer->status === TransferStatus::Available && $transfer->expires_at->isFuture(), 404);
+        abort_unless($transfer->recipient_id === $request->user()?->id && $transfer->delivery === TransferDelivery::Inbox
+            && ($transfer->status === TransferStatus::Available || ($transfer->status === TransferStatus::Pending && $transfer->isPublishedInboxTurbo())) && $transfer->expires_at->isFuture(), 404);
+        if ($transfer->status === TransferStatus::Pending) {
+            $recipient = $request->user();
+            assert($recipient instanceof User);
+            abort_unless(app(ReceivingPermissions::class)->resolve($recipient, $transfer->owner, $transfer->sender_authenticated)['canSend'], 404);
+        }
     }
 }

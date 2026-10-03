@@ -37,6 +37,7 @@ use crate::{
 pub mod activity;
 pub mod background;
 mod download;
+pub mod inbox_staging;
 mod live;
 mod revocation;
 mod upload;

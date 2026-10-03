@@ -1,6 +1,7 @@
 <script lang="ts">
 import { Head, router, usePage } from '@inertiajs/vue3';
-import { cloneVNode, defineComponent, h, provide, type VNode } from 'vue';
+import { cloneVNode, defineComponent, h, provide, watch, onBeforeUnmount, type VNode } from 'vue';
+import { setInboxReceiverAccount } from '../../lib/inbox-staging';
 import { ConfigProvider } from 'reka-ui';
 import FilebeamHome from '../FilebeamHome.vue';
 import AppShell from './AppShell.vue';
@@ -12,8 +13,10 @@ export default defineComponent({
     setup(_, { slots }) {
         const page = usePage<{
             filebeam: FilebeamConfig;
-            auth: { user: { name: string; username?: string | null } | null };
+            auth: { user: { id: number; name: string; username?: string | null } | null };
         }>();
+        watch(() => page.props.auth.user?.id ?? null, setInboxReceiverAccount, { immediate: true });
+        onBeforeUnmount(() => setInboxReceiverAccount(null));
         let background: VNode | undefined;
         let backgroundUrl = '/';
         let wasAuthentication = false;

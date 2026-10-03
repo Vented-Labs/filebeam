@@ -45,6 +45,10 @@ struct SendComposerView: View {
     private var files: some View {
         Group {
             Text("Send encrypted files").font(.title2.bold())
+            if model.session != nil { NavigationLink("Choose a friend") { ContactsView(model: model) } }
+            if let recipient = model.drafts.files.options.recipient {
+                HStack { Text("To @\(recipient.username)"); Button("Clear recipient") { model.drafts.files.options.recipient = nil } }
+            }
             Text("Encrypted on your device before sharing.").foregroundStyle(.secondary)
             TransportPicker(transport: $model.drafts.files.options.transport)
             if model.drafts.files.sources.isEmpty { VStack(spacing: 12) { Image("FilebeamMark").resizable().scaledToFit().frame(width: 48, height: 68).accessibilityHidden(true); ContentUnavailableView("No files selected", systemImage: "document.badge.plus", description: Text("Choose files to prepare them for sharing.")) } }

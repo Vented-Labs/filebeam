@@ -63,6 +63,16 @@ final class AppModel {
 
     deinit {}
 
+    var stagedInbox: [StagedInboxItem] = []
+    func refreshAutomaticInbox() async {
+        guard session != nil else { return }
+        let selected = instance
+        if let state = try? await service.receiveAutomatically(instance: selected), instance == selected { stagedInbox = state.entries }
+    }
+    func verifyStagedInbox(_ item: StagedInboxItem, privateKey: Data) async throws -> [URL] {
+        try await service.exportStagedInbox(instance: instance, id: item.id, privateKey: privateKey, destination: outputDirectory().path).map { URL(fileURLWithPath: $0) }
+    }
+
     func load() async {
         isLoading = true
         defer { isLoading = false }
@@ -109,6 +119,7 @@ final class AppModel {
             pendingInstance = nil
             session = nil
             inboxItems = []
+            stagedInbox = []
             inboxUnreadCount = 0
             inboxError = nil
             policy = nil

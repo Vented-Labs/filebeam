@@ -149,6 +149,9 @@ function goHome(event: MouseEvent): void {
                 <AppLink v-if="user" href="/account/history" class="fb-button fb-button--ghost"
                     >History</AppLink
                 >
+                <AppLink v-if="user" href="/account/contacts" class="fb-button fb-button--ghost"
+                    >Contacts</AppLink
+                >
                 <AppLink
                     v-if="user?.unread_inbox_notifications"
                     href="/account/inbox"
@@ -199,6 +202,13 @@ function goHome(event: MouseEvent): void {
                         <DropdownMenuItem v-if="user" as-child>
                             <AppLink href="/account" class="fb-select-item fb-mobile-nav__item"
                                 >Account</AppLink
+                            >
+                        </DropdownMenuItem>
+                        <DropdownMenuItem v-if="user" as-child>
+                            <AppLink
+                                href="/account/contacts"
+                                class="fb-select-item fb-mobile-nav__item"
+                                >Contacts</AppLink
                             >
                         </DropdownMenuItem>
                         <DropdownMenuItem v-if="user" as-child>

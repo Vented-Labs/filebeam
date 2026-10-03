@@ -162,6 +162,40 @@ $app->handleRequest(Illuminate\\Http\\Request::capture());
                     denied = subprocess.run([*cli, "history", "list"], cwd=ROOT / "backend", env=env, capture_output=True, text=True, timeout=30)
                     assert denied.returncode != 0
                     print("PASS CLI authenticated upload/history/extend/delete/logout")
+                    print("PASS CLI migrated-config upload/download hash")
+                    friends = {}
+                    for username in ["cli_friend_sender", "cli_friend_receiver"]:
+                        profile = state / username
+                        profile.mkdir(mode=0o700)
+                        (profile / "config.toml").write_text(f'check_updates = false\n[server]\nurl = "{origin}"\n')
+                        command = [str(args.cli.resolve()), "--home", str(profile), "--plain"]
+                        run([*command, "account", "register", username, f"{username}@example.test", "--password-stdin"], env,
+                            input="Acceptance8!Password\n", text=True, capture_output=True)
+                        friends[username] = command
+                    sender = friends["cli_friend_sender"]
+                    receiver = friends["cli_friend_receiver"]
+                    run([*receiver, "account", "key-setup"], env, capture_output=True)
+                    run([*sender, "contacts", "request", "@cli_friend_receiver"], env, capture_output=True)
+                    run([*receiver, "contacts", "accept", "@cli_friend_sender"], env, capture_output=True)
+                    run([*receiver, "account", "receiving", "--policy", "friends", "--auto-download", "true"], env, capture_output=True)
+                    run([*sender, "to", "@cli_friend_receiver", str(source)], env, capture_output=True)
+                    inbox = run([*receiver, "inbox", "list"], env, capture_output=True, text=True).stdout.strip()
+                    transfer_id = inbox.split("\t")[0]
+                    staged = json.loads(run([*receiver, "inbox", "watch", "--once"], env, capture_output=True, text=True).stdout)
+                    assert any(item["id"] == transfer_id and item["state"] == "staged-locked" for item in staged["entries"])
+                    run([*receiver, "contacts", "set", "@cli_friend_sender", "--can-send", "deny"], env, capture_output=True)
+                    denied = subprocess.run([*sender, "to", "@cli_friend_receiver", str(source)], cwd=ROOT, env=env, capture_output=True, timeout=180)
+                    assert denied.returncode != 0, "per-contact denial must reject a directed upload"
+                    assert transfer_id in run([*receiver, "inbox", "list"], env, capture_output=True, text=True).stdout
+                    run(["php", "artisan", "tinker", "--execute",
+                         f"App\\Models\\Transfer::query()->whereKey('{transfer_id}')->update(['expires_at' => now()->subMinute()]);"], env, capture_output=True)
+                    saved = state / "friend-saved"
+                    run([*receiver, "inbox", "save", transfer_id, "--output", str(saved)], env, capture_output=True)
+                    assert (saved / source.name).read_bytes() == source.read_bytes()
+                    run([*receiver, "inbox", "dismiss", transfer_id], env, capture_output=True)
+                    assert "dismissed" in run([*receiver, "inbox", "staged"], env, capture_output=True, text=True).stdout
+                    assert (saved / source.name).read_bytes() == source.read_bytes()
+                    print("PASS CLI mutual friends, receiving overrides, private catch-up and verified save after expiry")
                 if args.browser_test:
                     subprocess.run([
                         "npx", "playwright", "test", *args.browser_test, "--workers=1",

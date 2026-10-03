@@ -15,6 +15,8 @@ use super::{ServiceClient, export_self_key, import_self_key};
 struct Session {
     origin: String,
     cookies: String,
+    #[serde(default)]
+    account_id: u64,
 }
 #[derive(Serialize, Deserialize)]
 struct PrivateKey {
@@ -73,6 +75,7 @@ impl LocalState {
         ServiceClient::new_with_cookie_context(&self.origin, cookies.as_deref())
     }
     pub fn save_session(&self, client: &ServiceClient) -> Result<()> {
+        let account_id = client.account().session()?.id;
         let cookies = client
             .cookie_context()
             .context("login did not return a session cookie")?;
@@ -81,6 +84,7 @@ impl LocalState {
             &Session {
                 origin: self.origin.clone(),
                 cookies,
+                account_id,
             },
         )
     }
@@ -89,6 +93,14 @@ impl LocalState {
             store.remove_named("session")?;
         }
         Ok(())
+    }
+    pub fn cached_account_id(&self) -> Result<Option<u64>> {
+        Ok(self
+            .open(false)?
+            .and_then(|store| store.load_named::<Session>("session").transpose())
+            .transpose()?
+            .filter(|session| session.origin == self.origin && session.account_id != 0)
+            .map(|session| session.account_id))
     }
     pub fn load_private_key(&self) -> Result<Zeroizing<Vec<u8>>> {
         let key = self

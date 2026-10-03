@@ -40,6 +40,7 @@ use Illuminate\Database\Eloquent\Relations\HasManyThrough;
     'delivery',
     'driver',
     'owner_id',
+    'sender_authenticated',
     'recipient_id',
     'plan_id',
     'filestore_ids',
@@ -110,6 +111,14 @@ class Transfer extends Model
             && in_array($this->status, [TransferStatus::Pending, TransferStatus::Available], true);
     }
 
+    public function isPublishedInboxTurbo(): bool
+    {
+        return $this->kind === TransferKind::Files && $this->delivery === TransferDelivery::Inbox
+            && $this->driver === TransferDriver::Http && $this->protocol_version === 1
+            && is_string($this->encrypted_descriptor)
+            && in_array($this->status, [TransferStatus::Pending, TransferStatus::Available], true);
+    }
+
     /** @return HasMany<FileReport, $this> */
     public function reports(): HasMany
     {
@@ -169,6 +178,7 @@ class Transfer extends Model
             'driver' => TransferDriver::class,
             'status' => TransferStatus::class,
             'burn_on_read' => 'boolean',
+            'sender_authenticated' => 'boolean',
             'completed_at' => 'immutable_datetime',
             'expires_at' => 'immutable_datetime',
             'published_at' => 'immutable_datetime',

@@ -32,6 +32,7 @@ enum Task {
     Report,
     Delete,
     Keys,
+    Contacts,
 }
 
 /// Retained Account form and account-scoped presentation state.
@@ -237,7 +238,7 @@ impl AccountPanel {
                 window,
                 cx,
             ),
-            Task::Profile | Task::Keys => {}
+            Task::Profile | Task::Keys | Task::Contacts => {}
         }
     }
 }
@@ -255,6 +256,8 @@ impl Render for AccountPanel {
             self.profile(p, window, cx)
         } else if self.snapshot.account.authenticated && self.task == Task::Keys {
             self.keys(p, window, cx)
+        } else if self.snapshot.account.authenticated && self.task == Task::Contacts {
+            self.contacts(p, cx)
         } else {
             self.form(p, window, cx)
         };
@@ -284,6 +287,324 @@ impl Render for AccountPanel {
 }
 
 impl AccountPanel {
+    fn contacts(&mut self, p: Palette, cx: &mut Context<Self>) -> gpui::Div {
+        let mut body = div()
+            .flex()
+            .flex_col()
+            .gap(px(crate::views::page::HEADER_GAP))
+            .max_w(px(1100.))
+            .child(crate::views::page::heading(
+                p,
+                "Contacts",
+                "Mutual friends on this instance. Your overrides control only incoming files.",
+            ))
+            .child(
+                Button::new("contacts-back")
+                    .label("Account")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.task = Task::Profile;
+                        cx.notify();
+                    })),
+            )
+            .child(field(p, "Exact username", &self.username))
+            .child(
+                Button::new("contacts-request")
+                    .label("Send friend request")
+                    .disabled(self.pending)
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        let username = Self::text(&this.username, cx)
+                            .trim_start_matches('@')
+                            .to_lowercase();
+                        this.dispatch(
+                            ClientCommand::ContactAction {
+                                username,
+                                action: "request".into(),
+                                can_send: None,
+                                auto_download: None,
+                            },
+                            window,
+                            cx,
+                        );
+                    })),
+            )
+            .child(
+                Button::new("contacts-refresh")
+                    .label("Refresh contacts")
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.dispatch(ClientCommand::RefreshContacts, window, cx)
+                    })),
+            );
+        if let Some(data) = self.snapshot.contacts.clone() {
+            let defaults = data.settings;
+            let policy = defaults.receiving_policy.clone();
+            let auto = defaults.auto_download_friends;
+            let mut policy_choices = div().flex().flex_wrap().gap(px(8.));
+            for (index, (value, label)) in [
+                ("anyone", "Anyone"),
+                ("authenticated", "Signed-in users"),
+                ("friends", "Friends only"),
+                ("nobody", "Nobody unless allowed"),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let button = Button::new(("receiving-policy-choice", index))
+                    .label(label)
+                    .disabled(self.pending)
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.dispatch(
+                            ClientCommand::ReceivingDefaults {
+                                policy: value.into(),
+                                auto_download: auto,
+                            },
+                            window,
+                            cx,
+                        )
+                    }));
+                policy_choices = policy_choices.child(if policy == value {
+                    button.primary()
+                } else {
+                    button
+                });
+            }
+            body = body
+                .child(
+                    card(p)
+                        .child(section_title(p, "shield", "Who can send me files"))
+                        .child(policy_choices),
+                )
+                .child(
+                    Switch::new("auto-friends")
+                        .label("Automatically download from friends")
+                        .checked(auto)
+                        .on_click(cx.listener(|this, value, window, cx| {
+                            if let Some(data) = &this.snapshot.contacts {
+                                this.dispatch(
+                                    ClientCommand::ReceivingDefaults {
+                                        policy: data.settings.receiving_policy.clone(),
+                                        auto_download: *value,
+                                    },
+                                    window,
+                                    cx,
+                                );
+                            }
+                        })),
+                )
+                .child(
+                    Switch::new("auto-this-client")
+                        .label("Stage eligible deliveries on this desktop")
+                        .checked(self.snapshot.auto_receiving)
+                        .on_click(cx.listener(|this, value, window, cx| {
+                            this.dispatch(ClientCommand::AutomaticReceiving(*value), window, cx)
+                        })),
+                );
+            for (index, contact) in data.contacts.into_iter().enumerate() {
+                let mut row = card(p)
+                    .child(section_title(p, "user", &contact.name))
+                    .child(meta(p, "Username", &format!("@{}", contact.username)))
+                    .child(meta(
+                        p,
+                        "Relationship",
+                        match contact.status.as_str() {
+                            "incoming" => "Incoming friend request",
+                            "outgoing" => "Waiting for acceptance",
+                            _ => "Friend on this instance",
+                        },
+                    ));
+                let actions: &[(&str, &str)] = match contact.status.as_str() {
+                    "incoming" => &[("Accept", "accept"), ("Decline", "decline")],
+                    "outgoing" => &[("Cancel request", "cancel")],
+                    _ => &[("Remove friend", "remove")],
+                };
+                for (action_index, (label, action)) in actions.iter().enumerate() {
+                    let username = contact.username.clone();
+                    let action = (*action).to_owned();
+                    row = row.child(
+                        Button::new(("contact-action", index * 4 + action_index))
+                            .label(*label)
+                            .disabled(self.pending)
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.dispatch(
+                                    ClientCommand::ContactAction {
+                                        username: username.clone(),
+                                        action: action.clone(),
+                                        can_send: None,
+                                        auto_download: None,
+                                    },
+                                    window,
+                                    cx,
+                                );
+                            })),
+                    );
+                }
+                if contact.status == "accepted" {
+                    for (field_index, (label, value)) in [
+                        ("Can send me files", contact.can_send),
+                        ("Automatic download", contact.auto_download),
+                    ]
+                    .into_iter()
+                    .enumerate()
+                    {
+                        let username = contact.username.clone();
+                        let other = if field_index == 0 {
+                            contact.auto_download
+                        } else {
+                            contact.can_send
+                        };
+                        let mut choices = div().flex().flex_wrap().gap(px(8.));
+                        for (choice_index, (next, choice_label)) in [
+                            (None, "Inherit"),
+                            (Some(true), if field_index == 0 { "Allow" } else { "On" }),
+                            (Some(false), if field_index == 0 { "Deny" } else { "Off" }),
+                        ]
+                        .into_iter()
+                        .enumerate()
+                        {
+                            let username = username.clone();
+                            let button = Button::new((
+                                "contact-override-choice",
+                                index * 6 + field_index * 3 + choice_index,
+                            ))
+                            .label(choice_label)
+                            .disabled(self.pending)
+                            .on_click(cx.listener(
+                                move |this, _, window, cx| {
+                                    this.dispatch(
+                                        ClientCommand::ContactAction {
+                                            username: username.clone(),
+                                            action: "preferences".into(),
+                                            can_send: if field_index == 0 { next } else { other },
+                                            auto_download: if field_index == 1 {
+                                                next
+                                            } else {
+                                                other
+                                            },
+                                        },
+                                        window,
+                                        cx,
+                                    )
+                                },
+                            ));
+                            choices = choices.child(if value == next {
+                                button.primary()
+                            } else {
+                                button
+                            });
+                        }
+                        row = row.child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(px(8.))
+                                .child(div().text_size(px(12.)).text_color(p.muted).child(label))
+                                .child(choices),
+                        );
+                    }
+                }
+                let username = contact.username;
+                row = row.child(
+                    Button::new(("contact-block", index))
+                        .label("Block")
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.dispatch(
+                                ClientCommand::ContactAction {
+                                    username: username.clone(),
+                                    action: "block".into(),
+                                    can_send: None,
+                                    auto_download: None,
+                                },
+                                window,
+                                cx,
+                            )
+                        })),
+                );
+                body = body.child(row);
+            }
+            for (index, contact) in data.blocked.into_iter().enumerate() {
+                let username = contact.username;
+                body = body.child(
+                    Button::new(("contact-unblock", index))
+                        .label(format!("Unblock @{username}"))
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.dispatch(
+                                ClientCommand::ContactAction {
+                                    username: username.clone(),
+                                    action: "unblock".into(),
+                                    can_send: None,
+                                    auto_download: None,
+                                },
+                                window,
+                                cx,
+                            )
+                        })),
+                );
+            }
+        }
+        for (index, staged) in self
+            .snapshot
+            .staged_inbox
+            .clone()
+            .into_iter()
+            .filter(|entry| entry.state != "dismissed")
+            .enumerate()
+        {
+            let id = staged.id;
+            let dismiss_id = id.clone();
+            body = body
+                .child(meta(
+                    p,
+                    "Private incoming ciphertext",
+                    &format!("{} — {}", byte_size(staged.bytes), staged.state),
+                ))
+                .child(
+                    Button::new(("save-staged-inbox", index))
+                        .label("Verify and save staged files")
+                        .disabled(staged.state != "staged-locked" || self.pending)
+                        .on_click(
+                            cx.listener(move |this, _, _, cx| this.save_staged(id.clone(), cx)),
+                        ),
+                )
+                .child(
+                    Button::new(("dismiss-staged-inbox", index))
+                        .label("Remove local ciphertext")
+                        .disabled(self.pending)
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.dispatch(
+                                ClientCommand::DismissStagedInbox {
+                                    id: dismiss_id.clone(),
+                                },
+                                window,
+                                cx,
+                            )
+                        })),
+                );
+        }
+        body.child(status(p, self.status.as_deref()))
+    }
+    fn save_staged(&mut self, id: String, cx: &mut Context<Self>) {
+        let receiver = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Choose folder for verified files".into()),
+        });
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(paths))) = receiver.await else {
+                return;
+            };
+            let Some(destination) = paths.into_iter().next() else {
+                return;
+            };
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.dispatch(
+                    ClientCommand::SaveStagedInbox { id, destination },
+                    window,
+                    cx,
+                )
+            });
+        })
+        .detach();
+    }
     fn form(&mut self, p: Palette, _window: &mut Window, cx: &mut Context<Self>) -> gpui::Div {
         let title = match self.task {
             Task::Register => "Create your account",
@@ -375,6 +696,10 @@ impl AccountPanel {
                 "Account",
                 "Identity, receiving address, and account-scoped preferences.",
             ))
+            .child(Button::new("account-contacts").label("Contacts and receiving permissions").on_click(cx.listener(|this, _, window, cx| {
+                this.task = Task::Contacts;
+                this.dispatch(ClientCommand::RefreshContacts, window, cx);
+            })))
             .child(div().flex().flex_row().flex_wrap().gap(px(20.)).children([
                 card(p).flex_1().min_w(px(370.)).child(
                     div().flex().items_center().gap(px(14.)).child(
@@ -1160,7 +1485,7 @@ fn validate_form(task: Task, values: &FormValues<'_>) -> Result<(), &'static str
             .and_then(|_| required(values.report_description, "Report description is required")),
         Task::Delete => required(values.password, "Current password is required")
             .and_then(|_| required(values.confirmation, "Confirmation is required")),
-        Task::Profile | Task::Keys => Ok(()),
+        Task::Profile | Task::Keys | Task::Contacts => Ok(()),
     }
 }
 fn card(p: Palette) -> gpui::Div {

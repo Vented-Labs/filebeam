@@ -2,7 +2,9 @@
 
 mod account;
 mod client;
+pub mod contacts;
 mod history;
+pub mod inbox_receiver;
 pub mod local_state;
 pub mod note_management;
 mod notes;
@@ -15,6 +17,7 @@ pub use account::{
     seal_recipient_key, unwrap_password_key, validate_self_key, wrap_password_key,
 };
 pub use client::ServiceClient;
+pub use contacts::{Contact, ContactIdentity, Contacts, ReceivingDefaults};
 pub use history::{HistoryEntry, HistoryFilter, HistoryPage, HistoryService, RetentionUpdate};
 pub use notes::{
     BurnResult, CreatedNote, NoteCreate, NoteInspection, NoteMetadata, NoteReceiveOptions,

@@ -57,6 +57,8 @@ impl ServiceClient {
             }
         }
         let http = Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(15))
+            .timeout(std::time::Duration::from_secs(120))
             .cookie_provider(cookies.clone())
             .user_agent(concat!("filebeam-native/", env!("CARGO_PKG_VERSION")))
             .build()
@@ -85,6 +87,9 @@ impl ServiceClient {
     }
     pub fn account(&self) -> &AccountService {
         &self.account
+    }
+    pub fn instance(&self) -> String {
+        self.instance.origin().ascii_serialization()
     }
 
     pub fn history(&self) -> &HistoryService {
