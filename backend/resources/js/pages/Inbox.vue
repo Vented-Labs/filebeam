@@ -13,6 +13,7 @@ import {
     enableBrowserReceiving,
 } from '../../../../ui/src/lib/inbox-staging';
 import { onMounted } from 'vue';
+import Switch from '../../../../ui/src/components/primitives/Switch.vue';
 
 defineOptions({ layout: RouteSurface });
 const props = defineProps<{
@@ -22,6 +23,7 @@ const props = defineProps<{
         item_count: number;
         completed_at: string;
         expires_at: string;
+        status?: string;
     }>;
     filebeam: FilebeamConfig;
     auth: { user: { id: number; name: string; username?: string | null } };
@@ -33,8 +35,8 @@ const automatic = ref(false);
 onMounted(() => {
     automatic.value = browserReceivingEnabled(props.auth.user.id);
 });
-function toggleAutomatic(event: Event): void {
-    automatic.value = (event.target as HTMLInputElement).checked;
+function toggleAutomatic(enabled: boolean): void {
+    automatic.value = enabled;
     enableBrowserReceiving(props.auth.user.id, automatic.value);
 }
 
@@ -72,20 +74,28 @@ async function remove(id: string): Promise<void> {
                 Received files stay encrypted until you unlock them. Filenames are never included in
                 notifications.
             </p>
-            <label
-                ><input type="checkbox" :checked="automatic" @change="toggleAutomatic" />
-                Automatically stage eligible friend deliveries in this browser</label
-            >
-            <p class="inbox-page__intro">
-                Runs while Filebeam is open and catches up when you return. Unlock and save files
-                explicitly.
-                <AppLink href="/account/contacts" class="fb-text-link"
-                    >Manage friend permissions</AppLink
+            <div class="inbox-automatic">
+                <span class="inbox-row__icon"><Icon name="download" :size="19" /></span>
+                <label class="inbox-automatic__label" for="browser-auto-receive"
+                    ><strong>Automatically stage eligible friend deliveries in this browser</strong
+                    ><small
+                        >Catch up while Filebeam is open. Unlock and save files explicitly.</small
+                    ></label
                 >
-                <AppLink href="/account/inbox/staged" class="fb-text-link"
-                    >Open privately staged files</AppLink
-                >
-            </p>
+                <Switch
+                    id="browser-auto-receive"
+                    :model-value="automatic"
+                    aria-label="Automatically stage eligible friend deliveries in this browser"
+                    @update:model-value="toggleAutomatic"
+                />
+                <div class="inbox-automatic__links">
+                    <AppLink href="/account/contacts" class="fb-text-link"
+                        >Manage friend permissions</AppLink
+                    ><AppLink href="/account/inbox/staged" class="fb-text-link"
+                        >Open privately staged files</AppLink
+                    >
+                </div>
+            </div>
             <AnimatedReveal :show="Boolean(error)">
                 <p role="alert" class="inbox-page__error">{{ error }}</p>
             </AnimatedReveal>
@@ -106,8 +116,14 @@ async function remove(id: string): Promise<void> {
                             {{ transfer.item_count === 1 ? 'file' : 'files' }}</AppLink
                         >
                         <p>
-                            {{ formatBytes(transfer.ciphertext_bytes) }}. Received
-                            {{ new Date(transfer.completed_at).toLocaleString() }}
+                            <template v-if="transfer.status === 'pending'"
+                                >Turbo upload in progress · Receive available encrypted
+                                chunks</template
+                            >
+                            <template v-else
+                                >{{ formatBytes(transfer.ciphertext_bytes) }}. Received
+                                {{ new Date(transfer.completed_at).toLocaleString() }}</template
+                            >
                         </p>
                         <small>
                             Expires
@@ -152,6 +168,37 @@ async function remove(id: string): Promise<void> {
 </template>
 
 <style scoped>
+.inbox-automatic {
+    display: grid;
+    grid-template-columns: 2.75rem minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.875rem;
+    margin-top: 1.5rem;
+    padding: 1.125rem;
+    border: 1px solid var(--fb-border);
+    border-radius: 0.875rem;
+    background: var(--fb-surface);
+    box-shadow: var(--fb-shadow-panel);
+}
+.inbox-automatic__label strong {
+    display: block;
+    font-size: 0.8125rem;
+    font-weight: 600;
+}
+.inbox-automatic__label small {
+    display: block;
+    margin-top: 0.375rem;
+    color: var(--fb-text-muted);
+    font-size: 0.75rem;
+    line-height: 1.6;
+}
+.inbox-automatic__links {
+    grid-column: 2 / -1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem 1.25rem;
+    font-size: 0.75rem;
+}
 .inbox-page {
     width: min(100% - 2rem, 58rem);
     margin-inline: auto;

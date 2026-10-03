@@ -4,13 +4,17 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api\V1;
 
+use App\Enums\TransferDelivery;
 use App\Enums\TransferDriver;
 use App\Enums\TransferStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\PublishTransferDescriptorRequest;
+use App\Models\AccountKeyBundle;
 use App\Models\Transfer;
 use App\Models\TransferItem;
+use App\Models\User;
 use App\Support\Capability;
+use App\Support\ReceivingPermissions;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -24,12 +28,23 @@ class TurboTransferController extends Controller
      */
     public function descriptor(PublishTransferDescriptorRequest $request, Transfer $transfer): JsonResponse
     {
-        /** @var array{encrypted_descriptor: string} $validated */
+        /** @var array{encrypted_descriptor: string, encrypted_key?: string|null} $validated */
         $validated = $request->validated();
         DB::transaction(function () use ($request, $transfer, $validated): void {
             $lockedTransfer = Transfer::query()->lockForUpdate()->findOrFail($transfer->id);
             $this->authorizeUpload($lockedTransfer, $request->header('X-Filebeam-Upload-Token'));
             abort_unless($this->isPendingTurbo($lockedTransfer), 404);
+
+            if ($lockedTransfer->delivery === TransferDelivery::Inbox) {
+                $recipient = User::query()->lockForUpdate()->find($lockedTransfer->recipient_id);
+                $envelope = $lockedTransfer->keyEnvelopes()->recipient()->lockForUpdate()->sole();
+                $bundle = AccountKeyBundle::query()->lockForUpdate()->find($envelope->account_key_bundle_id);
+                abort_unless($recipient !== null && $bundle !== null && $bundle->is_active && $bundle->user_id === $recipient->id
+                    && app(ReceivingPermissions::class)->resolve($recipient, $lockedTransfer->owner, $lockedTransfer->sender_authenticated)['canSend']
+                    && is_string($validated['encrypted_key'] ?? null), 409);
+                abort_unless($envelope->encrypted_key === '' || hash_equals($envelope->encrypted_key, $validated['encrypted_key']), 409);
+                $envelope->update(['encrypted_key' => $validated['encrypted_key']]);
+            }
 
             if ($lockedTransfer->encrypted_descriptor !== null) {
                 abort_unless(hash_equals($lockedTransfer->encrypted_descriptor, $validated['encrypted_descriptor']), 409);
@@ -57,7 +72,7 @@ class TurboTransferController extends Controller
     {
         return $transfer->driver === TransferDriver::Http
             && $transfer->kind->value === 'files'
-            && $transfer->delivery->value === 'link'
+            && in_array($transfer->delivery, [TransferDelivery::Link, TransferDelivery::Inbox], true)
             && $transfer->protocol_version === 1
             && $transfer->status === TransferStatus::Pending
             && $transfer->expires_at->isFuture();
@@ -80,6 +95,24 @@ class TurboTransferController extends Controller
     public function progress(Transfer $transfer): JsonResponse
     {
         abort_unless($transfer->isPublishedTurbo() && $transfer->expires_at->isFuture(), 404);
+
+        return $this->progressData($transfer);
+    }
+
+    public function inboxProgress(Request $request, Transfer $transfer): JsonResponse
+    {
+        abort_unless($transfer->recipient_id === $request->user()?->id && $transfer->isPublishedInboxTurbo() && $transfer->expires_at->isFuture(), 404);
+        if ($transfer->status === TransferStatus::Pending) {
+            $recipient = $request->user();
+            assert($recipient instanceof User);
+            abort_unless(app(ReceivingPermissions::class)->resolve($recipient, $transfer->owner, $transfer->sender_authenticated)['canSend'], 404);
+        }
+
+        return $this->progressData($transfer);
+    }
+
+    private function progressData(Transfer $transfer): JsonResponse
+    {
         $transfer->load('items');
         $committedBytes = $transfer->items->sum('ciphertext_bytes');
         $complete = $transfer->status === TransferStatus::Available;
@@ -121,7 +154,7 @@ class TurboTransferController extends Controller
     public function heartbeat(Request $request, Transfer $transfer): JsonResponse
     {
         $this->authorizeUpload($transfer, $request->header('X-Filebeam-Upload-Token'));
-        abort_unless($this->isPendingTurbo($transfer) && $transfer->isPublishedTurbo(), 404);
+        abort_unless($this->isPendingTurbo($transfer) && ($transfer->isPublishedTurbo() || $transfer->isPublishedInboxTurbo()), 404);
         $this->pulse($transfer);
 
         return response()->json(status: 204);

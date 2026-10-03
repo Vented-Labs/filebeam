@@ -11,6 +11,7 @@ use App\Models\ContactPreference;
 use App\Models\Friendship;
 use App\Models\Plan;
 use App\Models\Transfer;
+use App\Models\TransferItem;
 use App\Models\TransferKeyEnvelope;
 use App\Models\User;
 use App\Notifications\FriendshipChanged;
@@ -135,4 +136,29 @@ test('inbox synchronization reflects current auto-download policy and staging ex
     $this->getJson('/api/native/v1/inbox/'.$transfer->id.'/staging')->assertConflict();
     $this->getJson('/api/native/v1/inbox/sync')->assertOk()->assertJsonPath('data.transfers.0.autoDownload', false);
     $this->getJson('/api/native/v1/inbox/'.$transfer->id.'/metadata')->assertOk();
+});
+
+test('friend Turbo descriptors and pending chunks are recipient owned and revocation stops unfinished reads', function (): void {
+    $recipient = User::factory()->create(['username' => 'receiver', 'normalized_username' => 'receiver', 'inbox_enabled' => true]);
+    $sender = User::factory()->create(['username' => 'sender', 'normalized_username' => 'sender']);
+    $outsider = User::factory()->create();
+    $bundle = AccountKeyBundle::factory()->for($recipient)->create();
+    $token = 'turbo-upload-capability';
+    $transfer = Transfer::factory()->create(['delivery' => TransferDelivery::Inbox, 'recipient_id' => $recipient->id, 'owner_id' => $sender->id, 'sender_authenticated' => true,
+        'status' => TransferStatus::Pending, 'driver' => 'http', 'protocol_version' => 1, 'upload_token_hash' => hash('sha256', $token), 'expires_at' => now()->addHour()]);
+    $item = TransferItem::factory()->for($transfer, 'transfer')->create(['chunk_count' => 1]);
+    TransferKeyEnvelope::factory()->for($transfer)->for($bundle, 'accountKeyBundle')->create(['role' => 'recipient', 'encrypted_key' => '']);
+    $envelope = rtrim(strtr(base64_encode(random_bytes(80)), '+/', '-_'), '=');
+    $descriptor = '/api/v1/transfers/'.$transfer->id.'/descriptor';
+    $this->putJson($descriptor, ['encrypted_descriptor' => 'opaque-descriptor'], ['X-Filebeam-Upload-Token' => $token])->assertConflict();
+    $this->putJson($descriptor, ['encrypted_descriptor' => 'opaque-descriptor', 'encrypted_key' => $envelope], ['X-Filebeam-Upload-Token' => $token])->assertNoContent();
+    $this->getJson('/api/v1/transfers/'.$transfer->id)->assertNotFound();
+    $this->getJson('/api/v1/transfers/'.$transfer->id.'/progress')->assertNotFound();
+    $this->actingAs($outsider)->getJson('/api/native/v1/inbox/'.$transfer->id.'/metadata')->assertNotFound();
+    $this->actingAs($recipient)->getJson('/api/native/v1/inbox/'.$transfer->id.'/metadata')->assertOk()->assertJsonPath('data.encrypted_descriptor', 'opaque-descriptor')->assertJsonPath('data.recipient_key.encrypted_key', $envelope);
+    $this->getJson('/api/native/v1/inbox/'.$transfer->id.'/progress')->assertOk()->assertJsonPath('data.status', 'pending');
+    $this->getJson('/api/native/v1/inbox/'.$transfer->id.'/items/'.$item->id.'/chunks/0')->assertStatus(202);
+    $this->postJson('/api/native/v1/contacts/sender', ['action' => 'block'])->assertOk();
+    $this->getJson('/api/native/v1/inbox/'.$transfer->id.'/metadata')->assertNotFound();
+    $this->getJson('/api/native/v1/inbox/'.$transfer->id.'/progress')->assertNotFound();
 });

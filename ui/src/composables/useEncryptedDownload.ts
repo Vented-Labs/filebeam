@@ -298,10 +298,15 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
             if (activity.signal.aborted) return;
             let retryAfter = 0;
             try {
-                const response = await fetch(transferProgress.url(transferId), {
-                    cache: 'no-store',
-                    signal: AbortSignal.any([activity.signal, AbortSignal.timeout(8_000)]),
-                });
+                const response = await fetch(
+                    inbox
+                        ? `/account/inbox/${transferId}/progress`
+                        : transferProgress.url(transferId),
+                    {
+                        cache: 'no-store',
+                        signal: AbortSignal.any([activity.signal, AbortSignal.timeout(8_000)]),
+                    },
+                );
                 if (activity.signal.aborted || activityController !== activity) return;
                 if (response.status === 404) {
                     availabilityError = new Error(
@@ -751,7 +756,7 @@ export function useEncryptedDownload(transferId: string, inbox = false) {
         downloadPhase.value = 'verifying';
         await waitUntilAvailable(jobId);
         const payload = await fetchChunkWithRetry(
-            `/api/v1/transfers/${transferId}`,
+            inbox ? `/account/inbox/${transferId}/metadata` : `/api/v1/transfers/${transferId}`,
             {},
             controller!.signal,
             (response) => response.json() as Promise<{ data: Transfer }>,

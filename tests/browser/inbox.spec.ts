@@ -86,6 +86,8 @@ async function sendToInbox(
     username: string,
     marker: string,
     authenticatedSender?: Page,
+    fromHome = false,
+    turbo = false,
 ): Promise<{ sender: Page; transfer: CreatedTransfer; filename: string; sentBodies: string[] }> {
     const senderContext = authenticatedSender ? undefined : await browser.newContext();
     if (senderContext) contexts.push(senderContext);
@@ -107,17 +109,18 @@ async function sendToInbox(
         transfers.push(transfer);
     });
     const filename = `private-${username}.txt`;
-    await sender.goto(`/u/${username}`);
+    if (!fromHome) await sender.goto(`/u/${username}`);
     await sender.locator('#filebeam-picker').setInputFiles({
         name: filename,
         mimeType: 'text/plain',
         buffer: Buffer.from(marker),
     });
-    await sender.getByRole('switch', { name: 'Attach note', exact: true }).click();
+    const attach = sender.getByRole('switch', { name: 'Attach note', exact: true });
+    if ((await attach.getAttribute('aria-checked')) !== 'true') await attach.click();
     await sender
         .getByRole('textbox', { name: 'Secure note editor', exact: true })
         .fill('PRIVATE_INBOX_ATTACHMENT 🦀\n');
-    await sender.getByRole('button', { name: 'Send encrypted' }).click();
+    await sender.getByRole('button', { name: turbo ? 'Turbo Transfer' : 'Send encrypted' }).click();
     await expect(sender.getByRole('heading', { name: 'Files sent' })).toBeVisible({
         timeout: 30_000,
     });
@@ -154,7 +157,8 @@ test('friends receive with inherited policies and keyless browser staging surviv
             response.url().endsWith('/account/receiving') &&
             response.request().method() === 'PATCH',
     );
-    await page.getByLabel('Who can send me files').selectOption('friends');
+    await page.getByRole('combobox', { name: 'Who can send me files' }).click();
+    await page.getByRole('option', { name: 'Friends only', exact: true }).click();
     expect((await policyResponse).status()).toBe(200);
     const settingsResponse = page.waitForResponse(
         (response) =>
@@ -164,12 +168,41 @@ test('friends receive with inherited policies and keyless browser staging surviv
     await page.getByRole('switch', { name: /Automatically download from friends/ }).click();
     expect((await settingsResponse).status()).toBe(200);
     const marker = `offline-catch-up-${receiver.username}`;
-    const { transfer, filename } = await sendToInbox(browser, receiver.username, marker, sender);
+    await sender.goto('/');
+    await sender.getByRole('switch', { name: 'Send to Friend', exact: true }).click();
+    await expect(sender.getByText('Send to a friend', { exact: true })).toHaveCount(0);
+    await expect(sender.getByText('Share a link instead', { exact: true })).toHaveCount(0);
+    await sender.locator('#transfer-recipient').fill(`@${receiver.username}`);
+    await sender.locator('#transfer-recipient').press('Tab');
+    await expect(
+        sender.getByText(`Files will go to @${receiver.username}’s inbox.`, { exact: true }),
+    ).toBeVisible();
+    await sender.getByRole('button', { name: 'Clear recipient', exact: true }).click();
+    await expect(sender.locator('#transfer-recipient')).toHaveValue('');
+    await sender.getByRole('button', { name: 'Choose contact', exact: true }).click();
+    await sender.getByRole('option', { name: `@${receiver.username}`, exact: true }).click();
+    await expect(
+        sender.getByText(`Files will go to @${receiver.username}’s inbox.`, { exact: true }),
+    ).toBeVisible();
+    const { transfer, filename } = await sendToInbox(
+        browser,
+        receiver.username,
+        marker,
+        sender,
+        true,
+    );
+    await sender.getByRole('button', { name: 'Send more files', exact: true }).click();
+    await expect(sender.getByRole('button', { name: 'Turbo Transfer' })).toBeVisible();
+    await sendToInbox(browser, receiver.username, `${marker}-turbo`, sender, true, true);
     await page.goto('/account/inbox');
     const staging = page.waitForResponse((response) =>
         response.url().endsWith(`/inbox/${transfer.id}/staging`),
     );
-    await page.getByLabel('Automatically stage eligible friend deliveries in this browser').check();
+    await page
+        .getByRole('switch', {
+            name: 'Automatically stage eligible friend deliveries in this browser',
+        })
+        .click();
     expect((await staging).status()).toBe(200);
     await expect
         .poll(async () =>
@@ -208,7 +241,10 @@ test('friends receive with inherited policies and keyless browser staging surviv
     const result = await download;
     expect((await readFile((await result.path())!)).toString()).toBe(marker);
     await page.goto('/account/inbox/staged');
-    await page.getByRole('button', { name: 'Remove local ciphertext' }).click();
+    while (await page.getByRole('button', { name: 'Remove local ciphertext' }).count()) {
+        await page.getByRole('button', { name: 'Remove local ciphertext' }).first().click();
+        await page.waitForTimeout(100);
+    }
     await expect(page.getByText('No completed automatic downloads in this browser.')).toBeVisible();
     await page.goto('/account/contacts');
     await page.getByRole('button', { name: 'Block', exact: true }).click();

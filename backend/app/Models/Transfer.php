@@ -111,6 +111,14 @@ class Transfer extends Model
             && in_array($this->status, [TransferStatus::Pending, TransferStatus::Available], true);
     }
 
+    public function isPublishedInboxTurbo(): bool
+    {
+        return $this->kind === TransferKind::Files && $this->delivery === TransferDelivery::Inbox
+            && $this->driver === TransferDriver::Http && $this->protocol_version === 1
+            && is_string($this->encrypted_descriptor)
+            && in_array($this->status, [TransferStatus::Pending, TransferStatus::Available], true);
+    }
+
     /** @return HasMany<FileReport, $this> */
     public function reports(): HasMany
     {

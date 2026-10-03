@@ -18,7 +18,7 @@ struct StagedInboxView: View {
                     }
                 }
             }
-            if model.stagedInbox.isEmpty { Text("No automatically staged files yet.").foregroundStyle(.secondary) }
+            if model.stagedInbox.isEmpty { EmptyStateView(title: "No staged files yet", detail: "Enable private receiving in Contacts to catch up on eligible friend deliveries.") }
         }.navigationTitle("Staged files").task { await model.refreshAutomaticInbox() }.refreshable { await model.refreshAutomaticInbox() }
     }
 }
@@ -52,8 +52,8 @@ private struct StagedInboxSaveView: View {
                         error = nil
                     } catch { self.error = model.message(error) }
                 }
-            }.disabled(busy || (password.isEmpty && recoveryKey.isEmpty))
-            if !urls.isEmpty { Button("Save verified files to Files") { exporting = true } }
+            }.buttonStyle(.borderedProminent).tint(.filebeamViolet).disabled(busy || (password.isEmpty && recoveryKey.isEmpty))
+            if !urls.isEmpty { PrimaryActionButton(title: "Save verified files to Files") { exporting = true } }
             if let error { InlineNotice(text: error) }
         }.navigationTitle("Save staged files")
             .task { bundle = try? await model.service.accountKeys(instance: model.instance).first { $0.id == item.keyBundleID } }

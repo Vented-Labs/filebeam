@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\AccountKeyController;
+use App\Http\Controllers\Api\V1\TurboTransferController;
 use App\Http\Controllers\AppleAppSiteAssociationController;
 use App\Http\Controllers\ContactController;
 use App\Http\Controllers\HomeController;
@@ -52,6 +53,7 @@ Route::middleware('auth')->group(function (): void {
     Route::get('/account/inbox/staged/{transferId}', fn (string $transferId): Response => Inertia::render('InboxTransfer', ['transferId' => $transferId]))->whereUlid('transferId')->name('inbox.staged.show');
     Route::get('/account/inbox/{transfer}/items/{item}/chunks/{position}', [InboxController::class, 'chunk'])->whereNumber('position')->scopeBindings()->middleware('throttle:transfer-reading')->name('inbox.chunk');
     Route::get('/account/inbox/{transfer}/metadata', [InboxController::class, 'metadata'])->middleware('throttle:transfer-reading')->name('inbox.metadata');
+    Route::get('/account/inbox/{transfer}/progress', [TurboTransferController::class, 'inboxProgress'])->middleware('throttle:transfer-reading');
     Route::get('/account/inbox/{transfer}', [InboxController::class, 'show'])->name('inbox.show');
     Route::delete('/account/inbox/{transfer}', [InboxController::class, 'destroy'])->name('inbox.destroy');
 });

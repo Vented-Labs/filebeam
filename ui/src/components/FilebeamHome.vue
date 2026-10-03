@@ -40,7 +40,13 @@ const props = defineProps<{
     user?: { name: string; username?: string | null } | null;
 }>();
 const chosenRecipient = ref<PublicRecipient>();
-const recipient = computed(() => props.recipient ?? chosenRecipient.value);
+const recipientBlocked = ref(false);
+const sendToFriend = ref(false);
+const recipient = computed(
+    () =>
+        props.recipient ??
+        (sendToFriend.value && mode.value === 'files' ? chosenRecipient.value : undefined),
+);
 const mode = ref<'files' | 'note'>('files');
 const note = ref('');
 const noteTitle = ref('');
@@ -88,6 +94,9 @@ const driver = ref<TransferDriver>(
         ? defaultDriver
         : (enabledDrivers.value[0] ?? 'http'),
 );
+watch(sendToFriend, (enabled) => {
+    if (enabled) driver.value = 'http';
+});
 const webrtcConsent = ref(false);
 const webrtcConsentDialog = ref<InstanceType<typeof WebRtcConsent>>();
 const restartHttpOpen = ref(false);
@@ -151,8 +160,11 @@ const canUpload = computed(() => {
         countAllowed &&
         enabledDrivers.value.includes(driver.value) &&
         (driver.value !== 'webrtc' || webRtcSupported) &&
-        passwordValid.value &&
-        !isBusy.value
+        (sendToFriend.value || passwordValid.value) &&
+        !isBusy.value &&
+        (mode.value !== 'files' ||
+            !sendToFriend.value ||
+            (!!chosenRecipient.value && !recipientBlocked.value))
     );
 });
 watch(driver, () => {
@@ -300,9 +312,8 @@ async function submit(turbo = false): Promise<void> {
         attachmentSubmitted.value = true;
         if (attachedError.value) return;
     }
-    if (recipient.value && (turbo || driver.value !== 'http' || selectedPassword.value)) {
-        activeUpload.value.error.value =
-            'Friend delivery requires HTTP without Turbo or a transfer password. Your draft is retained.';
+    if (recipient.value && driver.value !== 'http') {
+        activeUpload.value.error.value = 'Friend delivery requires HTTP. Your draft is retained.';
         return;
     }
     if (driver.value === 'webrtc') {
@@ -328,7 +339,7 @@ async function submit(turbo = false): Promise<void> {
                 : undefined,
         title: noteTitle.value,
         language: language.value,
-        password: selectedPassword.value,
+        password: recipient.value ? '' : selectedPassword.value,
         includeKey: selectedIncludeKey.value,
         retentionHours:
             mode.value === 'files' ? fileRetentionHours.value : noteRetentionHours.value,
@@ -515,25 +526,20 @@ onBeforeUnmount(() => {
             </div>
         </section>
         <template v-else>
-            <header v-if="recipient" class="prism-recipient-heading">
-                <h1>Send files to @{{ recipient.username }}</h1>
+            <header v-if="props.recipient" class="prism-recipient-heading">
+                <h1>Send files to @{{ props.recipient.username }}</h1>
                 <p>
                     Files are encrypted in your browser for this recipient. Their private key is
                     required to open them.
                 </p>
                 <details>
                     <summary>Recipient key fingerprint</summary>
-                    <p>{{ recipient.fingerprint }}</p>
+                    <p>{{ props.recipient.fingerprint }}</p>
                 </details>
             </header>
             <TransferModeTabs v-else v-model="mode" :disabled="isBusy" />
 
             <section class="prism-composer" data-testid="prism-composer">
-                <ContactRecipientPicker
-                    v-if="user && !props.recipient && mode === 'files'"
-                    :disabled="isBusy || Boolean(activeShare)"
-                    @choose="chosenRecipient = $event"
-                />
                 <TransferMethod
                     v-model="driver"
                     :enabled-drivers="enabledDrivers"
@@ -728,11 +734,14 @@ onBeforeUnmount(() => {
                     v-model:retention-hours="selectedRetentionHours"
                     v-model:burn-on-read="burnOnRead"
                     v-model:driver="driver"
+                    v-model:send-to-friend="sendToFriend"
                     :disabled="isBusy"
                     :can-upload="canUpload"
                     :uploading="activeIsUploading"
                     :mode="mode"
                     :recipient="Boolean(recipient)"
+                    :fixed-recipient="Boolean(props.recipient)"
+                    :can-send-to-friend="Boolean(user)"
                     :retention-options="
                         mode === 'files'
                             ? (config.file_retention_options ?? [])
@@ -741,7 +750,12 @@ onBeforeUnmount(() => {
                     @submit="submit()"
                     @turbo="submit(true)"
                     @cancel="cancelUpload"
-                />
+                    ><template #recipient
+                        ><ContactRecipientPicker
+                            :disabled="isBusy"
+                            @choose="chosenRecipient = $event"
+                            @blocked="recipientBlocked = $event" /></template
+                ></TransferOptions>
             </section>
         </template>
         <TrustFeatures class="prism-trust" />

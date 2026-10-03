@@ -388,6 +388,7 @@ class TransferController extends Controller
                     409,
                     'The recipient key is unavailable.',
                 );
+                abort_unless($envelope->encrypted_key === '' || hash_equals($envelope->encrypted_key, $validated['encrypted_key']), 409, 'The recipient envelope changed after publication.');
                 $envelope->update(['encrypted_key' => $validated['encrypted_key']]);
             }
 

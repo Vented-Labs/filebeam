@@ -5,6 +5,7 @@ import CopyButton from '../primitives/CopyButton.vue';
 import Input from '../primitives/Input.vue';
 import InboxSettings from './InboxSettings.vue';
 import Icon from '../primitives/Icon.vue';
+import AccountPage from '../layout/AccountPage.vue';
 
 defineProps<{
     githubUrl: string;
@@ -26,21 +27,17 @@ const emit = defineEmits<{ logout: [] }>();
 </script>
 
 <template>
-    <section class="account-panel">
-        <header class="account-panel__header">
-            <div>
-                <h1>Account</h1>
-                <p>Manage your identity, receiving link, and browser-held encryption keys.</p>
-            </div>
-            <div class="account-panel__actions">
-                <AppLink href="/account/history" class="fb-button fb-button--secondary"
-                    ><Icon name="clock" :size="16" />View transfer history</AppLink
-                >
-                <Button variant="secondary" @click="emit('logout')">
-                    <Icon name="logout" :size="16" />Sign out
-                </Button>
-            </div>
-        </header>
+    <AccountPage
+        title="Account"
+        description="Manage your identity, receiving link, and browser-held encryption keys."
+        class="account-panel"
+    >
+        <template #actions>
+            <AppLink href="/account/history" class="fb-button fb-button--secondary"><Icon name="clock" :size="16" />View transfer history</AppLink>
+            <Button variant="secondary" @click="emit('logout')">
+                <Icon name="logout" :size="16" />Sign out
+            </Button>
+        </template>
         <div class="account-panel__grid">
             <aside class="account-panel__identity">
                 <div class="account-panel__avatar"><Icon name="user" :size="26" /></div>
@@ -90,7 +87,7 @@ const emit = defineEmits<{ logout: [] }>();
             </aside>
             <InboxSettings :user="user" />
         </div>
-    </section>
+    </AccountPage>
 </template>
 
 <style scoped>

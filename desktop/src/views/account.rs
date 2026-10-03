@@ -288,9 +288,12 @@ impl Render for AccountPanel {
 
 impl AccountPanel {
     fn contacts(&mut self, p: Palette, cx: &mut Context<Self>) -> gpui::Div {
-        let mut body = card(p)
-            .max_w(px(850.))
-            .child(section_heading(
+        let mut body = div()
+            .flex()
+            .flex_col()
+            .gap(px(crate::views::page::HEADER_GAP))
+            .max_w(px(1100.))
+            .child(crate::views::page::heading(
                 p,
                 "Contacts",
                 "Mutual friends on this instance. Your overrides control only incoming files.",
@@ -335,26 +338,40 @@ impl AccountPanel {
             let defaults = data.settings;
             let policy = defaults.receiving_policy.clone();
             let auto = defaults.auto_download_friends;
+            let mut policy_choices = div().flex().flex_wrap().gap(px(8.));
+            for (index, (value, label)) in [
+                ("anyone", "Anyone"),
+                ("authenticated", "Signed-in users"),
+                ("friends", "Friends only"),
+                ("nobody", "Nobody unless allowed"),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let button = Button::new(("receiving-policy-choice", index))
+                    .label(label)
+                    .disabled(self.pending)
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.dispatch(
+                            ClientCommand::ReceivingDefaults {
+                                policy: value.into(),
+                                auto_download: auto,
+                            },
+                            window,
+                            cx,
+                        )
+                    }));
+                policy_choices = policy_choices.child(if policy == value {
+                    button.primary()
+                } else {
+                    button
+                });
+            }
             body = body
                 .child(
-                    Button::new("receiving-policy")
-                        .label(format!("Who can send: {policy} (change)"))
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            let next = match policy.as_str() {
-                                "anyone" => "authenticated",
-                                "authenticated" => "friends",
-                                "friends" => "nobody",
-                                _ => "anyone",
-                            };
-                            this.dispatch(
-                                ClientCommand::ReceivingDefaults {
-                                    policy: next.into(),
-                                    auto_download: auto,
-                                },
-                                window,
-                                cx,
-                            );
-                        })),
+                    card(p)
+                        .child(section_title(p, "shield", "Who can send me files"))
+                        .child(policy_choices),
                 )
                 .child(
                     Switch::new("auto-friends")
@@ -382,11 +399,18 @@ impl AccountPanel {
                         })),
                 );
             for (index, contact) in data.contacts.into_iter().enumerate() {
-                let mut row = card(p).child(section_heading(
-                    p,
-                    &format!("@{}", contact.username),
-                    &contact.status,
-                ));
+                let mut row = card(p)
+                    .child(section_title(p, "user", &contact.name))
+                    .child(meta(p, "Username", &format!("@{}", contact.username)))
+                    .child(meta(
+                        p,
+                        "Relationship",
+                        match contact.status.as_str() {
+                            "incoming" => "Incoming friend request",
+                            "outgoing" => "Waiting for acceptance",
+                            _ => "Friend on this instance",
+                        },
+                    ));
                 let actions: &[(&str, &str)] = match contact.status.as_str() {
                     "incoming" => &[("Accept", "accept"), ("Decline", "decline")],
                     "outgoing" => &[("Cancel request", "cancel")],
@@ -427,23 +451,24 @@ impl AccountPanel {
                         } else {
                             contact.can_send
                         };
-                        row = row.child(
-                            Button::new(("contact-override", index * 2 + field_index))
-                                .label(format!(
-                                    "{label}: {} (change)",
-                                    match value {
-                                        None => "Inherit",
-                                        Some(true) => "Allow",
-                                        Some(false) => "Deny",
-                                    }
-                                ))
-                                .disabled(self.pending)
-                                .on_click(cx.listener(move |this, _, window, cx| {
-                                    let next = match value {
-                                        None => Some(true),
-                                        Some(true) => Some(false),
-                                        Some(false) => None,
-                                    };
+                        let mut choices = div().flex().flex_wrap().gap(px(8.));
+                        for (choice_index, (next, choice_label)) in [
+                            (None, "Inherit"),
+                            (Some(true), if field_index == 0 { "Allow" } else { "On" }),
+                            (Some(false), if field_index == 0 { "Deny" } else { "Off" }),
+                        ]
+                        .into_iter()
+                        .enumerate()
+                        {
+                            let username = username.clone();
+                            let button = Button::new((
+                                "contact-override-choice",
+                                index * 6 + field_index * 3 + choice_index,
+                            ))
+                            .label(choice_label)
+                            .disabled(self.pending)
+                            .on_click(cx.listener(
+                                move |this, _, window, cx| {
                                     this.dispatch(
                                         ClientCommand::ContactAction {
                                             username: username.clone(),
@@ -457,8 +482,22 @@ impl AccountPanel {
                                         },
                                         window,
                                         cx,
-                                    );
-                                })),
+                                    )
+                                },
+                            ));
+                            choices = choices.child(if value == next {
+                                button.primary()
+                            } else {
+                                button
+                            });
+                        }
+                        row = row.child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(px(8.))
+                                .child(div().text_size(px(12.)).text_color(p.muted).child(label))
+                                .child(choices),
                         );
                     }
                 }

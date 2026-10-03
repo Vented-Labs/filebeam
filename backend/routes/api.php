@@ -136,6 +136,7 @@ Route::prefix('native/v1')->middleware([EncryptCookies::class, AddQueuedCookiesT
         Route::post('/account/email/verification-notification', [NativeAccountController::class, 'resendVerification'])->middleware('throttle:6,1');
         Route::post('/account/email/verify', [NativeAccountController::class, 'verifyEmail'])->middleware('throttle:6,1');
         Route::get('/inbox/{transfer}/metadata', [InboxController::class, 'metadata'])->middleware('throttle:transfer-reading');
+        Route::get('/inbox/{transfer}/progress', [TurboTransferController::class, 'inboxProgress'])->middleware('throttle:transfer-reading');
         Route::get('/inbox/{transfer}/staging', [InboxController::class, 'staging'])->middleware('throttle:transfer-reading');
         Route::get('/inbox/{transfer}/items/{item}/chunks/{position}', [InboxController::class, 'chunk'])
             ->whereNumber('position')

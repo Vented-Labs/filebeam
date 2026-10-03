@@ -1,67 +1,22 @@
 <script setup lang="ts">
-import {
-    SelectContent,
-    SelectItem,
-    SelectItemIndicator,
-    SelectItemText,
-    SelectPortal,
-    SelectRoot,
-    SelectTrigger,
-    SelectValue,
-    SelectViewport,
-} from 'reka-ui';
-import Icon from './Icon.vue';
-
-defineProps<{
-    label: string;
-    options: Array<{ value: string; label: string }>;
-    disabled?: boolean;
-}>();
+import { computed, useAttrs } from 'vue';
+import { SelectRoot, SelectTrigger, SelectValue, SelectPortal, SelectContent, SelectViewport, SelectItem, SelectItemText, SelectItemIndicator } from 'reka-ui';
+import Icon, { type IconName } from './Icon.vue';
+defineOptions({ inheritAttrs: false });
+const props = defineProps<{ label?: string; options: Array<{ value: string; label: string }>; disabled?: boolean; icon?: IconName; placeholder?: string }>();
 const value = defineModel<string>({ default: '' });
 const emit = defineEmits<{ change: [] }>();
-function select(next: unknown): void {
-    value.value = next === '__all__' ? '' : String(next);
-    emit('change');
-}
+const attrs = useAttrs();
+const selectedLabel = computed(() => props.options.find(option => option.value === value.value)?.label ?? props.placeholder);
+function update(next: unknown): void { value.value = next === '__all__' ? '' : String(next); emit('change'); }
 </script>
-
 <template>
-    <SelectRoot :model-value="value || '__all__'" :disabled="disabled" @update:model-value="select">
-        <SelectTrigger :aria-label="label" class="fb-select-trigger">
-            <SelectValue class="fb-select-value" />
-            <Icon name="chevron-down" :size="15" class="ml-auto" />
-        </SelectTrigger>
-        <SelectPortal>
-            <SelectContent
-                position="popper"
-                :body-lock="false"
-                :side-offset="8"
-                :collision-padding="8"
-                class="fb-select-content"
-            >
-                <SelectViewport>
-                    <SelectItem
-                        v-for="option in options"
-                        :key="option.value"
-                        :value="option.value || '__all__'"
-                        class="fb-select-item"
-                    >
-                        <SelectItemText>{{ option.label }}</SelectItemText>
-                        <SelectItemIndicator><Icon name="check" :size="15" /></SelectItemIndicator>
-                    </SelectItem>
-                </SelectViewport>
-            </SelectContent>
-        </SelectPortal>
+    <SelectRoot :model-value="value || '__all__'" :disabled="disabled" @update:model-value="update">
+        <SelectTrigger v-bind="attrs" :aria-label="label" class="fb-select-trigger account-select"><Icon v-if="icon" :name="icon" :size="16" /><SelectValue class="account-select__value">{{ selectedLabel }}</SelectValue><Icon name="chevron-down" :size="15" /></SelectTrigger>
+        <SelectPortal><SelectContent :body-lock="false" position="popper" :side-offset="8" :collision-padding="8" class="fb-select-content"><SelectViewport><SelectItem v-for="option in options" :key="option.value" :value="option.value || '__all__'" class="fb-select-item"><SelectItemText>{{ option.label }}</SelectItemText><SelectItemIndicator><Icon name="check" :size="15" /></SelectItemIndicator></SelectItem></SelectViewport></SelectContent></SelectPortal>
     </SelectRoot>
 </template>
-
 <style scoped>
-.fb-select-value {
-    min-width: 0;
-    flex: 1;
-    overflow: hidden;
-    text-align: left;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
+.account-select { width: 100%; min-width: 0; gap: 0.625rem; }
+.account-select__value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: left; white-space: nowrap; }
 </style>
