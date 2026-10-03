@@ -23,7 +23,7 @@ import FilePond from './upload/FilePond.vue';
 import FileQueue from './upload/FileQueue.vue';
 import TransferOptions from './upload/TransferOptions.vue';
 import TransferMethod from './upload/TransferMethod.vue';
-import ContactRecipientPicker from './upload/ContactRecipientPicker.vue';
+import FriendRecipientPopover from './upload/FriendRecipientPopover.vue';
 import TransferModeTabs from './upload/TransferModeTabs.vue';
 import ShareReady from './sharing/ShareReady.vue';
 import WebRtcConsent from './sharing/WebRtcConsent.vue';
@@ -751,7 +751,8 @@ onBeforeUnmount(() => {
                     @turbo="submit(true)"
                     @cancel="cancelUpload"
                     ><template #recipient
-                        ><ContactRecipientPicker
+                        ><FriendRecipientPopover
+                            :value="chosenRecipient"
                             :disabled="isBusy"
                             @choose="chosenRecipient = $event"
                             @blocked="recipientBlocked = $event" /></template

@@ -227,7 +227,7 @@ function setRetention(value: unknown): void {
 
 <style scoped>
 .transfer-options__recipient {
-    padding-inline: 1.5rem;
+    padding: 0.25rem 1.5rem;
     margin-bottom: 1.125rem;
 }
 .transfer-options {

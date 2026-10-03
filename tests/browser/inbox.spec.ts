@@ -37,13 +37,24 @@ async function register(page: Page): Promise<{ username: string; email: string }
     await page.getByLabel('Email', { exact: true }).fill(account.email);
     await page.getByLabel('Password', { exact: true }).fill(accountPassword);
     await page.getByLabel('Confirm password', { exact: true }).fill(accountPassword);
-    const registration = page.waitForResponse(
+    let registration = page.waitForResponse(
         (response) =>
             response.request().method() === 'POST' &&
             new URL(response.url()).pathname === '/register',
     );
     await page.getByRole('button', { name: 'Create account', exact: true }).click();
-    expect((await registration).status()).toBeLessThan(400);
+    let response = await registration;
+    if (response.status() === 429) {
+        // Browser workers share an IP; respect the instance's registration throttle.
+        const delay = Number(response.headers()['retry-after'] ?? 60);
+        await page.waitForTimeout(Math.min(60, Math.max(1, delay)) * 1000 + 250);
+        await page.getByLabel('Password', { exact: true }).fill(accountPassword);
+        await page.getByLabel('Confirm password', { exact: true }).fill(accountPassword);
+        registration = page.waitForResponse(candidate => candidate.request().method() === 'POST' && new URL(candidate.url()).pathname === '/register');
+        await page.getByRole('button', { name: 'Create account', exact: true }).click();
+        response = await registration;
+    }
+    expect(response.status()).toBeLessThan(400);
     await expect(page).toHaveURL(/\/verify-email$/);
     await page.goto('/account');
     await expect(page.getByRole('heading', { name: 'Account' })).toBeVisible();
@@ -170,6 +181,7 @@ test('friends receive with inherited policies and keyless browser staging surviv
     const marker = `offline-catch-up-${receiver.username}`;
     await sender.goto('/');
     await sender.getByRole('switch', { name: 'Send to Friend', exact: true }).click();
+    await sender.getByRole('button', { name: 'Set friend', exact: true }).click();
     await expect(sender.getByText('Send to a friend', { exact: true })).toHaveCount(0);
     await expect(sender.getByText('Share a link instead', { exact: true })).toHaveCount(0);
     await sender.locator('#transfer-recipient').fill(`@${receiver.username}`);
@@ -184,6 +196,7 @@ test('friends receive with inherited policies and keyless browser staging surviv
     await expect(
         sender.getByText(`Files will go to @${receiver.username}’s inbox.`, { exact: true }),
     ).toBeVisible();
+    await sender.getByRole('button', { name: 'Done', exact: true }).click();
     const { transfer, filename } = await sendToInbox(
         browser,
         receiver.username,

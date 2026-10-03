@@ -16,16 +16,16 @@ import Input from '../primitives/Input.vue';
 import Button from '../primitives/Button.vue';
 import Icon from '../primitives/Icon.vue';
 
-const props = defineProps<{ disabled: boolean }>();
+const props = defineProps<{ disabled: boolean; initialRecipient?: PublicRecipient }>();
 const emit = defineEmits<{
     choose: [recipient: PublicRecipient | undefined];
     blocked: [value: boolean];
 }>();
 const friends = ref<Contact[]>([]);
-const username = ref('');
+const username = ref(props.initialRecipient ? `@${props.initialRecipient.username}` : '');
 const checking = ref(false);
 const error = ref('');
-const resolved = ref('');
+const resolved = ref(props.initialRecipient?.username ?? '');
 const open = ref(false);
 const suggestions = computed(() =>
     friends.value.filter((contact) =>
