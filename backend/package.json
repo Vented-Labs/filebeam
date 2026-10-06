@@ -31,7 +31,7 @@
         "@types/node": "^26.4.1",
         "concurrently": "^10.0.3",
         "vite-plus": "1.0.0",
-        "vue-tsc": "^3.3.11"
+        "vue-tsc": "^3.3.12"
     },
     "optionalDependencies": {
         "@laravel/multiplex": "^0.4.1"
