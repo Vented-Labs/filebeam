@@ -108,7 +108,7 @@ jobs:
             beam-cargo-v2-${{ runner.os }}-${{ runner.arch }}-rust1.98.0-${{ hashFiles('docker/cli/Dockerfile') }}-${{ hashFiles('crates/cli/Cargo.lock', 'crates/transfer/Cargo.lock', 'crates/transfer-native/Cargo.lock') }}-
             beam-cargo-v2-${{ runner.os }}-${{ runner.arch }}-rust1.98.0-${{ hashFiles('docker/cli/Dockerfile') }}-
             beam-cargo-${{ runner.os }}-${{ runner.arch }}-rust1.98.0-${{ hashFiles('docker/cli/Dockerfile', 'crates/cli/Cargo.lock', 'crates/transfer/Cargo.lock', 'crates/transfer-native/Cargo.lock') }}-
-      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962
         with:
           php-version: '8.5'
           extensions: sodium
@@ -203,7 +203,7 @@ jobs:
           dissociate: true
           ref: ${{ env.RELEASE_COMMIT }}
           fetch-depth: 0
-      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962
         with:
           php-version: '8.5'
           extensions: sodium
@@ -229,7 +229,7 @@ jobs:
           [[ -n "$BEAM_RELEASE_PUBLIC_KEY" ]]
           scripts/cli/package.sh "$RELEASE_TAG" dist/beam
           bash scripts/cli/smoke-package.sh "$RELEASE_TAG" dist/beam
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: ${{ env.RELEASE_TAG }}-linux
           path: dist/beam/
@@ -269,7 +269,7 @@ jobs:
           persist-credentials: false
           ref: ${{ env.RELEASE_COMMIT }}
           fetch-depth: 0
-      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962
         with:
           php-version: '8.5'
           extensions: sodium
@@ -302,7 +302,7 @@ jobs:
         if: matrix.smoke
         shell: bash
         run: crates/cli/target/${{ matrix.target }}/release/beam${{ matrix.os == 'windows' && '.exe' || '' }} --version
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: ${{ env.RELEASE_TAG }}-${{ matrix.os }}-${{ matrix.architecture }}
           path: dist/beam/
@@ -319,7 +319,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ needs.validate-ref.outputs.commit }}
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           pattern: ${{ env.RELEASE_TAG }}-*
           path: dist/beam
@@ -337,7 +337,7 @@ jobs:
           (cd dist/beam && sha256sum "$RELEASE_TAG"-*.tar.gz "$RELEASE_TAG"-*.zip > checksums.txt)
           php scripts/release/cli-write-release.php "$RELEASE_TAG" dist/beam dist/beam/release.json
           bash scripts/cli/smoke-package.sh "$RELEASE_TAG" dist/beam
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: ${{ env.RELEASE_TAG }}
           path: dist/beam/
@@ -358,12 +358,12 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ env.RELEASE_COMMIT }}
-      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962
         with:
           php-version: '8.5'
           extensions: sodium
           coverage: none
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: ${{ env.RELEASE_TAG }}
           path: dist/beam
@@ -395,7 +395,7 @@ jobs:
       - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
-      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962
         with:
           php-version: '8.5'
           extensions: sodium
