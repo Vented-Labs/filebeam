@@ -40,7 +40,7 @@
         "iconsax": "0.1.1",
         "typescript": "^6.0.3",
         "vite": "npm:@voidzero-dev/vite-plus-core@1.0.0",
-        "vite-plus": "1.0.0",
+        "vite-plus": "1.3.0",
         "vue": "^3.5.42",
         "vue-tsc": "^3.3.12"
     },
