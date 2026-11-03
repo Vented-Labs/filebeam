@@ -19,7 +19,7 @@ jobs:
     env:
       IOS_ACCEPTANCE_EVIDENCE_DIR: test-results/ios/acceptance
     steps:
-      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
+      - uses: useblacksmith/checkout@2b9fe87d796feea153b455ec2f3125b471a7b0e7 # v1
         with: { persist-credentials: false, ref: '${{ inputs.ref || github.ref }}' }
       - uses: ./.github/actions/setup-php
       - uses: ./.github/actions/setup-rust
@@ -37,7 +37,7 @@ jobs:
           FILEBEAM_ACCEPTANCE_INSTANCE="$backend_url" bash scripts/ios/peer-native.sh > "$IOS_ACCEPTANCE_EVIDENCE_DIR/native-background.log" 2>&1
           printf 'native_http_instance=%s\n' "$backend_url" > "$IOS_ACCEPTANCE_EVIDENCE_DIR/instance.txt"
       - if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with: { name: ios-native-acceptance, path: test-results/ios/acceptance/, if-no-files-found: ignore, retention-days: 14 }
   apple-ui:
     needs: native-backend
@@ -49,7 +49,7 @@ jobs:
       IOS_ACCEPTANCE_HTTPS_LINK_FIXTURE: ${{ secrets.IOS_ACCEPTANCE_HTTPS_LINK_FIXTURE }}
       IOS_TEST_ONLY: FilebeamUITests/PeerAcceptanceTests
     steps:
-      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
+      - uses: useblacksmith/checkout@2b9fe87d796feea153b455ec2f3125b471a7b0e7 # v1
         with: { persist-credentials: false, ref: '${{ inputs.ref || github.ref }}' }
       - name: Run HTTPS XCUITest acceptance suite
         run: |
@@ -59,5 +59,5 @@ jobs:
           xcrun xcresulttool get test-results tests --path test-results/ios/Filebeam.xcresult > test-results/ios/peer-tests.json
           python3 scripts/ios/require-peer-test.py test-results/ios/peer-tests.json
       - if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with: { name: ios-apple-acceptance, path: test-results/ios/, if-no-files-found: ignore, retention-days: 14 }

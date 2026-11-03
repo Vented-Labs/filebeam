@@ -36,7 +36,7 @@ jobs:
       FILEBEAM_ANDROID_CACHE: ${{ github.workspace }}/.android-cache
       FILEBEAM_ANDROID_EMULATOR_IMAGE: filebeam-android-emulator:acceptance
     steps:
-      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
+      - uses: useblacksmith/checkout@2b9fe87d796feea153b455ec2f3125b471a7b0e7 # v1
         with:
           persist-credentials: false
       - uses: useblacksmith/setup-docker-builder@19215110ab936351210feebdfa5b440b4493e184 # v2
@@ -67,7 +67,7 @@ jobs:
         run: bash scripts/android/acceptance.sh --prepare
       - name: Upload acceptance evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: android-acceptance-${{ inputs.system_image }}
           path: |
