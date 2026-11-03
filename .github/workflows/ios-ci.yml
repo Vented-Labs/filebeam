@@ -22,7 +22,7 @@ jobs:
       IOS_TEST_OS: ${{ matrix.os }}
       IOS_TEST_RUNTIME_VERSION: ${{ matrix.runtime }}
     steps:
-      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
+      - uses: useblacksmith/checkout@2b9fe87d796feea153b455ec2f3125b471a7b0e7 # v1
         with: { persist-credentials: false, ref: '${{ inputs.ref || github.ref }}' }
       - name: Identify selected Xcode and SDK
         run: bash scripts/ios/toolchain-id.sh >> "$GITHUB_ENV"
@@ -40,5 +40,5 @@ jobs:
       - name: Check Rust, domain package, iOS builds, and tests
         run: bash scripts/ios/check.sh
       - if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with: { name: 'ios-development-${{ matrix.os }}', path: 'test-results/ios/', if-no-files-found: ignore, retention-days: 7 }
