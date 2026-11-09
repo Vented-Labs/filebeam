@@ -29,7 +29,7 @@ class ReleaseSynchronizer
     /** @return array{status: 'synced'|'skipped'|'locked'|'backoff'|'failed', reason?: string, imported?: int, updated?: int, hidden?: int, complete?: bool} */
     public function sync(bool $full = false, bool $force = false): array
     {
-        if (! config('changelog.sync')) {
+        if (! config('changelog.enabled') || ! config('changelog.sync')) {
             return ['status' => 'skipped', 'reason' => 'disabled'];
         }
 
@@ -56,7 +56,8 @@ class ReleaseSynchronizer
                 return ['status' => 'backoff', 'reason' => (string) $state->last_error];
             }
 
-            return $this->run($state, $full);
+            // Until one complete reconciliation succeeds, every pass imports the whole archive.
+            return $this->run($state, $full || $state->last_full_success_at === null);
         } finally {
             if (is_resource($handle)) {
                 $activity->release($handle);

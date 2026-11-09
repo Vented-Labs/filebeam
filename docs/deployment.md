@@ -98,11 +98,13 @@ social crawlers request it directly.
 `/changelog` shows release notes from a local mirror of the configured public
 GitHub repository's published releases. Visitors never trigger GitHub requests.
 The scheduler refreshes the newest releases every 15 minutes and reconciles the
-full archive daily. Import the archive once after deploying or changing the
-repository:
+full archive daily. The first check after deploying, or after changing the
+repository, imports the whole archive. Package updates refresh the mirror as
+soon as an update completes; a failed refresh leaves the update in place and the
+scheduler retries. To refresh immediately:
 
 ```sh
-php artisan filebeam:sync-changelog --full
+php artisan filebeam:sync-changelog
 ```
 
 Failed checks keep the saved notes, back off exponentially, and honor GitHub
@@ -112,7 +114,7 @@ disappear upstream are hidden only after two complete scans miss them.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `FILEBEAM_CHANGELOG_ENABLED` | `true` | Set `false` to remove the page, its routes, and navigation. |
+| `FILEBEAM_CHANGELOG_ENABLED` | `true` | Set `false` to remove the page, its routes, navigation, and release checks. |
 | `FILEBEAM_CHANGELOG_SYNC` | `true` | Set `false` to stop outbound checks and keep the saved mirror. |
 | `FILEBEAM_CHANGELOG_REPOSITORY` | `Vented-Labs/filebeam` | Public `owner/repository` to mirror. |
 | `FILEBEAM_CHANGELOG_TOKEN` | unset | Optional read-only token for busy shared egress addresses. Never sent to browsers. |

@@ -193,6 +193,10 @@ final class Command
             $this->state->write('status.json', ['state' => 'complete', 'tag' => $release['tag'], 'at' => gmdate('c')]);
             $heartbeat['state'] = 'complete';
             self::write('Updated to '.$release['tag'].'.');
+            // The mirror's import takes a shared activity lock, so it runs once the exclusive one is released.
+            $activity->release($exclusive);
+            $exclusive = null;
+            $this->refreshReleaseNotes();
         } catch (\Throwable $e) {
             $recovered = false;
             $recoveryError = null;
@@ -529,7 +533,7 @@ final class Command
     }
 
     /** @param list<string> $arguments */
-    private function artisan(array $arguments): void
+    private function artisan(array $arguments): string
     {
         $command = array_merge([PHP_BINARY, $this->root.'/backend/artisan'], $arguments);
         $process = proc_open($command, [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, $this->root.'/backend');
@@ -542,6 +546,18 @@ final class Command
         fclose($pipes[2]);
         if (proc_close($process) !== 0) {
             throw new RuntimeException('Artisan '.implode(' ', $arguments).' failed: '.trim($output));
+        }
+
+        return trim($output);
+    }
+
+    /** Refreshes the public release notes after a completed update; the scheduler retries any failure. */
+    private function refreshReleaseNotes(): void
+    {
+        try {
+            self::write($this->artisan(['filebeam:sync-changelog', '--no-interaction']));
+        } catch (\Throwable $e) {
+            self::write('Release notes were not refreshed; the scheduler will retry. '.$e->getMessage());
         }
     }
 

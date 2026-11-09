@@ -197,3 +197,23 @@ test('the shell links the installed version to its mirrored release notes', func
         ->where('filebeam.changelog.enabled', true)
         ->where('filebeam.changelog.version_url', route('changelog.show', ['tag' => 'v0.3.0'])));
 });
+
+test('the first pass imports the whole archive and later recent passes read only the newest page', function (): void {
+    fakeGithub([[githubRelease(5, 'v0.5.0')], [githubRelease(4, 'v0.4.0')], [githubRelease(3, 'v0.3.0')]]);
+
+    expect(synchronize(false))->toMatchArray(['status' => 'synced', 'complete' => true, 'imported' => 3])
+        ->and(ChangelogSyncState::query()->value('last_full_success_at'))->not->toBeNull();
+
+    fakeGithub([[githubRelease(6, 'v0.6.0')], [githubRelease(5, 'v0.5.0')], [githubRelease(9, 'v0.0.9')]]);
+    expect(synchronize(false))->toMatchArray(['status' => 'synced', 'complete' => false, 'imported' => 1]);
+    expect(ChangelogRelease::query()->where('tag', 'v0.0.9')->exists())->toBeFalse();
+});
+
+test('synchronization is skipped while the changelog is disabled', function (): void {
+    config(['changelog.enabled' => false]);
+    fakeGithub([[githubRelease(3, 'v0.3.0')]]);
+
+    expect(synchronize())->toBe(['status' => 'skipped', 'reason' => 'disabled'])
+        ->and(ChangelogRelease::query()->exists())->toBeFalse();
+    $this->artisan('filebeam:sync-changelog')->expectsOutputToContain('skipped: disabled')->assertSuccessful();
+});
