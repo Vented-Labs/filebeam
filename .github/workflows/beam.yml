@@ -14,6 +14,7 @@ on:
       - 'crates/cli/**'
       - 'crates/client-config/**'
       - 'crates/client-updater/**'
+      - 'crates/daemon/**'
       - 'crates/encryption/**'
       - 'crates/client-core/**'
       - 'crates/transfer/**'
@@ -62,7 +63,7 @@ jobs:
       commit: ${{ steps.verify.outputs.commit }}
       tag: ${{ steps.verify.outputs.tag }}
     steps:
-      - uses: useblacksmith/checkout@2b9fe87d796feea153b455ec2f3125b471a7b0e7 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: refs/heads/master
@@ -83,7 +84,7 @@ jobs:
     env:
       BEAM_DOCKER_BUILD: 'false'
     steps:
-      - uses: useblacksmith/checkout@2b9fe87d796feea153b455ec2f3125b471a7b0e7 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           # CLI containers need Git objects without the host's mirror mount.
@@ -103,7 +104,7 @@ jobs:
           path: |
             ${{ env.BEAM_CARGO_CACHE_DIR }}
             crates/cli/target
-          key: beam-cargo-v2-${{ runner.os }}-${{ runner.arch }}-rust1.98.0-${{ hashFiles('docker/cli/Dockerfile') }}-${{ hashFiles('crates/cli/Cargo.lock', 'crates/transfer/Cargo.lock', 'crates/transfer-native/Cargo.lock') }}-${{ hashFiles('crates/cli/src/**', 'crates/cli/tests/**', 'crates/cli/build.rs', 'crates/cli/Cargo.toml', 'crates/client-core/src/**', 'crates/client-core/Cargo.toml', 'crates/client-config/src/**', 'crates/client-config/Cargo.toml', 'crates/client-updater/src/**', 'crates/client-updater/Cargo.toml', 'crates/encryption/src/**', 'crates/encryption/Cargo.toml', 'crates/transfer/src/**', 'crates/transfer/Cargo.toml', 'crates/transfer-native/src/**', 'crates/transfer-native/Cargo.toml') }}
+          key: beam-cargo-v2-${{ runner.os }}-${{ runner.arch }}-rust1.98.0-${{ hashFiles('docker/cli/Dockerfile') }}-${{ hashFiles('crates/cli/Cargo.lock', 'crates/transfer/Cargo.lock', 'crates/transfer-native/Cargo.lock') }}-${{ hashFiles('crates/cli/src/**', 'crates/cli/tests/**', 'crates/cli/build.rs', 'crates/cli/Cargo.toml', 'crates/client-core/src/**', 'crates/client-core/Cargo.toml', 'crates/client-config/src/**', 'crates/client-config/Cargo.toml', 'crates/client-updater/src/**', 'crates/client-updater/Cargo.toml', 'crates/encryption/src/**', 'crates/encryption/Cargo.toml', 'crates/transfer/src/**', 'crates/transfer/Cargo.toml', 'crates/transfer-native/src/**', 'crates/transfer-native/Cargo.toml', 'crates/daemon/src/**', 'crates/daemon/Cargo.toml') }}
           restore-keys: |
             beam-cargo-v2-${{ runner.os }}-${{ runner.arch }}-rust1.98.0-${{ hashFiles('docker/cli/Dockerfile') }}-${{ hashFiles('crates/cli/Cargo.lock', 'crates/transfer/Cargo.lock', 'crates/transfer-native/Cargo.lock') }}-
             beam-cargo-v2-${{ runner.os }}-${{ runner.arch }}-rust1.98.0-${{ hashFiles('docker/cli/Dockerfile') }}-
@@ -144,7 +145,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
-      - uses: useblacksmith/checkout@2b9fe87d796feea153b455ec2f3125b471a7b0e7 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
       - name: Install Rust
@@ -160,7 +161,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             crates/cli/target
-          key: beam-check-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.98.0-${{ hashFiles('crates/cli/Cargo.lock', 'crates/transfer/Cargo.lock', 'crates/transfer-native/Cargo.lock') }}-${{ hashFiles('crates/cli/src/**', 'crates/cli/build.rs', 'crates/cli/Cargo.toml', 'crates/transfer/src/**', 'crates/transfer/Cargo.toml', 'crates/transfer-native/src/**', 'crates/transfer-native/Cargo.toml') }}
+          key: beam-check-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.98.0-${{ hashFiles('crates/cli/Cargo.lock', 'crates/transfer/Cargo.lock', 'crates/transfer-native/Cargo.lock') }}-${{ hashFiles('crates/cli/src/**', 'crates/cli/build.rs', 'crates/cli/Cargo.toml', 'crates/transfer/src/**', 'crates/transfer/Cargo.toml', 'crates/transfer-native/src/**', 'crates/transfer-native/Cargo.toml', 'crates/daemon/src/**', 'crates/daemon/Cargo.toml') }}
           restore-keys: |
             beam-check-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.98.0-${{ hashFiles('crates/cli/Cargo.lock', 'crates/transfer/Cargo.lock', 'crates/transfer-native/Cargo.lock') }}-
             beam-check-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.98.0-
@@ -197,7 +198,7 @@ jobs:
       RELEASE_COMMIT: ${{ needs.validate-ref.outputs.commit }}
       BEAM_DOCKER_BUILD: 'false'
     steps:
-      - uses: useblacksmith/checkout@2b9fe87d796feea153b455ec2f3125b471a7b0e7 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           dissociate: true
@@ -264,7 +265,7 @@ jobs:
       RELEASE_TAG: ${{ needs.validate-ref.outputs.tag }}
       RELEASE_COMMIT: ${{ needs.validate-ref.outputs.commit }}
     steps:
-      - uses: useblacksmith/checkout@2b9fe87d796feea153b455ec2f3125b471a7b0e7 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: ${{ env.RELEASE_COMMIT }}
@@ -287,7 +288,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             crates/cli/target
-          key: beam-package-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.98.0-${{ hashFiles('crates/cli/Cargo.lock', 'crates/transfer/Cargo.lock', 'crates/transfer-native/Cargo.lock') }}-${{ hashFiles('crates/cli/src/**', 'crates/cli/build.rs', 'crates/cli/Cargo.toml', 'crates/transfer/src/**', 'crates/transfer/Cargo.toml', 'crates/transfer-native/src/**', 'crates/transfer-native/Cargo.toml') }}
+          key: beam-package-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.98.0-${{ hashFiles('crates/cli/Cargo.lock', 'crates/transfer/Cargo.lock', 'crates/transfer-native/Cargo.lock') }}-${{ hashFiles('crates/cli/src/**', 'crates/cli/build.rs', 'crates/cli/Cargo.toml', 'crates/transfer/src/**', 'crates/transfer/Cargo.toml', 'crates/transfer-native/src/**', 'crates/transfer-native/Cargo.toml', 'crates/daemon/src/**', 'crates/daemon/Cargo.toml') }}
           restore-keys: beam-package-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.98.0-${{ hashFiles('crates/cli/Cargo.lock', 'crates/transfer/Cargo.lock', 'crates/transfer-native/Cargo.lock') }}-
       - name: Derive canonical CLI public key
         shell: bash
@@ -315,7 +316,7 @@ jobs:
     env:
       RELEASE_TAG: ${{ needs.validate-ref.outputs.tag }}
     steps:
-      - uses: useblacksmith/checkout@2b9fe87d796feea153b455ec2f3125b471a7b0e7 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: ${{ needs.validate-ref.outputs.commit }}
@@ -331,7 +332,11 @@ jobs:
             "$RELEASE_TAG-linux-aarch64.tar.gz" \
             "$RELEASE_TAG-macos-x86_64.tar.gz" \
             "$RELEASE_TAG-macos-aarch64.tar.gz" \
-            "$RELEASE_TAG-windows-x86_64.zip"; do
+            "$RELEASE_TAG-windows-x86_64.zip" \
+            "$RELEASE_TAG-linux-x86_64-filebeamd.tar.gz" \
+            "$RELEASE_TAG-linux-aarch64-filebeamd.tar.gz" \
+            "$RELEASE_TAG-macos-x86_64-filebeamd.tar.gz" \
+            "$RELEASE_TAG-macos-aarch64-filebeamd.tar.gz"; do
             test -s "dist/beam/$asset"
           done
           (cd dist/beam && sha256sum "$RELEASE_TAG"-*.tar.gz "$RELEASE_TAG"-*.zip > checksums.txt)
@@ -354,7 +359,7 @@ jobs:
       RELEASE_TAG: ${{ needs.validate-ref.outputs.tag }}
       RELEASE_COMMIT: ${{ needs.validate-ref.outputs.commit }}
     steps:
-      - uses: useblacksmith/checkout@2b9fe87d796feea153b455ec2f3125b471a7b0e7 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
           ref: ${{ env.RELEASE_COMMIT }}
@@ -392,7 +397,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     environment: release
     steps:
-      - uses: useblacksmith/checkout@2b9fe87d796feea153b455ec2f3125b471a7b0e7 # v1
+      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
           persist-credentials: false
       - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962

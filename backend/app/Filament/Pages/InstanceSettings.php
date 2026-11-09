@@ -8,6 +8,7 @@ use App\Actions\Admin\ManageInstanceSettings;
 use App\Enums\Feature;
 use App\Enums\SocialPlatform;
 use App\Models\User;
+use App\Services\PushSettings;
 use App\Support\FeatureAvailability;
 use App\Support\InstanceSettings as InstanceSettingsResolver;
 use App\Support\InstanceSettingValue;
@@ -19,6 +20,7 @@ use Filament\Facades\Filament;
 use Filament\Forms\Components\ColorPicker;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
@@ -74,6 +76,7 @@ class InstanceSettings extends Page
         }
 
         $data['smtp'] = app(SmtpSettings::class)->form();
+        $data['push'] = app(PushSettings::class)->form();
         $this->form->fill($data);
     }
 
@@ -142,6 +145,28 @@ class InstanceSettings extends Page
                             ->helperText($help('default_driver', 'Source: database override or HTTP-only fallback.'))
                             ->disabled($locked('default_driver'))
                             ->native(false),
+                    ])->columns(['default' => 1, 'sm' => 2]),
+                Section::make('Registered devices')
+                    ->description('These limits govern registration and SDP-only rendezvous. They do not grant client filesystem access or expose file metadata.')
+                    ->schema([
+                        TextInput::make('device_active_limit')->label('Active device limit')->integer()->minValue(1)->maxValue(2_592_000)->helperText($help('device_active_limit', 'Leave empty to use the PHP fallback.'))->disabled($locked('device_active_limit')),
+                        TextInput::make('device_connection_ttl_seconds')->label('Rendezvous TTL (seconds)')->integer()->minValue(1)->maxValue(2_592_000)->helperText($help('device_connection_ttl_seconds', 'Leave empty to use the PHP fallback.'))->disabled($locked('device_connection_ttl_seconds')),
+                        TextInput::make('device_presence_ttl_seconds')->label('Presence lease (seconds)')->integer()->minValue(1)->maxValue(2_592_000)->helperText($help('device_presence_ttl_seconds', 'Leave empty to use the PHP fallback.'))->disabled($locked('device_presence_ttl_seconds')),
+                        TextInput::make('device_offline_freshness_seconds')->label('Offline freshness (seconds)')->integer()->minValue(1)->maxValue(2_592_000)->helperText($help('device_offline_freshness_seconds', 'Leave empty to use the PHP fallback.'))->disabled($locked('device_offline_freshness_seconds')),
+                        TextInput::make('device_requests_per_minute')->label('Coordination requests per minute')->integer()->minValue(1)->maxValue(2_592_000)->helperText($help('device_requests_per_minute', 'Leave empty to use the PHP fallback.'))->disabled($locked('device_requests_per_minute')),
+                    ])->columns(['default' => 1, 'sm' => 2]),
+                Section::make('Optional device wakes')
+                    ->description('Best-effort APNs and FCM background wake hints. Private keys are encrypted and never shown after saving.')
+                    ->schema([
+                        Toggle::make('push.enabled')->label('Enable device wakes'),
+                        TextInput::make('push.apns.team_id')->label('APNs team ID')->maxLength(32),
+                        TextInput::make('push.apns.key_id')->label('APNs key ID')->maxLength(32),
+                        TextInput::make('push.apns.bundle_id')->label('APNs bundle ID')->maxLength(255),
+                        Textarea::make('push.apns.private_key')->label('APNs .p8 private key')->rows(4)->maxLength(8192)->helperText('Leave blank to retain the saved key.'),
+                        Toggle::make('push.apns.sandbox')->label('Use APNs sandbox'),
+                        TextInput::make('push.fcm.project_id')->label('FCM project ID')->maxLength(255),
+                        TextInput::make('push.fcm.client_email')->label('FCM service-account email')->email()->maxLength(254),
+                        Textarea::make('push.fcm.private_key')->label('FCM service-account private key')->rows(4)->maxLength(8192)->helperText('Leave blank to retain the saved key.'),
                     ])->columns(['default' => 1, 'sm' => 2]),
                 Section::make('Branding')
                     ->description('The copyright line, project link, and community links shown on public pages. Environment values always take precedence.')
@@ -264,6 +289,7 @@ class InstanceSettings extends Page
                         ->mapWithKeys(static fn (array $messages, string $key): array => ['data.'.$key => $messages])->all());
                 }
             }
+            app(PushSettings::class)->save(is_array($state['push'] ?? null) ? $state['push'] : []);
         });
         $this->fillForm();
 

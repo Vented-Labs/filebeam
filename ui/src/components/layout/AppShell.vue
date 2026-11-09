@@ -218,6 +218,13 @@ function goHome(event: MouseEvent): void {
                                 >Inbox</AppLink
                             >
                         </DropdownMenuItem>
+                        <DropdownMenuItem v-if="user" as-child>
+                            <AppLink
+                                href="/account/devices"
+                                class="fb-select-item fb-mobile-nav__item"
+                                >My devices</AppLink
+                            >
+                        </DropdownMenuItem>
                         <DropdownMenuItem v-if="!user" as-child>
                             <AuthLink href="/login" class="fb-select-item fb-mobile-nav__item"
                                 >Sign in</AuthLink

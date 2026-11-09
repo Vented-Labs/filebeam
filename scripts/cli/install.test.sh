@@ -14,6 +14,7 @@ cp "$tmp/release/beam-v1.2.3-linux-x86_64.tar.gz" "$tmp/release/beam-v1.2.3-linu
 cp "$tmp/release/beam-v1.2.3-linux-x86_64.tar.gz" "$tmp/release/beam-v1.2.3-macos-x86_64.tar.gz"
 cp "$tmp/release/beam-v1.2.3-linux-x86_64.tar.gz" "$tmp/release/beam-v1.2.3-macos-aarch64.tar.gz"
 cp "$tmp/release/beam-v1.2.3-linux-x86_64.tar.gz" "$tmp/release/beam-v1.2.3-windows-x86_64.zip"
+for platform in linux-x86_64 linux-aarch64 macos-x86_64 macos-aarch64; do printf 'daemon\n' > "$tmp/release/beam-v1.2.3-$platform-filebeamd.tar.gz"; done
 (cd "$tmp/release" && sha256sum beam-v1.2.3-linux-x86_64.tar.gz > checksums.txt)
 cat > "$tmp/bin/curl" <<'EOF'
 #!/bin/sh

@@ -1,7 +1,14 @@
-use std::{env, path::PathBuf};
+use std::{
+    cell::Cell,
+    env, fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 use anyhow::{Context, Result, bail};
-use filebeam_client_updater::{Activation, Options, Product, Updater};
+use filebeam_client_updater::{
+    Activation, DaemonService, Options, Product, Updater, daemon_service_name,
+};
 
 use crate::config::Config;
 
@@ -22,6 +29,203 @@ fn updater(home: PathBuf) -> Result<Updater> {
 /// Explicit `beam update`: bypasses scheduling but retains the shared lease and all checks.
 pub fn check(config: &Config) -> Result<String> {
     updater(config.home.clone())?.run_manual()
+}
+
+/// Explicit service setup never downloads an unsigned daemon. A missing optional
+/// component in the signed catalog is reported to the caller as unsupported.
+pub fn install_daemon_component(config: &Config) -> Result<String> {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        let service = CliDaemonService {
+            home: config.home.clone(),
+            started: Cell::new(false),
+        };
+        updater(config.home.clone())?
+            .install_daemon_component_with(
+                &filebeam_client_updater::HttpFetcher::new(std::time::Duration::from_secs(30)),
+                "cli",
+                filebeam_daemon::IPC_VERSION,
+                filebeam_daemon::STORAGE_SCHEMA,
+                &service,
+            )
+            .context("could not install the daemon from the signed release catalog")
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = config;
+        bail!(
+            "daemon service setup is unavailable on this platform until its runtime reports supported service capabilities"
+        )
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+struct CliDaemonService {
+    home: PathBuf,
+    started: Cell<bool>,
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+impl DaemonService for CliDaemonService {
+    fn drain(&self, _: &Path) -> Result<()> {
+        // Shutdown checkpoints jobs before the service is restarted onto the new launcher.
+        let reply = filebeam_daemon::request(
+            &self.home,
+            filebeam_daemon::Request::Shutdown {
+                version: filebeam_daemon::IPC_VERSION,
+            },
+        )
+        .context("request bounded daemon checkpoint before upgrade")?;
+        reply.error.map_or(Ok(()), |error| bail!(error))
+    }
+
+    fn start(&self, launcher: &Path) -> Result<()> {
+        install_user_service(launcher, &self.home)?;
+        self.started.set(true);
+        Ok(())
+    }
+
+    fn health(&self, candidate: &Path) -> Result<()> {
+        let metadata = fs::metadata(candidate).context("inspect installed daemon component")?;
+        if !metadata.is_file() || metadata.len() == 0 {
+            bail!("installed daemon component failed health validation");
+        }
+        if self.started.get() {
+            let reply = filebeam_daemon::request(
+                &self.home,
+                filebeam_daemon::Request::Status {
+                    version: filebeam_daemon::IPC_VERSION,
+                },
+            )
+            .context("verify restarted daemon IPC")?;
+            reply.error.map_or(Ok(()), |error| bail!(error))?;
+        }
+        Ok(())
+    }
+
+    fn rollback(&self, launcher: Option<&Path>) -> Result<()> {
+        if let Some(launcher) = launcher {
+            install_user_service(launcher, &self.home)?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn install_user_service(launcher: &Path, home: &Path) -> Result<()> {
+    install_linux_user_service(launcher, home)
+}
+
+#[cfg(target_os = "macos")]
+fn install_user_service(launcher: &Path, home: &Path) -> Result<()> {
+    let launcher = launcher
+        .to_str()
+        .context("daemon launcher path is not valid UTF-8")?;
+    let home = home.to_str().context("profile home is not valid UTF-8")?;
+    let label = launch_agent_label(Path::new(home))?;
+    let agents = env::var_os("HOME")
+        .map(|home| PathBuf::from(home).join("Library/LaunchAgents"))
+        .context("HOME is required for the LaunchAgent")?;
+    fs::create_dir_all(&agents)?;
+    let plist = agents.join(format!("{label}.plist"));
+    fs::write(
+        &plist,
+        format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\"><dict><key>Label</key><string>{}</string><key>ProgramArguments</key><array><string>{}</string><string>--home</string><string>{}</string></array><key>RunAtLoad</key><true/></dict></plist>\n",
+            xml_escape(&label),
+            xml_escape(launcher),
+            xml_escape(home)
+        ),
+    )?;
+    let uid = Command::new("id")
+        .arg("-u")
+        .output()
+        .context("read user id")?;
+    let uid = String::from_utf8(uid.stdout).context("read user id")?;
+    let domain = format!("gui/{}/{}", uid.trim(), label);
+    let _ = Command::new("launchctl")
+        .args(["bootout", &domain])
+        .status();
+    let status = Command::new("launchctl")
+        .args(["bootstrap", &format!("gui/{}", uid.trim())])
+        .arg(&plist)
+        .status()
+        .context("start Filebeam LaunchAgent")?;
+    if !status.success() {
+        bail!("launchctl could not start the Filebeam user daemon service");
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn launch_agent_label(home: &Path) -> Result<String> {
+    let name = daemon_service_name(home)?;
+    Ok(if name == "filebeam-daemon" {
+        "io.filebeam.daemon".into()
+    } else {
+        format!("io.filebeam.daemon-{}", &name["filebeam-daemon-".len()..])
+    })
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn xml_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+#[cfg(target_os = "linux")]
+fn install_linux_user_service(launcher: &Path, home: &Path) -> Result<()> {
+    let unit = linux_service_unit(launcher, home)?;
+    let service = daemon_service_name(home)?;
+    let config = env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
+        .context("HOME or XDG_CONFIG_HOME is required for the user service")?;
+    let directory = config.join("systemd/user");
+    fs::create_dir_all(&directory)?;
+    fs::write(directory.join(format!("{service}.service")), unit)?;
+    let unit_name = format!("{service}.service");
+    for arguments in [
+        vec!["--user".into(), "daemon-reload".into()],
+        vec![
+            "--user".into(),
+            "enable".into(),
+            "--now".into(),
+            unit_name.clone(),
+        ],
+        vec!["--user".into(), "restart".into(), unit_name.clone()],
+    ] {
+        let status = Command::new("systemctl")
+            .args(arguments)
+            .status()
+            .context("run systemctl for Filebeam daemon service")?;
+        if !status.success() {
+            bail!("systemctl could not start the Filebeam user daemon service");
+        }
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn linux_service_unit(launcher: &Path, home: &Path) -> Result<String> {
+    let launcher = launcher
+        .to_str()
+        .context("daemon launcher path is not valid UTF-8")?;
+    let home = home.to_str().context("profile home is not valid UTF-8")?;
+    if launcher
+        .chars()
+        .chain(home.chars())
+        .any(|character| matches!(character, '"' | '\\' | '\n' | '\r'))
+    {
+        bail!("daemon launcher and profile paths contain unsupported systemd characters");
+    }
+    Ok(format!(
+        "[Unit]\nDescription=Filebeam local device daemon\n\n[Service]\nType=simple\nExecStart=\"{launcher}\" --home \"{home}\"\nRestart=on-failure\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n"
+    ))
 }
 
 /// Fast launch path: this only schedules a copied, detached worker and performs no I/O.
@@ -185,6 +389,8 @@ pub fn report_staged_update_error() {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "linux")]
+    use super::linux_service_unit;
     use super::validate_legacy_update_paths;
 
     #[test]
@@ -203,6 +409,33 @@ mod tests {
                 &root.path().join("beam.exe")
             )
             .is_err()
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn daemon_unit_uses_the_stable_launcher_and_rejects_unsafe_paths() {
+        let unit = linux_service_unit(
+            std::path::Path::new("/home/alice/.filebeam/runtime/daemon/filebeamd"),
+            std::path::Path::new("/home/alice/.filebeam"),
+        )
+        .unwrap();
+        assert!(unit.contains("ExecStart=\"/home/alice/.filebeam/runtime/daemon/filebeamd\""));
+        assert!(
+            linux_service_unit(
+                std::path::Path::new("/bad\"path"),
+                std::path::Path::new("/home")
+            )
+            .is_err()
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn launchagent_values_are_xml_escaped_without_shell_interpolation() {
+        assert_eq!(
+            super::xml_escape("a&<>'\"$()"),
+            "a&amp;&lt;&gt;&apos;&quot;$()"
         );
     }
 }

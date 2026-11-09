@@ -47,7 +47,8 @@ put_immutable() {
 
 version=${tag#beam-v}
 release_dir="cli/versions/v$version"
-for target in linux-x86_64.tar.gz linux-aarch64.tar.gz macos-x86_64.tar.gz macos-aarch64.tar.gz windows-x86_64.zip; do
+for target in linux-x86_64.tar.gz linux-aarch64.tar.gz macos-x86_64.tar.gz macos-aarch64.tar.gz windows-x86_64.zip \
+    linux-x86_64-filebeamd.tar.gz linux-aarch64-filebeamd.tar.gz macos-x86_64-filebeamd.tar.gz macos-aarch64-filebeamd.tar.gz; do
     archive="$tag-$target"
     [[ -f "$output_dir/$archive" ]] || { printf 'Missing %s.\n' "$output_dir/$archive" >&2; exit 1; }
     put_immutable "$release_dir/$archive" "$output_dir/$archive"

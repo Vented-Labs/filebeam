@@ -10,10 +10,12 @@ use std::{
         mpsc::{self, Receiver, SyncSender, TrySendError},
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use anyhow::{Context, Result, bail};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+use ed25519_dalek::SigningKey;
 use filebeam_client_config::{Config, normalize_server_url};
 use filebeam_client_core::{
     ApplicationSettings, ClientRuntime, ExportState, JobAction, JobId, JobKind, PromptIdentity,
@@ -31,6 +33,7 @@ use filebeam_client_core::{
     uploads::DirectoryMode as NativeDirectoryMode,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
 use crate::model::*;
@@ -129,6 +132,7 @@ struct Worker {
     next_message_id: u64,
     inbox_receiver: Option<(Control, thread::JoinHandle<()>)>,
     account_id: std::cell::Cell<u64>,
+    next_device_daemon_poll: Instant,
 }
 
 struct PreparedReceive {
@@ -153,6 +157,41 @@ struct NoteJob {
 struct DesktopJournal {
     #[serde(default)]
     exports: BTreeMap<String, JournalExport>,
+}
+
+/// Device identity material stays in the existing encrypted checkpoint store.
+/// It is never copied into snapshots, account cookies, or daemon status records.
+#[derive(Serialize, Deserialize)]
+struct DeviceMaterial {
+    id: String,
+    signing_key: String,
+    public_key: String,
+    credential: Option<String>,
+    deployment: String,
+    account_id: u64,
+    generation: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct PendingDeviceEnrollment {
+    material: DeviceMaterial,
+    challenge: String,
+    approval: ApprovalPaste,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ApprovalPaste {
+    instance_origin: String,
+    deployment_id: String,
+    account_id: u64,
+    generation: u64,
+    candidate_device_id: String,
+    candidate_key_version: u32,
+    candidate_public_key: String,
+    challenge_sha256: String,
+    expires_at_unix: u64,
+    approver_device_id: String,
+    approver_key_version: u32,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -192,6 +231,7 @@ impl Worker {
             next_message_id: 0,
             inbox_receiver: None,
             account_id: std::cell::Cell::new(0),
+            next_device_daemon_poll: Instant::now(),
         };
         worker.restore_saved()?;
         Ok(worker)
@@ -222,6 +262,34 @@ impl Worker {
         match command {
             ClientCommand::ReloadSettings => self.reload_settings(),
             ClientCommand::Refresh => self.refresh_account(),
+            ClientCommand::RefreshDevices => self.refresh_devices(),
+            ClientCommand::EnrollDevice { display_name } => self.enroll_device(display_name),
+            ClientCommand::ApproveDeviceEnrollment {
+                approval_payload,
+                verified_fingerprint,
+            } => self.approve_device_enrollment(approval_payload, verified_fingerprint),
+            ClientCommand::CompleteDeviceEnrollment => self.complete_device_enrollment(),
+            ClientCommand::AddDeviceDropzone {
+                alias,
+                path,
+                auto_accept,
+            } => self.add_device_dropzone(alias, path, auto_accept),
+            ClientCommand::SetDeviceReceiving(enabled) => self.set_device_receiving(enabled),
+            ClientCommand::InstallDeviceService => self.install_device_service(),
+            ClientCommand::ConfirmDevicePeer {
+                id,
+                verified_fingerprint,
+            } => self.confirm_device_peer(id, verified_fingerprint),
+            ClientCommand::EnqueueDeviceSend { target, sources } => {
+                self.enqueue_device_send(target, sources)
+            }
+            ClientCommand::RenameDevice { id, display_name } => {
+                self.rename_device(id, display_name)
+            }
+            ClientCommand::RevokeDevice {
+                id,
+                current_password,
+            } => self.revoke_device(id, current_password),
             ClientCommand::RefreshInbox => self.refresh_inbox(),
             ClientCommand::RefreshHistory { filter, cursor } => {
                 self.refresh_history(filter, cursor.as_deref())
@@ -952,6 +1020,550 @@ impl Worker {
         }
         Ok(())
     }
+    fn refresh_devices(&mut self) -> Result<()> {
+        let registry = self.service()?.devices().account_devices()?;
+        let local_id = self.device_material()?.map(|material| material.id);
+        let daemon = self.refresh_device_daemon();
+        let devices = registry
+            .devices
+            .into_iter()
+            .map(|device| {
+                Ok(DeviceSnapshot {
+                    id: device.id.clone(),
+                    name: device.display_name,
+                    platform: device.platform,
+                    trust: match daemon
+                        .devices
+                        .iter()
+                        .find(|live| live.id == device.id)
+                        .map(|live| live.status.as_str())
+                        .unwrap_or(device.status.as_str())
+                    {
+                        "verified" => DeviceTrust::Verified,
+                        "active" => DeviceTrust::Registered,
+                        "pending" => DeviceTrust::Pending,
+                        _ => DeviceTrust::Revoked,
+                    },
+                    availability: if !daemon.connected {
+                        DeviceAvailability::Unknown
+                    } else if device.status == "active" {
+                        DeviceAvailability::NeedsOpen
+                    } else {
+                        DeviceAvailability::Unknown
+                    },
+                    detail: (local_id.as_deref() == Some(device.id.as_str()))
+                        .then(|| "This device".into()),
+                    fingerprint: device_fingerprint(&device.public_key)?,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let enrollment_payload = self
+            .pending_device()?
+            .map(|pending| serde_json::to_string(&pending.approval))
+            .transpose()?;
+        let pending_fingerprint = self
+            .pending_device()?
+            .map(|pending| device_fingerprint(&pending.material.public_key))
+            .transpose()?;
+        lock(&self.snapshot).device_directory = DeviceDirectorySnapshot {
+            availability: DeviceDirectoryAvailability::Available,
+            detail: Some(format!("Registry revision {}", registry.revision)),
+            devices,
+            daemon,
+            enrollment_payload,
+            pending_fingerprint,
+        };
+        Ok(())
+    }
+    fn enroll_device(&mut self, display_name: String) -> Result<()> {
+        let mut seed = [0u8; 32];
+        getrandom::getrandom(&mut seed)?;
+        let key = SigningKey::from_bytes(&seed);
+        let id = ulid::Ulid::new().to_string();
+        let public_key = STANDARD.encode(key.verifying_key().to_bytes());
+        let challenge = self.service()?.devices().account_device_challenge(
+            &id,
+            &display_name,
+            desktop_platform(),
+            &public_key,
+            1,
+            &["peer-transfer-v1".into()],
+        )?;
+        let material = DeviceMaterial {
+            id,
+            signing_key: STANDARD.encode(seed),
+            public_key: public_key.clone(),
+            credential: None,
+            deployment: challenge.approval_context.deployment_id.clone(),
+            account_id: challenge.approval_context.account_id,
+            generation: challenge.device.generation,
+        };
+        let signature = filebeam_client_core::services::enrollment_signature(
+            &key,
+            &material.id,
+            material.generation,
+            &challenge.challenge,
+        )?;
+        let enrolled = self
+            .service()?
+            .devices()
+            .account_device_enroll(&challenge, &signature)?;
+        let pending = PendingDeviceEnrollment {
+            material: DeviceMaterial {
+                credential: enrolled.credential,
+                ..material
+            },
+            challenge: challenge.challenge,
+            approval: ApprovalPaste {
+                instance_origin: challenge.approval_context.instance_origin,
+                deployment_id: challenge.approval_context.deployment_id,
+                account_id: challenge.approval_context.account_id,
+                generation: challenge.approval_context.generation,
+                candidate_device_id: challenge.approval_context.candidate_device_id,
+                candidate_key_version: challenge.approval_context.candidate_key_version,
+                candidate_public_key: public_key,
+                challenge_sha256: challenge.approval_context.challenge_sha256,
+                expires_at_unix: challenge.approval_context.expires_at_unix,
+                approver_device_id: String::new(),
+                approver_key_version: 0,
+            },
+        };
+        self.save_pending_device(&pending)?;
+        if pending.material.credential.is_some() {
+            self.save_device_material(&pending.material)?;
+            self.provision_daemon(&pending.material)?;
+            self.clear_pending_device()?;
+        }
+        self.refresh_devices()
+    }
+    fn approve_device_enrollment(
+        &mut self,
+        approval_payload: String,
+        verified_fingerprint: String,
+    ) -> Result<()> {
+        let pasted: ApprovalPaste = serde_json::from_str(&approval_payload)
+            .context("approval paste must be the Filebeam enrollment payload")?;
+        if pasted.instance_origin != self.config.server.url {
+            bail!("approval payload belongs to another Filebeam instance");
+        }
+        if device_fingerprint(&pasted.candidate_public_key)?
+            != normalize_fingerprint(&verified_fingerprint)
+        {
+            bail!("the pasted candidate key does not match the fingerprint you verified");
+        }
+        let material = self
+            .device_material()?
+            .context("enroll and activate this desktop before approving another device")?;
+        let credential = material
+            .credential
+            .as_deref()
+            .context("this desktop has no device-scoped credential")?;
+        let key = signing_key(&material)?;
+        let candidate = self
+            .service()?
+            .devices()
+            .account_devices()?
+            .devices
+            .into_iter()
+            .find(|device| device.id == pasted.candidate_device_id)
+            .context("candidate is no longer registered on this account")?;
+        if candidate.status != "pending" || candidate.public_key != pasted.candidate_public_key {
+            bail!("candidate is no longer pending with the verified key");
+        }
+        let context = filebeam_client_core::services::DeviceApprovalContext {
+            instance_origin: pasted.instance_origin,
+            deployment_id: pasted.deployment_id,
+            account_id: pasted.account_id,
+            generation: pasted.generation,
+            candidate_device_id: pasted.candidate_device_id,
+            candidate_key_version: pasted.candidate_key_version,
+            candidate_public_key: pasted.candidate_public_key,
+            challenge_sha256: pasted.challenge_sha256,
+            expires_at_unix: pasted.expires_at_unix,
+            approver_device_id: material.id.clone(),
+            approver_key_version: 1,
+        };
+        let signature = filebeam_client_core::services::approval_signature(&key, &context)?;
+        self.service()?
+            .devices()
+            .approve_device_enrollment(&candidate, credential, &signature)?;
+        self.refresh_devices()
+    }
+    fn complete_device_enrollment(&mut self) -> Result<()> {
+        let mut pending = self
+            .pending_device()?
+            .context("there is no pending device enrollment on this desktop")?;
+        if pending.material.credential.is_none() {
+            let key = signing_key(&pending.material)?;
+            let signature = filebeam_client_core::services::enrollment_signature(
+                &key,
+                &pending.material.id,
+                pending.material.generation,
+                &pending.challenge,
+            )?;
+            pending.material.credential = Some(
+                self.service()?
+                    .devices()
+                    .account_device_complete_enrollment(
+                        &filebeam_client_core::services::DeviceEnrollmentChallenge {
+                            device: self.device_from_pending(&pending)?,
+                            challenge: pending.challenge.clone(),
+                            expires_at: None,
+                            approval_context: self.pending_approval_context(&pending)?,
+                        },
+                        &signature,
+                    )?
+                    .credential,
+            );
+        }
+        self.save_device_material(&pending.material)?;
+        self.provision_daemon(&pending.material)?;
+        self.clear_pending_device()?;
+        self.refresh_devices()
+    }
+    fn rename_device(&mut self, id: String, display_name: String) -> Result<()> {
+        self.service()?
+            .devices()
+            .account_device_rename(&id, &display_name)?;
+        self.refresh_devices()
+    }
+    fn add_device_dropzone(
+        &mut self,
+        alias: String,
+        path: PathBuf,
+        auto_accept: bool,
+    ) -> Result<()> {
+        #[cfg(target_os = "linux")]
+        {
+            use filebeam_daemon::{ApprovalMode, IPC_VERSION, Request};
+
+            let reply = filebeam_daemon::request(
+                &self.config.home,
+                Request::AddDestination {
+                    version: IPC_VERSION,
+                    alias,
+                    path,
+                    approval: if auto_accept {
+                        ApprovalMode::Auto
+                    } else {
+                        ApprovalMode::Ask
+                    },
+                },
+            )?;
+            if let Some(error) = reply.error {
+                bail!(error);
+            }
+            self.refresh_devices()
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = (alias, path, auto_accept);
+            bail!("local device service IPC is not available on this platform")
+        }
+    }
+    fn install_device_service(&mut self) -> Result<()> {
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        {
+            crate::daemon_install::enable(&self.config, crate::VERSION)?;
+            self.refresh_devices()
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        bail!("the local device service is not available on this platform")
+    }
+
+    fn set_device_receiving(&mut self, enabled: bool) -> Result<()> {
+        #[cfg(target_os = "linux")]
+        {
+            use filebeam_daemon::{IPC_VERSION, Request};
+
+            let reply = filebeam_daemon::request(
+                &self.config.home,
+                Request::SetReceiveEnabled {
+                    version: IPC_VERSION,
+                    enabled,
+                },
+            )?;
+            if let Some(error) = reply.error {
+                bail!(error);
+            }
+            self.refresh_devices()
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = enabled;
+            bail!("local device service IPC is not available on this platform")
+        }
+    }
+    fn confirm_device_peer(&mut self, id: String, verified_fingerprint: String) -> Result<()> {
+        let registry = self.service()?.devices().account_devices()?;
+        let peer = registry
+            .devices
+            .into_iter()
+            .find(|device| device.id == id)
+            .context("device is no longer registered on this account")?;
+        if peer.status != "active" {
+            bail!("only an active registered device can be verified");
+        }
+        let fingerprint = device_fingerprint(&peer.public_key)?;
+        if fingerprint != normalize_fingerprint(&verified_fingerprint) {
+            bail!("the entered fingerprint does not match the current registered device key");
+        }
+        #[cfg(target_os = "linux")]
+        {
+            use filebeam_daemon::{IPC_VERSION, Request};
+
+            let reply = filebeam_daemon::request(
+                &self.config.home,
+                Request::ConfirmPeerVerification {
+                    version: IPC_VERSION,
+                    device_id: peer.id,
+                    key_version: peer.key_version,
+                    fingerprint,
+                    // The daemon validates this as a local, fresh ceremony acknowledgement.
+                    confirmation_nonce: ulid::Ulid::new().to_string(),
+                },
+            )?;
+            if let Some(error) = reply.error {
+                bail!(error);
+            }
+            self.refresh_devices()
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = peer;
+            bail!("local device service IPC is not available on this platform")
+        }
+    }
+    fn enqueue_device_send(&mut self, target: String, sources: Vec<PathBuf>) -> Result<()> {
+        #[cfg(target_os = "linux")]
+        {
+            use filebeam_daemon::{IPC_VERSION, Request};
+
+            let reply = filebeam_daemon::request(
+                &self.config.home,
+                Request::EnqueueJob {
+                    version: IPC_VERSION,
+                    target,
+                    // The receiver resolves its own locally granted default after
+                    // authenticated peer admission; no sender-side path authority exists.
+                    grant_id: "dropzone".into(),
+                    sources,
+                },
+            )?;
+            if let Some(error) = reply.error {
+                bail!(error);
+            }
+            self.refresh_devices()
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = (target, sources);
+            bail!("local device service IPC is not available on this platform")
+        }
+    }
+    fn revoke_device(&mut self, id: String, current_password: String) -> Result<()> {
+        self.service()?
+            .devices()
+            .account_device_revoke(&id, &current_password)?;
+        self.refresh_devices()
+    }
+    fn device_store(&self) -> Result<filebeam_transfer_native::checkpoint::Store> {
+        let root = self.config.home.join("devices");
+        let id = format!(
+            "registry-{}",
+            Sha256::digest(self.config.server.url.as_bytes())
+                .iter()
+                .take(12)
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        );
+        if root.join(&id).exists() {
+            filebeam_transfer_native::checkpoint::Store::open(&root, &id)
+        } else {
+            filebeam_transfer_native::checkpoint::Store::create(&root, &id)
+        }
+    }
+    fn device_material(&self) -> Result<Option<DeviceMaterial>> {
+        self.device_store()?.load_named("device-material-v1.json")
+    }
+    fn save_device_material(&self, material: &DeviceMaterial) -> Result<()> {
+        self.device_store()?
+            .save_named("device-material-v1.json", material)
+    }
+    fn pending_device(&self) -> Result<Option<PendingDeviceEnrollment>> {
+        self.device_store()?
+            .load_named("pending-device-enrollment-v1.json")
+    }
+    fn save_pending_device(&self, pending: &PendingDeviceEnrollment) -> Result<()> {
+        self.device_store()?
+            .save_named("pending-device-enrollment-v1.json", pending)
+    }
+    fn clear_pending_device(&self) -> Result<()> {
+        self.device_store()?
+            .remove_named("pending-device-enrollment-v1.json")
+    }
+    fn device_from_pending(
+        &self,
+        pending: &PendingDeviceEnrollment,
+    ) -> Result<filebeam_client_core::services::AccountDevice> {
+        self.service()?
+            .devices()
+            .account_devices()?
+            .devices
+            .into_iter()
+            .find(|device| device.id == pending.material.id)
+            .context("pending enrollment is no longer registered")
+    }
+    fn pending_approval_context(
+        &self,
+        pending: &PendingDeviceEnrollment,
+    ) -> Result<filebeam_client_core::services::DeviceApprovalContext> {
+        let device = self.device_from_pending(pending)?;
+        Ok(filebeam_client_core::services::DeviceApprovalContext {
+            instance_origin: self.config.server.url.clone(),
+            deployment_id: pending.material.deployment.clone(),
+            account_id: pending.material.account_id,
+            generation: pending.material.generation,
+            candidate_device_id: pending.material.id.clone(),
+            candidate_key_version: 1,
+            candidate_public_key: pending.material.public_key.clone(),
+            // This field is never sent for candidate credential redemption.
+            challenge_sha256: String::new(),
+            expires_at_unix: 0,
+            approver_device_id: device.id,
+            approver_key_version: 1,
+        })
+    }
+    fn refresh_device_daemon(&self) -> DeviceDaemonSnapshot {
+        #[cfg(target_os = "linux")]
+        {
+            use filebeam_daemon::{IPC_VERSION, Request};
+
+            let status = filebeam_daemon::request(
+                &self.config.home,
+                Request::Status {
+                    version: IPC_VERSION,
+                },
+            );
+            let Ok(status) = status else {
+                return DeviceDaemonSnapshot {
+                    detail: Some("Local device service is not running.".into()),
+                    ..DeviceDaemonSnapshot::default()
+                };
+            };
+            if let Some(error) = status.error {
+                return DeviceDaemonSnapshot {
+                    detail: Some(error),
+                    ..DeviceDaemonSnapshot::default()
+                };
+            }
+            let destinations = filebeam_daemon::request(
+                &self.config.home,
+                Request::ListDestinations {
+                    version: IPC_VERSION,
+                },
+            )
+            .ok()
+            .and_then(|reply| reply.error.is_none().then_some(reply.destinations))
+            .unwrap_or_default()
+            .into_iter()
+            .map(|grant| DeviceDestinationSnapshot {
+                id: grant.id.to_string(),
+                alias: grant.alias,
+                approval: format!("{:?}", grant.approval).to_lowercase(),
+                enabled: grant.enabled,
+            })
+            .collect();
+            let devices = filebeam_daemon::request(
+                &self.config.home,
+                Request::ListDevices {
+                    version: IPC_VERSION,
+                },
+            )
+            .ok()
+            .and_then(|reply| reply.error.is_none().then_some(reply.devices))
+            .unwrap_or_default()
+            .into_iter()
+            .map(|device| DaemonDeviceSnapshot {
+                id: device.id,
+                key_version: device.key_version,
+                status: device.status,
+                fingerprint: device.fingerprint,
+            })
+            .collect();
+            let jobs = filebeam_daemon::request(
+                &self.config.home,
+                Request::ListJobs {
+                    version: IPC_VERSION,
+                },
+            )
+            .ok()
+            .and_then(|reply| reply.error.is_none().then_some(reply.jobs))
+            .unwrap_or_default()
+            .into_iter()
+            .map(|job| DeviceJobSnapshot {
+                id: job.id.to_string(),
+                target: job.target,
+                state: format!("{:?}", job.state).to_lowercase(),
+                prepared: job.prepared,
+                error: job.error,
+            })
+            .collect();
+            DeviceDaemonSnapshot {
+                connected: true,
+                receive_enabled: status.state.receive_enabled,
+                runtime: Some(format!("{:?}", status.state.runtime)),
+                destinations,
+                jobs,
+                devices,
+                detail: None,
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            DeviceDaemonSnapshot {
+                detail: Some("Local device service IPC is not available on this platform.".into()),
+                ..DeviceDaemonSnapshot::default()
+            }
+        }
+    }
+    fn provision_daemon(&self, material: &DeviceMaterial) -> Result<()> {
+        #[cfg(target_os = "linux")]
+        {
+            use filebeam_daemon::{DeviceProvision, IPC_VERSION, Request};
+
+            let credential = material
+                .credential
+                .clone()
+                .context("device enrollment is awaiting approval")?;
+            let reply = filebeam_daemon::request(
+                &self.config.home,
+                Request::ProvisionDevice {
+                    version: IPC_VERSION,
+                    provision: DeviceProvision {
+                        instance: self.config.server.url.clone(),
+                        deployment: material.deployment.clone(),
+                        account_id: material.account_id,
+                        generation: material.generation,
+                        device_id: material.id.clone(),
+                        key_version: 1,
+                        public_key: material.public_key.clone(),
+                        signing_key: material.signing_key.clone(),
+                        credential,
+                    },
+                },
+            )?;
+            if let Some(error) = reply.error {
+                bail!(error);
+            }
+            Ok(())
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = material;
+            bail!("local device service IPC is not available on this platform")
+        }
+    }
     fn refresh_account(&mut self) -> Result<()> {
         self.refresh_policy();
         match self.service()?.account().session() {
@@ -959,6 +1571,7 @@ impl Worker {
                 self.set_account(session);
                 self.refresh_key_custody()?;
                 let _ = self.refresh_contacts();
+                let _ = self.refresh_devices();
                 self.start_inbox_receiver()
             }
             // A public discovery remains useful when an old account cookie expires.
@@ -1547,6 +2160,10 @@ impl Worker {
         };
     }
     fn publish(&mut self) {
+        if Instant::now() >= self.next_device_daemon_poll {
+            lock(&self.snapshot).device_directory.daemon = self.refresh_device_daemon();
+            self.next_device_daemon_poll = Instant::now() + Duration::from_secs(1);
+        }
         let snapshots = self.runtime.snapshots();
         let active_job_ids = snapshots
             .iter()
@@ -1627,6 +2244,36 @@ impl Worker {
             jobs.push(job);
         }
         let mut snapshot = lock(&self.snapshot);
+        jobs.extend(
+            snapshot
+                .device_directory
+                .daemon
+                .jobs
+                .iter()
+                .map(|job| JobSnapshot {
+                    id: format!("device:{}", job.id),
+                    direction: TransferDirection::Send,
+                    state: match job.state.as_str() {
+                        "delivered" => TransferState::Complete,
+                        "failed" | "cancelled" => TransferState::Failed,
+                        "paused" => TransferState::Paused,
+                        _ => TransferState::Running,
+                    },
+                    progress: TransferProgress {
+                        phase: format!("Device {}", job.state),
+                        name: job.target.clone(),
+                        ..TransferProgress::default()
+                    },
+                    share_url: None,
+                    separate_key: None,
+                    cli_command: None,
+                    checkpoint_id: Some(job.id.clone()),
+                    origin: Some(self.config.server.url.clone()),
+                    error: None,
+                    peer_warning: None,
+                    capabilities: TransferCapabilities::default(),
+                }),
+        );
         snapshot.jobs = jobs;
         snapshot.pending_prompts = prompts;
         snapshot.verified_results = results;
@@ -1695,6 +2342,47 @@ impl Drop for Worker {
         if let Some((control, _)) = self.inbox_receiver.take() {
             control.cancel();
         }
+    }
+}
+
+fn signing_key(material: &DeviceMaterial) -> Result<SigningKey> {
+    let bytes: [u8; 32] = STANDARD
+        .decode(&material.signing_key)
+        .context("stored device signing key is invalid")?
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("stored device signing key has an invalid length"))?;
+    let key = SigningKey::from_bytes(&bytes);
+    if STANDARD.encode(key.verifying_key().to_bytes()) != material.public_key {
+        bail!("stored device signing key does not match its public identity");
+    }
+    Ok(key)
+}
+
+fn device_fingerprint(public_key: &str) -> Result<String> {
+    let key = STANDARD
+        .decode(public_key)
+        .context("device public key is not base64")?;
+    if key.len() != 32 {
+        bail!("device public key has an invalid length");
+    }
+    Ok(Sha256::digest(key)[..8]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<Vec<_>>()
+        .join(":"))
+}
+
+fn normalize_fingerprint(value: &str) -> String {
+    value.trim().to_ascii_lowercase()
+}
+
+fn desktop_platform() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(target_os = "windows") {
+        "windows"
+    } else {
+        "linux"
     }
 }
 
@@ -1993,7 +2681,9 @@ fn map_job(
             JobKind::Upload => TransferDirection::Send,
             JobKind::Download | JobKind::Resume => TransferDirection::Receive,
             JobKind::Note | JobKind::LiveNote => TransferDirection::Note,
-            JobKind::Service | JobKind::Revoke | JobKind::EndLive => TransferDirection::Service,
+            JobKind::Service | JobKind::Revoke | JobKind::EndLive | JobKind::Device => {
+                TransferDirection::Service
+            }
         },
         state,
         progress: TransferProgress {

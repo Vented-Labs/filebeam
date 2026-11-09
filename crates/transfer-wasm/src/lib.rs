@@ -400,3 +400,34 @@ pub fn wasm_select_driver_limits(
     );
     serde_wasm_bindgen::to_value(&limits).map_err(|error| JsError::new(&error.to_string()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use filebeam_transfer::manifest::{
+        ManifestMetadataItem, validate_verified_device_manifest_with_tree_capability,
+    };
+
+    #[test]
+    fn shared_tree_fixture_is_private_only() {
+        let manifest: Manifest =
+            serde_json::from_str(include_str!("../../transfer/tests/fixtures/tree.json")).unwrap();
+        let items = vec![
+            ManifestMetadataItem {
+                id: "one".into(),
+                position: 0,
+                chunk_count: 1,
+            },
+            ManifestMetadataItem {
+                id: "two".into(),
+                position: 1,
+                chunk_count: 1,
+            },
+        ];
+        assert!(validate_manifest(&manifest, "http", 16, &items).is_err());
+        assert!(
+            validate_verified_device_manifest_with_tree_capability(&manifest, 16, &items, true)
+                .is_ok()
+        );
+    }
+}

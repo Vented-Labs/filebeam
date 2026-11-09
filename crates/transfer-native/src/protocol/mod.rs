@@ -39,6 +39,7 @@ pub mod background;
 mod download;
 pub mod inbox_staging;
 mod live;
+pub mod peer;
 mod revocation;
 mod upload;
 
@@ -910,6 +911,7 @@ mod tests {
         let manifest = Manifest {
             attached_note: None,
             join_token: None,
+            tree: None,
             version: 1,
             items: vec![ManifestItem {
                 id: "item".into(),

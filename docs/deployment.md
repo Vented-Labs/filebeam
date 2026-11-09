@@ -46,6 +46,14 @@ Configure outgoing SMTP during onboarding or under **Admin > Instance settings >
 
 Operator environment configuration takes precedence as a whole connection: setting any of `MAIL_MAILER`, `MAIL_URL`, `MAIL_SCHEME`, `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, or `MAIL_EHLO_DOMAIN` locks SMTP editing and prevents mixing database credentials with environment connection values. Containers also support `MAIL_PASSWORD_FILE`. Keep an explicit `MAIL_MAILER=log` to disable outbound delivery. To use Admin-managed SMTP on an existing deployment, remove transport variables from both the process environment and `.env`, then rebuild configuration and restart persistent workers. `MAIL_FROM_ADDRESS` and `MAIL_FROM_NAME` independently override sender fields without locking the connection. Environment changes require rebuilding cached configuration; Admin changes do not.
 
+### Device-to-device transfers
+
+Users can send files directly between their own registered devices (see [Device-to-device transfers](devices.md)). The feature is off by default. Enable **Registered-device rendezvous** under **Admin > Instance settings**, or set `FILEBEAM_DEVICE_RENDEZVOUS_ENABLED=true`; WebRTC transfers must also be enabled. The same page sets the per-account device limit, rendezvous and presence lifetimes, offline authorization freshness, and the per-device request rate. Devices require the instance to be served over HTTPS.
+
+The instance stores device registrations and relays only connection setup. File names, contents, and receipts never pass through it. Rendezvous state lives in the cache store, so deployments with more than one application server need a shared cache such as Redis. Users can always view and revoke their devices under **Account > My devices**, even while rendezvous is disabled. The scheduler prunes expired enrollments and credentials hourly.
+
+Optional push wakes are disabled by default. Set `FILEBEAM_PUSH_ENABLED=true`, then configure **Admin > Instance settings > Optional device wakes** with APNs (`team_id`, `key_id`, `bundle_id`, `.p8 private_key`, optional sandbox), FCM (`project_id`, `client_email`, service-account `private_key`), or both. The form encrypts private keys with `APP_KEY` and never shows them after saving; do not place provider keys in `.env`. A wake carries only an opaque connection ID and registry revision, never file metadata, and is a best-effort hint.
+
 ### Themes and optional PHP capabilities
 
 Set **Admin > Instance settings > Branding > Primary color** to generate the web

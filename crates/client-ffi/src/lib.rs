@@ -3,6 +3,7 @@
 mod activity;
 mod background;
 mod client;
+mod device_jobs;
 mod error;
 mod job;
 mod newlinkformatter;
@@ -17,6 +18,10 @@ mod types;
 pub use activity::{TransferActivity, TransferActivityRecord};
 pub use background::BackgroundTransfer;
 pub use client::TransferClient;
+pub use device_jobs::{
+    DeviceJobSnapshot, DevicePeerProofRequest, DeviceReceiptItemRequest, DeviceReceiptRequest,
+    DeviceReceiptRootOutcomeRequest, NativeDeviceCoordinator, NativeDeviceSigner,
+};
 pub use error::{ClientError, Result, invalid, operation};
 pub use job::TransferJob;
 pub use newlinkformatter::format_download_with_cli;
@@ -25,7 +30,10 @@ pub use notes::{
     NoteRequest, OpenedNote,
 };
 pub use runtime::NativeRuntime;
-pub use secret_store::{SecretStoreCallback, checkpoint_self_test};
+pub use secret_store::{
+    DeviceCredentialStoreCallback, DeviceKeySignerCallback, SecretStoreCallback,
+    checkpoint_self_test,
+};
 pub use self_test::{crypto_self_test, webrtc_self_test};
 pub use services::NativeServices;
 pub use source::SourceCallback;
@@ -165,5 +173,17 @@ mod tests {
             })
             .is_err()
         );
+    }
+
+    #[test]
+    fn disabled_device_registry_is_reported_readably() {
+        assert!(matches!(
+            error::registry_operation("INSTANCE_UNSUPPORTED"),
+            ClientError::Operation { detail } if detail.contains("unavailable on this instance")
+        ));
+        assert!(matches!(
+            error::registry_operation("native device request returned 401 Unauthorized"),
+            ClientError::Operation { detail } if detail.contains("401")
+        ));
     }
 }

@@ -502,7 +502,15 @@ mod tests {
             Prepared::from_sources(&sources, DirectoryMode::Zip, None, &Control::test_factory())
                 .unwrap();
         let archive = zip::ZipArchive::new(File::open(&prepared.files[0].path).unwrap()).unwrap();
-        assert!(archive.file_names().any(|name| name == "photos/one.jpg"));
-        assert!(archive.file_names().any(|name| name == "docs/two.txt"));
+        assert!(
+            archive
+                .file_names()
+                .any(|name| name.is_ok_and(|name| name == "photos/one.jpg"))
+        );
+        assert!(
+            archive
+                .file_names()
+                .any(|name| name.is_ok_and(|name| name == "docs/two.txt"))
+        );
     }
 }

@@ -7,6 +7,7 @@ trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/dist"
 touch "$tmp/dist/beam-v1.2.3-linux-x86_64.tar.gz" "$tmp/dist/beam-v1.2.3-linux-aarch64.tar.gz"
 touch "$tmp/dist/beam-v1.2.3-macos-x86_64.tar.gz" "$tmp/dist/beam-v1.2.3-macos-aarch64.tar.gz" "$tmp/dist/beam-v1.2.3-windows-x86_64.zip"
+for platform in linux-x86_64 linux-aarch64 macos-x86_64 macos-aarch64; do printf 'daemon\n' > "$tmp/dist/beam-v1.2.3-$platform-filebeamd.tar.gz"; done
 container_tmp=/workspace/${tmp#"$root"/}
 
 "$root/scripts/cli/run.sh" bash -ceu '

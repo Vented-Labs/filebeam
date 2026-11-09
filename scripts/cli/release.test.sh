@@ -19,6 +19,8 @@ BEAM_RELEASE_PUBLIC_KEY=$' \n'"${RELEASE_PUBLIC_KEY%=}"$'\t\r\n' "$root/scripts/
 cp "$temporary/package/beam-v0.2.0-linux-x86_64.tar.gz" "$temporary/package/beam-v0.2.0-macos-x86_64.tar.gz"
 cp "$temporary/package/beam-v0.2.0-linux-aarch64.tar.gz" "$temporary/package/beam-v0.2.0-macos-aarch64.tar.gz"
 cp "$temporary/package/beam-v0.2.0-linux-x86_64.tar.gz" "$temporary/package/beam-v0.2.0-windows-x86_64.zip"
+cp "$temporary/package/beam-v0.2.0-linux-x86_64-filebeamd.tar.gz" "$temporary/package/beam-v0.2.0-macos-x86_64-filebeamd.tar.gz"
+cp "$temporary/package/beam-v0.2.0-linux-aarch64-filebeamd.tar.gz" "$temporary/package/beam-v0.2.0-macos-aarch64-filebeamd.tar.gz"
 [[ $(<"$temporary/package/public-key") == "$RELEASE_PUBLIC_KEY" ]]
 bash "$root/scripts/cli/smoke-package.sh" beam-v0.2.0 "$temporary/package"
 

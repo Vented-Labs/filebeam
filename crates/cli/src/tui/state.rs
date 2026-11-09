@@ -7,7 +7,7 @@ use std::{
     time::Instant,
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use zeroize::Zeroizing;
@@ -20,6 +20,9 @@ use crate::{
     protocol::{self, Info, SavedTransfer},
     services,
 };
+
+/// Registered devices and device jobs read from the daemon off the UI thread.
+type DaemonSnapshot = Result<(Vec<crate::daemon::Device>, Vec<crate::daemon::Job>), String>;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum NativeAction {
@@ -273,11 +276,17 @@ impl Entry {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
     Send,
     Receive,
     Transfers,
+    DeviceJobs,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RecipientMode {
+    Public,
+    Devices,
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
@@ -292,6 +301,20 @@ pub enum Focus {
 pub struct Receipt {
     pub result: Result<Vec<String>, String>,
     pub cancelled: bool,
+}
+
+pub struct TrustPrompt {
+    pub device: crate::daemon::Device,
+    pub fingerprint: Input,
+}
+
+enum DaemonAction {
+    Job(crate::daemon::Job),
+    Trusted {
+        id: String,
+        name: String,
+        fingerprint: String,
+    },
 }
 
 pub struct State {
@@ -318,6 +341,7 @@ pub struct State {
     pub searching: bool,
     pub hidden: bool,
     pub mode: Mode,
+    pub recipient_mode: RecipientMode,
     pub focus: Focus,
     pub link: Input,
     pub destination: Input,
@@ -333,6 +357,16 @@ pub struct State {
     pub results: Vec<String>,
     pub info: Option<Result<Info, String>>,
     pub saved_transfers: Vec<SavedTransfer>,
+    pub devices: Vec<crate::daemon::Device>,
+    pub device_cursor: usize,
+    pub device_scroll: usize,
+    pub selected_device: Option<String>,
+    trusted_device_pin: Option<String>,
+    pub trust_prompt: Option<TrustPrompt>,
+    pub device_jobs: Vec<crate::daemon::Job>,
+    pub device_job_cursor: usize,
+    pub device_job_scroll: usize,
+    pub device_job_details: bool,
     pub instance: String,
     pub config: Config,
     pub now: Instant,
@@ -342,6 +376,9 @@ pub struct State {
     pub native: Option<NativeForm>,
     pub service_result: Option<mpsc::Receiver<Result<Vec<String>, String>>>,
     service_notice: Option<&'static str>,
+    daemon_snapshot: Option<mpsc::Receiver<DaemonSnapshot>>,
+    daemon_action: Option<mpsc::Receiver<Result<DaemonAction, String>>>,
+    daemon_refreshed: Instant,
 }
 
 impl State {
@@ -371,6 +408,7 @@ impl State {
             searching: false,
             hidden: false,
             mode: Mode::Send,
+            recipient_mode: RecipientMode::Public,
             focus: Focus::Browser,
             link: Input::default(),
             prompt: None,
@@ -386,6 +424,16 @@ impl State {
             info: None,
             saved_transfers: protocol::saved_transfers(&config.home.join("transfers"))
                 .unwrap_or_default(),
+            devices: Vec::new(),
+            device_cursor: 0,
+            device_scroll: 0,
+            selected_device: None,
+            trusted_device_pin: None,
+            trust_prompt: None,
+            device_jobs: Vec::new(),
+            device_job_cursor: 0,
+            device_job_scroll: 0,
+            device_job_details: false,
             instance: instance.to_owned(),
             config: config.clone(),
             now: Instant::now(),
@@ -395,6 +443,9 @@ impl State {
             native: None,
             service_result: None,
             service_notice: None,
+            daemon_snapshot: None,
+            daemon_action: None,
+            daemon_refreshed: Instant::now() - std::time::Duration::from_secs(2),
         };
         state.refresh()?;
         Ok(state)
@@ -476,7 +527,162 @@ impl State {
     }
 
     pub fn start(&mut self) {
+        if self.mode == Mode::Send && self.recipient_mode == RecipientMode::Devices {
+            self.start_device_job();
+            return;
+        }
         self.start_upload(false);
+    }
+
+    fn start_device_job(&mut self) {
+        if self.daemon_action.is_some() {
+            return;
+        }
+        let Some(target) = self.selected_device.clone() else {
+            self.toast("Choose one of your devices first");
+            self.focus = Focus::Destination;
+            return;
+        };
+        let trusted = self.trusted_device_pin.as_ref().is_some_and(|fingerprint| {
+            self.devices.iter().any(|device| {
+                device.id == target
+                    && device.status == "active"
+                    && device.fingerprint == *fingerprint
+            })
+        });
+        if !trusted {
+            self.selected_device = None;
+            self.trusted_device_pin = None;
+            self.toast("Compare and confirm this device's current fingerprint before sending");
+            self.focus = Focus::Destination;
+            return;
+        }
+        if self.has_device_note() {
+            self.toast(
+                "Device jobs do not support attached notes yet; your note was preserved and was not sent",
+            );
+            return;
+        }
+        if self.selected.is_empty() {
+            self.toggle();
+        }
+        if self.selected.is_empty() {
+            self.toast("Choose a file with Space to get started");
+            return;
+        }
+        let config = self.config.clone();
+        let sources = self.selected.keys().cloned().collect();
+        let (send, receive) = mpsc::channel();
+        self.daemon_action = Some(receive);
+        std::thread::spawn(move || {
+            let result = crate::daemon::enqueue_job(&config, &target, "dropzone", sources)
+                .map(DaemonAction::Job)
+                .map_err(|error| error.to_string());
+            let _ = send.send(result);
+        });
+        self.toast("Preparing device job in the Filebeam daemon…");
+    }
+
+    pub fn has_device_note(&self) -> bool {
+        !self.note.fields[2].value.is_empty() || !self.attachment.fields[2].value.is_empty()
+    }
+
+    fn begin_device_trust(&mut self) {
+        let Some(device) = self.devices.get(self.device_cursor).cloned() else {
+            return;
+        };
+        if device.status != "active" {
+            self.toast("This device is not active in the current daemon directory");
+            return;
+        }
+        self.trust_prompt = Some(TrustPrompt {
+            device,
+            fingerprint: Input::default(),
+        });
+    }
+
+    fn confirm_device_trust(&mut self) {
+        let Some(prompt) = self.trust_prompt.as_ref() else {
+            return;
+        };
+        let fingerprint = normalize_pin(&prompt.fingerprint.value);
+        if fingerprint != prompt.device.fingerprint {
+            self.toast(
+                "The typed fingerprint does not match the current daemon device fingerprint",
+            );
+            return;
+        }
+        if self.daemon_action.is_some() {
+            return;
+        }
+        let config = self.config.clone();
+        let device = prompt.device.clone();
+        let (send, receive) = mpsc::channel();
+        self.daemon_action = Some(receive);
+        std::thread::spawn(move || {
+            let result = crate::daemon::confirm_peer(
+                &config,
+                &device.id,
+                device.key_version,
+                &device.fingerprint,
+                &uuid::Uuid::new_v4().simple().to_string(),
+            )
+            .map(|()| DaemonAction::Trusted {
+                id: device.id,
+                name: device.display_name,
+                fingerprint: device.fingerprint,
+            })
+            .map_err(|error| error.to_string());
+            let _ = send.send(result);
+        });
+        self.trust_prompt = None;
+        self.toast("Confirming the current device fingerprint with the daemon…");
+    }
+
+    fn refresh_device_snapshot(&mut self) {
+        if self.daemon_snapshot.is_some()
+            || self.daemon_refreshed.elapsed() < std::time::Duration::from_secs(1)
+        {
+            return;
+        }
+        let config = self.config.clone();
+        let (send, receive) = mpsc::channel();
+        self.daemon_snapshot = Some(receive);
+        self.daemon_refreshed = Instant::now();
+        std::thread::spawn(move || {
+            let result = (|| {
+                Ok((
+                    crate::daemon::devices(&config)?,
+                    crate::daemon::jobs(&config)?,
+                ))
+            })()
+            .map_err(|error: anyhow::Error| error.to_string());
+            let _ = send.send(result);
+        });
+    }
+
+    fn control_device_job(&mut self, action: &'static str) {
+        let Some(job) = self.device_jobs.get(self.device_job_cursor) else {
+            self.toast("No device job selected");
+            return;
+        };
+        if self.daemon_action.is_some() {
+            return;
+        }
+        let config = self.config.clone();
+        let id = job.id.clone();
+        let (send, receive) = mpsc::channel();
+        self.daemon_action = Some(receive);
+        std::thread::spawn(move || {
+            let result = crate::daemon::control_job(&config, &id, action)
+                .and_then(|mut jobs| {
+                    jobs.pop()
+                        .context("daemon did not return the controlled job")
+                })
+                .map(DaemonAction::Job)
+                .map_err(|error| error.to_string());
+            let _ = send.send(result);
+        });
     }
 
     fn start_upload(&mut self, turbo: bool) {
@@ -601,6 +807,7 @@ impl State {
                 self.resume_selected();
                 return;
             }
+            Mode::DeviceJobs => return,
         };
         self.begin(request);
     }
@@ -665,6 +872,60 @@ impl State {
     }
 
     pub fn receive(&mut self, theme: Theme) {
+        self.refresh_device_snapshot();
+        if let Some(result) = self
+            .daemon_snapshot
+            .as_ref()
+            .and_then(|receiver| receiver.try_recv().ok())
+        {
+            if let Ok((devices, jobs)) = result {
+                if let Some(id) = self.selected_device.as_ref() {
+                    let trusted = self.trusted_device_pin.as_ref().is_some_and(|fingerprint| {
+                        devices.iter().any(|device| {
+                            device.id == id.as_str()
+                                && device.status == "active"
+                                && device.fingerprint == *fingerprint
+                        })
+                    });
+                    if !trusted {
+                        self.selected_device = None;
+                        self.trusted_device_pin = None;
+                    }
+                }
+                self.devices = devices;
+                self.device_jobs = jobs;
+                self.device_cursor = self.device_cursor.min(self.devices.len().saturating_sub(1));
+                self.device_job_cursor = self
+                    .device_job_cursor
+                    .min(self.device_jobs.len().saturating_sub(1));
+            }
+            self.daemon_snapshot = None;
+        }
+        if let Some(result) = self
+            .daemon_action
+            .as_ref()
+            .and_then(|receiver| receiver.try_recv().ok())
+        {
+            match result {
+                Ok(DaemonAction::Job(job)) => {
+                    self.toast(format!("Device job {} is {}", job.id, job.state))
+                }
+                Ok(DaemonAction::Trusted {
+                    id,
+                    name,
+                    fingerprint,
+                }) => {
+                    self.selected_device = Some(id);
+                    self.trusted_device_pin = Some(fingerprint);
+                    self.toast(format!(
+                        "Current fingerprint confirmed for {name}; destination: dropzone"
+                    ));
+                }
+                Err(error) => self.toast(error),
+            }
+            self.daemon_action = None;
+            self.daemon_refreshed = Instant::now() - std::time::Duration::from_secs(2);
+        }
         if let Some(result) = self
             .clipboard_result
             .as_ref()
@@ -767,6 +1028,10 @@ impl State {
         if self.help || self.palette || self.receipt.is_some() {
             return;
         }
+        if let Some(prompt) = &mut self.trust_prompt {
+            prompt.fingerprint.insert(value.trim());
+            return;
+        }
         if let Some(form) = &mut self.native {
             if let Some(field) = form.fields.get_mut(form.field) {
                 field.insert(value);
@@ -836,6 +1101,10 @@ impl State {
 
     pub fn key(&mut self, key: KeyEvent) -> Result<bool> {
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+            if self.trust_prompt.is_some() {
+                self.trust_prompt = None;
+                return Ok(false);
+            }
             if self.job.is_some() {
                 self.cancel();
                 return Ok(false);
@@ -872,6 +1141,18 @@ impl State {
         }
         if self.native.is_some() {
             self.native_key(key)?;
+            return Ok(false);
+        }
+        if self.trust_prompt.is_some() {
+            match key.code {
+                KeyCode::Esc => self.trust_prompt = None,
+                KeyCode::Enter => self.confirm_device_trust(),
+                _ => {
+                    if let Some(prompt) = &mut self.trust_prompt {
+                        prompt.fingerprint.handle(key);
+                    }
+                }
+            }
             return Ok(false);
         }
         if self.prompt.is_some() {
@@ -954,7 +1235,11 @@ impl State {
             }
             return Ok(false);
         }
-        if self.mode == Mode::Send && self.send_notes && self.note_editing {
+        if self.mode == Mode::Send
+            && self.recipient_mode == RecipientMode::Public
+            && self.send_notes
+            && self.note_editing
+        {
             if self.service_result.is_some() {
                 return Ok(false);
             }
@@ -993,6 +1278,7 @@ impl State {
             return Ok(false);
         }
         if self.mode == Mode::Send
+            && self.recipient_mode == RecipientMode::Public
             && key.code == KeyCode::Enter
             && key.modifiers.contains(KeyModifiers::SHIFT)
         {
@@ -1006,9 +1292,32 @@ impl State {
             return Ok(false);
         }
         match key.code {
-            KeyCode::Enter if self.mode == Mode::Send && self.send_notes => self.start(),
-            KeyCode::Char('v') if self.mode == Mode::Send => self.read_clipboard(),
-            KeyCode::Char('n') if self.mode == Mode::Send => {
+            KeyCode::Char('m') if self.mode == Mode::Send => {
+                self.recipient_mode = match self.recipient_mode {
+                    RecipientMode::Public => RecipientMode::Devices,
+                    RecipientMode::Devices => RecipientMode::Public,
+                };
+                self.focus = if self.recipient_mode == RecipientMode::Devices {
+                    Focus::Destination
+                } else {
+                    Focus::Browser
+                };
+            }
+            KeyCode::Enter
+                if self.mode == Mode::Send
+                    && self.recipient_mode == RecipientMode::Public
+                    && self.send_notes =>
+            {
+                self.start()
+            }
+            KeyCode::Char('v')
+                if self.mode == Mode::Send && self.recipient_mode == RecipientMode::Public =>
+            {
+                self.read_clipboard()
+            }
+            KeyCode::Char('n')
+                if self.mode == Mode::Send && self.recipient_mode == RecipientMode::Public =>
+            {
                 if self.attachment_mode {
                     std::mem::swap(&mut self.note, &mut self.attachment);
                     self.attachment_mode = false;
@@ -1016,39 +1325,60 @@ impl State {
                 self.send_notes = !self.send_notes;
                 self.note_editing = false;
             }
-            KeyCode::Char('a') if self.mode == Mode::Send && !self.send_notes => {
+            KeyCode::Char('a')
+                if self.mode == Mode::Send
+                    && self.recipient_mode == RecipientMode::Public
+                    && !self.send_notes =>
+            {
                 std::mem::swap(&mut self.note, &mut self.attachment);
                 self.attachment_mode = true;
                 self.send_notes = true;
                 self.note_editing = true;
                 self.note.field = 2;
             }
-            KeyCode::Char('e') if self.mode == Mode::Send && self.send_notes => {
+            KeyCode::Char('e')
+                if self.mode == Mode::Send
+                    && self.recipient_mode == RecipientMode::Public
+                    && self.send_notes =>
+            {
                 self.note_editing = true
             }
-            KeyCode::Tab if self.mode == Mode::Send && self.send_notes => {
+            KeyCode::Tab
+                if self.mode == Mode::Send
+                    && self.recipient_mode == RecipientMode::Public
+                    && self.send_notes =>
+            {
                 self.note.field = (self.note.field + 1) % if self.attachment_mode { 3 } else { 5 };
                 self.note_editing = true;
             }
             KeyCode::Esc | KeyCode::Char('q') => return Ok(true),
             KeyCode::Char('?') => self.help = true,
-            KeyCode::Char('p') => self.palette = true,
+            KeyCode::Char('p') if self.mode != Mode::DeviceJobs => self.palette = true,
             KeyCode::Char('1') | KeyCode::Char('s') => {
                 self.switch_mode(Mode::Send);
             }
-            KeyCode::Char('2') | KeyCode::Char('d') => {
+            KeyCode::Char('2') | KeyCode::Char('d') if self.mode != Mode::DeviceJobs => {
                 self.switch_mode(Mode::Receive);
             }
-            KeyCode::Char('3') | KeyCode::Char('r') => {
+            KeyCode::Char('3') | KeyCode::Char('r') if self.mode != Mode::DeviceJobs => {
                 self.switch_mode(Mode::Transfers);
             }
+            KeyCode::Char('4') => self.switch_mode(Mode::DeviceJobs),
             KeyCode::Tab => self.next_focus(false),
             KeyCode::BackTab => self.next_focus(true),
             KeyCode::Char('U') => self.begin(Request::Update),
-            KeyCode::Char('u') if self.mode == Mode::Send => self.start(),
+            KeyCode::Char('u')
+                if self.mode == Mode::Send && self.recipient_mode == RecipientMode::Public =>
+            {
+                self.start()
+            }
             KeyCode::Enter if self.mode == Mode::Transfers => self.resume_selected(),
             KeyCode::Enter if self.focus == Focus::Action => self.start(),
             _ if self.mode == Mode::Transfers => self.transfers_key(key),
+            _ if self.mode == Mode::DeviceJobs => self.device_jobs_key(key),
+            _ if self.mode == Mode::Send && self.recipient_mode == RecipientMode::Devices => {
+                self.devices_key(key)
+            }
             _ if self.mode == Mode::Send && !self.send_notes => self.browser_key(key),
             _ => {}
         }
@@ -1072,6 +1402,7 @@ impl State {
                     .min(self.saved_transfers.len().saturating_sub(1));
                 Focus::Jobs
             }
+            Mode::DeviceJobs => Focus::Jobs,
         };
         self.queue_scroll = 0;
     }
@@ -1086,6 +1417,41 @@ impl State {
                 self.queue_cursor = self.queue_cursor.saturating_sub(1)
             }
             KeyCode::Delete | KeyCode::Backspace | KeyCode::Char('x') => self.discard_selected(),
+            _ => {}
+        }
+    }
+
+    fn devices_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.device_cursor =
+                    (self.device_cursor + 1).min(self.devices.len().saturating_sub(1))
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.device_cursor = self.device_cursor.saturating_sub(1)
+            }
+            KeyCode::Enter | KeyCode::Char(' ') => {
+                self.begin_device_trust();
+            }
+            _ => {}
+        }
+    }
+
+    fn device_jobs_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.device_job_cursor =
+                    (self.device_job_cursor + 1).min(self.device_jobs.len().saturating_sub(1))
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.device_job_cursor = self.device_job_cursor.saturating_sub(1)
+            }
+            KeyCode::Char('p') => self.control_device_job("paused"),
+            KeyCode::Char('r') => self.control_device_job("awaiting_peer_configuration"),
+            KeyCode::Char('c') => self.control_device_job("cancelled"),
+            KeyCode::Char('d') | KeyCode::Enter => {
+                self.device_job_details = !self.device_job_details
+            }
             _ => {}
         }
     }
@@ -1194,7 +1560,9 @@ impl State {
     }
 
     fn next_focus(&mut self, reverse: bool) {
-        let focuses = if self.mode == Mode::Send {
+        let focuses = if self.mode == Mode::Send && self.recipient_mode == RecipientMode::Devices {
+            [Focus::Destination, Focus::Queue, Focus::Action]
+        } else if self.mode == Mode::Send {
             [Focus::Browser, Focus::Queue, Focus::Action]
         } else if self.mode == Mode::Receive {
             [Focus::Link, Focus::Destination, Focus::Action]
@@ -1329,6 +1697,15 @@ fn expand_path(value: &str) -> PathBuf {
     } else {
         PathBuf::from(value)
     }
+}
+
+fn normalize_pin(value: &str) -> String {
+    value
+        .bytes()
+        .filter(u8::is_ascii_hexdigit)
+        .map(char::from)
+        .collect::<String>()
+        .to_ascii_lowercase()
 }
 
 fn native_action(
@@ -1732,6 +2109,135 @@ mod tests {
         assert!(state.job.is_some());
         state.cancel();
         assert!(state.job.is_some());
+    }
+
+    #[test]
+    fn device_recipient_selection_requires_a_current_pin_confirmation() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("report.pdf");
+        fs::write(&path, b"test").unwrap();
+        let mut state = State::new(
+            &Config::default(),
+            "http://localhost:8000",
+            dir.path().into(),
+        )
+        .unwrap();
+        state.selected.insert(
+            path.clone(),
+            Entry {
+                path,
+                name: "report.pdf".into(),
+                size: 4,
+                directory: false,
+            },
+        );
+        state.devices = vec![crate::daemon::Device {
+            id: "immutable-device-id".into(),
+            display_name: "Laptop".into(),
+            key_version: 1,
+            status: "active".into(),
+            fingerprint: "a".repeat(64),
+        }];
+        state.key(KeyCode::Char('m').into()).unwrap();
+        assert_eq!(state.recipient_mode, RecipientMode::Devices);
+        state.key(KeyCode::Enter.into()).unwrap();
+        assert!(state.trust_prompt.is_some());
+        assert!(state.selected_device.is_none());
+        state.key(KeyCode::Char('b').into()).unwrap();
+        state.key(KeyCode::Enter.into()).unwrap();
+        assert!(state.selected_device.is_none());
+        assert!(state.daemon_action.is_none());
+        assert_eq!(state.selected.len(), 1);
+        state.key(KeyCode::Esc.into()).unwrap();
+        state.key(KeyCode::Char('m').into()).unwrap();
+        assert_eq!(state.recipient_mode, RecipientMode::Public);
+        assert_eq!(state.selected.len(), 1);
+    }
+
+    #[test]
+    fn device_job_panel_keeps_prepared_jobs_pending_until_a_receipt_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = State::new(
+            &Config::default(),
+            "http://localhost:8000",
+            dir.path().into(),
+        )
+        .unwrap();
+        state.device_jobs = vec![crate::daemon::Job {
+            id: "a5fbcf8f-62d6-478f-9b2f-9a180cc03811".into(),
+            target: "Laptop".into(),
+            grant_id: "dropzone".into(),
+            state: "transferring".into(),
+            prepared: true,
+            error: None,
+        }];
+        state.key(KeyCode::Char('4').into()).unwrap();
+        assert_eq!(state.mode, Mode::DeviceJobs);
+        state.key(KeyCode::Char('d').into()).unwrap();
+        assert!(state.device_job_details);
+        assert_eq!(state.device_jobs[0].state, "transferring");
+        assert!(state.device_jobs[0].prepared);
+    }
+
+    #[test]
+    fn device_send_does_not_read_sources_before_pin_confirmation_or_send_notes() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("missing-after-selection.txt");
+        let mut state = State::new(
+            &Config::default(),
+            "http://localhost:8000",
+            dir.path().into(),
+        )
+        .unwrap();
+        state.recipient_mode = RecipientMode::Devices;
+        state.selected.insert(
+            missing.clone(),
+            Entry {
+                path: missing,
+                name: "missing-after-selection.txt".into(),
+                size: 1,
+                directory: false,
+            },
+        );
+        state.start_device_job();
+        assert!(state.daemon_action.is_none());
+        assert!(state.selected_device.is_none());
+        state.selected_device = Some("trusted-after-confirmation".into());
+        state.trusted_device_pin = Some("a".repeat(64));
+        state.devices = vec![crate::daemon::Device {
+            id: "trusted-after-confirmation".into(),
+            display_name: "Laptop".into(),
+            key_version: 1,
+            status: "active".into(),
+            fingerprint: "a".repeat(64),
+        }];
+        state.attachment.fields[2].value = "do not drop this note".into();
+        state.start_device_job();
+        assert!(state.daemon_action.is_none());
+        assert_eq!(state.attachment.fields[2].value, "do not drop this note");
+    }
+
+    #[test]
+    fn leaving_the_device_jobs_panel_detaches_without_controlling_the_daemon_job() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = State::new(
+            &Config::default(),
+            "http://localhost:8000",
+            dir.path().into(),
+        )
+        .unwrap();
+        state.mode = Mode::DeviceJobs;
+        state.device_jobs = vec![crate::daemon::Job {
+            id: "a5fbcf8f-62d6-478f-9b2f-9a180cc03811".into(),
+            target: "Laptop".into(),
+            grant_id: "dropzone".into(),
+            state: "transferring".into(),
+            prepared: true,
+            error: None,
+        }];
+        assert!(state.key(KeyCode::Char('q').into()).unwrap());
+        assert_eq!(state.device_jobs[0].state, "transferring");
+        assert!(state.daemon_action.is_none());
     }
 
     #[test]

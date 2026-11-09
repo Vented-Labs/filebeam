@@ -11,8 +11,10 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\PublishWebRtcTransferRequest;
 use App\Http\Resources\TransferResource;
 use App\Models\Transfer;
+use App\Services\IceServers;
 use App\Support\Capability;
 use App\Support\TransportPolicy;
+use App\Support\WebRtcDescription;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -185,13 +187,7 @@ class WebRtcTransferController extends Controller
     /** @return array{type: string, sdp: string} */
     private function description(Request $request, string $type): array
     {
-        $contentLength = $request->header('Content-Length');
-        $maximum = (int) config('filebeam.webrtc.max_sdp_bytes', 65_536) + 512;
-        abort_if(is_string($contentLength) && (! ctype_digit($contentLength) || (int) $contentLength > $maximum), 422, 'Invalid SDP.');
-        $description = $request->validate(['description.type' => ['required', 'in:'.$type], 'description.sdp' => ['required', 'string']])['description'];
-        abort_unless(is_array($description) && is_string($description['sdp']) && strlen($description['sdp']) <= (int) config('filebeam.webrtc.max_sdp_bytes', 65536) && preg_match('/\A[\x09\x0A\x0D\x20-\x7E]*\z/', $description['sdp']) === 1, 422, 'Invalid SDP.');
-
-        return ['type' => $type, 'sdp' => $description['sdp']];
+        return app(WebRtcDescription::class)->from($request, $type);
     }
 
     /** @param callable(array<string, mixed>&): void $mutate */
@@ -329,16 +325,6 @@ class WebRtcTransferController extends Controller
     /** @return list<array<string, mixed>> */
     private function iceServers(): array
     {
-        $servers = config('filebeam.webrtc.ice_servers', []);
-        $servers = is_array($servers) ? array_values($servers) : [];
-        $urls = config('filebeam.webrtc.turn_urls', []);
-        $secret = config('filebeam.webrtc.turn_secret');
-        if (! is_array($urls) || $urls === [] || ! is_string($secret) || $secret === '') {
-            return $servers;
-        }
-        $username = (string) now()->addSeconds((int) config('filebeam.webrtc.turn_ttl_seconds', 3600))->getTimestamp().':'.Str::random(16);
-        $servers[] = ['urls' => array_values($urls), 'username' => $username, 'credential' => base64_encode(hash_hmac('sha1', $username, $secret, true))];
-
-        return $servers;
+        return app(IceServers::class)->forConnection();
     }
 }

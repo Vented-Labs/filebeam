@@ -11,7 +11,7 @@ use webrtc::data_channel::{DataChannel, DataChannelEvent};
 use crate::webrtc::{CONTROL_LIMIT, FRAME_PAYLOAD_BYTES, REQUEST_TIMEOUT};
 
 #[derive(Clone, Debug)]
-pub(super) struct CiphertextArtifact {
+pub(crate) struct CiphertextArtifact {
     pub path: PathBuf,
     pub bytes: u64,
     pub checksum: String,
@@ -20,7 +20,7 @@ pub(super) struct CiphertextArtifact {
 /// Streams an immutable checkpointed record only after verifying its durable
 /// identity. Verification and framing use fixed-size buffers, so eight peers
 /// do not multiply a full ciphertext chunk into memory.
-pub(super) async fn serve_artifacts(
+pub(crate) async fn serve_artifacts(
     channel: Arc<dyn DataChannel>,
     chunks: HashMap<(String, u64), CiphertextArtifact>,
 ) -> Result<()> {

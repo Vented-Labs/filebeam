@@ -32,3 +32,16 @@ cp LICENSE "$stage/beam/"
 printf '%s\n' "$version" > "$stage/beam/version"
 archive="$output_dir/$tag-$os-$architecture.$format"
 python3 scripts/cli/archive.py "$format" "$stage" "$archive" "$source_date_epoch"
+
+# The daemon ships as a separate signed component that `beam service enable`
+# and the desktop app install on demand. Windows has no daemon service yet.
+if [[ $os != windows ]]; then
+    cargo build --manifest-path crates/daemon/Cargo.toml --release --locked --target "$target" --target-dir crates/cli/target
+    daemon="crates/cli/target/$target/release/filebeamd"
+    [[ -f $daemon ]] || { printf 'Expected executable %s.\n' "$daemon" >&2; exit 1; }
+    rm -rf "$stage/beam"
+    mkdir -p "$stage/filebeamd"
+    cp "$daemon" "$stage/filebeamd/filebeamd"
+    cp LICENSE "$stage/filebeamd/"
+    python3 scripts/cli/archive.py tar.gz "$stage" "$output_dir/$tag-$os-$architecture-filebeamd.tar.gz" "$source_date_epoch"
+fi

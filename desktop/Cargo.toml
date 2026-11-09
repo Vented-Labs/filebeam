@@ -26,6 +26,7 @@ required-features = ["visual-test"]
 [dependencies]
 anyhow = "=1.0.104"
 base64 = "=0.22.1"
+ed25519-dalek = "=2.2.0"
 env_logger = "=0.11.8"
 filebeam-client-config = { path = "../crates/client-config" }
 filebeam-client-core = { path = "../crates/client-core" }
@@ -41,15 +42,18 @@ log = "=0.4.34"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "=0.10.9"
+ulid = "=1.2.1"
 zeroize = "=1.8.2"
 url = "=2.5.8"
 
 [target.'cfg(target_os = "linux")'.dependencies]
+filebeam-daemon = { path = "../crates/daemon" }
 image = { version = "=0.25.9", default-features = false, features = ["png"] }
 ksni = { version = "=0.3.6", default-features = false, features = ["async-io", "blocking"] }
 notify-rust = { version = "=4.11.7", default-features = false, features = ["z"] }
 
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
+filebeam-daemon = { path = "../crates/daemon" }
 image = { version = "=0.25.9", default-features = false, features = ["png"] }
 notify-rust = "=4.11.7"
 tray-icon = "=0.21.2"

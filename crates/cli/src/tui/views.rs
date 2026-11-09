@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Block, Paragraph, Sparkline, Widget, Wrap},
 };
 
-use super::state::{Entry, Focus, Mode, NativeAction, State};
+use super::state::{Entry, Focus, Mode, NativeAction, RecipientMode, State};
 use crate::{
     app::{Direction, Phase, PromptKind},
     input::Input,
@@ -58,8 +58,10 @@ pub fn render(
         send(body, buffer, state, theme)
     } else if state.mode == Mode::Receive {
         receive(body, buffer, state, theme)
-    } else {
+    } else if state.mode == Mode::Transfers {
         transfers(body, buffer, state, theme)
+    } else {
+        device_jobs(body, buffer, state, theme)
     };
     footer_view(footer, buffer, state, theme);
     if state.palette {
@@ -70,6 +72,10 @@ pub fn render(
         state.hyperlink = None;
         dim(area, buffer, theme);
         cursor = native_form(area, buffer, state, theme);
+    } else if state.trust_prompt.is_some() {
+        state.hyperlink = None;
+        dim(area, buffer, theme);
+        cursor = trust_pin(area, buffer, state, theme);
     } else if state.help {
         state.hyperlink = None;
         dim(area, buffer, theme);
@@ -235,6 +241,7 @@ fn navigation(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) {
         (Mode::Send, " 1 Send "),
         (Mode::Receive, " 2 Receive "),
         (Mode::Transfers, " 3 Transfers "),
+        (Mode::DeviceJobs, " 4 Device jobs "),
     ] {
         let style = if state.mode == mode {
             theme.strong().fg(theme.accent()).bg(theme.selected())
@@ -248,16 +255,19 @@ fn navigation(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) {
 }
 
 fn send(area: Rect, buffer: &mut Buffer, state: &mut State, theme: Theme) -> Option<(u16, u16)> {
+    if state.recipient_mode == RecipientMode::Devices {
+        return devices_send(area, buffer, state, theme);
+    }
     paint::line(
         at(area, 0, 1),
         buffer,
         Line::styled(
             if state.attachment_mode {
-                "Files + attached note · Enter saves draft · n switch"
+                "Files + attached note · Enter saves draft · n switch · m devices"
             } else if state.send_notes {
-                "Files / [Notes] · n switch · v Paste"
+                "Files / [Notes] · n switch · v Paste · m devices"
             } else {
-                "[Files] / Notes · n switch · v Paste · a attach note"
+                "[Files] / Notes · n switch · v Paste · a attach note · m devices"
             },
             theme.strong(),
         ),
@@ -328,6 +338,137 @@ fn send(area: Rect, buffer: &mut Buffer, state: &mut State, theme: Theme) -> Opt
         );
         cursor
     }
+}
+
+fn devices_send(
+    area: Rect,
+    buffer: &mut Buffer,
+    state: &mut State,
+    theme: Theme,
+) -> Option<(u16, u16)> {
+    paint::line(
+        at(area, 0, 1),
+        buffer,
+        Line::styled(
+            "Files / Notes / [My devices] · m changes recipient type",
+            theme.strong(),
+        ),
+    );
+    let note_warning = state.has_device_note();
+    if note_warning {
+        paint::line(
+            at(area, 1, 1),
+            buffer,
+            Line::styled(
+                "Attached notes are preserved but cannot be sent to a device yet.",
+                Style::default().fg(theme.warning()),
+            ),
+        );
+    }
+    let body_start = if note_warning { 3 } else { 2 };
+    let area = at(area, body_start, area.height.saturating_sub(body_start));
+    let list_width = if area.width >= 95 {
+        area.width * 56 / 100
+    } else {
+        area.width
+    };
+    let list = Rect::new(area.x, area.y, list_width, area.height);
+    let queue_area = Rect::new(
+        list.right().saturating_add(2),
+        area.y,
+        area.width.saturating_sub(list_width.saturating_add(2)),
+        area.height,
+    );
+    let cursor = device_list(list, buffer, state, theme);
+    if queue_area.width >= 25 {
+        queue(queue_area, buffer, state, theme);
+    }
+    cursor
+}
+
+fn device_list(
+    area: Rect,
+    buffer: &mut Buffer,
+    state: &mut State,
+    theme: Theme,
+) -> Option<(u16, u16)> {
+    let inner = paint::card(area, buffer, theme, state.focus == Focus::Destination);
+    if inner.height < 4 {
+        return None;
+    }
+    paint::line(
+        at(inner, 0, 1),
+        buffer,
+        Line::styled("My devices", theme.strong().fg(theme.accent())),
+    );
+    paint::line(
+        at(inner, 1, 1),
+        buffer,
+        Line::styled(
+            "Enter compares the current pin · destination: dropzone",
+            theme.dim(),
+        ),
+    );
+    let rows = at(inner, 3, inner.height.saturating_sub(3));
+    let capacity = rows.height as usize;
+    ensure_scroll(&mut state.device_scroll, state.device_cursor, capacity);
+    if state.devices.is_empty() {
+        paint::line(
+            at(rows, 0, 1),
+            buffer,
+            Line::styled(
+                "No daemon devices available. Start Filebeam receiving first.",
+                theme.dim(),
+            ),
+        );
+        return None;
+    }
+    for (offset, device) in state
+        .devices
+        .iter()
+        .skip(state.device_scroll)
+        .take(capacity)
+        .enumerate()
+    {
+        let row = at(rows, offset as u16, 1);
+        let focused = state.device_scroll + offset == state.device_cursor;
+        let selected = state.selected_device.as_deref() == Some(device.id.as_str());
+        let availability = match device.status.as_str() {
+            "active" => "active",
+            "suspended" => "needs open",
+            "revoked" => "revoked",
+            _ => "offline",
+        };
+        Block::default()
+            .style(Style::default().bg(if focused {
+                theme.selected()
+            } else {
+                theme.surface()
+            }))
+            .render(row, buffer);
+        paint::line(
+            row,
+            buffer,
+            Line::styled(
+                clip(
+                    &format!(
+                        "{} {}  {} · current pin {}",
+                        if selected {
+                            theme.symbol("✓", "+")
+                        } else {
+                            " "
+                        },
+                        clean(&device.display_name),
+                        availability,
+                        clip(&clean(&device.fingerprint), 12),
+                    ),
+                    row.width,
+                ),
+                if focused { theme.strong() } else { theme.dim() },
+            ),
+        );
+    }
+    None
 }
 
 fn browser(
@@ -637,11 +778,28 @@ fn queue(area: Rect, buffer: &mut Buffer, state: &mut State, theme: Theme) {
     paint::line(
         at(inner, inner.height.saturating_sub(1), 1),
         buffer,
-        Line::styled("Share the link with your recipient.", theme.dim()),
+        Line::styled(
+            if state.recipient_mode == RecipientMode::Devices {
+                "The daemon owns delivery after preparation."
+            } else {
+                "Share the link with your recipient."
+            },
+            theme.dim(),
+        ),
     );
 }
 
 fn send_actions(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) {
+    if state.recipient_mode == RecipientMode::Devices {
+        paint::button(
+            area,
+            buffer,
+            theme,
+            "Send to selected device  ↵",
+            state.focus == Focus::Action,
+        );
+        return;
+    }
     if area.width < 54 && area.height >= 2 {
         for (row, label) in [
             (0, "Send Encrypted  ↵"),
@@ -851,6 +1009,140 @@ fn transfers(
         );
     }
     None
+}
+
+fn device_jobs(
+    area: Rect,
+    buffer: &mut Buffer,
+    state: &mut State,
+    theme: Theme,
+) -> Option<(u16, u16)> {
+    let inner = paint::card(centered(area, 100, area.height), buffer, theme, true);
+    if inner.height < 4 {
+        return None;
+    }
+    paint::line(
+        at(inner, 0, 1),
+        buffer,
+        Line::styled("Device jobs", theme.strong().fg(theme.accent())),
+    );
+    paint::line(
+        at(inner, 1, 1),
+        buffer,
+        Line::styled("p pause · r resume · c cancel · d details", theme.dim()),
+    );
+    let details_height = if state.device_job_details { 5 } else { 0 };
+    let rows = at(inner, 3, inner.height.saturating_sub(4 + details_height));
+    let capacity = rows.height as usize;
+    ensure_scroll(
+        &mut state.device_job_scroll,
+        state.device_job_cursor,
+        capacity,
+    );
+    if state.device_jobs.is_empty() {
+        paint::line(
+            at(rows, 0, 1),
+            buffer,
+            Line::styled("No daemon-owned device jobs.", theme.dim()),
+        );
+    }
+    for (offset, job) in state
+        .device_jobs
+        .iter()
+        .skip(state.device_job_scroll)
+        .take(capacity)
+        .enumerate()
+    {
+        let row = at(rows, offset as u16, 1);
+        let focused = state.device_job_scroll + offset == state.device_job_cursor;
+        Block::default()
+            .style(Style::default().bg(if focused {
+                theme.selected()
+            } else {
+                theme.surface()
+            }))
+            .render(row, buffer);
+        let phase = device_job_phase(job);
+        paint::line(
+            row,
+            buffer,
+            Line::styled(
+                clip(
+                    &format!(
+                        "Outgoing to {} · {} · {}",
+                        clean(&job.target),
+                        phase,
+                        if job.prepared {
+                            "snapshot ready"
+                        } else {
+                            "snapshot pending"
+                        },
+                    ),
+                    row.width,
+                ),
+                if focused { theme.strong() } else { theme.dim() },
+            ),
+        );
+    }
+    if state.device_job_details
+        && let Some(job) = state.device_jobs.get(state.device_job_cursor)
+    {
+        let detail = at(inner, inner.height.saturating_sub(5), 4);
+        Block::default()
+            .style(Style::default().bg(theme.raised()))
+            .render(detail, buffer);
+        paint::line(
+            at(detail, 0, 1),
+            buffer,
+            Line::styled(format!("Job {}", job.id), theme.strong()),
+        );
+        paint::line(
+            at(detail, 1, 1),
+            buffer,
+            Line::styled(
+                format!(
+                    "Direction: outgoing · target: {} · destination: {}",
+                    clean(&job.target),
+                    clean(&job.grant_id)
+                ),
+                theme.dim(),
+            ),
+        );
+        paint::line(
+            at(detail, 2, 1),
+            buffer,
+            Line::styled(format!("Phase: {}", device_job_phase(job)), theme.dim()),
+        );
+        paint::line(
+            at(detail, 3, 1),
+            buffer,
+            Line::styled(
+                match (&job.error, job.state.as_str()) {
+                    (_, "delivered") => {
+                        "Receipt: verified receiver receipt persisted by the daemon.".into()
+                    }
+                    (Some(error), _) => format!("Last error: {}", clean(error)),
+                    (None, _) => "Receipt: no verified receiver receipt reported yet.".into(),
+                },
+                theme.dim(),
+            ),
+        );
+    }
+    None
+}
+
+fn device_job_phase(job: &crate::daemon::Job) -> &'static str {
+    match job.state.as_str() {
+        "awaiting_peer_configuration" => "queued",
+        "preparing" => "preparing snapshot",
+        "connecting" => "connecting",
+        "transferring" => "transferring",
+        "delivered" => "delivered",
+        "failed" => "failed",
+        "paused" => "paused",
+        "cancelled" => "cancelled",
+        _ => "daemon state unavailable",
+    }
 }
 
 fn transfer(area: Rect, buffer: &mut Buffer, state: &mut State, theme: Theme) {
@@ -1225,6 +1517,8 @@ fn footer_view(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) {
             ("Enter", "continue"),
             ("Esc", "cancel"),
         ]
+    } else if state.trust_prompt.is_some() {
+        vec![("Enter", "confirm pin"), ("Esc", "cancel")]
     } else if state.mode == Mode::Send && state.send_notes {
         if state.note_editing {
             vec![("Esc", "done editing"), ("Shift+Tab", "field")]
@@ -1257,6 +1551,22 @@ fn footer_view(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) {
             ("x", "discard"),
             ("↑↓", "choose"),
             ("q", "quit"),
+        ]
+    } else if state.mode == Mode::DeviceJobs {
+        vec![
+            ("1/2/3/4", "switch page"),
+            ("p/r/c", "pause/resume/cancel"),
+            ("d", "details"),
+            ("↑↓", "choose"),
+            ("q", "quit"),
+        ]
+    } else if state.mode == Mode::Send && state.recipient_mode == RecipientMode::Devices {
+        vec![
+            ("m", "public recipient"),
+            ("↑↓", "choose device"),
+            ("Enter", "select/send"),
+            ("Tab", "queue/send"),
+            ("4", "device jobs"),
         ]
     } else {
         vec![
@@ -1431,6 +1741,58 @@ fn native_form(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) -> 
     cursor
 }
 
+fn trust_pin(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) -> Option<(u16, u16)> {
+    let prompt = state.trust_prompt.as_ref()?;
+    let inner = paint::card(centered(area, 76, 15), buffer, theme, true);
+    paint::line(
+        at(inner, 0, 1),
+        buffer,
+        Line::styled(
+            "Confirm device fingerprint",
+            theme.strong().fg(theme.accent()),
+        ),
+    );
+    paint::line(
+        at(inner, 2, 1),
+        buffer,
+        Line::styled(clean(&prompt.device.display_name), theme.strong()),
+    );
+    paint::line(
+        at(inner, 3, 1),
+        buffer,
+        Line::styled(
+            clip(
+                &format!("Current pin: {}", clean(&prompt.device.fingerprint)),
+                inner.width,
+            ),
+            theme.dim(),
+        ),
+    );
+    paint::line(
+        at(inner, 5, 1),
+        buffer,
+        Line::styled(
+            "Compare this pin on the other device, then type the full fingerprint.",
+            theme.dim(),
+        ),
+    );
+    let cursor = field(
+        at(inner, 7, 3),
+        buffer,
+        &prompt.fingerprint,
+        theme,
+        true,
+        "Full fingerprint",
+        false,
+    );
+    paint::line(
+        at(inner, 12, 1),
+        buffer,
+        Line::styled("Enter confirms · Esc cancels", theme.dim()),
+    );
+    cursor
+}
+
 fn secret(area: Rect, buffer: &mut Buffer, state: &State, theme: Theme) -> Option<(u16, u16)> {
     let prompt = state.prompt.as_ref()?;
     if matches!(prompt.kind, PromptKind::PeerConsent { .. }) {
@@ -1545,6 +1907,57 @@ mod tests {
             assert!(text.contains("person@example.test"));
             assert!(!text.contains("secret-password"));
         }
+    }
+
+    #[test]
+    fn device_names_and_pins_cannot_emit_terminal_control_sequences() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut state = State::new(
+            &Config::default(),
+            "https://example.test",
+            directory.path().into(),
+        )
+        .unwrap();
+        state.recipient_mode = RecipientMode::Devices;
+        state.devices = vec![crate::daemon::Device {
+            id: "device-id".into(),
+            display_name: "\x1b]52;c;bad\x07Laptop".into(),
+            key_version: 1,
+            status: "active".into(),
+            fingerprint: "\x1b]8;;https://invalid\x1b\\abcdef".into(),
+        }];
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 100, 30));
+        render(buffer.area, &mut buffer, &mut state, Theme::fixture());
+        let text: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+        assert!(text.contains("Laptop"));
+        assert!(!text.contains('\x1b'));
+    }
+
+    #[test]
+    fn device_job_details_present_daemon_phase_direction_target_and_receipt_state() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut state = State::new(
+            &Config::default(),
+            "https://example.test",
+            directory.path().into(),
+        )
+        .unwrap();
+        state.mode = Mode::DeviceJobs;
+        state.device_job_details = true;
+        state.device_jobs = vec![crate::daemon::Job {
+            id: "a5fbcf8f-62d6-478f-9b2f-9a180cc03811".into(),
+            target: "Laptop".into(),
+            grant_id: "dropzone".into(),
+            state: "delivered".into(),
+            prepared: true,
+            error: None,
+        }];
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 120, 36));
+        render(buffer.area, &mut buffer, &mut state, Theme::fixture());
+        let text: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+        assert!(text.contains("Outgoing to Laptop"));
+        assert!(text.contains("Phase: delivered"));
+        assert!(text.contains("verified receiver receipt persisted"));
     }
 
     #[test]

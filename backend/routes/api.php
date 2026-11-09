@@ -14,11 +14,14 @@ use App\Http\Controllers\Api\V1\WebRtcTransferController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Auth\RegisteredUserController;
 use App\Http\Controllers\ContactController;
+use App\Http\Controllers\DeviceController;
 use App\Http\Controllers\FileReportController;
 use App\Http\Controllers\InboxController;
 use App\Http\Controllers\NativeAccountController;
 use App\Http\Controllers\TransferHistoryController;
+use App\Http\Middleware\AuthenticateDeviceCredential;
 use App\Http\Middleware\EnsureAnonymousTransferUploadsAreEnabled;
+use App\Http\Middleware\EnsureDeviceRendezvousIsEnabled;
 use App\Http\Middleware\ProtectAuthenticatedTransferCreation;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
@@ -145,5 +148,32 @@ Route::prefix('native/v1')->middleware([EncryptCookies::class, AddQueuedCookiesT
         Route::get('/account/keys', [NativeAccountController::class, 'keys']);
         Route::post('/account/keys', [AccountKeyController::class, 'store'])->middleware('throttle:account-key-writing');
         Route::delete('/account', [NativeAccountController::class, 'destroyAccount']);
+        // Inventory, rename, and revoke stay available when an administrator
+        // disables device rendezvous, so users can still remove a lost device.
+        Route::prefix('/devices')->middleware('throttle:contact-writing')->group(function (): void {
+            Route::get('/', [DeviceController::class, 'index']);
+            Route::post('/enrollment-challenge', [DeviceController::class, 'challenge'])->middleware(EnsureDeviceRendezvousIsEnabled::class);
+            Route::post('/enrollments/{device}', [DeviceController::class, 'enroll'])->whereUlid('device')->middleware(EnsureDeviceRendezvousIsEnabled::class);
+            Route::patch('/{device}', [DeviceController::class, 'rename'])->whereUlid('device');
+            Route::delete('/{device}', [DeviceController::class, 'revoke'])->whereUlid('device');
+            Route::delete('/', [DeviceController::class, 'reset']);
+        });
     });
+
+});
+
+Route::post('native/v1/devices/enrollments/{device}/credential', [DeviceController::class, 'credential'])->whereUlid('device')->middleware([EnsureDeviceRendezvousIsEnabled::class, 'throttle:webrtc-registration']);
+Route::prefix('native/v1/devices')->middleware([EnsureDeviceRendezvousIsEnabled::class, AuthenticateDeviceCredential::class, 'throttle:device-rendezvous'])->group(function (): void {
+    Route::post('/enrollments/{device}/approve', [DeviceController::class, 'approve'])->whereUlid('device');
+    Route::get('/sync', [DeviceController::class, 'sync']);
+    Route::post('/credentials/rotate', [DeviceController::class, 'rotateCredential']);
+    Route::put('/presence', [DeviceController::class, 'presence']);
+    Route::put('/push-token', [DeviceController::class, 'pushToken']);
+    Route::post('/connections', [DeviceController::class, 'connect'])->middleware('throttle:device-pair');
+    Route::get('/connections', [DeviceController::class, 'inbound']);
+    Route::get('/connections/{connection}/ice', [DeviceController::class, 'ice'])->whereUlid('connection');
+    Route::put('/connections/{connection}/offer', [DeviceController::class, 'offer'])->whereUlid('connection');
+    Route::put('/connections/{connection}/answer', [DeviceController::class, 'answer'])->whereUlid('connection');
+    Route::get('/connections/{connection}', [DeviceController::class, 'connection'])->whereUlid('connection');
+    Route::delete('/connections/{connection}', [DeviceController::class, 'end'])->whereUlid('connection');
 });

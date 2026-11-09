@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
+use App\Support\DevicePolicy;
 use App\Support\InstanceMailManager;
 use Carbon\CarbonImmutable;
 use Filebeam\Updater\ActivityLock;
@@ -55,6 +56,12 @@ class AppServiceProvider extends ServiceProvider
             Limit::perMinute(1200)->by('ip:'.$request->ip()),
             Limit::perMinute(120)->by('session:'.hash('sha256', (string) $request->header('X-Filebeam-Session-Token'))),
         ]);
+        RateLimiter::for('device-rendezvous', fn (Request $request): array => [
+            Limit::perMinute(app(DevicePolicy::class)->requestsPerMinute())->by('ip:'.$request->ip()),
+            Limit::perMinute(app(DevicePolicy::class)->requestsPerMinute())->by('device:'.(string) optional($request->attributes->get('device'))->id),
+            Limit::perMinute(app(DevicePolicy::class)->requestsPerMinute())->by('account:'.(string) optional($request->attributes->get('device'))->user_id),
+        ]);
+        RateLimiter::for('device-pair', fn (Request $request): Limit => Limit::perMinute(max(1, intdiv(app(DevicePolicy::class)->requestsPerMinute(), 2)))->by('pair:'.(string) optional($request->attributes->get('device'))->id.'|'.(string) $request->input('target_device_id')));
         RateLimiter::for('account-key-writing', fn (Request $request): Limit => Limit::perMinute(5)->by((string) $request->user()?->getAuthIdentifier()));
         RateLimiter::for('contact-writing', fn (Request $request): array => [
             Limit::perMinute(60)->by('ip:'.$request->ip()),

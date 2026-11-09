@@ -3,6 +3,7 @@
 mod account;
 mod client;
 pub mod contacts;
+mod device;
 mod history;
 pub mod inbox_receiver;
 pub mod local_state;
@@ -16,8 +17,13 @@ pub use account::{
     export_self_key, generate_self_keypair, import_self_key, open_recipient_key,
     seal_recipient_key, unwrap_password_key, validate_self_key, wrap_password_key,
 };
-pub use client::ServiceClient;
+pub use client::{INSTANCE_CA_ENV, ServiceClient, instance_certificate_from_env};
 pub use contacts::{Contact, ContactIdentity, Contacts, ReceivingDefaults};
+pub use device::{
+    AccountDevice, DeviceApprovalContext, DeviceApprovalEvidence, DeviceCredentialRedemption,
+    DeviceEnrollmentChallenge, DeviceEnrollmentResult, DeviceRegistrySnapshot, DeviceService,
+    approval_signature, approval_transcript, enrollment_signature, enrollment_transcript,
+};
 pub use history::{HistoryEntry, HistoryFilter, HistoryPage, HistoryService, RetentionUpdate};
 pub use notes::{
     BurnResult, CreatedNote, NoteCreate, NoteInspection, NoteMetadata, NoteReceiveOptions,

@@ -39,6 +39,14 @@ test('cron registers short database batches with an overlap lock', function (): 
     expect(config('queue.connections.database.retry_after'))->toBeGreaterThan(60);
 });
 
+test('scheduler registers bounded device-state pruning', function (): void {
+    $event = collect(app(Schedule::class)->events())->first(fn (Event $event): bool => str_contains($event->command ?? '', 'filebeam:prune-devices'));
+
+    expect($event)->not->toBeNull()
+        ->and($event->expression)->toBe('0 * * * *')
+        ->and($event->withoutOverlapping)->toBeTrue();
+});
+
 test('scheduler processes package updates without a separate system cron', function (): void {
     $event = collect(app(Schedule::class)->events())->first(fn (Event $event): bool => $event->description === 'filebeam:process-updates');
 

@@ -56,6 +56,18 @@ scripts/cli/wasm.sh transfer-wasm
 
 The wrapper keeps Cargo state in `${XDG_CACHE_HOME:-$HOME/.cache}/filebeam/wasm` (or `FILEBEAM_WASM_CACHE_DIR`) and builds its pinned tooling image only when its Docker layer cache is invalidated.
 
+### Device-to-device transfers
+
+Devices only register with HTTPS instances. `bash scripts/device/production-backend.sh` starts a disposable SQLite instance behind a locally trusted TLS certificate and runs two real daemons through enrollment, approval, a directory transfer with a verified receipt, and a web revoke during an active transfer. It needs `php`, `openssl`, `socat`, `curl`, and `python3`. `cargo test --manifest-path crates/daemon/Cargo.toml` covers the daemon, including a two-daemon transfer against a local coordinator.
+
+To try the commands by hand, serve the local instance over HTTPS (for example behind a reverse proxy with a development certificate) and point `FILEBEAM_INSTANCE_CA` at that certificate's PEM file for both the daemon and the CLI. Give each simulated device its own profile:
+
+```sh
+export FILEBEAM_INSTANCE_CA=$PWD/dev-ca.pem
+cargo run --manifest-path crates/daemon/Cargo.toml -- --home /tmp/device-a &
+cargo run --manifest-path crates/cli/Cargo.toml -- --home /tmp/device-a devices add --name A
+```
+
 ## Continuous Integration
 
 Actions use Blacksmith Ubuntu 24.04 runners for application tests and Linux packages, `blacksmith-6vcpu-macos-15` for Intel and Apple Silicon CLI packages, and `blacksmith-4vcpu-windows-2025` for the Windows x86_64 CLI package. The Beam CLI test job uses `blacksmith-8vcpu-ubuntu-2404`. CI containers have no Docker CPU or memory caps, and Cargo uses the available CPUs. Local CLI scripts retain their default limits.

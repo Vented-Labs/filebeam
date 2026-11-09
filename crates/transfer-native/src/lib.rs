@@ -3,8 +3,11 @@
 
 pub mod checkpoint;
 pub mod control;
+pub mod device;
+pub mod device_registry;
 pub mod http;
 pub mod ice;
+pub mod lan;
 pub mod policy;
 pub mod protocol;
 pub mod runtime;

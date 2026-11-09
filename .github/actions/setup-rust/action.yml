@@ -21,9 +21,10 @@ runs:
           crates/transfer/target
           crates/transfer-native/target
           crates/transfer-wasm/target
-        key: cargo-${{ runner.os }}-${{ runner.arch }}-1.98.0-wasm${{ inputs.wasm }}-${{ hashFiles('crates/encryption/Cargo.lock', 'crates/transfer/Cargo.lock', 'crates/transfer-native/Cargo.lock', 'crates/transfer-wasm/Cargo.lock') }}-${{ hashFiles('crates/encryption/src/**', 'crates/encryption/Cargo.toml', 'crates/transfer/src/**', 'crates/transfer/Cargo.toml', 'crates/transfer-native/src/**', 'crates/transfer-native/Cargo.toml', 'crates/transfer-wasm/src/**', 'crates/transfer-wasm/Cargo.toml') }}
+          crates/daemon/target
+        key: cargo-${{ runner.os }}-${{ runner.arch }}-1.98.0-wasm${{ inputs.wasm }}-${{ hashFiles('crates/encryption/Cargo.lock', 'crates/transfer/Cargo.lock', 'crates/transfer-native/Cargo.lock', 'crates/transfer-wasm/Cargo.lock', 'crates/daemon/Cargo.lock') }}-${{ hashFiles('crates/encryption/src/**', 'crates/encryption/Cargo.toml', 'crates/transfer/src/**', 'crates/transfer/Cargo.toml', 'crates/transfer-native/src/**', 'crates/transfer-native/Cargo.toml', 'crates/transfer-wasm/src/**', 'crates/transfer-wasm/Cargo.toml', 'crates/daemon/src/**', 'crates/daemon/Cargo.toml') }}
         restore-keys: |
-          cargo-${{ runner.os }}-${{ runner.arch }}-1.98.0-wasm${{ inputs.wasm }}-${{ hashFiles('crates/encryption/Cargo.lock', 'crates/transfer/Cargo.lock', 'crates/transfer-native/Cargo.lock', 'crates/transfer-wasm/Cargo.lock') }}-
+          cargo-${{ runner.os }}-${{ runner.arch }}-1.98.0-wasm${{ inputs.wasm }}-${{ hashFiles('crates/encryption/Cargo.lock', 'crates/transfer/Cargo.lock', 'crates/transfer-native/Cargo.lock', 'crates/transfer-wasm/Cargo.lock', 'crates/daemon/Cargo.lock') }}-
           cargo-${{ runner.os }}-${{ runner.arch }}-1.98.0-wasm${{ inputs.wasm }}-
     - name: Cache wasm-pack
       if: inputs.wasm == 'true'

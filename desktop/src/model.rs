@@ -20,6 +20,9 @@ pub struct DesktopSnapshot {
     /// encrypted manifest has been validated by the native receiver.
     pub receive_previews: Vec<ReceivePreview>,
     pub notes: Vec<NoteSnapshot>,
+    /// Daemon-owned device registry state. The desktop client never infers
+    /// receiver readiness from an account session or a desired preference.
+    pub device_directory: DeviceDirectorySnapshot,
     pub messages: Vec<ClientMessage>,
     pub operations: Vec<OperationStatus>,
     pub invitation: Option<InvitationSnapshot>,
@@ -79,6 +82,90 @@ pub struct AccountSnapshot {
     pub inbox_enabled: bool,
     pub notification_channel: Option<NotificationChannel>,
     pub key_custody: KeyCustody,
+}
+
+#[derive(Clone, Default)]
+pub struct DeviceDirectorySnapshot {
+    pub availability: DeviceDirectoryAvailability,
+    pub detail: Option<String>,
+    pub devices: Vec<DeviceSnapshot>,
+    pub daemon: DeviceDaemonSnapshot,
+    /// One-use candidate ceremony data. It contains no credential or private key.
+    pub enrollment_payload: Option<String>,
+    pub pending_fingerprint: Option<String>,
+}
+
+#[derive(Clone, Default)]
+pub struct DeviceDaemonSnapshot {
+    pub connected: bool,
+    pub receive_enabled: bool,
+    pub runtime: Option<String>,
+    pub destinations: Vec<DeviceDestinationSnapshot>,
+    pub jobs: Vec<DeviceJobSnapshot>,
+    pub devices: Vec<DaemonDeviceSnapshot>,
+    pub detail: Option<String>,
+}
+
+#[derive(Clone)]
+pub struct DaemonDeviceSnapshot {
+    pub id: String,
+    pub key_version: u32,
+    pub status: String,
+    pub fingerprint: String,
+}
+
+#[derive(Clone)]
+pub struct DeviceDestinationSnapshot {
+    pub id: String,
+    pub alias: String,
+    pub approval: String,
+    pub enabled: bool,
+}
+
+#[derive(Clone)]
+pub struct DeviceJobSnapshot {
+    pub id: String,
+    pub target: String,
+    pub state: String,
+    pub prepared: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DeviceDirectoryAvailability {
+    Available,
+    Stale,
+    #[default]
+    Unavailable,
+}
+
+#[derive(Clone)]
+pub struct DeviceSnapshot {
+    pub id: String,
+    pub name: String,
+    pub platform: String,
+    pub trust: DeviceTrust,
+    pub availability: DeviceAvailability,
+    pub detail: Option<String>,
+    pub fingerprint: String,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum DeviceTrust {
+    Pending,
+    Registered,
+    Verified,
+    Revoked,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum DeviceAvailability {
+    Ready,
+    Busy,
+    NeedsOpen,
+    Locked,
+    Offline,
+    Unknown,
 }
 #[derive(Clone, Default)]
 pub enum KeyCustody {
@@ -304,6 +391,38 @@ pub enum ClientCommand {
     /// Reload the validated shared configuration for controls created after this command.
     ReloadSettings,
     Refresh,
+    RefreshDevices,
+    EnrollDevice {
+        display_name: String,
+    },
+    ApproveDeviceEnrollment {
+        approval_payload: String,
+        verified_fingerprint: String,
+    },
+    CompleteDeviceEnrollment,
+    AddDeviceDropzone {
+        alias: String,
+        path: PathBuf,
+        auto_accept: bool,
+    },
+    SetDeviceReceiving(bool),
+    InstallDeviceService,
+    ConfirmDevicePeer {
+        id: String,
+        verified_fingerprint: String,
+    },
+    EnqueueDeviceSend {
+        target: String,
+        sources: Vec<PathBuf>,
+    },
+    RenameDevice {
+        id: String,
+        display_name: String,
+    },
+    RevokeDevice {
+        id: String,
+        current_password: String,
+    },
     RefreshInbox,
     RefreshHistory {
         filter: filebeam_client_core::services::HistoryFilter,
@@ -471,6 +590,17 @@ impl ClientCommand {
     pub fn operation(&self) -> &'static str {
         match self {
             Self::ReloadSettings => "reload settings",
+            Self::RefreshDevices => "refresh devices",
+            Self::EnrollDevice { .. } => "enroll device",
+            Self::ApproveDeviceEnrollment { .. } => "approve device enrollment",
+            Self::CompleteDeviceEnrollment => "complete device enrollment",
+            Self::AddDeviceDropzone { .. } => "add device dropzone",
+            Self::SetDeviceReceiving(_) => "set device receiving",
+            Self::InstallDeviceService => "install device service",
+            Self::ConfirmDevicePeer { .. } => "confirm device verification",
+            Self::EnqueueDeviceSend { .. } => "enqueue device send",
+            Self::RenameDevice { .. } => "rename device",
+            Self::RevokeDevice { .. } => "revoke device",
             Self::RefreshHistory { .. } => "load history",
             Self::DeleteHistory { .. } => "delete history transfer",
             Self::ExtendHistory { .. } => "extend history transfer",
@@ -557,5 +687,9 @@ mod tests {
         let snapshot = DesktopSnapshot::default();
         assert!(snapshot.jobs.is_empty());
         assert!(!snapshot.account.authenticated);
+        assert_eq!(
+            snapshot.device_directory.availability,
+            DeviceDirectoryAvailability::Unavailable
+        );
     }
 }

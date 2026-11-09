@@ -1,0 +1,19 @@
+[package]
+name = "filebeam-device-production-backend"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+anyhow = "1.0.98"
+base64 = "0.22.1"
+ed25519-dalek = "2.2.0"
+filebeam-client-core = { path = "../../../crates/client-core" }
+filebeam-daemon = { path = "../../../crates/daemon" }
+filebeam-transfer-native = { path = "../../../crates/transfer-native" }
+reqwest = { version = "0.12.20", default-features = false, features = ["blocking", "cookies", "json", "rustls-tls"] }
+serde_json = "1.0.140"
+sha2 = "0.10"
+time = { version = "0.3", features = ["parsing"] }
+url = "2.5"
+uuid = { version = "1.16.0", features = ["v4"] }

@@ -51,7 +51,7 @@ use crate::{
 };
 
 #[path = "rtc_upload.rs"]
-mod rtc_upload;
+pub(crate) mod rtc_upload;
 use rtc_upload::{CiphertextArtifact, serve_artifacts};
 
 const TAG_BYTES: u64 = 16;
@@ -213,6 +213,66 @@ struct PreparedCiphertext {
     position: u64,
     plaintext_bytes: u64,
     ciphertext: Vec<u8>,
+}
+
+/// A peer item's immutable source baseline. It is intentionally opaque so all
+/// chunks use the one fingerprint captured before preparation began.
+pub(crate) struct PeerPreparedItem {
+    source: Source,
+}
+
+/// Peer preparation calls the identical source fingerprint and chunk AEAD
+/// worker used by public uploads. The peer owner persists this output through
+/// the existing immutable checkpoint store before exposing it to WebRTC.
+pub(crate) struct PeerPreparedChunk {
+    pub plaintext_bytes: u64,
+    pub ciphertext: Vec<u8>,
+}
+
+pub(crate) fn prepare_peer_item(
+    spec: &SourceSpec,
+    chunk_bytes: u64,
+    control: &Control,
+) -> Result<PeerPreparedItem> {
+    Ok(PeerPreparedItem {
+        source: fingerprint(spec, chunk_bytes, &control.cancelled, control)?,
+    })
+}
+
+pub(crate) fn peer_prepared_item_metadata(item: &PeerPreparedItem) -> (u64, &str) {
+    (item.source.bytes, &item.source.digest)
+}
+
+/// Per-item key material for preparing peer chunks.
+pub(crate) struct PeerChunkKey<'a> {
+    pub transfer_id: &'a str,
+    pub item_id: &'a str,
+    pub master_key: &'a [u8],
+    pub nonce_prefix: &'a [u8],
+}
+
+pub(crate) fn prepare_peer_chunk(
+    item: &PeerPreparedItem,
+    key: &PeerChunkKey<'_>,
+    position: u64,
+    chunk_bytes: u64,
+    control: Control,
+) -> Result<PeerPreparedChunk> {
+    let prepared = prepare_one(PreparedInput {
+        source: item.source.clone(),
+        item: 0,
+        item_id: key.item_id.into(),
+        position,
+        chunk_bytes,
+        prefix: key.nonce_prefix.to_vec(),
+        key: derive_item_key(key.master_key, key.transfer_id, key.item_id)?,
+        transfer: key.transfer_id.into(),
+        control,
+    })?;
+    Ok(PeerPreparedChunk {
+        plaintext_bytes: prepared.plaintext_bytes,
+        ciphertext: prepared.ciphertext,
+    })
 }
 
 struct PreparedInput {
@@ -3304,7 +3364,7 @@ mod tests {
         assert!(
             archive
                 .file_names()
-                .any(|name| name == "fotos/ni\u{00f1}o/archivo.txt")
+                .any(|name| name.is_ok_and(|name| name == "fotos/ni\u{00f1}o/archivo.txt"))
         );
     }
 }

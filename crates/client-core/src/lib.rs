@@ -4,6 +4,9 @@
 //! never cancels a transfer. Dropping the owning job requests a checkpointed stop.
 
 pub mod application;
+pub mod device_coordinator;
+pub mod device_registry;
+pub mod device_runtime;
 mod error;
 pub mod link_presentation;
 mod managed;
@@ -14,6 +17,8 @@ pub use application::{
     ActionCapabilities, ApplicationJobSnapshot, ApplicationSettings, ClientRuntime, ExportState,
     JobAction, JobId, JobKind, JobObservation, PromptIdentity, PromptResponse, ShutdownReport,
 };
+pub use device_coordinator::DeviceCoordinator;
+pub use device_runtime::DeviceRuntime;
 pub use error::JobError;
 pub use filebeam_transfer_native::source;
 pub use filebeam_transfer_native::webrtc::loopback_self_test as webrtc_self_test;

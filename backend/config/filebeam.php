@@ -131,8 +131,27 @@ if ($webrtcSessionLimit < 1 || $webrtcSessionLimit > 128 || $webrtcMaxSdpBytes <
     throw new InvalidArgumentException('WebRTC session and SDP limits are outside supported bounds.');
 }
 
+// Devices bind this identifier into every authentication proof, so it must use
+// only letters, digits, '.', '_', and '-'. The default is the instance host.
+$deviceDeploymentId = env('FILEBEAM_DEVICE_DEPLOYMENT_ID');
+if (! is_string($deviceDeploymentId) || $deviceDeploymentId === '') {
+    $appUrl = parse_url((string) env('APP_URL', 'http://localhost'));
+    $deviceDeploymentId = (is_array($appUrl) ? ($appUrl['host'] ?? 'localhost') : 'localhost')
+        .(is_array($appUrl) && isset($appUrl['port']) ? '-'.$appUrl['port'] : '');
+    $deviceDeploymentId = (string) preg_replace('/[^A-Za-z0-9._-]/', '-', $deviceDeploymentId);
+}
+if (preg_match('/\A[A-Za-z0-9._-]{1,255}\z/', $deviceDeploymentId) !== 1) {
+    throw new InvalidArgumentException('FILEBEAM_DEVICE_DEPLOYMENT_ID may contain only letters, digits, ".", "_", and "-".');
+}
+
 $settingEnvironmentNames = [
     'registration' => ['FILEBEAM_REGISTRATION_ENABLED', 'boolean'],
+    'device_rendezvous' => ['FILEBEAM_DEVICE_RENDEZVOUS_ENABLED', 'boolean'],
+    'device_active_limit' => ['FILEBEAM_DEVICE_ACTIVE_LIMIT', 'integer'],
+    'device_connection_ttl_seconds' => ['FILEBEAM_DEVICE_CONNECTION_TTL_SECONDS', 'integer'],
+    'device_presence_ttl_seconds' => ['FILEBEAM_DEVICE_PRESENCE_TTL_SECONDS', 'integer'],
+    'device_offline_freshness_seconds' => ['FILEBEAM_DEVICE_OFFLINE_FRESHNESS_SECONDS', 'integer'],
+    'device_requests_per_minute' => ['FILEBEAM_DEVICE_REQUESTS_PER_MINUTE', 'integer'],
     'anonymous_uploads' => ['FILEBEAM_ANONYMOUS_UPLOADS_ENABLED', 'boolean'],
     'username_routing' => ['FILEBEAM_USERNAME_ROUTING_ENABLED', 'boolean'],
     'copyright_holder' => ['FILEBEAM_COPYRIGHT_HOLDER', 'text'],
@@ -206,6 +225,23 @@ return [
         'username_routing' => true,
     ],
 
+    // Registered-device rendezvous is opt-in until compatible native clients are deployed.
+    'devices' => [
+        'enabled' => false,
+        'deployment_id' => $deviceDeploymentId,
+        'active_limit' => 32,
+        'connection_ttl_seconds' => 600,
+        'presence_ttl_seconds' => 90,
+        'offline_freshness_seconds' => 604800,
+        'requests_per_minute' => 120,
+    ],
+
+    // Push is an optional wake mechanism. Provider credentials live encrypted in instance_settings.
+    'push' => [
+        'enabled' => env('FILEBEAM_PUSH_ENABLED', false),
+        'wakes_per_minute' => 10,
+    ],
+
     'instance_settings' => [
         // Normalized environment values; a non-null key locks its Admin field and wins over the database row.
         'environment' => $settingEnvironment,
@@ -223,6 +259,17 @@ return [
                 'type' => 'boolean',
                 'fallback' => 'filebeam.features.registration',
             ],
+            'device_rendezvous' => [
+                'label' => 'Registered-device rendezvous',
+                'description' => 'Allow registered native devices to use account-scoped signaling. File metadata remains peer-to-peer.',
+                'type' => 'boolean',
+                'fallback' => 'filebeam.devices.enabled',
+            ],
+            'device_active_limit' => ['label' => 'Active device limit', 'description' => 'Maximum active registrations per account.', 'type' => 'integer', 'fallback' => 'filebeam.devices.active_limit'],
+            'device_connection_ttl_seconds' => ['label' => 'Device rendezvous TTL', 'description' => 'Maximum lifetime of SDP-only device rendezvous state, in seconds.', 'type' => 'integer', 'fallback' => 'filebeam.devices.connection_ttl_seconds'],
+            'device_presence_ttl_seconds' => ['label' => 'Device presence lease', 'description' => 'How long a device is shown ready after a presence update, in seconds.', 'type' => 'integer', 'fallback' => 'filebeam.devices.presence_ttl_seconds'],
+            'device_offline_freshness_seconds' => ['label' => 'Offline authorization freshness', 'description' => 'Maximum client registry freshness for offline LAN authorization, in seconds.', 'type' => 'integer', 'fallback' => 'filebeam.devices.offline_freshness_seconds'],
+            'device_requests_per_minute' => ['label' => 'Device coordination rate limit', 'description' => 'Per-device coordination requests permitted each minute.', 'type' => 'integer', 'fallback' => 'filebeam.devices.requests_per_minute'],
             'anonymous_uploads' => [
                 'label' => 'Anonymous uploads',
                 'description' => 'Allow visitors without an account to create uploads.',

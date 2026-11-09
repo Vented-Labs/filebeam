@@ -15,13 +15,17 @@ git -C "$temporary" tag beam-v0.2.0
 [[ $(cd "$temporary" && bash "$root/scripts/release/cli-validate-ref.sh" beam-v0.2.0) == "$commit" ]]
 
 tag=beam-v0.2.0
-for target in linux-x86_64.tar.gz linux-aarch64.tar.gz macos-x86_64.tar.gz macos-aarch64.tar.gz windows-x86_64.zip; do printf '%s\n' "$target" > "$temporary/$tag-$target"; done
+for target in linux-x86_64.tar.gz linux-aarch64.tar.gz macos-x86_64.tar.gz macos-aarch64.tar.gz windows-x86_64.zip \
+    linux-x86_64-filebeamd.tar.gz linux-aarch64-filebeamd.tar.gz macos-x86_64-filebeamd.tar.gz macos-aarch64-filebeamd.tar.gz; do
+    printf '%s\n' "$target" > "$temporary/$tag-$target"
+done
 (cd "$temporary" && sha256sum "$tag"-*.tar.gz "$tag"-*.zip > checksums.txt)
 printf '0.2.0\n' > "$temporary/version"
 printf 'key\n' > "$temporary/public-key"
 printf 'installer\n' > "$temporary/install.sh"
 printf 'installer\n' > "$temporary/install.ps1"
 SOURCE_DATE_EPOCH=1700000000 php "$root/scripts/release/cli-write-release.php" "$tag" "$temporary" "$temporary/release.json"
+php -r '$r = json_decode(file_get_contents($argv[1]), true, 512, JSON_THROW_ON_ERROR); $d = $r["daemons"]; exit(count($d) === 4 && $d[0]["asset"]["path"] === "versions/v0.2.0/beam-v0.2.0-linux-x86_64-filebeamd.tar.gz" && $d[0]["min_ipc"] === 1 ? 0 : 1);' "$temporary/release.json"
 mkdir "$temporary/bin" "$temporary/source-assets"
 cp "$temporary"/beam-* "$temporary"/{checksums.txt,version,public-key,install.sh,install.ps1,release.json} "$temporary/source-assets/"
 cat > "$temporary/bin/gh" <<'EOF'

@@ -6,8 +6,8 @@ use filebeam_client_config::{Appearance, Config, Theme as ConfigTheme, normalize
 use filebeam_client_updater::{Options, Product, Updater};
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement, Render,
-    ScrollHandle, StatefulInteractiveElement, Styled, Window, div, px, rgb,
+    AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement, PathPromptOptions,
+    Render, ScrollHandle, StatefulInteractiveElement, Styled, Window, div, px, rgb,
 };
 use gpui_component::{
     Disableable, Icon, Sizable, Size,
@@ -41,6 +41,13 @@ pub struct SettingsPanel {
     server: Entity<InputState>,
     memory_limit: Entity<InputState>,
     concurrency: Entity<InputState>,
+    device_name: Entity<InputState>,
+    approval_payload: Entity<InputState>,
+    verified_fingerprint: Entity<InputState>,
+    device_id: Entity<InputState>,
+    rename_name: Entity<InputState>,
+    revoke_password: Entity<InputState>,
+    dropzone_alias: Entity<InputState>,
     appearance: Entity<SelectState<Vec<&'static str>>>,
     scroll_handle: ScrollHandle,
     relay_only: bool,
@@ -48,6 +55,7 @@ pub struct SettingsPanel {
     notifications: bool,
     background_transfers: bool,
     reduced_motion: bool,
+    dropzone_auto_confirmed: bool,
     appearance_save_in_flight: bool,
     presence: Option<PresenceAvailability>,
     notifications_available: Option<bool>,
@@ -76,6 +84,16 @@ impl SettingsPanel {
             server: cx.new(|cx| InputState::new(window, cx).placeholder("https://filebeam.io")),
             memory_limit: cx.new(|cx| InputState::new(window, cx).placeholder("512")),
             concurrency: cx.new(|cx| InputState::new(window, cx).placeholder("Default (4)")),
+            device_name: cx.new(|cx| InputState::new(window, cx).placeholder("This desktop")),
+            approval_payload: cx
+                .new(|cx| InputState::new(window, cx).placeholder("Paste enrollment payload")),
+            verified_fingerprint: cx
+                .new(|cx| InputState::new(window, cx).placeholder("Verified fingerprint")),
+            device_id: cx.new(|cx| InputState::new(window, cx).placeholder("Device ID")),
+            rename_name: cx.new(|cx| InputState::new(window, cx).placeholder("New device name")),
+            revoke_password: cx
+                .new(|cx| InputState::new(window, cx).placeholder("Current password")),
+            dropzone_alias: cx.new(|cx| InputState::new(window, cx).placeholder("dropzone")),
             appearance: cx.new(|cx| {
                 SelectState::new(
                     APPEARANCES.to_vec(),
@@ -90,6 +108,7 @@ impl SettingsPanel {
             notifications: config.desktop.notifications,
             background_transfers: config.desktop.background_transfers,
             reduced_motion: config.appearance.reduced_motion,
+            dropzone_auto_confirmed: false,
             appearance_save_in_flight: false,
             presence: None,
             notifications_available: None,
@@ -432,6 +451,114 @@ impl SettingsPanel {
         cx.notify();
     }
 
+    fn device_command(
+        &mut self,
+        command: ClientCommand,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match self.client.dispatch(command) {
+            Ok(()) => self.status = Some("Device request queued...".into()),
+            Err(error) => {
+                crate::toast::error("Device request failed", error.to_string(), window, cx)
+            }
+        }
+        cx.notify();
+    }
+
+    fn refresh_devices(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.device_command(ClientCommand::RefreshDevices, window, cx)
+    }
+
+    fn enroll_device(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.device_command(
+            ClientCommand::EnrollDevice {
+                display_name: self.device_name.read(cx).value().to_string(),
+            },
+            window,
+            cx,
+        )
+    }
+
+    fn approve_device(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.device_command(
+            ClientCommand::ApproveDeviceEnrollment {
+                approval_payload: self.approval_payload.read(cx).value().to_string(),
+                verified_fingerprint: self.verified_fingerprint.read(cx).value().to_string(),
+            },
+            window,
+            cx,
+        )
+    }
+
+    fn complete_device_enrollment(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.device_command(ClientCommand::CompleteDeviceEnrollment, window, cx)
+    }
+
+    fn confirm_device_peer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.device_command(
+            ClientCommand::ConfirmDevicePeer {
+                id: self.device_id.read(cx).value().to_string(),
+                verified_fingerprint: self.verified_fingerprint.read(cx).value().to_string(),
+            },
+            window,
+            cx,
+        )
+    }
+
+    fn rename_device(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.device_command(
+            ClientCommand::RenameDevice {
+                id: self.device_id.read(cx).value().to_string(),
+                display_name: self.rename_name.read(cx).value().to_string(),
+            },
+            window,
+            cx,
+        )
+    }
+
+    fn revoke_device(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.device_command(
+            ClientCommand::RevokeDevice {
+                id: self.device_id.read(cx).value().to_string(),
+                current_password: self.revoke_password.read(cx).value().to_string(),
+            },
+            window,
+            cx,
+        )
+    }
+
+    fn choose_dropzone(&mut self, cx: &mut Context<Self>) {
+        let alias = self.dropzone_alias.read(cx).value().to_string();
+        let auto_accept = self.dropzone_auto_confirmed;
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Choose device dropzone".into()),
+        });
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(paths))) = receiver.await else {
+                return;
+            };
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
+            let _ = this.update(cx, |this, cx| {
+                this.status = match this.client.dispatch(ClientCommand::AddDeviceDropzone {
+                    alias,
+                    path,
+                    auto_accept,
+                }) {
+                    Ok(()) => Some("Device dropzone request queued...".into()),
+                    Err(error) => Some(error.to_string()),
+                };
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     #[cfg(feature = "visual-test")]
     pub fn apply_visual_scenario(
         &mut self,
@@ -544,6 +671,13 @@ impl Render for SettingsPanel {
             ))
             .child(meta(p, "Notifications", notification_detail))
             .child(meta(p, "Background availability", presence_detail))
+            .child(meta(
+                p,
+                "Registered devices",
+                self.snapshot.device_directory.detail.as_deref().unwrap_or(
+                    "Unavailable until the shared daemon exposes registered-device state.",
+                ),
+            ))
             .child(
                 Switch::new("notifications")
                     .label("Desktop notifications")
@@ -562,6 +696,84 @@ impl Render for SettingsPanel {
                         this.set_background_transfers(*checked, window, cx)
                     })),
             );
+        let devices = group(p, "monitor", "My devices")
+            .child(
+                div().text_size(px(11.)).text_color(p.muted).child(
+                    "A registered device is not trusted for transfers until this daemon records an explicit verified key pin.",
+                ),
+            )
+            .child(
+                div().flex().gap(px(8.)).child(
+                    Button::new("refresh-devices")
+                        .label("Refresh devices")
+                        .on_click(cx.listener(|this, _, window, cx| this.refresh_devices(window, cx))),
+                ),
+            )
+            .children(self.snapshot.device_directory.devices.iter().map(|device| {
+                meta(
+                    p,
+                    &format!("{} · {}", device.name, device.platform),
+                    &format!("{} · {} · {} · {}", device.id, device.fingerprint, device_trust(device.trust), device_availability(device.availability)),
+                )
+            }))
+            .child(label(p, "Name this desktop"))
+            .child(Input::new(&self.device_name).with_size(Size::Large).w_full().min_w_0())
+            .child(Button::new("enroll-device").label("Enroll this device").primary().on_click(cx.listener(|this, _, window, cx| this.enroll_device(window, cx))))
+            .when_some(self.snapshot.device_directory.enrollment_payload.as_deref(), |this, payload| {
+                this.child(meta(p, "Compare this fingerprint out of band", self.snapshot.device_directory.pending_fingerprint.as_deref().unwrap_or("unavailable"))).child(meta(p, "Pending approval payload", payload)).child(
+                    Button::new("complete-device-enrollment").label("Complete after approval").on_click(cx.listener(|this, _, window, cx| this.complete_device_enrollment(window, cx))),
+                )
+            })
+            .child(label(p, "Approve a verified enrollment"))
+            .child(Input::new(&self.approval_payload).with_size(Size::Large).w_full().min_w_0())
+            .child(Input::new(&self.verified_fingerprint).with_size(Size::Large).w_full().min_w_0())
+            .child(Button::new("approve-device").label("Approve verified device").on_click(cx.listener(|this, _, window, cx| this.approve_device(window, cx))))
+            .child(label(p, "Rename or revoke by exact device ID"))
+            .child(Input::new(&self.device_id).with_size(Size::Large).w_full().min_w_0())
+            .child(Button::new("confirm-device-peer").label("Record verified peer pin").on_click(cx.listener(|this, _, window, cx| this.confirm_device_peer(window, cx))))
+            .child(Input::new(&self.rename_name).with_size(Size::Large).w_full().min_w_0())
+            .child(Button::new("rename-device").label("Rename device").on_click(cx.listener(|this, _, window, cx| this.rename_device(window, cx))))
+            .child(Input::new(&self.revoke_password).with_size(Size::Large).w_full().min_w_0())
+            .child(Button::new("revoke-device").label("Revoke device").danger().on_click(cx.listener(|this, _, window, cx| this.revoke_device(window, cx))))
+            .child(label(p, "Receiving dropzone"))
+            .child(Input::new(&self.dropzone_alias).with_size(Size::Large).w_full().min_w_0())
+            .child(
+                Switch::new("dropzone-auto-confirmed")
+                    .label("Save automatically after I confirm this folder")
+                    .checked(self.dropzone_auto_confirmed)
+                    .on_click(cx.listener(|this, checked, _, cx| {
+                        this.dropzone_auto_confirmed = *checked;
+                        cx.notify();
+                    })),
+            )
+            .child(Button::new("choose-device-dropzone").label("Choose dropzone folder").on_click(cx.listener(|this, _, _, cx| this.choose_dropzone(cx))))
+            .child(meta(
+                p,
+                "Local device service",
+                self.snapshot.device_directory.daemon.detail.as_deref().unwrap_or(if self.snapshot.device_directory.daemon.receive_enabled { "Receiving enabled" } else { "Receiving paused" }),
+            ))
+            .when(!self.snapshot.device_directory.daemon.connected, |group| {
+                group.child(
+                    Button::new("install-device-service")
+                        .label("Install device service")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.device_command(ClientCommand::InstallDeviceService, window, cx)
+                        })),
+                )
+            })
+            .child(
+                Button::new("toggle-device-receiving")
+                    .label(if self.snapshot.device_directory.daemon.receive_enabled { "Pause device receiving" } else { "Enable device receiving" })
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        let enabled = !this.snapshot.device_directory.daemon.receive_enabled;
+                        this.device_command(ClientCommand::SetDeviceReceiving(enabled), window, cx)
+                    })),
+            )
+            .children(self.snapshot.device_directory.daemon.destinations.iter().map(|grant| meta(p, &format!("Destination: {}", grant.alias), if grant.enabled { &grant.approval } else { "revoked" })))
+            .children(self.snapshot.device_directory.daemon.jobs.iter().map(|job| meta(p, &format!("Job: {}", job.target), &match &job.error {
+                Some(error) => format!("{} · {error}", job.state),
+                None => format!("{} · prepared={}", job.state, job.prepared),
+            })));
         let storage = group(p, "storage", "Local storage")
             .child(meta(
                 p,
@@ -691,6 +903,7 @@ impl Render for SettingsPanel {
                                             this.flex_1().min_w(px(SECONDARY_COLUMN_MIN_WIDTH))
                                         })
                                         .child(account)
+                                        .child(devices)
                                         .child(storage)
                                         .child(about),
                                 ),
@@ -839,6 +1052,24 @@ fn meta(p: Palette, name: &str, value: &str) -> gpui::Div {
                 .child(name.to_owned()),
         )
         .child(div().min_w_0().text_size(px(12.)).child(value.to_owned()))
+}
+fn device_availability(value: crate::model::DeviceAvailability) -> &'static str {
+    match value {
+        crate::model::DeviceAvailability::Ready => "ready",
+        crate::model::DeviceAvailability::Busy => "busy",
+        crate::model::DeviceAvailability::NeedsOpen => "needs Filebeam open",
+        crate::model::DeviceAvailability::Locked => "locked",
+        crate::model::DeviceAvailability::Offline => "offline",
+        crate::model::DeviceAvailability::Unknown => "unknown",
+    }
+}
+fn device_trust(value: crate::model::DeviceTrust) -> &'static str {
+    match value {
+        crate::model::DeviceTrust::Pending => "pending approval",
+        crate::model::DeviceTrust::Registered => "registered, not pinned",
+        crate::model::DeviceTrust::Verified => "verified",
+        crate::model::DeviceTrust::Revoked => "revoked",
+    }
 }
 fn supports_two_columns(viewport_width: f32) -> bool {
     let compact = viewport_width < COMPACT_VIEWPORT_WIDTH;
