@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
 # All service images are the selected, multi-architecture upstream releases.
-FROM dunglas/frankenphp:1.12.7-php8.5-trixie@sha256:f92d81eb3fe4fd18b35d3d58192b7cc3acc8943817bbf39f2fcf0be02a3916dc AS php-base
+FROM dunglas/frankenphp:1.13.5-php8.5-trixie@sha256:7e73a27eb7712a5b4073b92f8f0dec91e9400138604b76cc791589faaa6a639c AS php-base
 ENV LOG_CHANNEL=stdout LOG_STACK=stdout LOG_EMERGENCY_PATH=php://stdout
 
 COPY docker/production/apt.conf /etc/apt/apt.conf.d/80-filebeam-network

@@ -5,7 +5,7 @@ FROM rust:1.98.0-slim-bookworm AS rust
 RUN rustup target add wasm32-unknown-unknown \
     && cargo install wasm-pack --version 0.15.0 --locked
 
-FROM dunglas/frankenphp:1-php8.5-bookworm
+FROM dunglas/frankenphp:1.13.5-php8.5-bookworm
 ENV LOG_CHANNEL=stdout LOG_STACK=stdout LOG_EMERGENCY_PATH=php://stdout
 
 ARG WWWUSER=1000
