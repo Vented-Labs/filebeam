@@ -12,7 +12,7 @@
             "vite": "npm:@voidzero-dev/vite-plus-core@1.5.1",
             "vite-plus": "1.5.1",
             "vue": "^3.5.42",
-            "vue-tsc": "^3.3.14"
+            "vue-tsc": "3.3.11"
         },
         "backend/package.json": {
             "@filebeam/ui": "file:../ui",
@@ -31,7 +31,7 @@
             "vite": "npm:@voidzero-dev/vite-plus-core@1.5.1",
             "vite-plus": "1.5.1",
             "vue": "^3.5.13",
-            "vue-tsc": "^3.3.14"
+            "vue-tsc": "3.3.11"
         },
         "ui/package.json": {
             "@codemirror/commands": "^6.11.0",
@@ -74,8 +74,8 @@
         }
     },
     "npmResolved": {
-        "count": 358,
-        "sha256": "7de3289855cd2ea51bf2e15f11259bab18a2ec0163de149c3ba18d9e9a20d7eb"
+        "count": 353,
+        "sha256": "a992d14d49b6070cea65f6ee6ca14bcf21b341135d40c2d101b46c47c1c09b20"
     },
     "composerResolved": {
         "count": 181,
