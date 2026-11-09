@@ -176,14 +176,14 @@ mod tests {
     }
 
     #[test]
-    fn disabled_device_registry_is_a_typed_error() {
+    fn disabled_device_registry_is_reported_readably() {
         assert!(matches!(
             error::registry_operation("INSTANCE_UNSUPPORTED"),
-            ClientError::InstanceUnsupported
+            ClientError::Operation { detail } if detail.contains("unavailable on this instance")
         ));
         assert!(matches!(
             error::registry_operation("native device request returned 401 Unauthorized"),
-            ClientError::Operation { .. }
+            ClientError::Operation { detail } if detail.contains("401")
         ));
     }
 }

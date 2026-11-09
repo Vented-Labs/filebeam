@@ -4,17 +4,18 @@ pub enum ClientError {
     InvalidInput { detail: String },
     #[error("{detail}")]
     Operation { detail: String },
-    #[error("Registered-device rendezvous is unavailable on this instance")]
-    InstanceUnsupported,
 }
 
+/// Reports registry failures as operation errors, so existing native callers
+/// that match every `ClientError` case keep compiling.
 pub fn registry_operation(error: impl std::fmt::Display) -> ClientError {
     let detail = error.to_string();
-    if detail.contains("INSTANCE_UNSUPPORTED") {
-        ClientError::InstanceUnsupported
+    let detail = if detail.contains("INSTANCE_UNSUPPORTED") {
+        "Registered-device rendezvous is unavailable on this instance".into()
     } else {
-        ClientError::Operation { detail }
-    }
+        detail
+    };
+    ClientError::Operation { detail }
 }
 
 pub type Result<T> = std::result::Result<T, ClientError>;
