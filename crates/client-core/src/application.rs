@@ -59,6 +59,7 @@ pub enum JobKind {
     LiveNote,
     Revoke,
     EndLive,
+    Device,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -365,6 +366,15 @@ impl ClientRuntime {
         run: impl FnOnce(&crate::control::Control) -> Result<Vec<String>> + Send + 'static,
     ) -> JobObservation {
         self.start_service_job(JobKind::EndLive, run)
+    }
+
+    /// Registered-device orchestration has the same lifetime and scheduler as
+    /// normal transfer jobs, but is not a public upload/download request.
+    pub fn start_device_job(
+        &self,
+        run: impl FnOnce(&crate::control::Control) -> Result<Vec<String>> + Send + 'static,
+    ) -> JobObservation {
+        self.start_service_job(JobKind::Device, run)
     }
 
     fn start_request(&self, kind: JobKind, request: Request) -> Result<JobObservation> {

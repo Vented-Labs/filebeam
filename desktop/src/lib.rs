@@ -3,6 +3,8 @@ pub mod app;
 #[cfg(not(feature = "headless-acceptance"))]
 pub mod assets;
 pub mod client;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub mod daemon_install;
 pub mod model;
 #[cfg(not(feature = "headless-acceptance"))]
 pub mod platform;

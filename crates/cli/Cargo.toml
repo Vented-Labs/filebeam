@@ -22,6 +22,7 @@ ed25519-dalek = "2.1.1"
 filebeam-encryption = { path = "../encryption" }
 filebeam-client-core = { path = "../client-core" }
 filebeam-client-config = { path = "../client-config" }
+filebeam-daemon = { path = "../daemon" }
 filebeam-transfer = { path = "../transfer" }
 filebeam-transfer-native = { path = "../transfer-native" }
 bytes = "1"
@@ -45,6 +46,7 @@ unicode-segmentation = "1.13.3"
 unicode-width = "=0.2.0"
 zip = { version = "4.6.1", default-features = false, features = ["deflate"] }
 uuid = { version = "1.18.1", features = ["v4"] }
+ulid = "=1.2.1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "fs", "io-util"] }
 tokio-util = { version = "0.7", features = ["rt", "io"] }
 

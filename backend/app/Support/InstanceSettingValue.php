@@ -31,6 +31,7 @@ class InstanceSettingValue
             'url' => self::url($value),
             'color' => self::color($value),
             'community_links' => self::communityLinks($value),
+            'integer' => self::integer($value),
             default => throw new InvalidArgumentException("Unknown instance setting type [{$type}]."),
         };
     }
@@ -110,6 +111,16 @@ class InstanceSettingValue
         }
 
         return $year;
+    }
+
+    private static function integer(mixed $value): int
+    {
+        $integer = is_int($value) ? $value : (is_string($value) && ctype_digit($value) ? (int) $value : null);
+        if ($integer === null || $integer < 1 || $integer > 2_592_000) {
+            throw new InvalidArgumentException('Enter a whole number between 1 and 2592000.');
+        }
+
+        return $integer;
     }
 
     private static function url(mixed $value): string

@@ -10,10 +10,27 @@ public typealias DOpenedInbox = FilebeamDomain.OpenedInbox
 public typealias DAccountKeyBundle = FilebeamDomain.AccountKeyBundle
 public typealias DGeneratedAccountKey = FilebeamDomain.GeneratedAccountKey
 
+public struct NativeDeviceIdentity: Sendable {
+    public let id: String
+    let privateKey: Data
+    public let publicKey: String
+}
+
 public protocol NativeSecretStorage: Sendable {
     func checkpointKey(scope: String) throws -> Data
     func loadSession(origin: String) throws -> String?
     func saveSession(origin: String, cookie: String?) throws
+    func deviceIdentity(origin: String) throws -> NativeDeviceIdentity
+    func deviceDeployment(origin: String) throws -> String?
+    func saveDeviceDeployment(origin: String, deploymentID: String?) throws
+    func signDeviceEnrollment(origin: String, deviceID: String, generation: UInt64, challenge: String) throws -> Data
+    func signDeviceApproval(origin: String, approval: FilebeamCore.DeviceApprovalPayload) throws -> Data
+    func signDevicePeerProof(origin: String, request: DevicePeerProofRequest) throws -> Data
+    func signDevicePeerReceipt(origin: String, request: DeviceReceiptRequest) throws -> Data
+    func loadDeviceCredential(origin: String, deviceID: String) throws -> String?
+    func saveDeviceCredential(origin: String, deviceID: String, credential: String?) throws
+    func loadPendingDevicePairing(origin: String) throws -> Data?
+    func savePendingDevicePairing(origin: String, data: Data?) throws
 }
 public protocol NativeSecretStorageRemoving: NativeSecretStorage { func removeCheckpointKey(scope: String) throws }
 
@@ -39,6 +56,33 @@ public final class NativeFilebeamService: FilebeamService, @unchecked Sendable {
             do { try removable.removeCheckpointKey(scope: scope) }
             catch { throw FilebeamCore.ClientError.Operation(detail: "The device checkpoint key could not be removed.") }
         }
+    }
+    private final class DeviceSigner: DeviceKeySignerCallback, NativeDeviceSigner, @unchecked Sendable {
+        let identity: NativeDeviceIdentity
+        let origin: String
+        let secrets: any NativeSecretStorage
+        init(_ identity: NativeDeviceIdentity, origin: String, secrets: any NativeSecretStorage) { self.identity = identity; self.origin = origin; self.secrets = secrets }
+        func signEnrollment(deviceId: String, generation: UInt64, challenge: String) throws -> Data {
+            try secrets.signDeviceEnrollment(origin: origin, deviceID: deviceId, generation: generation, challenge: challenge)
+        }
+        func signApproval(approval: FilebeamCore.DeviceApprovalPayload) throws -> Data {
+            try secrets.signDeviceApproval(origin: origin, approval: approval)
+        }
+        func signPeerProof(request: DevicePeerProofRequest) throws -> Data {
+            guard request.instanceOrigin == origin, request.signerDeviceId == identity.id else { throw FilebeamCore.ClientError.InvalidInput(detail: "Peer proof does not match this device identity.") }
+            return try secrets.signDevicePeerProof(origin: origin, request: request)
+        }
+        func signPeerReceipt(request: DeviceReceiptRequest) throws -> Data {
+            guard request.senderDeviceId == identity.id || request.receiverDeviceId == identity.id else { throw FilebeamCore.ClientError.InvalidInput(detail: "Peer receipt does not match this device identity.") }
+            return try secrets.signDevicePeerReceipt(origin: origin, request: request)
+        }
+    }
+    private final class DeviceCredentials: DeviceCredentialStoreCallback, @unchecked Sendable {
+        let secrets: any NativeSecretStorage
+        init(_ secrets: any NativeSecretStorage) { self.secrets = secrets }
+        func store(instance: String, deviceId: String, credential: String) throws { try secrets.saveDeviceCredential(origin: instance, deviceID: deviceId, credential: credential) }
+        func load(instance: String, deviceId: String) throws -> String { guard let credential = try secrets.loadDeviceCredential(origin: instance, deviceID: deviceId) else { throw FilebeamCore.ClientError.Operation(detail: "This device credential is unavailable. Register again.") }; return credential }
+        func remove(instance: String, deviceId: String) throws { try secrets.saveDeviceCredential(origin: instance, deviceID: deviceId, credential: nil) }
     }
     private enum Handle { case transfer(TransferJob); case note(ManagedNoteReceive); case creatingNote(ManagedNoteCreate); case completed(ShareReceipt); case backgroundOnly }
     private struct Job {
@@ -83,6 +127,24 @@ public final class NativeFilebeamService: FilebeamService, @unchecked Sendable {
     private var jobs: [TransferJobID: Job] = [:]
     private var receipts: [TransferID: ShareReceipt] = [:]
     private var servicesByOrigin: [String: NativeServices] = [:]
+    private var pendingDevicePairings: [String: DevicePairingPayload] = [:]
+    private let deviceCoordinator: NativeDeviceCoordinator
+    private var deviceDeployments: [String: String] = [:]
+    private var deviceReceiverTask: Task<Void, Never>?
+
+    private struct PendingDevicePairing: Codable {
+        let payload: DevicePairingPayload
+        let challenge: String
+        let expiresAt: String?
+        var evidence: PendingApprovalEvidence?
+    }
+    private struct PendingApprovalEvidence: Codable {
+        let version: UInt8
+        let approverDeviceID: String
+        let approverKeyVersion: UInt32
+        let approverPublicKey: String
+        let approvalSignature: String
+    }
     private var rememberedOrigins = Set<String>()
     private var backgroundExecutor: (any NativeBackgroundExecutor)?
     private var backgroundAssociations: [String: BackgroundAssociation] = [:]
@@ -126,6 +188,7 @@ public final class NativeFilebeamService: FilebeamService, @unchecked Sendable {
         let config = ClientConfig(stateDirectory: stateDirectory.path, memoryBudgetMib: 128, maxConcurrency: 2, relayOnly: relayOnly, allowHttp: false)
         let store = CheckpointStore(secrets)
         runtime = try NativeRuntime.newWithSecretStore(config: config, secretStore: store)
+        deviceCoordinator = NativeDeviceCoordinator(runtime: runtime)
         client = try TransferClient.newWithRuntimeSecretStore(config: config, runtime: runtime, secretStore: store)
         if let data = try recordStorage?.load(name: Self.receiptRecordName) {
             storedReceipts = try JSONDecoder().decode([String: StoredReceipt].self, from: data)
@@ -168,6 +231,27 @@ public final class NativeFilebeamService: FilebeamService, @unchecked Sendable {
     }
 
     public func backgroundEngine() async throws -> BackgroundTransfer { try await ffi { self.client.backgroundTransfer() } }
+    public func expireDeviceJobs(timeoutMillis: UInt64 = 4_000) {
+        queue.async { _ = self.deviceCoordinator.expire(timeoutMillis: timeoutMillis) }
+    }
+    public func startDeviceReceiverLoop() {
+        guard deviceReceiverTask == nil else { return }
+        deviceReceiverTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                _ = try? await self.ffi {
+                    _ = try self.deviceCoordinator.pollReceivers()
+                    try self.deviceCoordinator.advertisePresence(ready: true)
+                }
+                try? await Task.sleep(for: .seconds(30))
+            }
+        }
+    }
+    public func stopDeviceReceiverLoop() {
+        deviceReceiverTask?.cancel()
+        deviceReceiverTask = nil
+        queue.async { _ = try? self.deviceCoordinator.advertisePresence(ready: false) }
+    }
 
     /// May be called after constructing the service, before the app model starts jobs.
     public func configureBackgroundExecutor(_ executor: (any NativeBackgroundExecutor)?) {
@@ -370,6 +454,7 @@ public final class NativeFilebeamService: FilebeamService, @unchecked Sendable {
             switch native {
             case let .InvalidInput(detail): return .invalidInput(detail)
             case let .Operation(detail): return .remote(detail)
+            case .InstanceUnsupported: return .unavailable("Registered-device rendezvous is unavailable on this instance.")
             }
         }
         return .remote(error.localizedDescription)
@@ -385,6 +470,12 @@ public final class NativeFilebeamService: FilebeamService, @unchecked Sendable {
     private func persist(_ service: NativeServices, origin: String) throws { guard rememberedOrigins.contains(origin) else { return }; try secrets.saveSession(origin: origin, cookie: try service.accountCookieContext()) }
     private func cryptoServices() throws -> NativeServices {
         try NativeServices.newWithRuntime(instance: "https://localhost", allowHttp: false, runtime: runtime)
+    }
+    private func deviceServices(_ instance: FilebeamInstance) throws -> (NativeServices, NativeDeviceIdentity) {
+        let account = try services(instance)
+        let cookie = try account.accountCookieContext()
+        let identity = try secrets.deviceIdentity(origin: instance.origin)
+        return (try NativeServices.newWithRuntimeDeviceCallbacks(instance: instance.origin, allowHttp: false, cookieContext: cookie, runtime: runtime, deviceSigner: DeviceSigner(identity, origin: instance.origin, secrets: secrets), deviceCredentials: DeviceCredentials(secrets)), identity)
     }
     private func job(_ id: TransferJobID) throws -> Job { lock.lock(); defer { lock.unlock() }; guard let job = jobs[id] else { throw FilebeamDomainError.invalidInput("Transfer job no longer exists.") }; return job }
 
@@ -767,6 +858,107 @@ public final class NativeFilebeamService: FilebeamService, @unchecked Sendable {
     }
     public func report(_ request: ReportRequest) async throws -> ReportReceipt { try await ffi { try self.services(request.instance).accountReport(transferId: request.transferID.rawValue, category: request.category.rawValue, description: request.description, email: request.email); return ReportReceipt(reportID: nil, submittedAt: nil) } }
     public func requestAccountDeletion(_ request: AccountDeletionRequest) async throws -> AccountDeletionResult { try await ffi { let s = try self.services(request.instance); let status = try s.accountDelete(currentPassword: request.currentPassword, confirmation: request.confirmation); self.lock.withLock { self.servicesByOrigin.removeValue(forKey: request.instance.origin); self.rememberedOrigins.remove(request.instance.origin) }; try self.secrets.saveSession(origin: request.instance.origin, cookie: nil); return AccountDeletionResult(accepted: status == "deletion_scheduled", effectiveAt: nil) } }
+    public func deviceDirectory(instance: FilebeamInstance) async throws -> DeviceDirectory {
+        try await ffi {
+            let (service, identity) = try self.deviceServices(instance)
+            var registry = try service.accountDevices()
+            if let data = try self.secrets.loadPendingDevicePairing(origin: instance.origin), var pending = try? JSONDecoder().decode(PendingDevicePairing.self, from: data), pending.evidence == nil,
+               let candidate = registry.devices.first(where: { $0.id == identity.id && $0.status == "active" }) {
+                let context = self.corePayload(pending.payload, approverID: "", approverKeyVersion: 0)
+                let challenge = DeviceEnrollmentChallenge(device: candidate, challenge: pending.challenge, expiresAt: pending.expiresAt, approvalContext: context)
+                let redemption = try service.accountDeviceCompleteEnrollment(challenge: challenge)
+                guard let evidence = redemption.approvalEvidence else { throw FilebeamDomainError.remote("Approved enrollment did not return approval evidence.") }
+                pending.evidence = PendingApprovalEvidence(version: evidence.version, approverDeviceID: evidence.approverDeviceId, approverKeyVersion: evidence.approverKeyVersion, approverPublicKey: evidence.approverPublicKey, approvalSignature: evidence.approvalSignature)
+                try self.secrets.savePendingDevicePairing(origin: instance.origin, data: try JSONEncoder().encode(pending))
+                registry = try service.accountDevices()
+            }
+            if let deployment = try self.deviceDeployments[instance.origin] ?? self.secrets.deviceDeployment(origin: instance.origin) {
+                try self.configureDeviceCoordinator(service: service, identity: identity, instance: instance, deployment: deployment)
+            }
+            let trusted = Set((try? self.deviceCoordinator.registeredTrustSnapshot().filter(\.pinned).map(\.deviceId)) ?? [])
+            return self.deviceDirectory(instance, currentID: identity.id, registry: registry, trusted: trusted)
+        }
+    }
+    public func enrollDevice(instance: FilebeamInstance, request: DeviceEnrollmentRequest) async throws -> DeviceDirectory {
+        try await ffi {
+            let (service, identity) = try self.deviceServices(instance)
+            let challenge = try service.accountDeviceChallenge(deviceId: identity.id, displayName: request.name, platform: request.platform, publicKey: identity.publicKey, keyVersion: 1, capabilities: [])
+            _ = try service.accountDeviceEnroll(challenge: challenge)
+            self.deviceDeployments[instance.origin] = challenge.approvalContext.deploymentId
+            try self.secrets.saveDeviceDeployment(origin: instance.origin, deploymentID: challenge.approvalContext.deploymentId)
+            let payload = self.pairingPayload(challenge.approvalContext)
+            self.pendingDevicePairings[instance.origin] = payload
+            try self.secrets.savePendingDevicePairing(origin: instance.origin, data: try JSONEncoder().encode(PendingDevicePairing(payload: payload, challenge: challenge.challenge, expiresAt: challenge.expiresAt, evidence: nil)))
+            return self.deviceDirectory(instance, currentID: identity.id, registry: try service.accountDevices())
+        }
+    }
+    public func renameDevice(instance: FilebeamInstance, deviceID: String, name: String) async throws -> DeviceDirectory {
+        try await ffi { let (service, identity) = try self.deviceServices(instance); _ = try service.accountDeviceRename(deviceId: deviceID, displayName: name); return self.deviceDirectory(instance, currentID: identity.id, registry: try service.accountDevices()) }
+    }
+    public func revokeDevice(instance: FilebeamInstance, deviceID: String, currentPassword: String) async throws -> DeviceDirectory {
+        try await ffi { let (service, identity) = try self.deviceServices(instance); _ = try service.accountDeviceRevoke(deviceId: deviceID, currentPassword: currentPassword); return self.deviceDirectory(instance, currentID: identity.id, registry: try service.accountDevices()) }
+    }
+    public func pendingDevicePairing(instance: FilebeamInstance) async throws -> DevicePairingPayload? {
+        try await ffi { self.pendingDevicePairings[instance.origin] }
+    }
+    public func approveDevicePairing(instance: FilebeamInstance, payload: DevicePairingPayload, confirmedFingerprint: String) async throws -> DeviceDirectory {
+        try await ffi {
+            guard payload.version == 2, payload.instanceOrigin == instance.origin, self.fingerprint(payload.candidatePublicKey) == confirmedFingerprint else {
+                throw FilebeamDomainError.invalidInput("Confirm the candidate key fingerprint shown by the other device.")
+            }
+            let (service, identity) = try self.deviceServices(instance)
+            let approval = FilebeamCore.DeviceApprovalPayload(instanceOrigin: payload.instanceOrigin, deploymentId: payload.deploymentID, accountId: payload.accountID, generation: payload.generation, candidateDeviceId: payload.candidateDeviceID, candidateKeyVersion: payload.candidateKeyVersion, candidatePublicKey: payload.candidatePublicKey, challengeSha256: payload.challengeSHA256, expiresAtUnix: payload.expiresAtUnix, approverDeviceId: identity.id, approverKeyVersion: 1)
+            _ = try service.deviceApproveEnrollment(localDeviceId: identity.id, approval: approval)
+            return self.deviceDirectory(instance, currentID: identity.id, registry: try service.accountDevices())
+        }
+    }
+    public func confirmDeviceApprover(instance: FilebeamInstance, confirmedFingerprint: String) async throws -> DeviceDirectory {
+        try await ffi {
+            guard let data = try self.secrets.loadPendingDevicePairing(origin: instance.origin), let pending = try? JSONDecoder().decode(PendingDevicePairing.self, from: data), let evidence = pending.evidence else {
+                throw FilebeamDomainError.invalidInput("This device has not redeemed approved-device evidence yet.")
+            }
+            let (service, identity) = try self.deviceServices(instance)
+            try service.deviceConfirmApprover(localDeviceId: identity.id, approval: self.corePayload(pending.payload, approverID: evidence.approverDeviceID, approverKeyVersion: evidence.approverKeyVersion), evidence: DeviceApprovalEvidence(version: evidence.version, approverDeviceId: evidence.approverDeviceID, approverKeyVersion: evidence.approverKeyVersion, approverPublicKey: evidence.approverPublicKey, approvalSignature: evidence.approvalSignature), confirmedFingerprint: confirmedFingerprint)
+            try self.secrets.savePendingDevicePairing(origin: instance.origin, data: nil)
+            return self.deviceDirectory(instance, currentID: identity.id, registry: try service.accountDevices())
+        }
+    }
+    public func startDeviceSend(_ request: DeviceSendStartRequest) async throws {
+        try await ffi {
+            guard request.source.sizeBytes != nil else { throw FilebeamDomainError.invalidInput("Selected document size is unavailable.") }
+            let (service, identity) = try self.deviceServices(request.instance)
+            guard let deployment = try self.deviceDeployments[request.instance.origin] ?? self.secrets.deviceDeployment(origin: request.instance.origin) else {
+                throw FilebeamDomainError.invalidInput("Complete device pairing before sending to a device.")
+            }
+            try self.configureDeviceCoordinator(service: service, identity: identity, instance: request.instance, deployment: deployment)
+            _ = try self.deviceCoordinator.startSender(request: FilebeamCore.DeviceSendRequest(sourceName: request.source.name, sourcePath: request.source.location, providerIdentity: nil, providerLength: nil, providerMutationToken: nil, targetDeviceId: request.targetDeviceID, destinationAlias: "incoming", expiresAtUnixSeconds: UInt64(Date().timeIntervalSince1970) + 120))
+        }
+    }
+
+    private func pairingPayload(_ value: FilebeamCore.DeviceApprovalPayload) -> DevicePairingPayload {
+        DevicePairingPayload(instanceOrigin: value.instanceOrigin, deploymentID: value.deploymentId, accountID: value.accountId, generation: value.generation, candidateDeviceID: value.candidateDeviceId, candidateKeyVersion: value.candidateKeyVersion, candidatePublicKey: value.candidatePublicKey, challengeSHA256: value.challengeSha256, expiresAtUnix: value.expiresAtUnix)
+    }
+    private func corePayload(_ value: DevicePairingPayload, approverID: String, approverKeyVersion: UInt32) -> FilebeamCore.DeviceApprovalPayload {
+        FilebeamCore.DeviceApprovalPayload(instanceOrigin: value.instanceOrigin, deploymentId: value.deploymentID, accountId: value.accountID, generation: value.generation, candidateDeviceId: value.candidateDeviceID, candidateKeyVersion: value.candidateKeyVersion, candidatePublicKey: value.candidatePublicKey, challengeSha256: value.challengeSHA256, expiresAtUnix: value.expiresAtUnix, approverDeviceId: approverID, approverKeyVersion: approverKeyVersion)
+    }
+    private func fingerprint(_ key: String) -> String {
+        (try? deviceKeyFingerprint(publicKey: key)) ?? ""
+    }
+
+    private func configureDeviceCoordinator(service: NativeServices, identity: NativeDeviceIdentity, instance: FilebeamInstance, deployment: String) throws {
+        let key = Data(base64Encoded: identity.publicKey) ?? Data()
+        guard key.count == 32 else { throw FilebeamDomainError.invalidInput("The registered device identity is invalid.") }
+        try deviceCoordinator.configure(services: service, configuration: DeviceCoordinatorConfiguration(deploymentId: deployment, localDeviceId: identity.id, localPublicKey: key, dropzoneAlias: "incoming"), signer: DeviceSigner(identity, origin: instance.origin, secrets: secrets))
+    }
+    private func deviceDirectory(_ instance: FilebeamInstance, currentID: String, registry: FilebeamCore.DeviceRegistry, trusted: Set<String> = []) -> DeviceDirectory {
+        DeviceDirectory(instance: instance, generation: registry.generation, revision: registry.revision, currentDeviceID: currentID, devices: registry.devices.map { device in
+            let pinned = trusted.contains(device.id)
+            let availability: DeviceAvailability = device.presenceExpiresAt.flatMap(self.livePresence) == true ? .ready : device.status == "active" ? .needsOpen : .offline
+            let trust: DeviceTrust = device.status == "revoked" ? .revoked : device.status == "pending" ? .pending : pinned ? .verified : .pending
+            return DeviceSnapshot(id: device.id, name: device.displayName, platform: device.platform, trust: trust, availability: availability, detail: pinned || device.status != "active" ? nil : "Pairing needed", canReceive: pinned && device.status == "active")
+        }, stale: false)
+    }
+    private func livePresence(_ value: String) -> Bool { ISO8601DateFormatter().date(from: value).map { $0 > Date() } ?? false }
 
     private func normalizedTransferInput(_ input: String, instance: FilebeamInstance, id: String) -> String {
         let base = "\(instance.origin)/\(id)"

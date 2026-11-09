@@ -76,7 +76,7 @@ test('SDP is immutable and terminal reports are exactly idempotent', function ()
     $endpoint = "/api/v1/transfers/{$transfer['id']}/webrtc/sessions/{$session['id']}";
     $headers = ['X-Filebeam-Session-Token' => $session['token']];
     $this->putJson($endpoint.'/offer', ['description' => ['type' => 'offer', 'sdp' => 'v=0']], $headers)->assertNoContent();
-    $this->putJson($endpoint.'/offer', ['description' => ['type' => 'offer', 'sdp' => 'v=1']], $headers)->assertConflict();
+    $this->putJson($endpoint.'/offer', ['description' => ['type' => 'offer', 'sdp' => 'v=1']], $headers)->assertUnprocessable();
     $this->putJson($endpoint.'/offer', ['description' => ['type' => 'offer', 'sdp' => str_repeat('a', 70_000)]], $headers)->assertUnprocessable();
     $this->patchJson($endpoint, ['status' => 'completed', 'progress' => 100], $headers)->assertNoContent();
     $this->patchJson($endpoint, ['status' => 'completed', 'progress' => 100], $headers)->assertNoContent();
@@ -95,6 +95,17 @@ test('signaling preserves SDP line endings byte for byte in both directions', fu
     $this->getJson($endpoint, $sender)->assertOk()->assertJsonPath('data.sessions.0.offer.sdp', $sdp);
     $this->putJson("{$endpoint}/{$session['id']}/answer", ['description' => ['type' => 'answer', 'sdp' => $sdp]], $sender)->assertNoContent();
     $this->getJson("{$endpoint}/{$session['id']}", $receiver)->assertOk()->assertJsonPath('data.answer.sdp', $sdp);
+});
+
+test('public WebRTC signaling rejects arbitrary metadata text while retaining SDP extensions', function (): void {
+    $transfer = reserveWebRtc();
+    publishWebRtc($transfer);
+    $session = registerWebRtc($transfer);
+    $endpoint = "/api/v1/transfers/{$transfer['id']}/webrtc/sessions/{$session['id']}/offer";
+    $headers = ['X-Filebeam-Session-Token' => $session['token']];
+
+    $this->putJson($endpoint, ['description' => ['type' => 'offer', 'sdp' => "v=0\r\na=ice-ufrag:browser-compatible\r\n"]], $headers)->assertNoContent();
+    $this->putJson($endpoint, ['description' => ['type' => 'offer', 'sdp' => "v=0\r\na=encrypted-manifest:canary\r\n"]], $headers)->assertUnprocessable();
 });
 
 test('burn notes have one durable claimant and consumption requires its session token', function (): void {

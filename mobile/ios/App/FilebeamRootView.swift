@@ -12,6 +12,7 @@ struct FilebeamRootView: View {
         TabView(selection: $model.selectedTab) {
             SendComposerView(model: model, importSources: importSources).tabItem { Label("Send", systemImage: "arrow.up.circle") }.tag(AppModel.Tab.send)
             ReceiveView(model: model).tabItem { Label("Receive", systemImage: "arrow.down.circle") }.tag(AppModel.Tab.receive)
+            DevicesView(model: model).tabItem { Label("My devices", systemImage: "laptopcomputer.and.iphone") }.tag(AppModel.Tab.devices)
             TransfersView(model: model).tabItem { Label("Transfers", systemImage: "arrow.left.arrow.right") }.tag(AppModel.Tab.transfers)
             InboxView(model: model).tabItem { Label("Inbox", systemImage: "tray") }.tag(AppModel.Tab.inbox)
             SettingsView(model: model).tabItem { Label("Settings", systemImage: "gearshape") }.tag(AppModel.Tab.settings)
@@ -20,6 +21,7 @@ struct FilebeamRootView: View {
         .task {
             await model.load()
             model.pollLiveJobs()
+            if scenePhase == .active { (model.service as? NativeFilebeamService)?.startDeviceReceiverLoop() }
             if let paths = try? AppPaths(), let group = paths.group {
                 await model.processPendingSharedDrafts(root: group, importer: importSources)
             }
@@ -34,7 +36,23 @@ struct FilebeamRootView: View {
         }
         .onDisappear { draftSaveTask?.cancel() }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .background { InboxBackgroundReceiving.schedule() }
+            if phase == .active {
+                (model.service as? NativeFilebeamService)?.startDeviceReceiverLoop()
+            } else {
+                (model.service as? NativeFilebeamService)?.stopDeviceReceiverLoop()
+            }
+            if phase == .background {
+                InboxBackgroundReceiving.schedule()
+                if let native = model.service as? NativeFilebeamService {
+                    let task = UIApplication.shared.beginBackgroundTask(withName: "device-peer-checkpoint") {
+                        native.expireDeviceJobs()
+                    }
+                    native.expireDeviceJobs()
+                    DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 5) {
+                        UIApplication.shared.endBackgroundTask(task)
+                    }
+                }
+            }
         }
         .task(id: model.session?.id) {
             while !Task.isCancelled && model.session != nil {

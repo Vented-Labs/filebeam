@@ -1,6 +1,7 @@
 mod app;
 mod clipboard;
 mod config;
+mod daemon;
 mod inline;
 mod input;
 mod output;
@@ -12,7 +13,17 @@ mod tui;
 mod update;
 mod uploads;
 
-use std::{env, io::IsTerminal, path::PathBuf, process::Command as ProcessCommand};
+use std::{
+    env,
+    io::{IsTerminal, Write},
+    path::PathBuf,
+    process::Command as ProcessCommand,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::{Duration, Instant},
+};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
@@ -69,16 +80,56 @@ enum Command {
         #[command(subcommand)]
         command: HistoryCommand,
     },
-    /// Encrypt and deliver files to an account on the selected instance.
+    /// Send files to a registered device through the local daemon.
     To {
-        #[arg(value_parser = directed_username)]
+        #[arg(value_parser = device_or_directed_username)]
         recipient: String,
         #[arg(required = true)]
         files: Vec<PathBuf>,
+        /// Receiver destination grant alias or UUID. Defaults to dropzone.
+        #[arg(long)]
+        into: Option<String>,
+        /// Wait for a verified receiver receipt instead of returning once queued.
+        #[arg(long, conflicts_with = "detach")]
+        wait: bool,
+        /// Return after the daemon has prepared the durable local snapshot.
+        #[arg(long, conflicts_with = "wait")]
+        detach: bool,
+        /// Stop waiting after this many seconds without cancelling the durable job.
+        #[arg(long, requires = "wait", value_parser = clap::value_parser!(u64).range(1..))]
+        wait_timeout: Option<u64>,
+        /// Print the queued job as JSON.
+        #[arg(long)]
+        json: bool,
         #[arg(long, conflicts_with = "individual")]
         zip: bool,
         #[arg(long, conflicts_with = "zip")]
         individual: bool,
+    },
+    /// Inspect or control the local daemon-backed device receiver.
+    Receive {
+        #[command(subcommand)]
+        command: ReceiveCommand,
+    },
+    /// Inspect or stop the local Filebeam daemon.
+    Service {
+        #[command(subcommand)]
+        command: ServiceCommand,
+    },
+    /// Manage local receiver-owned destination grants.
+    Destinations {
+        #[command(subcommand)]
+        command: DestinationCommand,
+    },
+    /// Inspect or control daemon-owned device jobs.
+    Jobs {
+        #[command(subcommand)]
+        command: DeviceJobsCommand,
+    },
+    /// List, verify, and manage registered devices.
+    Devices {
+        #[command(subcommand)]
+        command: DevicesCommand,
     },
     /// Manage mutual friends and your own incoming permissions.
     Contacts {
@@ -192,6 +243,76 @@ enum NoteCommand {
         link: String,
         #[arg(long)]
         password: bool,
+        #[arg(long)]
+        password_file: Option<PathBuf>,
+        #[arg(long)]
+        password_stdin: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ReceiveCommand {
+    Status,
+    Pause,
+    Enable,
+}
+
+#[derive(Subcommand)]
+enum ServiceCommand {
+    Status,
+    /// Install a daemon only from this build's signed release catalog.
+    Enable,
+    /// Stop the daemon after it has persisted its local control state.
+    Stop,
+}
+
+#[derive(Subcommand)]
+enum DestinationCommand {
+    List,
+    /// Create a local destination grant. Custom aliases ask before receiving by default.
+    Add {
+        alias: String,
+        path: PathBuf,
+        /// Permit unattended receives after the shared receiver runtime authorizes a trusted sender.
+        #[arg(long)]
+        auto_approve: bool,
+    },
+    Revoke {
+        alias_or_id: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum DeviceJobsCommand {
+    List,
+    Show { id: String },
+    Wait { id: String },
+    Pause { id: String },
+    Resume { id: String },
+    Cancel { id: String },
+}
+
+#[derive(Subcommand)]
+enum DevicesCommand {
+    List,
+    /// Register this CLI profile as a device and provision the local daemon after approval.
+    Add {
+        /// Device name. Required when standard input is not a terminal.
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Confirm an active peer's full fingerprint after comparing it out of band.
+    Pair {
+        target: String,
+        #[arg(long)]
+        fingerprint: String,
+    },
+    Rename {
+        id: String,
+        name: String,
+    },
+    Revoke {
+        id: String,
         #[arg(long)]
         password_file: Option<PathBuf>,
         #[arg(long)]
@@ -384,6 +505,137 @@ fn directed_username(value: &str) -> std::result::Result<String, String> {
         .map_err(|error| error.to_string())
 }
 
+fn device_or_directed_username(value: &str) -> std::result::Result<String, String> {
+    if value.starts_with('@') {
+        directed_username(value).map(|username| format!("@{username}"))
+    } else {
+        if value.trim().is_empty() || value.len() > 80 || value.contains(['/', '\\', '\0']) {
+            Err("device destinations must be a registered device ID or display name".into())
+        } else {
+            Ok(value.into())
+        }
+    }
+}
+
+fn resolve_device(config: &config::Config, target: &str) -> Result<daemon::Device> {
+    resolve_device_from(daemon::devices(config)?, target)
+}
+
+fn resolve_device_from(devices: Vec<daemon::Device>, target: &str) -> Result<daemon::Device> {
+    let matches = devices
+        .into_iter()
+        .filter(|device| device.id == target || device.display_name == target)
+        .collect::<Vec<_>>();
+    match matches.as_slice() {
+        [device] if device.status == "active" => Ok(daemon::Device {
+            id: device.id.clone(),
+            display_name: device.display_name.clone(),
+            key_version: device.key_version,
+            status: device.status.clone(),
+            fingerprint: device.fingerprint.clone(),
+        }),
+        [_] => anyhow::bail!("device is not active"),
+        [] => anyhow::bail!("registered device was not found"),
+        _ => anyhow::bail!("device display name is ambiguous; use its immutable device ID"),
+    }
+}
+
+fn normalize_fingerprint(value: &str) -> Result<String> {
+    let value = value
+        .bytes()
+        .filter(u8::is_ascii_hexdigit)
+        .map(char::from)
+        .collect::<String>()
+        .to_ascii_lowercase();
+    if value.len() != 64 {
+        anyhow::bail!("device fingerprint must contain 64 hexadecimal characters");
+    }
+    Ok(value)
+}
+
+fn confirm_fingerprint(fingerprint: &str) -> Result<()> {
+    if !std::io::stdin().is_terminal() {
+        anyhow::bail!("peer verification requires an interactive terminal");
+    }
+    eprint!("Type the full verified fingerprint to pair: ");
+    std::io::stderr().flush()?;
+    let mut confirmation = String::new();
+    std::io::stdin().read_line(&mut confirmation)?;
+    if normalize_fingerprint(confirmation.trim())? != fingerprint {
+        anyhow::bail!("fingerprint confirmation did not match");
+    }
+    Ok(())
+}
+
+fn device_name(value: Option<String>) -> Result<String> {
+    if let Some(value) = value {
+        anyhow::ensure!(!value.trim().is_empty(), "device name must not be empty");
+        return Ok(value);
+    }
+    if !std::io::stdin().is_terminal() {
+        anyhow::bail!("devices add requires --name when standard input is not a terminal");
+    }
+    eprint!("Device name: ");
+    std::io::stderr().flush()?;
+    let mut value = String::new();
+    std::io::stdin().read_line(&mut value)?;
+    let value = value.trim();
+    anyhow::ensure!(!value.is_empty(), "device name must not be empty");
+    Ok(value.into())
+}
+
+fn job_by_id(config: &config::Config, id: &str) -> Result<daemon::Job> {
+    daemon::jobs(config)?
+        .into_iter()
+        .find(|job| job.id == id)
+        .context("daemon job disappeared")
+}
+
+fn wait_for_prepared(config: &config::Config, id: &str, interrupted: &AtomicBool) -> Result<()> {
+    loop {
+        if interrupted.load(Ordering::Relaxed) {
+            anyhow::bail!("wait interrupted; device job remains queued")
+        }
+        let job = job_by_id(config, id)?;
+        if job.prepared {
+            return Ok(());
+        }
+        match job.state.as_str() {
+            "cancelled" => anyhow::bail!("device job was cancelled"),
+            "failed" => anyhow::bail!("device job failed before its durable snapshot was prepared"),
+            _ => std::thread::sleep(std::time::Duration::from_millis(250)),
+        }
+    }
+}
+
+fn wait_for_delivery(
+    config: &config::Config,
+    id: &str,
+    plain: bool,
+    timeout: Option<Duration>,
+    interrupted: &AtomicBool,
+) -> Result<()> {
+    let deadline = timeout.map(|timeout| Instant::now() + timeout);
+    loop {
+        if interrupted.load(Ordering::Relaxed) {
+            anyhow::bail!("wait interrupted; device job remains queued")
+        }
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            anyhow::bail!("timed out waiting; device job remains queued")
+        }
+        let job = job_by_id(config, id)?;
+        match job.state.as_str() {
+            "delivered" => {
+                output::result("Verified receiver receipt persisted.", plain)?;
+                return Ok(());
+            }
+            "cancelled" => anyhow::bail!("device job was cancelled"),
+            "failed" => anyhow::bail!("device job failed"),
+            _ => std::thread::sleep(std::time::Duration::from_millis(250)),
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum Transport {
     Http,
@@ -450,46 +702,226 @@ fn main() -> Result<()> {
         Some(Command::To {
             recipient,
             files,
+            into,
+            wait,
+            detach: _,
+            wait_timeout,
+            json,
             zip,
             individual,
         }) => {
-            let client = services::client(&config, &instance)?;
-            let target = client.account().recipient(&recipient)?;
-            let options = protocol::UploadOptions {
-                authentication: protocol::UploadAuthentication::SessionCookie(
-                    client.cookie_context()?,
-                ),
-                recipient: Some(protocol::UploadRecipient {
-                    username: target.username.clone(),
-                    user_id: target.id,
-                    account_key_bundle_id: target.account_key_bundle_id,
-                    public_key: target.public_key,
-                }),
-                ..Default::default()
-            };
-            let mode = if zip {
-                uploads::DirectoryMode::Zip
-            } else if individual {
-                uploads::DirectoryMode::Individual
-            } else if cli.plain || !std::io::stdin().is_terminal() {
-                uploads::DirectoryMode::RequireFlag
+            if recipient.starts_with('@') {
+                let recipient = recipient.trim_start_matches('@');
+                let client = services::client(&config, &instance)?;
+                let target = client.account().recipient(&recipient)?;
+                let options = protocol::UploadOptions {
+                    authentication: protocol::UploadAuthentication::SessionCookie(
+                        client.cookie_context()?,
+                    ),
+                    recipient: Some(protocol::UploadRecipient {
+                        username: target.username.clone(),
+                        user_id: target.id,
+                        account_key_bundle_id: target.account_key_bundle_id,
+                        public_key: target.public_key,
+                    }),
+                    ..Default::default()
+                };
+                let mode = if zip {
+                    uploads::DirectoryMode::Zip
+                } else if individual {
+                    uploads::DirectoryMode::Individual
+                } else if cli.plain || !std::io::stdin().is_terminal() {
+                    uploads::DirectoryMode::RequireFlag
+                } else {
+                    uploads::DirectoryMode::Ask
+                };
+                let receipts = inline::run(
+                    &config,
+                    &instance,
+                    app::Request::Upload(files, mode, options),
+                    cli.plain,
+                    cli.accept_peer_address_exposure,
+                )?;
+                for receipt in receipts {
+                    output::result(&format!("@{}\t{receipt}", target.username), cli.plain)?;
+                }
             } else {
-                uploads::DirectoryMode::Ask
-            };
-            let receipts = inline::run(
-                &config,
-                &instance,
-                app::Request::Upload(files, mode, options),
-                cli.plain,
-                cli.accept_peer_address_exposure,
-            )?;
-            for receipt in receipts {
-                output::result(&format!("@{}\t{receipt}", target.username), cli.plain)?;
+                if zip || individual {
+                    anyhow::bail!("--zip and --individual apply only to @account delivery");
+                }
+                let device = resolve_device(&config, &recipient)?;
+                let grant_id = into.unwrap_or_else(|| "dropzone".into());
+                let job = daemon::enqueue_job(&config, &device.id, &grant_id, files)?;
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "id": job.id,
+                            "target": job.target,
+                            "destination": job.grant_id,
+                            "state": job.state,
+                            "prepared": job.prepared,
+                        })
+                    );
+                } else {
+                    output::result(&daemon::job_line(&job), cli.plain)?;
+                }
+                let interrupted = Arc::new(AtomicBool::new(false));
+                let _interrupt = terminal::watch_interrupt(interrupted.clone())?;
+                if !wait {
+                    wait_for_prepared(&config, &job.id, &interrupted)?;
+                    std::process::exit(10);
+                }
+                wait_for_delivery(
+                    &config,
+                    &job.id,
+                    cli.plain,
+                    wait_timeout.map(Duration::from_secs),
+                    &interrupted,
+                )?;
             }
         }
         Some(Command::Contacts { command }) => {
             services::contacts(&config, &instance, command, cli.plain)?
         }
+        Some(Command::Receive { command }) => {
+            let state = match command {
+                ReceiveCommand::Status => daemon::status(&config)?,
+                ReceiveCommand::Pause => daemon::set_receive_enabled(&config, false)?,
+                ReceiveCommand::Enable => daemon::set_receive_enabled(&config, true)?,
+            };
+            output::result(daemon::status_line(&state), cli.plain)?;
+        }
+        Some(Command::Service { command }) => match command {
+            ServiceCommand::Status => {
+                output::result(daemon::status_line(&daemon::status(&config)?), cli.plain)?
+            }
+            ServiceCommand::Stop => {
+                daemon::shutdown(&config)?;
+                output::result("Daemon stopped.", cli.plain)?;
+            }
+            ServiceCommand::Enable => {
+                let launcher = update::install_daemon_component(&config)?;
+                output::result(
+                    &format!("Verified daemon component installed and started at {launcher}."),
+                    cli.plain,
+                )?;
+            }
+        },
+        Some(Command::Destinations { command }) => {
+            let grants = match command {
+                DestinationCommand::List => daemon::destinations(&config)?,
+                DestinationCommand::Add {
+                    alias,
+                    path,
+                    auto_approve,
+                } => daemon::add_destination(&config, &alias, &path, auto_approve)?,
+                DestinationCommand::Revoke { alias_or_id } => {
+                    daemon::revoke_destination(&config, &alias_or_id)?
+                }
+            };
+            for grant in grants {
+                output::result(&daemon::destination_line(&grant), cli.plain)?;
+            }
+        }
+        Some(Command::Jobs { command }) => {
+            let jobs = match command {
+                DeviceJobsCommand::List => daemon::jobs(&config)?,
+                DeviceJobsCommand::Show { id } => daemon::jobs(&config)?
+                    .into_iter()
+                    .filter(|job| job.id == id)
+                    .collect(),
+                DeviceJobsCommand::Wait { id } => {
+                    let interrupted = Arc::new(AtomicBool::new(false));
+                    let _interrupt = terminal::watch_interrupt(interrupted.clone())?;
+                    wait_for_delivery(&config, &id, cli.plain, None, &interrupted)?;
+                    Vec::new()
+                }
+                DeviceJobsCommand::Pause { id } => daemon::control_job(&config, &id, "paused")?,
+                DeviceJobsCommand::Resume { id } => {
+                    daemon::control_job(&config, &id, "awaiting_peer_configuration")?
+                }
+                DeviceJobsCommand::Cancel { id } => daemon::control_job(&config, &id, "cancelled")?,
+            };
+            for job in jobs {
+                output::result(&daemon::job_line(&job), cli.plain)?;
+            }
+        }
+        Some(Command::Devices { command }) => match command {
+            DevicesCommand::List => {
+                for device in daemon::devices(&config)? {
+                    output::result(&daemon::device_line(&device), cli.plain)?;
+                }
+            }
+            DevicesCommand::Add { name } => {
+                let name = device_name(name)?;
+                daemon::status(&config).context(
+                    "start the local Filebeam daemon before adding a device; provisioning never writes device keys to an unverified service",
+                )?;
+                match services::begin_or_resume_device_add(&config, &instance, &name)? {
+                    services::DeviceAdd::Pending { id, fingerprint } => output::result(
+                        &format!(
+                            "Enrollment pending approval. Device: {id}\nFingerprint: {fingerprint}\nApprove it on a verified device, then rerun `beam devices add`."
+                        ),
+                        cli.plain,
+                    )?,
+                    services::DeviceAdd::Provision(provision) => {
+                        let id = provision.device_id.clone();
+                        daemon::provision_device(&config, provision)?;
+                        services::finish_device_add(&config, &instance)?;
+                        output::result(
+                            &format!("Device {id} registered and provisioned."),
+                            cli.plain,
+                        )?;
+                    }
+                }
+            }
+            DevicesCommand::Pair {
+                target,
+                fingerprint,
+            } => {
+                let device = resolve_device(&config, &target)?;
+                let fingerprint = normalize_fingerprint(&fingerprint)?;
+                if device.fingerprint != fingerprint {
+                    anyhow::bail!(
+                        "the supplied fingerprint does not match the authenticated device registry"
+                    );
+                }
+                confirm_fingerprint(&fingerprint)?;
+                daemon::confirm_peer(
+                    &config,
+                    &device.id,
+                    device.key_version,
+                    &fingerprint,
+                    &uuid::Uuid::new_v4().simple().to_string(),
+                )?;
+                output::result("Peer verification persisted.", cli.plain)?;
+            }
+            DevicesCommand::Rename { id, name } => {
+                let device = services::client(&config, &instance)?
+                    .devices()
+                    .account_device_rename(&id, &name)?;
+                output::result(
+                    &format!("{}\t{}", device.display_name, device.id),
+                    cli.plain,
+                )?;
+            }
+            DevicesCommand::Revoke {
+                id,
+                password_file,
+                password_stdin,
+            } => {
+                let password =
+                    services::secret(password_file.as_deref(), password_stdin, "Account password")?;
+                let (device, _) = services::client(&config, &instance)?
+                    .devices()
+                    .account_device_revoke(&id, &password)?;
+                output::result(
+                    &format!("{}\t{}", device.display_name, device.status),
+                    cli.plain,
+                )?;
+            }
+        },
         Some(Command::Up {
             files,
             transport,
@@ -1015,7 +1447,10 @@ fn bootstrap_home() -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cli, Command, Custody, InboxCommand, NoteCommand, Transport, configured_instance};
+    use super::{
+        Cli, Command, Custody, DevicesCommand, InboxCommand, NoteCommand, ReceiveCommand,
+        ServiceCommand, Transport, configured_instance, resolve_device_from,
+    };
     use clap::Parser;
 
     #[test]
@@ -1048,12 +1483,41 @@ mod tests {
     }
 
     #[test]
+    fn daemon_control_commands_are_parsed_without_changing_public_transfers() {
+        let cli = Cli::try_parse_from(["beam", "receive", "enable"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Command::Receive {
+                command: ReceiveCommand::Enable
+            })
+        ));
+        let cli = Cli::try_parse_from(["beam", "service", "stop"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Command::Service {
+                command: ServiceCommand::Stop
+            })
+        ));
+    }
+
+    #[test]
+    fn device_add_requires_an_explicit_name_for_noninteractive_use() {
+        let cli = Cli::try_parse_from(["beam", "devices", "add", "--name", "Office PC"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Command::Devices {
+                command: DevicesCommand::Add { name: Some(name) }
+            }) if name == "Office PC"
+        ));
+    }
+
+    #[test]
     fn account_destinations_and_contact_overrides_are_unambiguous() {
         let cli = Cli::try_parse_from(["beam", "to", "@alice", "report.pdf"]).unwrap();
         assert!(
-            matches!(cli.command, Some(Command::To { recipient, files, .. }) if recipient == "alice" && files == vec![std::path::PathBuf::from("report.pdf")])
+            matches!(cli.command, Some(Command::To { recipient, files, .. }) if recipient == "@alice" && files == vec![std::path::PathBuf::from("report.pdf")])
         );
-        assert!(Cli::try_parse_from(["beam", "to", "alice", "report.pdf"]).is_err());
+        assert!(Cli::try_parse_from(["beam", "to", "alice", "report.pdf"]).is_ok());
         assert!(Cli::try_parse_from(["beam", "to", "@alice@remote", "report.pdf"]).is_err());
         assert!(Cli::try_parse_from(["beam", "to", "@alice"]).is_err());
         assert!(
@@ -1070,6 +1534,73 @@ mod tests {
             .is_ok()
         );
         assert!(Cli::try_parse_from(["beam", "inbox", "watch", "--once"]).is_ok());
+    }
+
+    #[test]
+    fn device_destinations_are_distinct_from_directed_account_destinations() {
+        assert!(matches!(
+            Cli::try_parse_from(["beam", "to", "Laptop", "report.pdf"]).unwrap().command,
+            Some(Command::To { recipient, .. }) if recipient == "Laptop"
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["beam", "to", "01ARZ3NDEKTSV4RRFFQ69G5FAV", "report.pdf"]).unwrap().command,
+            Some(Command::To { recipient, .. }) if recipient == "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+        ));
+        assert!(Cli::try_parse_from(["beam", "to", "", "report.pdf"]).is_err());
+        assert!(Cli::try_parse_from(["beam", "to", "Laptop/other", "report.pdf"]).is_err());
+    }
+
+    #[test]
+    fn device_wait_options_require_verified_receipt_waiting() {
+        assert!(
+            Cli::try_parse_from([
+                "beam",
+                "to",
+                "Laptop",
+                "report.pdf",
+                "--wait",
+                "--wait-timeout",
+                "30",
+                "--json",
+            ])
+            .is_ok()
+        );
+        assert!(
+            Cli::try_parse_from(["beam", "to", "Laptop", "report.pdf", "--wait-timeout", "30",])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn device_resolution_rejects_ambiguous_names_in_the_active_daemon_context() {
+        let device = |id: &str, name: &str, status: &str| crate::daemon::Device {
+            id: id.into(),
+            display_name: name.into(),
+            key_version: 1,
+            status: status.into(),
+            fingerprint: "a".repeat(64),
+        };
+        let resolved =
+            resolve_device_from(vec![device("device-a", "Laptop", "active")], "Laptop").unwrap();
+        assert_eq!(resolved.id, "device-a");
+        assert!(
+            resolve_device_from(
+                vec![
+                    device("device-a", "Laptop", "active"),
+                    device("device-b", "Laptop", "active"),
+                ],
+                "Laptop",
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("ambiguous")
+        );
+        assert!(
+            resolve_device_from(vec![device("device-a", "Laptop", "revoked")], "device-a")
+                .unwrap_err()
+                .to_string()
+                .contains("not active")
+        );
     }
 
     #[test]

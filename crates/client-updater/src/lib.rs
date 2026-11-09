@@ -1,5 +1,6 @@
 //! Signed, bounded release staging shared by `beam` and Filebeam Desktop.
 use std::{
+    collections::BTreeSet,
     env, fs,
     io::{Cursor, Read, Write},
     path::{Component, Path, PathBuf},
@@ -133,12 +134,266 @@ pub enum Activation {
     RelaunchGui,
 }
 
+/// Coordinates an installed daemon with its supervisor during a component switch.
+/// Implementations must leave profile data intact when returning an error.
+pub trait DaemonService {
+    fn drain(&self, _current: &Path) -> Result<()> {
+        Ok(())
+    }
+    fn start(&self, _launcher: &Path) -> Result<()> {
+        Ok(())
+    }
+    fn health(&self, candidate: &Path) -> Result<()>;
+    fn rollback(&self, _restored_launcher: Option<&Path>) -> Result<()> {
+        Ok(())
+    }
+}
+
+/// Result of removing one product's claim on a shared daemon component.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DaemonRemoval {
+    pub retained_for_other_owners: bool,
+}
+
+/// Stable per-profile service suffix. The default profile keeps the historical
+/// name so an existing user service is migrated in place rather than duplicated.
+pub fn daemon_service_name(home: &Path) -> Result<String> {
+    if !home.is_absolute() {
+        bail!("daemon profile home must be absolute");
+    }
+    let normalized = home.canonicalize().unwrap_or_else(|_| home.to_path_buf());
+    if let Some(default) = env::var_os("HOME") {
+        let default = PathBuf::from(default).join(".filebeam");
+        let default = default.canonicalize().unwrap_or(default);
+        if normalized == default {
+            return Ok("filebeam-daemon".into());
+        }
+    }
+    let digest = hex::encode(Sha256::digest(normalized.to_string_lossy().as_bytes()));
+    Ok(format!("filebeam-daemon-{}", &digest[..12]))
+}
+
+struct HealthOnly<H>(H);
+impl<H: Fn(&Path) -> Result<()>> DaemonService for HealthOnly<H> {
+    fn health(&self, candidate: &Path) -> Result<()> {
+        (self.0)(candidate)
+    }
+}
+
 pub struct Updater {
     options: Options,
 }
 impl Updater {
     pub fn new(options: Options) -> Self {
         Self { options }
+    }
+    /// Installs a daemon only from the component asset bound into this product's
+    /// existing signed catalog. Callers provide a local health check; a failed
+    /// check leaves the prior launcher untouched.
+    pub fn install_daemon_component<F: Fetcher, H: Fn(&Path) -> Result<()>>(
+        &self,
+        fetcher: &F,
+        owner: &str,
+        ipc: u32,
+        storage_schema: u32,
+        health: H,
+    ) -> Result<String> {
+        self.install_daemon_component_with(fetcher, owner, ipc, storage_schema, &HealthOnly(health))
+    }
+    /// Installs or upgrades the catalog-bound shared daemon. The service hooks
+    /// provide the drain/start/rollback boundary for CLI and desktop supervisors.
+    pub fn install_daemon_component_with<F: Fetcher, S: DaemonService>(
+        &self,
+        fetcher: &F,
+        owner: &str,
+        ipc: u32,
+        storage_schema: u32,
+        service: &S,
+    ) -> Result<String> {
+        if owner.is_empty()
+            || !owner
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        {
+            bail!("invalid daemon component owner");
+        }
+        if cfg!(windows) {
+            bail!("Windows daemon installation requires runtime-reported service capabilities");
+        }
+        let _lease = self.lease()?;
+        let key = key(&self.options.public_key)?;
+        let catalog_url = Url::parse(&format!(
+            "{ORIGIN}{}/index.json",
+            self.options.product.catalog()
+        ))?;
+        let catalog = verify_catalog(
+            &fetcher.get(&catalog_url, MAX_CATALOG_BYTES)?,
+            &key,
+            self.options.product,
+        )?;
+        let mut state = self.load_state()?;
+        if catalog.generation < state.entry(self.options.product).generation {
+            bail!("release catalog generation rolled back");
+        }
+        let current = Version::parse(&self.options.version)?;
+        let component = catalog
+            .releases
+            .into_iter()
+            .filter(|release| !release.withdrawn)
+            .filter_map(|release| {
+                Version::parse(&release.version)
+                    .ok()
+                    .map(|version| (version, release.daemon))
+            })
+            .filter(|(version, _)| version >= &current)
+            .filter_map(|(_, component)| component)
+            .filter(|component| {
+                component.min_ipc <= ipc
+                    && ipc <= component.max_ipc
+                    && component.storage_schema == storage_schema
+                    && component.asset.os == os().unwrap_or("")
+                    && component.asset.architecture == arch().unwrap_or("")
+            })
+            .max_by(|left, right| {
+                Version::parse(&left.version)
+                    .unwrap()
+                    .cmp(&Version::parse(&right.version).unwrap())
+            })
+            .context("catalog has no compatible daemon component")?;
+        let asset = component.asset.clone();
+        let url = catalog_url.join(&asset.path)?;
+        validate_origin(&url, self.options.product)?;
+        let bytes = fetcher.get(&url, asset.size)?;
+        if bytes.len() as u64 != asset.size
+            || hex::encode(Sha256::digest(&bytes)) != asset.sha256.to_ascii_lowercase()
+        {
+            bail!("daemon archive checksum or size does not match the signed catalog");
+        }
+        let binary = extract_daemon_binary(&bytes)?;
+        let root = self.options.home.join("runtime/daemon");
+        ensure_component_root(&root)?;
+        let version = Version::parse(&component.version)?;
+        let component_version = version.to_string();
+        let mut record = load_component_record(&root)?;
+        if record
+            .current
+            .as_deref()
+            .and_then(|current| Version::parse(current).ok())
+            .is_some_and(|current| current > version)
+        {
+            bail!("signed daemon component would downgrade the installed version");
+        }
+        let target = root.join("versions").join(version.to_string());
+        if fs::symlink_metadata(&target)
+            .map(|metadata| metadata.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            bail!("daemon component version directory must not be a symlink");
+        }
+        if !target.join(daemon_executable_name()).exists() {
+            let candidate = root
+                .join("versions")
+                .join(format!(".{}-{}", version, Uuid::new_v4()));
+            fs::create_dir(&candidate)?;
+            atomic_write(
+                &candidate.join(daemon_executable_name()),
+                &binary,
+                Product::Cli,
+            )?;
+            fs::rename(candidate, &target)?;
+        }
+        let candidate_binary = target.join(daemon_executable_name());
+        if fs::symlink_metadata(&candidate_binary)
+            .map(|metadata| metadata.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            bail!("daemon component executable must not be a symlink");
+        }
+        service.health(&candidate_binary)?;
+        let launcher = root.join("filebeamd");
+        let previous_launcher = fs::read(&launcher).ok();
+        let switching = record.current.as_deref() != Some(component_version.as_str());
+        if switching && launcher.exists() {
+            service.drain(&launcher)?;
+        }
+        let temporary = root.join(format!(".filebeamd-{}", Uuid::new_v4()));
+        atomic_write(
+            &temporary,
+            format!(
+                "#!/usr/bin/env sh\nexec \"{}\" \"$@\"\n",
+                candidate_binary.display()
+            )
+            .as_bytes(),
+            Product::Cli,
+        )?;
+        fs::rename(temporary, &launcher)?;
+        if let Err(error) = service
+            .start(&launcher)
+            .and_then(|_| service.health(&candidate_binary))
+        {
+            if let Some(previous) = previous_launcher {
+                atomic_write(&launcher, &previous, Product::Cli)?;
+                let _ = service.rollback(Some(&launcher));
+            } else {
+                let _ = fs::remove_file(&launcher);
+                let _ = service.rollback(None);
+            }
+            return Err(
+                error.context("daemon component activation failed; restored prior launcher")
+            );
+        }
+        record.current = Some(component_version);
+        record.owners.insert(owner.into());
+        save_component_record(&root, &record)?;
+        state.entry_mut(self.options.product).generation = catalog.generation;
+        self.save_state(&state)?;
+        Ok(launcher.to_string_lossy().into_owned())
+    }
+    pub fn install_daemon_component_http<H: Fn(&Path) -> Result<()>>(
+        &self,
+        owner: &str,
+        ipc: u32,
+        storage_schema: u32,
+        health: H,
+    ) -> Result<String> {
+        self.install_daemon_component(
+            &HttpFetcher::new(Duration::from_secs(30)),
+            owner,
+            ipc,
+            storage_schema,
+            health,
+        )
+    }
+    /// Drops one product's claim without deleting profile data or versioned binaries.
+    /// The callback stops the supervisor only when this was the final owner.
+    pub fn remove_daemon_component<F: FnOnce() -> Result<()>>(
+        &self,
+        owner: &str,
+        stop_if_last: F,
+    ) -> Result<DaemonRemoval> {
+        if owner.is_empty()
+            || !owner
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        {
+            bail!("invalid daemon component owner");
+        }
+        let _lease = self.lease()?;
+        let root = self.options.home.join("runtime/daemon");
+        let mut record = load_component_record(&root)?;
+        record.owners.remove(owner);
+        if !record.owners.is_empty() {
+            save_component_record(&root, &record)?;
+            return Ok(DaemonRemoval {
+                retained_for_other_owners: true,
+            });
+        }
+        stop_if_last()?;
+        record.current = None;
+        save_component_record(&root, &record)?;
+        Ok(DaemonRemoval {
+            retained_for_other_owners: false,
+        })
     }
     /// Starts a copied, detached worker. No network request is made on the launch path.
     pub fn launch(&self, auto_update: bool) -> Result<bool> {
@@ -620,6 +875,93 @@ impl Drop for Lease {
     }
 }
 
+#[derive(Default)]
+struct ComponentRecord {
+    schema: u64,
+    current: Option<String>,
+    owners: BTreeSet<String>,
+}
+
+fn ensure_component_root(root: &Path) -> Result<()> {
+    fs::create_dir_all(root)?;
+    if fs::symlink_metadata(root)?.file_type().is_symlink() {
+        bail!("daemon component root must not be a symlink");
+    }
+    let versions = root.join("versions");
+    fs::create_dir_all(&versions)?;
+    if fs::symlink_metadata(&versions)?.file_type().is_symlink() {
+        bail!("daemon component versions directory must not be a symlink");
+    }
+    Ok(())
+}
+
+fn load_component_record(root: &Path) -> Result<ComponentRecord> {
+    let path = root.join("component.json");
+    let record = match fs::read(path) {
+        Ok(bytes) => {
+            let value: serde_json::Value =
+                serde_json::from_slice(&bytes).context("parse daemon component record")?;
+            let owners = value
+                .get("owners")
+                .and_then(serde_json::Value::as_object)
+                .context("daemon component record owners are invalid")?
+                .iter()
+                .filter_map(|(owner, present)| {
+                    present
+                        .as_bool()
+                        .filter(|present| *present)
+                        .map(|_| owner.clone())
+                })
+                .collect();
+            ComponentRecord {
+                schema: value
+                    .get("schema")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0),
+                current: value
+                    .get("current")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned),
+                owners,
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => ComponentRecord::default(),
+        Err(error) => return Err(error.into()),
+    };
+    if record.schema > 1
+        || record
+            .current
+            .as_deref()
+            .is_some_and(|version| Version::parse(version).is_err())
+        || record.owners.iter().any(|owner| {
+            owner.is_empty()
+                || !owner
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        })
+    {
+        bail!("daemon component record is invalid");
+    }
+    Ok(record)
+}
+
+fn save_component_record(root: &Path, record: &ComponentRecord) -> Result<()> {
+    ensure_component_root(root)?;
+    let owners = record
+        .owners
+        .iter()
+        .map(|owner| (owner.clone(), serde_json::Value::Bool(true)))
+        .collect::<serde_json::Map<_, _>>();
+    atomic_write_raw(
+        &root.join("component.json"),
+        &serde_json::to_vec(&serde_json::json!({
+            "schema": 1,
+            "current": record.current,
+            "owners": owners,
+        }))?,
+    )
+}
+
 #[derive(Deserialize)]
 struct Envelope {
     signed: String,
@@ -641,6 +983,16 @@ struct Release {
     #[serde(default)]
     withdrawn: bool,
     assets: Vec<Asset>,
+    #[serde(default)]
+    daemon: Option<DaemonComponent>,
+}
+#[derive(Clone, Deserialize)]
+struct DaemonComponent {
+    version: String,
+    min_ipc: u32,
+    max_ipc: u32,
+    storage_schema: u32,
+    asset: Asset,
 }
 #[derive(Clone, Deserialize)]
 struct Asset {
@@ -722,7 +1074,40 @@ fn verify_catalog(bytes: &[u8], key: &VerifyingKey, product: Product) -> Result<
             }
         }
     }
+    for release in &c.releases {
+        if let Some(component) = &release.daemon {
+            validate_daemon_component(component, product)?;
+        }
+    }
     Ok(c)
+}
+
+fn validate_daemon_component(component: &DaemonComponent, _product: Product) -> Result<()> {
+    if Version::parse(&component.version).is_err()
+        || component.min_ipc == 0
+        || component.min_ipc > component.max_ipc
+        || component.storage_schema == 0
+        || component.asset.kind != "tar-gz"
+    {
+        bail!("signed catalog daemon component is invalid");
+    }
+    let asset = &component.asset;
+    if asset.os.is_empty()
+        || asset.architecture.is_empty()
+        || asset.size == 0
+        || asset.size > MAX_ARCHIVE_BYTES
+        || !valid_sha256(&asset.sha256)
+        || asset.path.starts_with('/')
+        || asset
+            .path
+            .split('/')
+            .any(|part| matches!(part, "" | "." | ".."))
+        || !asset.path.starts_with("versions/")
+        || !asset.path.ends_with(".tar.gz")
+    {
+        bail!("signed catalog daemon component asset is unsafe");
+    }
+    Ok(())
 }
 fn validate_asset(a: &Asset, p: Product) -> Result<()> {
     let kind_is_supported = if p == Product::Desktop && cfg!(target_os = "macos") {
@@ -831,6 +1216,35 @@ fn extract_binary(bytes: &[u8], kind: &str, p: Product) -> Result<Vec<u8>> {
         }
     }
     found.context("release archive does not contain executable")
+}
+fn extract_daemon_binary(bytes: &[u8]) -> Result<Vec<u8>> {
+    let mut archive = Archive::new(GzDecoder::new(Cursor::new(bytes)));
+    let mut found = None;
+    let mut count = 0;
+    let mut total = 0;
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        let path = entry.path()?.into_owned();
+        count += 1;
+        total += entry.size();
+        if count > MAX_ARCHIVE_ENTRIES || total > MAX_UNPACKED_BYTES {
+            bail!("daemon archive exceeds unpack limits");
+        }
+        if !safe_relative(&path)
+            || !entry.header().entry_type().is_file() && !entry.header().entry_type().is_dir()
+        {
+            bail!("daemon archive contains an unsafe entry");
+        }
+        if path == Path::new(&format!("filebeamd/{}", daemon_executable_name())) {
+            if found.is_some() || !entry.header().entry_type().is_file() || entry.size() == 0 {
+                bail!("daemon archive contains an invalid executable");
+            }
+            let mut binary = Vec::new();
+            entry.read_to_end(&mut binary)?;
+            found = Some(binary);
+        }
+    }
+    found.context("daemon archive does not contain filebeamd/filebeamd")
 }
 fn safe_relative(path: &Path) -> bool {
     !path.is_absolute() && path.components().all(|c| matches!(c, Component::Normal(_)))
@@ -1045,6 +1459,13 @@ fn arch() -> Result<&'static str> {
 fn executable_name(p: Product) -> String {
     format!("{}{}", p.binary(), executable_suffix())
 }
+fn daemon_executable_name() -> &'static str {
+    if cfg!(windows) {
+        "filebeamd.exe"
+    } else {
+        "filebeamd"
+    }
+}
 fn executable_suffix() -> &'static str {
     if cfg!(windows) { ".exe" } else { "" }
 }
@@ -1077,6 +1498,60 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn signed_daemon_component_requires_valid_metadata_and_signature() {
+        let key = SigningKey::from_bytes(&[7; 32]);
+        let payload = serde_json::json!({
+            "schema": 1, "product": "cli", "generation": 1,
+            "published_at": "2025-01-01T00:00:00Z", "expires_at": "2999-01-01T00:00:00Z",
+            "releases": [{"version": "1.2.3", "assets": [], "daemon": {
+                "version": "1.2.3", "min_ipc": 1, "max_ipc": 1, "storage_schema": 1,
+                "asset": {"os": "linux", "architecture": "x86_64", "kind": "tar-gz", "path": "versions/v1.2.3/filebeamd.tar.gz", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "size": 1}
+            }}]
+        }).to_string();
+        assert!(
+            verify_catalog(
+                &envelope(&payload, &key),
+                &key.verifying_key(),
+                Product::Cli
+            )
+            .is_ok()
+        );
+        let macos_desktop = payload
+            .replace("\"product\":\"cli\"", "\"product\":\"desktop\"")
+            .replace("\"os\":\"linux\"", "\"os\":\"macos\"");
+        assert!(
+            verify_catalog(
+                &envelope(&macos_desktop, &key),
+                &key.verifying_key(),
+                Product::Desktop
+            )
+            .is_ok()
+        );
+        let tampered = payload.replace("\"max_ipc\":1", "\"max_ipc\":0");
+        assert!(
+            verify_catalog(
+                &envelope(&tampered, &key),
+                &key.verifying_key(),
+                Product::Cli
+            )
+            .is_err()
+        );
+        let mut forged = envelope(&payload, &key);
+        *forged.last_mut().unwrap() ^= 1;
+        assert!(verify_catalog(&forged, &key.verifying_key(), Product::Cli).is_err());
+    }
+
+    #[test]
+    fn isolated_profiles_receive_distinct_stable_service_names() {
+        let left = Path::new("/tmp/filebeam-profile-a");
+        let right = Path::new("/tmp/filebeam-profile-b");
+        let left_name = daemon_service_name(left).unwrap();
+        assert_eq!(left_name, daemon_service_name(left).unwrap());
+        assert_ne!(left_name, daemon_service_name(right).unwrap());
+        assert!(left_name.starts_with("filebeam-daemon-"));
     }
 
     #[test]
@@ -1448,5 +1923,218 @@ mod tests {
         fs::write(&staged.path, b"tampered").unwrap();
         assert!(updater.activate_staged(|| true).is_err());
         fs::remove_dir_all(fixture).unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    fn daemon_archive() -> Vec<u8> {
+        let encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        let mut archive = tar::Builder::new(encoder);
+        let mut header = tar::Header::new_gnu();
+        header.set_size(6);
+        header.set_mode(0o755);
+        header.set_cksum();
+        archive
+            .append_data(&mut header, "filebeamd/filebeamd", &b"daemon"[..])
+            .unwrap();
+        archive.into_inner().unwrap().finish().unwrap()
+    }
+
+    #[cfg(target_os = "linux")]
+    fn traversal_daemon_archive() -> Vec<u8> {
+        let mut tar = vec![0u8; 512];
+        tar[..9].copy_from_slice(b"../escape");
+        for (range, value) in [(100..108, 0o755), (124..136, 1), (136..148, 0)] {
+            let text = format!("{:0width$o}\0", value, width = range.len() - 1);
+            tar[range].copy_from_slice(text.as_bytes());
+        }
+        tar[148..156].fill(b' ');
+        tar[156] = b'0';
+        tar[257..263].copy_from_slice(b"ustar\0");
+        tar[263..265].copy_from_slice(b"00");
+        let checksum: u32 = tar.iter().map(|byte| u32::from(*byte)).sum();
+        let text = format!("{:06o}\0 ", checksum);
+        tar[148..156].copy_from_slice(text.as_bytes());
+        tar.extend_from_slice(b"x");
+        tar.resize(1024, 0);
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        encoder.write_all(&tar).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    #[cfg(target_os = "linux")]
+    fn daemon_component_fetcher(key: &SigningKey, archive: Vec<u8>) -> FixtureFetcher {
+        let path = "versions/v1.0.0/filebeamd.tar.gz";
+        let payload = serde_json::json!({
+            "schema": 1, "product": "cli", "generation": 1,
+            "published_at": "2026-01-01T00:00:00Z", "expires_at": "2999-01-01T00:00:00Z",
+            "releases": [{"version": "1.0.0", "assets": [], "daemon": {
+                "version": "1.0.0", "min_ipc": 1, "max_ipc": 1, "storage_schema": 1,
+                "asset": {"os": "linux", "architecture": arch().unwrap(), "kind": "tar-gz", "path": path,
+                    "sha256": hex::encode(Sha256::digest(&archive)), "size": archive.len()}
+            }}]
+        });
+        FixtureFetcher {
+            responses: HashMap::from([
+                (
+                    "https://releases.filebeam.io/cli/index.json".into(),
+                    envelope(&payload.to_string(), key),
+                ),
+                (format!("https://releases.filebeam.io/cli/{path}"), archive),
+            ]),
+            calls: AtomicUsize::new(0),
+            gate: Mutex::new(()),
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn signed_daemon_component_keeps_owners_data_and_restart_recovery() {
+        let directory = TestDirectory::new();
+        let signing = SigningKey::from_bytes(&[3; 32]);
+        let updater = Updater::new(Options {
+            home: directory.0.clone(),
+            product: Product::Cli,
+            version: "0.1.0".into(),
+            public_key: STANDARD.encode(signing.verifying_key().to_bytes()),
+            executable: env::current_exe().unwrap(),
+        });
+        let fetcher = daemon_component_fetcher(&signing, daemon_archive());
+        let launcher = updater
+            .install_daemon_component(&fetcher, "cli", 1, 1, |path| {
+                assert_eq!(fs::read(path)?, b"daemon");
+                Ok(())
+            })
+            .unwrap();
+        let fetcher = daemon_component_fetcher(&signing, daemon_archive());
+        updater
+            .install_daemon_component(&fetcher, "desktop", 1, 1, |_| Ok(()))
+            .unwrap();
+        let retained = updater
+            .remove_daemon_component("cli", || panic!("must retain daemon"))
+            .unwrap();
+        assert!(retained.retained_for_other_owners);
+        assert!(Path::new(&launcher).exists());
+        assert!(
+            directory
+                .0
+                .join("runtime/daemon/versions/1.0.0/filebeamd")
+                .exists()
+        );
+        let restarted = Updater::new(Options {
+            home: directory.0.clone(),
+            product: Product::Cli,
+            version: "0.1.0".into(),
+            public_key: STANDARD.encode(signing.verifying_key().to_bytes()),
+            executable: env::current_exe().unwrap(),
+        });
+        assert!(
+            restarted
+                .load_component_record_for_test()
+                .owners
+                .contains("desktop")
+        );
+        let removed = restarted
+            .remove_daemon_component("desktop", || Ok(()))
+            .unwrap();
+        assert!(!removed.retained_for_other_owners);
+        assert!(
+            directory
+                .0
+                .join("runtime/daemon/versions/1.0.0/filebeamd")
+                .exists()
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn signed_daemon_component_rejects_bad_hash_and_archive_traversal() {
+        let signing = SigningKey::from_bytes(&[4; 32]);
+        let directory = TestDirectory::new();
+        let updater = Updater::new(Options {
+            home: directory.0.clone(),
+            product: Product::Cli,
+            version: "0.1.0".into(),
+            public_key: STANDARD.encode(signing.verifying_key().to_bytes()),
+            executable: env::current_exe().unwrap(),
+        });
+        let mut fetcher = daemon_component_fetcher(&signing, daemon_archive());
+        fetcher.responses.insert(
+            "https://releases.filebeam.io/cli/versions/v1.0.0/filebeamd.tar.gz".into(),
+            b"not the catalogued archive".to_vec(),
+        );
+        assert!(
+            updater
+                .install_daemon_component(&fetcher, "cli", 1, 1, |_| Ok(()))
+                .is_err()
+        );
+        assert!(extract_daemon_binary(&traversal_daemon_archive()).is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn failed_daemon_activation_restores_the_previous_launcher() {
+        struct FailingService {
+            health_checks: AtomicUsize,
+            rollbacks: AtomicUsize,
+        }
+        impl DaemonService for FailingService {
+            fn health(&self, _: &Path) -> Result<()> {
+                if self.health_checks.fetch_add(1, Ordering::SeqCst) == 0 {
+                    Ok(())
+                } else {
+                    bail!("new daemon did not become healthy")
+                }
+            }
+            fn rollback(&self, _: Option<&Path>) -> Result<()> {
+                self.rollbacks.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }
+        }
+
+        let directory = TestDirectory::new();
+        let root = directory.0.join("runtime/daemon");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            root.join("component.json"),
+            br#"{"schema":1,"current":"0.9.0","owners":{"cli":true}}"#,
+        )
+        .unwrap();
+        fs::write(root.join("filebeamd"), b"old launcher").unwrap();
+        let signing = SigningKey::from_bytes(&[5; 32]);
+        let updater = Updater::new(Options {
+            home: directory.0.clone(),
+            product: Product::Cli,
+            version: "0.1.0".into(),
+            public_key: STANDARD.encode(signing.verifying_key().to_bytes()),
+            executable: env::current_exe().unwrap(),
+        });
+        let service = FailingService {
+            health_checks: AtomicUsize::new(0),
+            rollbacks: AtomicUsize::new(0),
+        };
+        assert!(
+            updater
+                .install_daemon_component_with(
+                    &daemon_component_fetcher(&signing, daemon_archive()),
+                    "cli",
+                    1,
+                    1,
+                    &service,
+                )
+                .is_err()
+        );
+        assert_eq!(fs::read(root.join("filebeamd")).unwrap(), b"old launcher");
+        assert_eq!(service.rollbacks.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            load_component_record(&root).unwrap().current.as_deref(),
+            Some("0.9.0")
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    impl Updater {
+        fn load_component_record_for_test(&self) -> ComponentRecord {
+            load_component_record(&self.options.home.join("runtime/daemon")).unwrap()
+        }
     }
 }

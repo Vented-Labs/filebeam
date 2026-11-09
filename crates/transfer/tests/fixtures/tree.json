@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "items": [
+    {
+      "id": "one",
+      "name": "report.txt",
+      "type": "text/plain",
+      "size": 1,
+      "nonce_prefix": "AAAAAAAAAAAAAAAAAAAAAA",
+      "chunk_count": 1,
+      "digest": { "algorithm": "sha256", "value": "0000000000000000000000000000000000000000000000000000000000000000" }
+    },
+    {
+      "id": "two",
+      "name": ".hidden",
+      "type": "application/octet-stream",
+      "size": 0,
+      "nonce_prefix": "AAAAAAAAAAAAAAAAAAAAAA",
+      "chunk_count": 1,
+      "digest": { "algorithm": "sha256", "value": "1111111111111111111111111111111111111111111111111111111111111111" }
+    }
+  ],
+  "tree": {
+    "roots": ["photos"],
+    "entries": [
+      { "path": ["photos", "empty"] },
+      { "path": ["photos", "report.txt"], "item_id": "one" },
+      { "path": ["photos", ".hidden"], "item_id": "two" }
+    ]
+  }
+}

@@ -64,6 +64,7 @@ pub struct SendPanel {
     inspector_width: f32,
     status: Option<String>,
     preparing_paths: bool,
+    selected_device: Option<String>,
 }
 
 /// Input entities deliberately belong to a mode, so swapping composers never
@@ -197,6 +198,7 @@ impl SendPanel {
             inspector_width,
             status: None,
             preparing_paths: false,
+            selected_device: None,
         };
         panel.apply_server_default(&policy);
         panel.subscribe_inputs(cx);
@@ -360,6 +362,21 @@ impl SendPanel {
             cx.notify();
             return;
         }
+        if self.mode == ComposerMode::Files
+            && let Some(target) = self.selected_device.clone()
+        {
+            self.status = match self.client.dispatch(ClientCommand::EnqueueDeviceSend {
+                target,
+                sources: self.paths.clone(),
+            }) {
+                Ok(()) => {
+                    Some("Queued with the local device service. Preparing is not delivery.".into())
+                }
+                Err(error) => Some(error.to_string()),
+            };
+            cx.notify();
+            return;
+        }
         let preferences = self.active_preferences();
         let snapshot = self.client.snapshot();
         let mut command = match build_command_for_policy(
@@ -425,6 +442,12 @@ impl SendPanel {
 
     fn can_submit(&self, cx: &Context<Self>) -> bool {
         draft_has_content(self.mode, &self.paths, &self.note_editor.read(cx).value())
+    }
+
+    fn select_device(&mut self, id: String, cx: &mut Context<Self>) {
+        self.selected_device = Some(id);
+        self.status = None;
+        cx.notify();
     }
 
     fn active_preferences(&self) -> &Preferences {
@@ -1051,6 +1074,7 @@ fn build_command_for_policy(
 impl Render for SendPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let policy = self.client.snapshot().policy;
+        let devices = self.client.snapshot().device_directory.devices;
         let p = palette_for(Theme::global(cx).mode);
         let files_ready = !self.paths.is_empty();
         let http_selected = self.active_preferences().transport == Transport::Http;
@@ -1388,6 +1412,34 @@ impl Render for SendPanel {
                                 ]),
                         ),
                     )
+                    .when(self.mode == ComposerMode::Files, |this| {
+                        this.child(
+                            div()
+                                .flex_none()
+                                .mx(px(21.))
+                                .mb(px(10.))
+                                .p(px(10.))
+                                .rounded(px(10.))
+                                .bg(p.inset)
+                                .border_1()
+                                .border_color(p.border)
+                                .child(div().text_size(px(11.)).text_color(p.muted).child("My devices"))
+                                .child(div().mt(px(6.)).flex().flex_wrap().gap(px(6.)).children(
+                                    devices.into_iter().filter(|device| matches!(device.trust, crate::model::DeviceTrust::Registered | crate::model::DeviceTrust::Verified)).map(|device| {
+                                        let selected = self.selected_device.as_deref() == Some(device.id.as_str());
+                                        let id = device.id.clone();
+                                        Button::new(SharedString::from(format!("device-target-{}", device.id)))
+                                            .label(format!("{} · {}", device.name, if selected { "selected" } else { "select" }))
+                                            .with_size(Size::Small)
+                                            .when(selected, |button| button.primary())
+                                            .on_click(cx.listener(move |this, _, _, cx| this.select_device(id.clone(), cx)))
+                                    }),
+                                ))
+                                .child(div().mt(px(6.)).text_size(px(10.)).text_color(p.subtle).child(
+                                    "The local service verifies the selected device pin before it prepares or connects.",
+                                )),
+                        )
+                    })
                     .child(
                         div()
                             .flex_none()

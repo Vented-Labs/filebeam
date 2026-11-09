@@ -151,6 +151,134 @@ struct SavedItem {
     published: bool,
 }
 
+/// Peer receiver input for the existing authenticated chunk writer.
+pub struct PeerReceiveItem {
+    pub id: String,
+    pub name: String,
+    pub size: u64,
+    pub nonce_prefix: String,
+    pub chunk_count: u64,
+    pub digest: String,
+    pub target: PathBuf,
+}
+
+/// Receiver-owned private staging operations. Implementations may use a
+/// directory capability rather than re-resolving a pathname for each record.
+pub trait PeerReceiveStaging: Send + Sync {
+    fn read_ciphertext(&self, item: usize, chunk: u64) -> Result<Vec<u8>>;
+    fn write_ciphertext(&self, item: usize, chunk: u64, ciphertext: &[u8]) -> Result<()>;
+    fn write_plain(&self, item: usize, offset: u64, plain: &[u8]) -> Result<()>;
+    fn read_plain(&self, item: usize) -> Result<File>;
+    fn write_target(&self, item: usize, plain: &mut File) -> Result<()>;
+}
+
+pub fn receive_peer_chunk(
+    base: &Path,
+    item_index: usize,
+    index: u64,
+    chunk_bytes: u64,
+    transfer_id: &str,
+    item: &PeerReceiveItem,
+    master: &[u8],
+    ciphertext: Vec<u8>,
+) -> Result<u64> {
+    authenticate_and_write(AuthenticateAndWriteRequest {
+        base,
+        item_index,
+        index,
+        chunk_bytes,
+        transfer_id,
+        item: &SavedItem {
+            id: item.id.clone(),
+            name: item.name.clone(),
+            size: item.size,
+            nonce_prefix: item.nonce_prefix.clone(),
+            chunk_count: item.chunk_count,
+            digest: item.digest.clone(),
+            target: item.target.clone(),
+            verified: vec![false; item.chunk_count as usize],
+            published: false,
+        },
+        master,
+        ciphertext,
+        retain_ciphertext: true,
+    })
+}
+
+pub fn receive_peer_chunk_staged(
+    staging: &dyn PeerReceiveStaging,
+    item_index: usize,
+    index: u64,
+    chunk_bytes: u64,
+    transfer_id: &str,
+    item: &PeerReceiveItem,
+    master: &[u8],
+    ciphertext: Vec<u8>,
+) -> Result<u64> {
+    let (expected, plain) = authenticate_peer_chunk(
+        item_index,
+        index,
+        chunk_bytes,
+        transfer_id,
+        &PeerReceiveItem {
+            id: item.id.clone(),
+            name: item.name.clone(),
+            size: item.size,
+            nonce_prefix: item.nonce_prefix.clone(),
+            chunk_count: item.chunk_count,
+            digest: item.digest.clone(),
+            target: item.target.clone(),
+        },
+        master,
+        &ciphertext,
+    )?;
+    staging.write_ciphertext(item_index, index, &ciphertext)?;
+    staging.write_plain(item_index, index * chunk_bytes, &plain)?;
+    Ok(expected)
+}
+
+pub fn publish_peer_item(base: &Path, item_index: usize, item: &PeerReceiveItem) -> Result<()> {
+    publish_item(
+        base,
+        &SavedItem {
+            id: item.id.clone(),
+            name: item.name.clone(),
+            size: item.size,
+            nonce_prefix: item.nonce_prefix.clone(),
+            chunk_count: item.chunk_count,
+            digest: item.digest.clone(),
+            target: item.target.clone(),
+            verified: vec![true; item.chunk_count as usize],
+            published: false,
+        },
+        item_index,
+    )
+}
+
+pub fn publish_peer_item_staged(
+    staging: &dyn PeerReceiveStaging,
+    item_index: usize,
+    item: &PeerReceiveItem,
+) -> Result<()> {
+    let mut input = staging.read_plain(item_index)?;
+    let mut hash = Sha256::new();
+    let mut bytes = 0u64;
+    let mut buffer = [0; 64 * 1024];
+    loop {
+        let read = input.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hash.update(&buffer[..read]);
+        bytes += read as u64;
+    }
+    if bytes != item.size || hex::encode(hash.finalize()) != item.digest {
+        bail!("SHA-256 verification failed for {}", item.name);
+    }
+    input.rewind()?;
+    staging.write_target(item_index, &mut input)
+}
+
 struct UnlockedKeys {
     master: Zeroizing<Vec<u8>>,
     share_key: Zeroizing<Vec<u8>>,
@@ -2489,19 +2617,23 @@ fn authenticate_and_write(request: AuthenticateAndWriteRequest<'_>) -> Result<u6
         ciphertext,
         retain_ciphertext,
     } = request;
-    let key = derive_item_key(master, transfer_id, &item.id)?;
-    let plain = decrypt_chunk(
-        &key,
-        &decode(&item.nonce_prefix)?,
-        index as u32,
+    let (expected, plain) = authenticate_peer_chunk(
+        item_index,
+        index,
+        chunk_bytes,
+        transfer_id,
+        &PeerReceiveItem {
+            id: item.id.clone(),
+            name: item.name.clone(),
+            size: item.size,
+            nonce_prefix: item.nonce_prefix.clone(),
+            chunk_count: item.chunk_count,
+            digest: item.digest.clone(),
+            target: item.target.clone(),
+        },
+        master,
         &ciphertext,
-        aad(transfer_id, &item.id, &index.to_string()).as_bytes(),
-    )
-    .context("could not authenticate downloaded chunk")?;
-    let expected = plaintext_len(item.size, chunk_bytes, index);
-    if plain.len() as u64 != expected {
-        bail!("authenticated chunk has an invalid plaintext length");
-    }
+    )?;
     if retain_ciphertext {
         // Live transport has no HTTP prefix file. Retain the authenticated record
         // before the verified bit can be checkpointed, so restart can rebuild
@@ -2515,6 +2647,31 @@ fn authenticate_and_write(request: AuthenticateAndWriteRequest<'_>) -> Result<u6
     }
     write_plain(base, item_index, index * chunk_bytes, &plain)?;
     Ok(expected)
+}
+
+fn authenticate_peer_chunk(
+    _item_index: usize,
+    index: u64,
+    chunk_bytes: u64,
+    transfer_id: &str,
+    item: &PeerReceiveItem,
+    master: &[u8],
+    ciphertext: &[u8],
+) -> Result<(u64, Vec<u8>)> {
+    let key = derive_item_key(master, transfer_id, &item.id)?;
+    let plain = decrypt_chunk(
+        &key,
+        &decode(&item.nonce_prefix)?,
+        index as u32,
+        ciphertext,
+        aad(transfer_id, &item.id, &index.to_string()).as_bytes(),
+    )
+    .context("could not authenticate downloaded chunk")?;
+    let expected = plaintext_len(item.size, chunk_bytes, index);
+    if plain.len() as u64 != expected {
+        bail!("authenticated chunk has an invalid plaintext length");
+    }
+    Ok((expected, plain))
 }
 fn restore_retained(
     store: &Store,
