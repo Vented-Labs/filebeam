@@ -21,7 +21,6 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\RateLimiter;
-use Illuminate\Support\Facades\Vite;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
 
@@ -30,22 +29,9 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->app->extend('mail.manager', static fn (mixed $manager, Application $app): InstanceMailManager => new InstanceMailManager($app));
-        $this->configureVite();
         $this->configureDefaults();
         $this->configureRateLimiting();
         $this->configureUpdateActivityTracking();
-    }
-
-    protected function configureVite(): void
-    {
-        $directory = config('filebeam.vite.build_directory');
-        $hotFile = config('filebeam.vite.hot_file');
-        if (is_string($directory) && $directory !== '') {
-            Vite::useBuildDirectory($directory);
-        }
-        if (is_string($hotFile) && $hotFile !== '') {
-            Vite::useHotFile($hotFile);
-        }
     }
 
     protected function configureRateLimiting(): void

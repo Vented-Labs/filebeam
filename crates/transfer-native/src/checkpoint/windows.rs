@@ -243,7 +243,13 @@ unsafe fn verify_destination_descriptor(
 ) -> Result<()> {
     unsafe { verify_ancestor_descriptor(owner, dacl, user, system, administrators) }?;
     unsafe {
-        verify_untrusted_access(dacl, user, system, administrators, untrusted_can_modify_destination)
+        verify_untrusted_access(
+            dacl,
+            user,
+            system,
+            administrators,
+            untrusted_can_modify_destination,
+        )
     }
 }
 
@@ -280,7 +286,13 @@ unsafe fn verify_ancestor_descriptor(
             return Err(io::Error::last_os_error().into());
         }
         unsafe {
-            verify_ace_access(ace, user, system, administrators, untrusted_can_mutate_ancestor)
+            verify_ace_access(
+                ace,
+                user,
+                system,
+                administrators,
+                untrusted_can_mutate_ancestor,
+            )
         }?;
     }
     Ok(())
@@ -338,15 +350,23 @@ unsafe fn verify_ace_access(
 }
 
 fn untrusted_can_mutate_ancestor(access: u32) -> bool {
-    access & (0x0001_0000 | FILE_DELETE_CHILD | WRITE_DAC | WRITE_OWNER | GENERIC_WRITE | GENERIC_ALL)
+    access
+        & (0x0001_0000 | FILE_DELETE_CHILD | WRITE_DAC | WRITE_OWNER | GENERIC_WRITE | GENERIC_ALL)
         != 0
 }
 
 fn untrusted_can_modify_destination(access: u32) -> bool {
     // FILE_ADD_FILE and FILE_ADD_SUBDIRECTORY allow content injection at the
     // approved root; DELETE prevents a held root from protecting its children.
-    access & (0x0000_0002 | 0x0000_0004 | 0x0001_0000 | FILE_DELETE_CHILD | WRITE_DAC
-        | WRITE_OWNER | GENERIC_WRITE | GENERIC_ALL)
+    access
+        & (0x0000_0002
+            | 0x0000_0004
+            | 0x0001_0000
+            | FILE_DELETE_CHILD
+            | WRITE_DAC
+            | WRITE_OWNER
+            | GENERIC_WRITE
+            | GENERIC_ALL)
         != 0
 }
 

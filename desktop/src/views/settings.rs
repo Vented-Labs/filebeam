@@ -752,6 +752,15 @@ impl Render for SettingsPanel {
                 "Local device service",
                 self.snapshot.device_directory.daemon.detail.as_deref().unwrap_or(if self.snapshot.device_directory.daemon.receive_enabled { "Receiving enabled" } else { "Receiving paused" }),
             ))
+            .when(!self.snapshot.device_directory.daemon.connected, |group| {
+                group.child(
+                    Button::new("install-device-service")
+                        .label("Install device service")
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.device_command(ClientCommand::InstallDeviceService, window, cx)
+                        })),
+                )
+            })
             .child(
                 Button::new("toggle-device-receiving")
                     .label(if self.snapshot.device_directory.daemon.receive_enabled { "Pause device receiving" } else { "Enable device receiving" })
@@ -761,7 +770,10 @@ impl Render for SettingsPanel {
                     })),
             )
             .children(self.snapshot.device_directory.daemon.destinations.iter().map(|grant| meta(p, &format!("Destination: {}", grant.alias), if grant.enabled { &grant.approval } else { "revoked" })))
-            .children(self.snapshot.device_directory.daemon.jobs.iter().map(|job| meta(p, &format!("Job: {}", job.target), &format!("{} · prepared={}", job.state, job.prepared))));
+            .children(self.snapshot.device_directory.daemon.jobs.iter().map(|job| meta(p, &format!("Job: {}", job.target), &match &job.error {
+                Some(error) => format!("{} · {error}", job.state),
+                None => format!("{} · prepared={}", job.state, job.prepared),
+            })));
         let storage = group(p, "storage", "Local storage")
             .child(meta(
                 p,

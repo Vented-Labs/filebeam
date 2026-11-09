@@ -16,7 +16,7 @@ use filebeam_client_core::{
     services::ServiceClient,
 };
 use filebeam_daemon::{
-    ApprovalMode, Daemon, DeviceJobState, DeviceProvision, IPC_VERSION, Request,
+    ApprovalMode, Daemon, DeviceApproval, DeviceJobState, DeviceProvision, IPC_VERSION, Request,
 };
 use filebeam_transfer_native::{checkpoint::Store, device::load_device_receipt};
 use reqwest::{
@@ -59,9 +59,16 @@ fn run() -> Result<()> {
         PathBuf::from(env::var("FILEBEAM_DEVICE_CA").context("FILEBEAM_DEVICE_CA is required")?);
     let certificate = Certificate::from_pem(&fs::read(&certificate_path)?)?;
     let jar = std::sync::Arc::new(Jar::default());
+    // Laravel answers JSON clients with JSON instead of redirects.
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
+        reqwest::header::ACCEPT,
+        reqwest::header::HeaderValue::from_static("application/json"),
+    );
     let web = Client::builder()
         .add_root_certificate(certificate.clone())
         .cookie_provider(jar.clone())
+        .default_headers(headers)
         .build()?;
     login(&web, &jar, &instance)?;
 
@@ -75,16 +82,9 @@ fn run() -> Result<()> {
         key: SigningKey::from_bytes(&[22; 32]),
         credential: String::new(),
     };
-    sender.credential = enroll_first(&web, &jar, &instance, &sender)?;
-    receiver.credential = enroll_and_approve(&web, &jar, &instance, &sender, &receiver)?;
-
-    // Exercise the maintained Rust DTO decoder against Laravel before daemon provisioning.
+    let (credential, deployment) = enroll_first(&web, &jar, &instance, &sender)?;
+    sender.credential = credential;
     let native = ServiceClient::new_with_trusted_certificate(&instance, certificate.clone())?;
-    let registry = native.devices().device_sync(&sender.credential)?;
-    ensure!(
-        registry.devices.len() == 2,
-        "Laravel registry did not contain both approved devices"
-    );
 
     let sender_home = root.join("sender");
     let receiver_home = root.join("receiver");
@@ -93,14 +93,25 @@ fn run() -> Result<()> {
     for directory in [&sender_home, &receiver_home, &source, &destination] {
         fs::create_dir_all(directory)?;
     }
+    // Daemon profiles must be private to the current user.
+    for home in [&sender_home, &receiver_home] {
+        fs::set_permissions(home, std::os::unix::fs::PermissionsExt::from_mode(0o700))?;
+    }
     let mut sender_daemon = start_daemon(&sender_home, &certificate_path)?;
     let mut receiver_daemon = start_daemon(&receiver_home, &certificate_path)?;
 
     let outcome = (|| -> Result<()> {
-        provision(&sender_home, &instance, &sender)?;
-        provision(&receiver_home, &instance, &receiver)?;
-        pin(&sender_home, &instance, &sender, &receiver)?;
-        pin(&receiver_home, &instance, &receiver, &sender)?;
+        provision(&sender_home, &instance, &deployment, &sender)?;
+        // The sender's daemon approves the pending receiver, which also pins it.
+        receiver.credential = enroll_and_approve(&web, &jar, &instance, &sender_home, &receiver)?;
+        // Exercise the maintained Rust DTO decoder against Laravel.
+        let registry = native.devices().device_sync(&sender.credential)?;
+        ensure!(
+            registry.devices.len() == 2,
+            "Laravel registry did not contain both approved devices"
+        );
+        provision(&receiver_home, &instance, &deployment, &receiver)?;
+        pair(&receiver_home, &sender)?;
         request(
             &receiver_home,
             Request::SetReceiveEnabled {
@@ -181,6 +192,11 @@ fn run() -> Result<()> {
         .into_iter()
         .next()
         .context("sender did not create an active revoke job")?;
+        wait_for(
+            "active transfer preparation",
+            Duration::from_secs(600),
+            || job_prepared(&sender_home, active_job.id),
+        )?;
         wait_for("active direct transfer", Duration::from_secs(120), || {
             job_state(&sender_home, active_job.id) == Some(DeviceJobState::Transferring)
         })?;
@@ -217,7 +233,7 @@ fn run() -> Result<()> {
             "receiver committed after the web revoke"
         );
         ensure!(
-            sender_peer_denied(&sender_home, &instance, &sender, receiver.id)?,
+            sender_peer_denied(&sender_home, &instance, &deployment, &sender, receiver.id)?,
             "sender registry gate retained the revoked receiver"
         );
         Ok(())
@@ -245,26 +261,38 @@ fn login(web: &Client, jar: &Jar, instance: &str) -> Result<()> {
     Ok(())
 }
 
-fn enroll_first(web: &Client, jar: &Jar, instance: &str, identity: &Identity) -> Result<String> {
+/// Enrolls the account's first device and returns its credential and the
+/// instance's device deployment ID.
+fn enroll_first(
+    web: &Client,
+    jar: &Jar,
+    instance: &str,
+    identity: &Identity,
+) -> Result<(String, String)> {
     let challenge_response = challenge(web, jar, instance, identity)?;
+    let deployment = challenge_response["data"]["approval_context"]["deployment_id"]
+        .as_str()
+        .context("deployment missing")?
+        .to_owned();
     let challenge = challenge_response["data"]["challenge"]
         .as_str()
         .context("challenge missing")?;
     let response = web.post(format!("{instance}/api/native/v1/devices/enrollments/{}", identity.id))
         .header("Sec-Fetch-Site", "same-origin").header("X-XSRF-TOKEN", xsrf(jar, &Url::parse(instance)?)?)
-        .json(&json!({"challenge": challenge, "signature": enrollment_signature(identity, &challenge)?})).send()?;
+        .json(&json!({"challenge": challenge, "signature": enrollment_signature(identity, challenge)?})).send()?;
     let body = response_json(response, 201)?;
-    body["data"]["credential"]
+    let credential = body["data"]["credential"]
         .as_str()
         .map(str::to_owned)
-        .context("first enrollment did not issue a credential")
+        .context("first enrollment did not issue a credential")?;
+    Ok((credential, deployment))
 }
 
 fn enroll_and_approve(
     web: &Client,
     jar: &Jar,
     instance: &str,
-    approver: &Identity,
+    approver_home: &Path,
     candidate: &Identity,
 ) -> Result<String> {
     let challenge_response = challenge(web, jar, instance, candidate)?;
@@ -273,20 +301,18 @@ fn enroll_and_approve(
         .context("challenge missing")?;
     let response = web.post(format!("{instance}/api/native/v1/devices/enrollments/{}", candidate.id))
         .header("Sec-Fetch-Site", "same-origin").header("X-XSRF-TOKEN", xsrf(jar, &Url::parse(instance)?)?)
-        .json(&json!({"challenge": challenge, "signature": enrollment_signature(candidate, &challenge)?})).send()?;
+        .json(&json!({"challenge": challenge, "signature": enrollment_signature(candidate, challenge)?})).send()?;
     response_json(response, 201)?;
-    let approval = approval_signature(instance, approver, candidate, &challenge_response)?;
-    let response = web
-        .post(format!(
-            "{instance}/api/native/v1/devices/enrollments/{}/approve",
-            candidate.id
-        ))
-        .bearer_auth(&approver.credential)
-        .json(&json!({"approval_signature": approval}))
-        .send()?;
-    response_json(response, 201)?;
+    request(
+        approver_home,
+        Request::ApproveDevice {
+            version: IPC_VERSION,
+            approval: device_approval(candidate, &challenge_response)?,
+            fingerprint: fingerprint(candidate),
+        },
+    )?;
     let response = web.post(format!("{instance}/api/native/v1/devices/enrollments/{}/credential", candidate.id))
-        .json(&json!({"challenge": challenge, "signature": enrollment_signature(candidate, &challenge)?})).send()?;
+        .json(&json!({"challenge": challenge, "signature": enrollment_signature(candidate, challenge)?})).send()?;
     let body = response_json(response, 201)?;
     body["data"]["credential"]
         .as_str()
@@ -301,52 +327,44 @@ fn challenge(web: &Client, jar: &Jar, instance: &str, identity: &Identity) -> Re
     response_json(response, 201)
 }
 
-fn approval_signature(
-    instance: &str,
-    approver: &Identity,
-    candidate: &Identity,
-    challenge_response: &Value,
-) -> Result<String> {
+/// The payload a pending device prints for `beam devices approve`.
+fn device_approval(candidate: &Identity, challenge_response: &Value) -> Result<DeviceApproval> {
     let data = &challenge_response["data"]["approval_context"];
-    let digest = STANDARD.decode(
-        data["challenge_sha256"]
+    let text = |field: &str| -> Result<String> {
+        data[field]
             .as_str()
-            .context("approval digest missing")?,
-    )?;
-    let expiry = time::OffsetDateTime::parse(
-        data["expires_at"]
-            .as_str()
-            .context("approval expiry missing")?,
-        &time::format_description::well_known::Rfc3339,
-    )?
-    .unix_timestamp();
-    let message = [
-        "filebeam-device-approval-v2",
-        instance,
-        data["deployment_id"]
-            .as_str()
-            .context("deployment missing")?,
-        &data["account_id"]
+            .map(str::to_owned)
+            .with_context(|| format!("approval {field} missing"))
+    };
+    let number = |field: &str| -> Result<u64> {
+        data[field]
             .as_u64()
-            .context("account missing")?
-            .to_string(),
-        &data["generation"]
-            .as_u64()
-            .context("generation missing")?
-            .to_string(),
-        candidate.id,
-        "1",
-        approver.id,
-        "1",
-        &expiry.to_string(),
-    ]
-    .join("\0")
-    .into_bytes();
-    let mut message = message;
-    message.push(0);
-    message.extend(digest);
-    message.extend(candidate.key.verifying_key().to_bytes());
-    Ok(STANDARD.encode(approver.key.sign(&message).to_bytes()))
+            .with_context(|| format!("approval {field} missing"))
+    };
+    Ok(DeviceApproval {
+        instance_origin: text("instance_origin")?,
+        deployment_id: text("deployment_id")?,
+        account_id: number("account_id")?,
+        generation: number("generation")?,
+        candidate_device_id: candidate.id.into(),
+        candidate_key_version: 1,
+        candidate_public_key: STANDARD.encode(candidate.key.verifying_key().to_bytes()),
+        challenge_sha256: text("challenge_sha256")?,
+        expires_at_unix: u64::try_from(
+            time::OffsetDateTime::parse(
+                &text("expires_at")?,
+                &time::format_description::well_known::Rfc3339,
+            )?
+            .unix_timestamp(),
+        )?,
+    })
+}
+
+fn fingerprint(identity: &Identity) -> String {
+    format!(
+        "{:x}",
+        Sha256::digest(identity.key.verifying_key().to_bytes())
+    )
 }
 
 fn enrollment_signature(identity: &Identity, challenge: &str) -> Result<String> {
@@ -362,14 +380,14 @@ fn enrollment_signature(identity: &Identity, challenge: &str) -> Result<String> 
     Ok(STANDARD.encode(identity.key.sign(&message).to_bytes()))
 }
 
-fn provision(home: &Path, instance: &str, identity: &Identity) -> Result<()> {
+fn provision(home: &Path, instance: &str, deployment: &str, identity: &Identity) -> Result<()> {
     request(
         home,
         Request::ProvisionDevice {
             version: IPC_VERSION,
             provision: DeviceProvision {
                 instance: instance.into(),
-                deployment: instance.into(),
+                deployment: deployment.into(),
                 account_id: 1,
                 generation: 1,
                 device_id: identity.id.into(),
@@ -383,25 +401,31 @@ fn provision(home: &Path, instance: &str, identity: &Identity) -> Result<()> {
     Ok(())
 }
 
-fn pin(home: &Path, instance: &str, local: &Identity, peer: &Identity) -> Result<()> {
-    let store = Store::open(&home.join("registry"), "device-registry-v1")?;
-    let scope = RegistryScope {
-        origin: Origin::parse(instance)?,
-        deployment: DeploymentId::parse(instance)?,
-        account: AccountId(1),
-        generation: DeviceGeneration(1),
-        local_device: DeviceId::parse(local.id)?,
-    };
-    let mut registry = DeviceRegistry::open(&store, scope, Duration::from_secs(60))?;
-    registry.approve_pairing(&DeviceId::parse(peer.id)?, now())?;
+fn pair(home: &Path, peer: &Identity) -> Result<()> {
+    request(
+        home,
+        Request::ConfirmPeerVerification {
+            version: IPC_VERSION,
+            device_id: peer.id.into(),
+            key_version: 1,
+            fingerprint: fingerprint(peer),
+            confirmation_nonce: uuid::Uuid::new_v4().simple().to_string(),
+        },
+    )?;
     Ok(())
 }
 
-fn sender_peer_denied(home: &Path, instance: &str, local: &Identity, peer: &str) -> Result<bool> {
+fn sender_peer_denied(
+    home: &Path,
+    instance: &str,
+    deployment: &str,
+    local: &Identity,
+    peer: &str,
+) -> Result<bool> {
     let store = Store::open(&home.join("registry"), "device-registry-v1")?;
     let scope = RegistryScope {
         origin: Origin::parse(instance)?,
-        deployment: DeploymentId::parse(instance)?,
+        deployment: DeploymentId::parse(deployment)?,
         account: AccountId(1),
         generation: DeviceGeneration(1),
         local_device: DeviceId::parse(local.id)?,
@@ -472,6 +496,16 @@ fn request(home: &Path, request: Request) -> Result<filebeam_daemon::Reply> {
         bail!("daemon IPC request failed: {error}");
     }
     Ok(reply)
+}
+
+fn job_prepared(home: &Path, id: uuid::Uuid) -> bool {
+    request(
+        home,
+        Request::ListJobs {
+            version: IPC_VERSION,
+        },
+    )
+    .is_ok_and(|reply| reply.jobs.iter().any(|job| job.id == id && job.prepared))
 }
 
 fn job_state(home: &Path, id: uuid::Uuid) -> Option<DeviceJobState> {

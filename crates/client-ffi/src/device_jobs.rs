@@ -14,7 +14,7 @@ use filebeam_transfer_native::device::{
     DeviceProofContext, DeviceReceipt, DeviceReceiptItem, DeviceReceiptRootOutcome, DeviceSigner,
 };
 use filebeam_transfer_native::{
-    protocol::peer::{PeerReceiveGrant, PeerReceiver, PeerSource, prepare_peer_job},
+    protocol::peer::{PeerParties, PeerReceiveGrant, PeerReceiver, PeerSource, prepare_peer_job},
     source::SourceSpec,
     webrtc::{self, DeviceSignaling},
 };
@@ -166,10 +166,12 @@ impl NativeDeviceCoordinator {
         let prepared = prepare_peer_job(
             &store,
             &[source],
-            local.id().to_owned(),
-            local.key_version(),
-            target_info.id.as_str().to_owned(),
-            target_info.key_version,
+            PeerParties {
+                sender_device_id: local.id().to_owned(),
+                sender_key_version: local.key_version(),
+                receiver_device_id: target_info.id.as_str().to_owned(),
+                receiver_key_version: target_info.key_version,
+            },
             webrtc::FRAME_PAYLOAD_BYTES as u64,
             control,
         )

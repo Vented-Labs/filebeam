@@ -128,6 +128,7 @@ pub struct DeviceJobSnapshot {
     pub target: String,
     pub state: String,
     pub prepared: bool,
+    pub error: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -405,6 +406,7 @@ pub enum ClientCommand {
         auto_accept: bool,
     },
     SetDeviceReceiving(bool),
+    InstallDeviceService,
     ConfirmDevicePeer {
         id: String,
         verified_fingerprint: String,
@@ -594,6 +596,7 @@ impl ClientCommand {
             Self::CompleteDeviceEnrollment => "complete device enrollment",
             Self::AddDeviceDropzone { .. } => "add device dropzone",
             Self::SetDeviceReceiving(_) => "set device receiving",
+            Self::InstallDeviceService => "install device service",
             Self::ConfirmDevicePeer { .. } => "confirm device verification",
             Self::EnqueueDeviceSend { .. } => "enqueue device send",
             Self::RenameDevice { .. } => "rename device",

@@ -32,6 +32,7 @@ async function installDevicesApi(
                 display_name: 'Studio Mac',
                 platform: 'macos',
                 public_key: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+                fingerprint: '66687aadf862bd776c8fc18b8e9f8e20089714856ee233b3902a591d0d5f2925',
                 key_version: 1,
                 status: 'active',
                 generation: 1,
@@ -68,6 +69,7 @@ test('devices inventory renames and password-confirms a revoke without exposing 
     await expect(page.getByRole('heading', { name: 'My devices' })).toBeVisible();
     await expect(page.getByText('Studio Mac')).toBeVisible();
     await expect(page.getByText(/key v1/)).toBeVisible();
+    await expect(page.getByText('6668 7aad f862 bd77…')).toBeVisible();
     await page.getByRole('button', { name: 'Rename' }).click();
     await page.getByLabel('Device name').fill('Laptop');
     await page.getByRole('button', { name: 'Save' }).click();

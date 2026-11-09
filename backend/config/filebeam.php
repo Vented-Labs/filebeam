@@ -131,6 +131,19 @@ if ($webrtcSessionLimit < 1 || $webrtcSessionLimit > 128 || $webrtcMaxSdpBytes <
     throw new InvalidArgumentException('WebRTC session and SDP limits are outside supported bounds.');
 }
 
+// Devices bind this identifier into every authentication proof, so it must use
+// only letters, digits, '.', '_', and '-'. The default is the instance host.
+$deviceDeploymentId = env('FILEBEAM_DEVICE_DEPLOYMENT_ID');
+if (! is_string($deviceDeploymentId) || $deviceDeploymentId === '') {
+    $appUrl = parse_url((string) env('APP_URL', 'http://localhost'));
+    $deviceDeploymentId = (is_array($appUrl) ? ($appUrl['host'] ?? 'localhost') : 'localhost')
+        .(is_array($appUrl) && isset($appUrl['port']) ? '-'.$appUrl['port'] : '');
+    $deviceDeploymentId = (string) preg_replace('/[^A-Za-z0-9._-]/', '-', $deviceDeploymentId);
+}
+if (preg_match('/\A[A-Za-z0-9._-]{1,255}\z/', $deviceDeploymentId) !== 1) {
+    throw new InvalidArgumentException('FILEBEAM_DEVICE_DEPLOYMENT_ID may contain only letters, digits, ".", "_", and "-".');
+}
+
 $settingEnvironmentNames = [
     'registration' => ['FILEBEAM_REGISTRATION_ENABLED', 'boolean'],
     'device_rendezvous' => ['FILEBEAM_DEVICE_RENDEZVOUS_ENABLED', 'boolean'],
@@ -184,11 +197,6 @@ foreach (['FILEBEAM_CLI_INSTALLER_URL' => $cliInstallerUrl, 'FILEBEAM_CLI_WINDOW
 }
 
 return [
-    'vite' => [
-        'build_directory' => env('FILEBEAM_VITE_BUILD_DIRECTORY'),
-        'hot_file' => env('FILEBEAM_VITE_HOT_FILE'),
-    ],
-
     'username_domain' => $usernameDomain,
     'apple' => [
         'app_ids' => $appleAppIds,
@@ -220,7 +228,7 @@ return [
     // Registered-device rendezvous is opt-in until compatible native clients are deployed.
     'devices' => [
         'enabled' => false,
-        'deployment_id' => env('FILEBEAM_DEVICE_DEPLOYMENT_ID') ?: rtrim((string) env('APP_URL', 'http://localhost'), '/'),
+        'deployment_id' => $deviceDeploymentId,
         'active_limit' => 32,
         'connection_ttl_seconds' => 600,
         'presence_ttl_seconds' => 90,

@@ -103,7 +103,8 @@ export R2_ENDPOINT_URL=https://0123456789abcdef0123456789abcdef.r2.cloudflaresto
 export R2_BUCKET=filebeam-releases AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test
 printf '%s\n' "$canonical_public" > "$tmp/package/public-key"
 printf '0.2.0\n' > "$tmp/package/version"
-for target in linux-x86_64.tar.gz linux-aarch64.tar.gz macos-x86_64.tar.gz macos-aarch64.tar.gz windows-x86_64.zip; do
+for target in linux-x86_64.tar.gz linux-aarch64.tar.gz macos-x86_64.tar.gz macos-aarch64.tar.gz windows-x86_64.zip \
+    linux-x86_64-filebeamd.tar.gz linux-aarch64-filebeamd.tar.gz macos-x86_64-filebeamd.tar.gz macos-aarch64-filebeamd.tar.gz; do
     printf 'archive fixture\n' > "$tmp/package/beam-v0.2.0-$target"
 done
 (cd "$tmp/package" && sha256sum beam-v0.2.0-*.tar.gz beam-v0.2.0-*.zip > checksums.txt)

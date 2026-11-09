@@ -21,10 +21,7 @@ use filebeam_client_core::device_registry::{
 };
 use filebeam_transfer_native::checkpoint::Store;
 use rcgen::generate_simple_self_signed;
-use rustls::{
-    ServerConfig, ServerConnection, StreamOwned,
-    pki_types::{CertificateDer, PrivateKeyDer},
-};
+use rustls::{ServerConfig, ServerConnection, StreamOwned, pki_types::PrivateKeyDer};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -58,7 +55,7 @@ impl Coordinator {
             ServerConfig::builder()
                 .with_no_client_auth()
                 .with_single_cert(
-                    vec![CertificateDer::from(certificate.cert.der().clone())],
+                    vec![certificate.cert.der().clone()],
                     PrivateKeyDer::Pkcs8(certificate.signing_key.serialize_der().into()),
                 )?,
         );

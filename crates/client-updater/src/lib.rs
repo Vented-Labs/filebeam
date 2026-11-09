@@ -222,17 +222,16 @@ impl Updater {
         }
         let _lease = self.lease()?;
         let key = key(&self.options.public_key)?;
-        let catalog_url = Url::parse(&format!(
-            "{ORIGIN}{}/index.json",
-            self.options.product.catalog()
-        ))?;
+        // CLI and desktop share one daemon component, published in the CLI catalog.
+        let catalog_product = Product::Cli;
+        let catalog_url = Url::parse(&format!("{ORIGIN}{}/index.json", catalog_product.catalog()))?;
         let catalog = verify_catalog(
             &fetcher.get(&catalog_url, MAX_CATALOG_BYTES)?,
             &key,
-            self.options.product,
+            catalog_product,
         )?;
         let mut state = self.load_state()?;
-        if catalog.generation < state.entry(self.options.product).generation {
+        if catalog.generation < state.entry(catalog_product).generation {
             bail!("release catalog generation rolled back");
         }
         let current = Version::parse(&self.options.version)?;
@@ -243,10 +242,10 @@ impl Updater {
             .filter_map(|release| {
                 Version::parse(&release.version)
                     .ok()
-                    .map(|version| (version, release.daemon))
+                    .map(|version| (version, release.daemons))
             })
             .filter(|(version, _)| version >= &current)
-            .filter_map(|(_, component)| component)
+            .flat_map(|(_, components)| components)
             .filter(|component| {
                 component.min_ipc <= ipc
                     && ipc <= component.max_ipc
@@ -262,7 +261,7 @@ impl Updater {
             .context("catalog has no compatible daemon component")?;
         let asset = component.asset.clone();
         let url = catalog_url.join(&asset.path)?;
-        validate_origin(&url, self.options.product)?;
+        validate_origin(&url, catalog_product)?;
         let bytes = fetcher.get(&url, asset.size)?;
         if bytes.len() as u64 != asset.size
             || hex::encode(Sha256::digest(&bytes)) != asset.sha256.to_ascii_lowercase()
@@ -345,7 +344,7 @@ impl Updater {
         record.current = Some(component_version);
         record.owners.insert(owner.into());
         save_component_record(&root, &record)?;
-        state.entry_mut(self.options.product).generation = catalog.generation;
+        state.entry_mut(catalog_product).generation = catalog.generation;
         self.save_state(&state)?;
         Ok(launcher.to_string_lossy().into_owned())
     }
@@ -983,8 +982,9 @@ struct Release {
     #[serde(default)]
     withdrawn: bool,
     assets: Vec<Asset>,
+    /// One shared daemon build per supported platform.
     #[serde(default)]
-    daemon: Option<DaemonComponent>,
+    daemons: Vec<DaemonComponent>,
 }
 #[derive(Clone, Deserialize)]
 struct DaemonComponent {
@@ -1075,7 +1075,7 @@ fn verify_catalog(bytes: &[u8], key: &VerifyingKey, product: Product) -> Result<
         }
     }
     for release in &c.releases {
-        if let Some(component) = &release.daemon {
+        for component in &release.daemons {
             validate_daemon_component(component, product)?;
         }
     }
@@ -1506,10 +1506,10 @@ mod tests {
         let payload = serde_json::json!({
             "schema": 1, "product": "cli", "generation": 1,
             "published_at": "2025-01-01T00:00:00Z", "expires_at": "2999-01-01T00:00:00Z",
-            "releases": [{"version": "1.2.3", "assets": [], "daemon": {
+            "releases": [{"version": "1.2.3", "assets": [], "daemons": [{
                 "version": "1.2.3", "min_ipc": 1, "max_ipc": 1, "storage_schema": 1,
                 "asset": {"os": "linux", "architecture": "x86_64", "kind": "tar-gz", "path": "versions/v1.2.3/filebeamd.tar.gz", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "size": 1}
-            }}]
+            }]}]
         }).to_string();
         assert!(
             verify_catalog(
@@ -1848,6 +1848,20 @@ mod tests {
                 fs::write(path, b"installer").unwrap();
             }
         }
+        if product == Product::Cli {
+            for platform in [
+                "linux-x86_64",
+                "linux-aarch64",
+                "macos-x86_64",
+                "macos-aarch64",
+            ] {
+                fs::write(
+                    fixture.join(format!("{prefix}-{platform}-filebeamd.tar.gz")),
+                    b"daemon",
+                )
+                .unwrap();
+            }
+        }
         assert!(
             Command::new("php")
                 .arg(root.join(format!("scripts/release/{namespace}-write-release.php")))
@@ -1967,11 +1981,11 @@ mod tests {
         let payload = serde_json::json!({
             "schema": 1, "product": "cli", "generation": 1,
             "published_at": "2026-01-01T00:00:00Z", "expires_at": "2999-01-01T00:00:00Z",
-            "releases": [{"version": "1.0.0", "assets": [], "daemon": {
+            "releases": [{"version": "1.0.0", "assets": [], "daemons": [{
                 "version": "1.0.0", "min_ipc": 1, "max_ipc": 1, "storage_schema": 1,
                 "asset": {"os": "linux", "architecture": arch().unwrap(), "kind": "tar-gz", "path": path,
                     "sha256": hex::encode(Sha256::digest(&archive)), "size": archive.len()}
-            }}]
+            }]}]
         });
         FixtureFetcher {
             responses: HashMap::from([

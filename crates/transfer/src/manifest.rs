@@ -278,10 +278,10 @@ fn validate_tree(tree: &ManifestTree, item_ids: &HashSet<&String>) -> Result<(),
         if paths.insert(path, entry.item_id.is_some()).is_some() {
             return Err("manifest tree has duplicate paths".into());
         }
-        if let Some(item_id) = &entry.item_id {
-            if !item_ids.contains(item_id) || !referenced.insert(item_id.as_str()) {
-                return Err("manifest tree has an invalid item reference".into());
-            }
+        if let Some(item_id) = &entry.item_id
+            && (!item_ids.contains(item_id) || !referenced.insert(item_id.as_str()))
+        {
+            return Err("manifest tree has an invalid item reference".into());
         }
     }
     if referenced.len() != item_ids.len() {

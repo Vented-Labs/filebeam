@@ -172,7 +172,9 @@ class DeviceController extends Controller
     public function sync(Request $request): JsonResponse
     {
         $device = $this->current($request);
-        $device->update(['last_seen_at' => now()]);
+        if ($device->last_seen_at === null || $device->last_seen_at->lt(now()->subMinute())) {
+            $device->update(['last_seen_at' => now()]);
+        }
         $user = $device->user;
 
         return $this->json(['revision' => $user->device_registry_revision, 'generation' => $user->device_generation, 'offline_freshness_seconds' => app(DevicePolicy::class)->offlineFreshnessSeconds(), 'devices' => Device::query()->where('user_id', $user->id)->get()->map(fn (Device $entry): array => $this->device($entry))->all()]);
@@ -273,7 +275,7 @@ class DeviceController extends Controller
     /** @return array<string, mixed> */
     private function device(Device $device): array
     {
-        return ['id' => $device->id, 'display_name' => $device->display_name, 'platform' => $device->platform, 'public_key' => base64_encode($device->public_key), 'key_version' => $device->key_version, 'status' => $device->status->value, 'generation' => $device->generation, 'last_seen_at' => $device->last_seen_at?->toIso8601String(), 'presence_expires_at' => $device->presence_expires_at?->toIso8601String(), 'revoked_at' => $device->revoked_at?->toIso8601String()];
+        return ['id' => $device->id, 'display_name' => $device->display_name, 'platform' => $device->platform, 'public_key' => base64_encode($device->public_key), 'fingerprint' => hash('sha256', $device->public_key), 'key_version' => $device->key_version, 'status' => $device->status->value, 'generation' => $device->generation, 'last_seen_at' => $device->last_seen_at?->toIso8601String(), 'presence_expires_at' => $device->presence_expires_at?->toIso8601String(), 'revoked_at' => $device->revoked_at?->toIso8601String()];
     }
 
     /**

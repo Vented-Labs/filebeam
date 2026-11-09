@@ -11,6 +11,27 @@ use std::sync::{
 
 use super::{AccountService, DeviceService, HistoryService, NotesService, TurboService};
 
+/// Names a PEM file holding an extra root certificate for an instance served
+/// by a development or private certificate authority.
+pub const INSTANCE_CA_ENV: &str = "FILEBEAM_INSTANCE_CA";
+
+/// Reads the optional certificate named by [`INSTANCE_CA_ENV`]. It only adds a
+/// trusted root; hostname and certificate-chain verification stay enabled.
+pub fn instance_certificate_from_env() -> Result<Option<reqwest::Certificate>> {
+    let Some(path) = std::env::var_os(INSTANCE_CA_ENV).filter(|path| !path.is_empty()) else {
+        return Ok(None);
+    };
+    let pem = std::fs::read(&path).with_context(|| {
+        format!(
+            "read the {INSTANCE_CA_ENV} certificate {}",
+            std::path::Path::new(&path).display()
+        )
+    })?;
+    reqwest::Certificate::from_pem(&pem)
+        .map(Some)
+        .with_context(|| format!("{INSTANCE_CA_ENV} must name a PEM certificate"))
+}
+
 #[derive(Clone)]
 pub struct ServiceClient {
     instance: Url,
@@ -79,6 +100,10 @@ impl ServiceClient {
             .timeout(std::time::Duration::from_secs(120))
             .cookie_provider(cookies.clone())
             .user_agent(concat!("filebeam-native/", env!("CARGO_PKG_VERSION")));
+        let certificate = match certificate {
+            Some(certificate) => Some(certificate),
+            None => instance_certificate_from_env()?,
+        };
         if let Some(certificate) = certificate {
             http = http.add_root_certificate(certificate);
         }

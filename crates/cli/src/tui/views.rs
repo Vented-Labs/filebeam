@@ -1084,47 +1084,49 @@ fn device_jobs(
             ),
         );
     }
-    if state.device_job_details {
-        if let Some(job) = state.device_jobs.get(state.device_job_cursor) {
-            let detail = at(inner, inner.height.saturating_sub(5), 4);
-            Block::default()
-                .style(Style::default().bg(theme.raised()))
-                .render(detail, buffer);
-            paint::line(
-                at(detail, 0, 1),
-                buffer,
-                Line::styled(format!("Job {}", job.id), theme.strong()),
-            );
-            paint::line(
-                at(detail, 1, 1),
-                buffer,
-                Line::styled(
-                    format!(
-                        "Direction: outgoing · target: {} · destination: {}",
-                        clean(&job.target),
-                        clean(&job.grant_id)
-                    ),
-                    theme.dim(),
+    if state.device_job_details
+        && let Some(job) = state.device_jobs.get(state.device_job_cursor)
+    {
+        let detail = at(inner, inner.height.saturating_sub(5), 4);
+        Block::default()
+            .style(Style::default().bg(theme.raised()))
+            .render(detail, buffer);
+        paint::line(
+            at(detail, 0, 1),
+            buffer,
+            Line::styled(format!("Job {}", job.id), theme.strong()),
+        );
+        paint::line(
+            at(detail, 1, 1),
+            buffer,
+            Line::styled(
+                format!(
+                    "Direction: outgoing · target: {} · destination: {}",
+                    clean(&job.target),
+                    clean(&job.grant_id)
                 ),
-            );
-            paint::line(
-                at(detail, 2, 1),
-                buffer,
-                Line::styled(format!("Phase: {}", device_job_phase(job)), theme.dim()),
-            );
-            paint::line(
-                at(detail, 3, 1),
-                buffer,
-                Line::styled(
-                    if job.state == "delivered" {
-                        "Receipt: verified receiver receipt persisted by the daemon."
-                    } else {
-                        "Receipt: no verified receiver receipt reported yet."
-                    },
-                    theme.dim(),
-                ),
-            );
-        }
+                theme.dim(),
+            ),
+        );
+        paint::line(
+            at(detail, 2, 1),
+            buffer,
+            Line::styled(format!("Phase: {}", device_job_phase(job)), theme.dim()),
+        );
+        paint::line(
+            at(detail, 3, 1),
+            buffer,
+            Line::styled(
+                match (&job.error, job.state.as_str()) {
+                    (_, "delivered") => {
+                        "Receipt: verified receiver receipt persisted by the daemon.".into()
+                    }
+                    (Some(error), _) => format!("Last error: {}", clean(error)),
+                    (None, _) => "Receipt: no verified receiver receipt reported yet.".into(),
+                },
+                theme.dim(),
+            ),
+        );
     }
     None
 }
@@ -1948,6 +1950,7 @@ mod tests {
             grant_id: "dropzone".into(),
             state: "delivered".into(),
             prepared: true,
+            error: None,
         }];
         let mut buffer = Buffer::empty(Rect::new(0, 0, 120, 36));
         render(buffer.area, &mut buffer, &mut state, Theme::fixture());

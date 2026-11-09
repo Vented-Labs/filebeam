@@ -40,15 +40,15 @@ pub fn install_daemon_component(config: &Config) -> Result<String> {
             home: config.home.clone(),
             started: Cell::new(false),
         };
-        return updater(config.home.clone())?
+        updater(config.home.clone())?
             .install_daemon_component_with(
                 &filebeam_client_updater::HttpFetcher::new(std::time::Duration::from_secs(30)),
                 "cli",
                 filebeam_daemon::IPC_VERSION,
-                1,
+                filebeam_daemon::STORAGE_SCHEMA,
                 &service,
             )
-            .context("daemon service setup is blocked: this signed release catalog has no compatible daemon component");
+            .context("could not install the daemon from the signed release catalog")
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {

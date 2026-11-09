@@ -22,7 +22,7 @@ use crate::{
         PinnedDevice, VerifiedDeviceAuthority, authenticate_device_connection,
     },
     protocol::peer::{
-        PeerPreparedJob, PeerReceiveGrant, PeerReceiver, receive_admitted_offer,
+        PeerDelivery, PeerPreparedJob, PeerReceiveGrant, PeerReceiver, receive_admitted_offer,
         receive_authenticated_peer_offer, send_prepared_peer_job,
     },
     webrtc::{DeviceChannels, NativePeer},
@@ -737,9 +737,11 @@ impl AuthenticatedPeerSession {
             job,
             &self.channels,
             &self.authority,
-            requested_grant_id,
-            requested_subdirectory,
-            expires_at_unix_seconds,
+            PeerDelivery {
+                grant_id: requested_grant_id,
+                subdirectory: requested_subdirectory,
+                expires_at_unix_seconds,
+            },
             &self.receiver_key,
         )
         .await;

@@ -56,6 +56,8 @@ docker compose -f backend/compose.yaml run --rm --no-deps laravel.test bash -c '
 - [Contributing](CONTRIBUTING.md)
 - [UI workspace](ui/README.md)
 - [Beam CLI](crates/cli/README.md)
+- [Device-to-device transfers](docs/devices.md)
+- [Device daemon](docs/daemon.md)
 - [Adaptive transfers and production operation](docs/adaptive-transfers.md)
 - [Shared transfer policy](crates/transfer/README.md)
 - [Native transfer runtime](crates/transfer-native/README.md)

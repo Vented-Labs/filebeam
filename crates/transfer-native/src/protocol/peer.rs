@@ -35,7 +35,8 @@ use crate::{
     webrtc::{DeviceChannels, request_chunk},
 };
 
-pub use super::download::{PeerReceiveItem, PeerReceiveStaging};
+pub use super::download::{PeerChunkPosition, PeerReceiveItem, PeerReceiveStaging};
+use super::upload::PeerChunkKey;
 
 /// Durable peer preparation. The artifact is persisted before the caller can
 /// attach it to the unchanged WebRTC chunk worker, making a prepared job
@@ -43,25 +44,13 @@ pub use super::download::{PeerReceiveItem, PeerReceiveStaging};
 pub(crate) fn prepare_chunk(
     store: &Store,
     item: &super::upload::PeerPreparedItem,
-    transfer_id: &str,
-    item_id: &str,
+    key: &PeerChunkKey<'_>,
     position: u64,
     chunk_bytes: u64,
-    master_key: &[u8],
-    nonce_prefix: Vec<u8>,
     control: Control,
 ) -> Result<PreparedChunk> {
-    let prepared = super::upload::prepare_peer_chunk(
-        item,
-        transfer_id,
-        item_id,
-        position,
-        chunk_bytes,
-        master_key,
-        nonce_prefix,
-        control,
-    )?;
-    let name = format!("peer-chunk-{item_id}-{position}");
+    let prepared = super::upload::prepare_peer_chunk(item, key, position, chunk_bytes, control)?;
+    let name = format!("peer-chunk-{}-{position}", key.item_id);
     let path = store.persist_immutable(&name, &prepared.ciphertext)?;
     Ok(PreparedChunk {
         path,
@@ -236,29 +225,25 @@ impl PeerPreparedJob {
     }
 }
 
+/// Registered sender and receiver identities bound into a prepared peer job.
+#[derive(Clone, Debug)]
+pub struct PeerParties {
+    pub sender_device_id: String,
+    pub sender_key_version: u32,
+    pub receiver_device_id: String,
+    pub receiver_key_version: u32,
+}
+
 /// Prepare every selected regular source into immutable artifacts and persist a
 /// typed private job record before an offer can be created.
 pub fn prepare_peer_job(
     store: &Store,
     sources: &[PeerSource],
-    sender_device_id: String,
-    sender_key_version: u32,
-    receiver_device_id: String,
-    receiver_key_version: u32,
+    parties: PeerParties,
     chunk_bytes: u64,
     control: Control,
 ) -> Result<PeerPreparedJob> {
-    prepare_peer_job_inner(
-        store,
-        sources,
-        None,
-        sender_device_id,
-        sender_key_version,
-        receiver_device_id,
-        receiver_key_version,
-        chunk_bytes,
-        control,
-    )
+    prepare_peer_job_inner(store, sources, None, parties, chunk_bytes, control)
 }
 
 /// Enumerate selected filesystem roots without following links, then prepare
@@ -268,10 +253,7 @@ pub fn prepare_peer_tree_job(
     store: &Store,
     selected: &[PathBuf],
     options: TreeEnumerationOptions,
-    sender_device_id: String,
-    sender_key_version: u32,
-    receiver_device_id: String,
-    receiver_key_version: u32,
+    parties: PeerParties,
     chunk_bytes: u64,
     control: Control,
 ) -> Result<PeerPreparedJob> {
@@ -284,30 +266,23 @@ pub fn prepare_peer_tree_job(
             spec: file.source.spec.clone(),
         })
         .collect::<Vec<_>>();
-    prepare_peer_job_inner(
-        store,
-        &sources,
-        Some(&tree),
-        sender_device_id,
-        sender_key_version,
-        receiver_device_id,
-        receiver_key_version,
-        chunk_bytes,
-        control,
-    )
+    prepare_peer_job_inner(store, &sources, Some(&tree), parties, chunk_bytes, control)
 }
 
 fn prepare_peer_job_inner(
     store: &Store,
     sources: &[PeerSource],
     source_tree: Option<&EnumeratedSourceTree>,
-    sender_device_id: String,
-    sender_key_version: u32,
-    receiver_device_id: String,
-    receiver_key_version: u32,
+    parties: PeerParties,
     chunk_bytes: u64,
     control: Control,
 ) -> Result<PeerPreparedJob> {
+    let PeerParties {
+        sender_device_id,
+        sender_key_version,
+        receiver_device_id,
+        receiver_key_version,
+    } = parties;
     if (sources.is_empty() && source_tree.is_none())
         || chunk_bytes == 0
         || sender_device_id.is_empty()
@@ -347,16 +322,19 @@ fn prepare_peer_job_inner(
         let nonce_prefix = generate_nonce_prefix()?;
         control.item(source.name.clone(), index, size);
         let mut item_artifacts = Vec::with_capacity(usize::try_from(chunk_count)?);
+        let key = PeerChunkKey {
+            transfer_id: &transfer_id,
+            item_id: &item_id,
+            master_key: &master_key,
+            nonce_prefix: &nonce_prefix,
+        };
         for position in 0..chunk_count {
             let prepared = prepare_chunk(
                 store,
                 &prepared_item,
-                &transfer_id,
-                &item_id,
+                &key,
                 position,
                 chunk_bytes,
-                &master_key,
-                nonce_prefix.clone(),
                 control.clone(),
             )?;
             done = done
@@ -488,6 +466,13 @@ pub fn load_peer_job(store: &Store) -> Result<PeerPreparedJob> {
     })
 }
 
+/// Receiver destination and expiry requested in a peer offer.
+pub(crate) struct PeerDelivery {
+    pub grant_id: String,
+    pub subdirectory: Option<String>,
+    pub expires_at_unix_seconds: u64,
+}
+
 /// Send an already durable job after proof authentication. The only network
 /// payload before `serve_artifacts` is the peer-only offer/accept metadata.
 pub(crate) async fn send_prepared_peer_job(
@@ -495,11 +480,14 @@ pub(crate) async fn send_prepared_peer_job(
     job: &PeerPreparedJob,
     channels: &DeviceChannels,
     authority: &VerifiedDeviceAuthority,
-    requested_grant_id: String,
-    requested_subdirectory: Option<String>,
-    expires_at_unix_seconds: u64,
+    delivery: PeerDelivery,
     receiver_key: &ed25519_dalek::VerifyingKey,
 ) -> Result<DeviceReceipt> {
+    let PeerDelivery {
+        grant_id: requested_grant_id,
+        subdirectory: requested_subdirectory,
+        expires_at_unix_seconds,
+    } = delivery;
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .context("system clock predates Unix epoch")?
@@ -684,7 +672,7 @@ pub(crate) async fn receive_admitted_offer(
         receive_device_receipt_ack(channels.metadata.clone(), &receipt).await?;
         return Ok(receipt);
     }
-    let manifest = decrypt_peer_manifest(&offer)?;
+    let manifest = decrypt_peer_manifest(offer)?;
     offer.validate_manifest(&manifest, authority)?;
     if hex::encode(Sha256::digest(serde_json::to_vec(&manifest)?)) != offer.metadata.manifest_digest
     {
@@ -716,7 +704,7 @@ pub(crate) async fn receive_admitted_offer(
             state
         }
     };
-    let grant = receiver.admit(&offer, &manifest)?;
+    let grant = receiver.admit(offer, &manifest)?;
     if Uuid::parse_str(&grant.id).is_err()
         || grant.revision == 0
         || grant.targets.len() != manifest.items.len()
@@ -797,12 +785,15 @@ pub(crate) async fn receive_admitted_offer(
                 )
                 .await?
             };
+            let chunk = PeerChunkPosition {
+                item_index,
+                index: position,
+                chunk_bytes: offer.metadata.chunk_bytes,
+            };
             if let Some(staging) = &grant.staging {
                 super::download::receive_peer_chunk_staged(
                     staging.as_ref(),
-                    item_index,
-                    position,
-                    offer.metadata.chunk_bytes,
+                    chunk,
                     &offer.metadata.transfer_id,
                     &item,
                     &master,
@@ -811,9 +802,7 @@ pub(crate) async fn receive_admitted_offer(
             } else {
                 receive_chunk(
                     &grant.staging_base,
-                    item_index,
-                    position,
-                    offer.metadata.chunk_bytes,
+                    chunk,
                     &offer.metadata.transfer_id,
                     &item,
                     &master,
@@ -946,31 +935,18 @@ fn new_ulid() -> Result<String> {
 
 pub fn receive_chunk(
     base: &std::path::Path,
-    item_index: usize,
-    index: u64,
-    chunk_bytes: u64,
+    position: PeerChunkPosition,
     transfer_id: &str,
     item: &PeerReceiveItem,
     master: &[u8],
     ciphertext: Vec<u8>,
 ) -> Result<u64> {
-    super::download::receive_peer_chunk(
-        base,
-        item_index,
-        index,
-        chunk_bytes,
-        transfer_id,
-        item,
-        master,
-        ciphertext,
-    )
+    super::download::receive_peer_chunk(base, position, transfer_id, item, master, ciphertext)
 }
 
 pub fn receive_chunk_staged(
     staging: &dyn PeerReceiveStaging,
-    item_index: usize,
-    index: u64,
-    chunk_bytes: u64,
+    position: PeerChunkPosition,
     transfer_id: &str,
     item: &PeerReceiveItem,
     master: &[u8],
@@ -978,9 +954,7 @@ pub fn receive_chunk_staged(
 ) -> Result<u64> {
     super::download::receive_peer_chunk_staged(
         staging,
-        item_index,
-        index,
-        chunk_bytes,
+        position,
         transfer_id,
         item,
         master,
@@ -1028,11 +1002,28 @@ mod tests {
             send_device_receipt_ack, send_offer_decision,
         },
         protocol::{
-            download::receive_peer_chunk, peer::PeerReceiveItem, upload::prepare_peer_chunk,
+            download::receive_peer_chunk,
+            peer::PeerReceiveItem,
+            upload::{PeerChunkKey, prepare_peer_chunk},
         },
         source::SourceSpec,
         webrtc::{NativePeer, request_chunk, serve_channel, wait_for_open},
     };
+
+    const TEST_CHUNK: PeerChunkPosition = PeerChunkPosition {
+        item_index: 0,
+        index: 0,
+        chunk_bytes: 1024,
+    };
+
+    fn test_parties() -> PeerParties {
+        PeerParties {
+            sender_device_id: "sender-1".into(),
+            sender_key_version: 1,
+            receiver_device_id: "receiver-1".into(),
+            receiver_key_version: 1,
+        }
+    }
 
     struct TestReceiver {
         base: PathBuf,
@@ -1091,27 +1082,14 @@ mod tests {
         };
         let item =
             super::super::upload::prepare_peer_item(&source, 1024, &Control::test_factory())?;
-        let durable = super::prepare_chunk(
-            &store,
-            &item,
+        let key = PeerChunkKey {
             transfer_id,
             item_id,
-            0,
-            1024,
-            &master,
-            nonce.clone(),
-            Control::test_factory(),
-        )?;
-        let prepared = prepare_peer_chunk(
-            &item,
-            transfer_id,
-            item_id,
-            0,
-            1024,
-            &master,
-            nonce.clone(),
-            Control::test_factory(),
-        )?;
+            master_key: &master,
+            nonce_prefix: &nonce,
+        };
+        let durable = super::prepare_chunk(&store, &item, &key, 0, 1024, Control::test_factory())?;
+        let prepared = prepare_peer_chunk(&item, &key, 0, 1024, Control::test_factory())?;
         assert_eq!(fs::read(&durable.path)?, prepared.ciphertext);
 
         let receiver = NativePeer::with_udp_addrs(&[], vec!["127.0.0.1:0".into()]).await?;
@@ -1149,9 +1127,7 @@ mod tests {
         assert_eq!(
             receive_peer_chunk(
                 output.path(),
-                0,
-                0,
-                1024,
+                TEST_CHUNK,
                 transfer_id,
                 &item,
                 &master,
@@ -1327,16 +1303,13 @@ mod tests {
         };
         let item =
             super::super::upload::prepare_peer_item(&source, 1024, &Control::test_factory())?;
-        let prepared = prepare_peer_chunk(
-            &item,
+        let key = PeerChunkKey {
             transfer_id,
             item_id,
-            0,
-            1024,
-            &master,
-            nonce.clone(),
-            Control::test_factory(),
-        )?;
+            master_key: &master,
+            nonce_prefix: &nonce,
+        };
+        let prepared = prepare_peer_chunk(&item, &key, 0, 1024, Control::test_factory())?;
         let worker = tokio::spawn(serve_channel(
             sender_channels.file.clone(),
             HashMap::from([((item_id.into(), 0), prepared.ciphertext.clone())]),
@@ -1361,9 +1334,7 @@ mod tests {
         };
         receive_peer_chunk(
             output.path(),
-            0,
-            0,
-            1024,
+            TEST_CHUNK,
             transfer_id,
             &item,
             &master,
@@ -1491,10 +1462,7 @@ mod tests {
                     length: 24,
                 },
             }],
-            "sender-1".into(),
-            1,
-            "receiver-1".into(),
-            1,
+            test_parties(),
             1024,
             Control::test_factory(),
         )?;
@@ -1515,9 +1483,11 @@ mod tests {
                 &job,
                 &sender_channels,
                 &sender_authority,
-                "dropzone-1".into(),
-                None,
-                4_000_000_000,
+                PeerDelivery {
+                    grant_id: "dropzone-1".into(),
+                    subdirectory: None,
+                    expires_at_unix_seconds: 4_000_000_000,
+                },
                 &receiver_public
             ),
             receive_peer_job(
@@ -1628,31 +1598,16 @@ mod tests {
         let master = generate_transfer_key()?;
         let nonce = generate_nonce_prefix()?;
 
-        prepare_peer_chunk(
-            &item,
-            "01ARZ3NDEKTSV4RRFFQ69G5FAV",
-            "01ARZ3NDEKTSV4RRFFQ69G5FAW",
-            0,
-            4,
-            &master,
-            nonce.clone(),
-            control.clone(),
-        )?;
+        let key = PeerChunkKey {
+            transfer_id: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            item_id: "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+            master_key: &master,
+            nonce_prefix: &nonce,
+        };
+        prepare_peer_chunk(&item, &key, 0, 4, control.clone())?;
         fs::write(&path, b"abcdWXYZ")?;
 
-        assert!(
-            prepare_peer_chunk(
-                &item,
-                "01ARZ3NDEKTSV4RRFFQ69G5FAV",
-                "01ARZ3NDEKTSV4RRFFQ69G5FAW",
-                1,
-                4,
-                &master,
-                nonce,
-                control,
-            )
-            .is_err()
-        );
+        assert!(prepare_peer_chunk(&item, &key, 1, 4, control).is_err());
         Ok(())
     }
 
@@ -1673,10 +1628,7 @@ mod tests {
                     length: 14,
                 },
             }],
-            "sender-1".into(),
-            1,
-            "receiver-1".into(),
-            1,
+            test_parties(),
             4,
             Control::test_factory(),
         )?;
@@ -1712,10 +1664,7 @@ mod tests {
                     length: bytes.len() as u64,
                 },
             }],
-            "sender-1".into(),
-            1,
-            "receiver-1".into(),
-            1,
+            test_parties(),
             4,
             control,
         )?;

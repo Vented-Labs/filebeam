@@ -9,7 +9,7 @@ use ed25519_dalek::{SigningKey, VerifyingKey};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use crate::{DaemonDevice, DaemonState, DeviceProvision, RuntimeAvailability};
+use crate::{DaemonDevice, DaemonState, DeviceApproval, DeviceProvision, RuntimeAvailability};
 
 /// Platform-neutral account registry control. IPC transports and filesystem
 /// receivers deliberately call this one owner instead of reimplementing trust.
@@ -77,6 +77,58 @@ impl ControlPlane {
             .collect()
     }
 
+    /// Approves a pending device on this account with this daemon's device key.
+    pub(crate) fn approve_device(&self, approval: DeviceApproval, fingerprint: &str) -> Result<()> {
+        let provision = daemon_store(&self.home)?
+            .load_named::<DeviceProvision>("device-provision-v1.json")?
+            .context("add this device with `beam devices add` before approving another")?;
+        if approval.instance_origin != provision.instance {
+            bail!("the approval payload belongs to another Filebeam instance");
+        }
+        if device_fingerprint(&approval.candidate_public_key)? != fingerprint {
+            bail!("the candidate key does not match the fingerprint you verified");
+        }
+        let service = service_client(&provision.instance, self.certificate.clone())?;
+        let devices = service.devices();
+        let candidate = devices
+            .device_sync(&provision.credential)?
+            .devices
+            .into_iter()
+            .find(|device| device.id == approval.candidate_device_id)
+            .context("the candidate device is not registered on this account")?;
+        if candidate.status != "pending" || candidate.public_key != approval.candidate_public_key {
+            bail!("the candidate device is no longer pending with the verified key");
+        }
+        let context = filebeam_client_core::services::DeviceApprovalContext {
+            instance_origin: approval.instance_origin,
+            deployment_id: approval.deployment_id,
+            account_id: approval.account_id,
+            generation: approval.generation,
+            candidate_device_id: approval.candidate_device_id,
+            candidate_key_version: approval.candidate_key_version,
+            candidate_public_key: approval.candidate_public_key,
+            challenge_sha256: approval.challenge_sha256,
+            expires_at_unix: approval.expires_at_unix,
+            approver_device_id: provision.device_id.clone(),
+            approver_key_version: provision.key_version,
+        };
+        let key = SigningKey::from_bytes(
+            &STANDARD
+                .decode(&provision.signing_key)?
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("device signing key has an invalid length"))?,
+        );
+        let signature = filebeam_client_core::services::approval_signature(&key, &context)?;
+        devices.approve_device_enrollment(&candidate, &provision.credential, &signature)?;
+        // The user verified this key to approve it, which is the same check pairing makes.
+        self.pin_peer(
+            &provision,
+            &candidate.id,
+            candidate.key_version,
+            fingerprint,
+        )
+    }
+
     pub(crate) fn confirm_peer(
         &self,
         device_id: &str,
@@ -90,6 +142,17 @@ impl ControlPlane {
         let provision = daemon_store(&self.home)?
             .load_named::<DeviceProvision>("device-provision-v1.json")?
             .context("device provisioning is required")?;
+        self.pin_peer(&provision, device_id, key_version, fingerprint)
+    }
+
+    /// Pins an active device whose fingerprint the user verified out of band.
+    fn pin_peer(
+        &self,
+        provision: &DeviceProvision,
+        device_id: &str,
+        key_version: u32,
+        fingerprint: &str,
+    ) -> Result<()> {
         let snapshot = service_client(&provision.instance, self.certificate.clone())?
             .devices()
             .device_sync(&provision.credential)?;
@@ -104,9 +167,9 @@ impl ControlPlane {
         {
             bail!("pairing verification does not match the authenticated device registry");
         }
-        refresh_registry(&self.home, &provision, snapshot)?;
+        refresh_registry(&self.home, provision, snapshot)?;
         let store = registry_store(&self.home)?;
-        let scope = registry_scope(&provision)?;
+        let scope = registry_scope(provision)?;
         let mut registry = filebeam_client_core::device_registry::DeviceRegistry::open(
             &store,
             scope,
@@ -159,24 +222,36 @@ fn registry_sync_failure(
 }
 
 pub(crate) fn daemon_store(home: &Path) -> Result<filebeam_transfer_native::checkpoint::Store> {
-    let root = home.join("transfers");
-    match filebeam_transfer_native::checkpoint::Store::open(&root, "daemon-private-v1") {
-        Ok(store) => Ok(store),
-        Err(error) if error.to_string().contains("does not exist") => {
-            filebeam_transfer_native::checkpoint::Store::create(&root, "daemon-private-v1")
-        }
-        Err(error) => Err(error.into()),
-    }
+    open_store(&home.join("transfers"), "daemon-private-v1")
 }
 pub(crate) fn registry_store(home: &Path) -> Result<filebeam_transfer_native::checkpoint::Store> {
-    let root = home.join("registry");
-    match filebeam_transfer_native::checkpoint::Store::open(&root, "device-registry-v1") {
-        Ok(store) => Ok(store),
-        Err(error) if error.to_string().contains("does not exist") => {
-            filebeam_transfer_native::checkpoint::Store::create(&root, "device-registry-v1")
+    open_store(&home.join("registry"), "device-registry-v1")
+}
+/// Opens a private store, creating it on first use. Daemon threads share these
+/// stores through an exclusive lock, so a short wait covers another thread's
+/// read or write instead of failing that thread's whole pass.
+fn open_store(root: &Path, id: &str) -> Result<filebeam_transfer_native::checkpoint::Store> {
+    use filebeam_transfer_native::checkpoint::Store;
+    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        match Store::open(root, id) {
+            Ok(store) => return Ok(store),
+            Err(error) if error.to_string().contains("does not exist") => {
+                return Store::create(root, id);
+            }
+            Err(error) if lock_contended(&error) && std::time::Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(error) => return Err(error),
         }
-        Err(error) => Err(error.into()),
     }
+}
+fn lock_contended(error: &anyhow::Error) -> bool {
+    let contended = fs2::lock_contended_error().raw_os_error();
+    error
+        .chain()
+        .filter_map(|cause| cause.downcast_ref::<std::io::Error>())
+        .any(|cause| cause.raw_os_error() == contended)
 }
 pub(crate) fn write_state(path: &Path, state: &DaemonState) -> Result<()> {
     write_json(path, state)

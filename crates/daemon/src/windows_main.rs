@@ -11,11 +11,11 @@ use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 
 use crate::{
-    ControlPlane, DaemonState, DestinationGrants, DeviceJobs, Reply, Request, windows::Pipe,
+    ControlPlane, DaemonState, DestinationGrants, DeviceJobs, IPC_VERSION, Reply, Request,
+    windows::Pipe,
 };
 
 type HmacSha256 = Hmac<Sha256>;
-pub const IPC_VERSION: u32 = 1;
 const MAX_MESSAGE_BYTES: u64 = 1024 * 1024;
 
 #[derive(Serialize, Deserialize)]
@@ -256,6 +256,13 @@ impl WindowsDaemon {
                             &fingerprint,
                             &confirmation_nonce,
                         )
+                    }),
+                    Ok(Request::ApproveDevice {
+                        version,
+                        approval,
+                        fingerprint,
+                    }) => self.with_version(version, |_| {
+                        ControlPlane::new(&self.home, None).approve_device(approval, &fingerprint)
                     }),
                     Ok(Request::ListDestinations { version }) => {
                         let mut reply = self.reply_for_version(version);

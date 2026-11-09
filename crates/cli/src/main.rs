@@ -301,6 +301,12 @@ enum DevicesCommand {
         #[arg(long)]
         name: Option<String>,
     },
+    /// Approve a pending device from its `devices add` payload, read from standard input.
+    Approve {
+        /// The candidate's full fingerprint, compared out of band.
+        #[arg(long)]
+        fingerprint: String,
+    },
     /// Confirm an active peer's full fingerprint after comparing it out of band.
     Pair {
         target: String,
@@ -553,6 +559,24 @@ fn normalize_fingerprint(value: &str) -> Result<String> {
     Ok(value)
 }
 
+/// Reads the single-line JSON payload printed by `beam devices add` or the desktop app.
+fn read_device_approval() -> Result<filebeam_daemon::DeviceApproval> {
+    if std::io::stdin().is_terminal() {
+        eprint!("Paste the approval payload: ");
+        std::io::stderr().flush()?;
+    }
+    let mut payload = String::new();
+    std::io::stdin().read_line(&mut payload)?;
+    serde_json::from_str(payload.trim())
+        .context("the approval payload must be the JSON printed by `beam devices add`")
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs())
+}
+
 fn confirm_fingerprint(fingerprint: &str) -> Result<()> {
     if !std::io::stdin().is_terminal() {
         anyhow::bail!("peer verification requires an interactive terminal");
@@ -602,7 +626,10 @@ fn wait_for_prepared(config: &config::Config, id: &str, interrupted: &AtomicBool
         }
         match job.state.as_str() {
             "cancelled" => anyhow::bail!("device job was cancelled"),
-            "failed" => anyhow::bail!("device job failed before its durable snapshot was prepared"),
+            "failed" => anyhow::bail!(
+                "device job failed before its durable snapshot was prepared: {}",
+                job.error.as_deref().unwrap_or("unknown error")
+            ),
             _ => std::thread::sleep(std::time::Duration::from_millis(250)),
         }
     }
@@ -630,7 +657,10 @@ fn wait_for_delivery(
                 return Ok(());
             }
             "cancelled" => anyhow::bail!("device job was cancelled"),
-            "failed" => anyhow::bail!("device job failed"),
+            "failed" => anyhow::bail!(
+                "device job failed: {}",
+                job.error.as_deref().unwrap_or("unknown error")
+            ),
             _ => std::thread::sleep(std::time::Duration::from_millis(250)),
         }
     }
@@ -713,7 +743,7 @@ fn main() -> Result<()> {
             if recipient.starts_with('@') {
                 let recipient = recipient.trim_start_matches('@');
                 let client = services::client(&config, &instance)?;
-                let target = client.account().recipient(&recipient)?;
+                let target = client.account().recipient(recipient)?;
                 let options = protocol::UploadOptions {
                     authentication: protocol::UploadAuthentication::SessionCookie(
                         client.cookie_context()?,
@@ -859,12 +889,30 @@ fn main() -> Result<()> {
                     "start the local Filebeam daemon before adding a device; provisioning never writes device keys to an unverified service",
                 )?;
                 match services::begin_or_resume_device_add(&config, &instance, &name)? {
-                    services::DeviceAdd::Pending { id, fingerprint } => output::result(
-                        &format!(
-                            "Enrollment pending approval. Device: {id}\nFingerprint: {fingerprint}\nApprove it on a verified device, then rerun `beam devices add`."
-                        ),
-                        cli.plain,
-                    )?,
+                    services::DeviceAdd::Pending {
+                        id,
+                        fingerprint,
+                        approval,
+                    } => {
+                        let mut message = format!(
+                            "Enrollment pending approval. Device: {id}\nFingerprint: {fingerprint}"
+                        );
+                        if let Some(approval) = approval {
+                            message.push_str(&format!(
+                                "\nOn an active device, run `beam devices approve --fingerprint {fingerprint}` and paste this payload:\n{}\nThen rerun `beam devices add` here within {} minutes.",
+                                serde_json::to_string(&approval)?,
+                                approval
+                                    .expires_at_unix
+                                    .saturating_sub(unix_now())
+                                    .div_ceil(60)
+                            ));
+                        } else {
+                            message.push_str(
+                                "\nApprove it on an active device, then rerun `beam devices add`.",
+                            );
+                        }
+                        output::result(&message, cli.plain)?;
+                    }
                     services::DeviceAdd::Provision(provision) => {
                         let id = provision.device_id.clone();
                         daemon::provision_device(&config, provision)?;
@@ -875,6 +923,24 @@ fn main() -> Result<()> {
                         )?;
                     }
                 }
+            }
+            DevicesCommand::Approve { fingerprint } => {
+                let fingerprint = normalize_fingerprint(&fingerprint)?;
+                let approval = read_device_approval()?;
+                if services::device_fingerprint(&approval.candidate_public_key)? != fingerprint {
+                    anyhow::bail!(
+                        "the pasted candidate key does not match the supplied fingerprint"
+                    );
+                }
+                if std::io::stdin().is_terminal() {
+                    confirm_fingerprint(&fingerprint)?;
+                }
+                let candidate = approval.candidate_device_id.clone();
+                daemon::approve_device(&config, approval, &fingerprint)?;
+                output::result(
+                    &format!("Device {candidate} approved and paired with this device."),
+                    cli.plain,
+                )?;
             }
             DevicesCommand::Pair {
                 target,

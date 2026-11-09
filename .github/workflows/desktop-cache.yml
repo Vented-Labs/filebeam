@@ -10,6 +10,7 @@ on:
       - 'crates/client-core/Cargo.lock'
       - 'crates/client-config/Cargo.toml'
       - 'crates/client-updater/Cargo.toml'
+      - 'crates/daemon/Cargo.toml'
       - 'crates/encryption/Cargo.toml'
       - 'crates/transfer/Cargo.toml'
       - 'crates/transfer-native/Cargo.toml'

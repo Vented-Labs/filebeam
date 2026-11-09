@@ -39,7 +39,7 @@ pub fn enable(config: &Config, version: &str) -> Result<String> {
             &HttpFetcher::new(Duration::from_secs(30)),
             "desktop",
             filebeam_daemon::IPC_VERSION,
-            1,
+            filebeam_daemon::STORAGE_SCHEMA,
             &service,
         )
         .context("daemon service setup is blocked: this signed release catalog has no compatible daemon component")

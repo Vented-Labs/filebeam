@@ -22,7 +22,7 @@ fn daemon_child_owner() -> Result<()> {
     Ok(())
 }
 
-/// T25/T38/T40: real daemon IPC, TLS rendezvous, WebRTC, receipt, and commit.
+/// Real daemon IPC, TLS rendezvous, WebRTC, receipt, and commit.
 #[test]
 fn two_daemons_deliver_prepared_bytes_after_sender_observer_detaches() -> Result<()> {
     let coordinator = Coordinator::start()?;
