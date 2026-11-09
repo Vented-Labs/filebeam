@@ -81,6 +81,10 @@ function selected(event: Event): void {
 <style scoped>
 .file-pond {
     --fb-pond-art-scale: 1;
+    /* The empty-state padding is derived from this inset so content never crosses the outline. */
+    --pond-outline-block: 0.75rem;
+    --pond-outline-inline: 1.125rem;
+    --pond-outline-clearance: 0.625rem;
     position: relative;
     min-width: 0;
     overflow: hidden;
@@ -89,7 +93,7 @@ function selected(event: Event): void {
 .file-pond::after {
     content: '';
     position: absolute;
-    inset: 0.75rem 1.125rem;
+    inset: var(--pond-outline-block) var(--pond-outline-inline);
     border: 1px dashed transparent;
     border-radius: 1rem;
     pointer-events: none;
@@ -138,7 +142,9 @@ function selected(event: Event): void {
     align-items: center;
     flex-direction: column;
     justify-content: center;
-    padding: 0.9375rem 1.75rem 1.625rem;
+    padding: max(0.9375rem, calc(var(--pond-outline-block) + var(--pond-outline-clearance)))
+        max(1.75rem, calc(var(--pond-outline-inline) + var(--pond-outline-clearance)))
+        max(1.625rem, calc(var(--pond-outline-block) + var(--pond-outline-clearance)));
     text-align: center;
 }
 .file-pond__art {
@@ -262,9 +268,14 @@ function selected(event: Event): void {
     }
 }
 @media (max-width: 730px) {
+    .file-pond {
+        --pond-outline-inline: 0.5rem;
+    }
     .file-pond__empty {
         min-height: 21.5625rem;
-        padding: 1.1875rem 0.9375rem 1.6875rem;
+        padding: 1.1875rem
+            max(0.9375rem, calc(var(--pond-outline-inline) + var(--pond-outline-clearance)))
+            1.6875rem;
     }
     .file-pond__empty h1 {
         font-size: 1.9375rem;
@@ -296,10 +307,11 @@ function selected(event: Event): void {
 @media (min-width: 901px) and (max-height: 1000px) {
     .file-pond {
         --fb-pond-art-scale: 0.6;
+        --pond-outline-block: 0.5rem;
     }
     .file-pond__empty {
         min-height: 0;
-        padding-block: 0.5rem;
+        padding-block: calc(var(--pond-outline-block) + var(--pond-outline-clearance));
     }
     .file-pond__empty > p {
         margin-top: 0.5rem;
