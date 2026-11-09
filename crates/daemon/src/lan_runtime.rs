@@ -44,7 +44,7 @@ pub fn start(
 }
 
 async fn run_listener(
-    home: &PathBuf,
+    home: &std::path::Path,
     runtime: &filebeam_client_core::DeviceRuntime,
     receive_enabled: &Arc<AtomicBool>,
     lan_enabled: &Arc<AtomicBool>,
@@ -114,13 +114,13 @@ async fn run_listener(
                 runtime.start_peer_receiver(
                     authenticated,
                     Arc::new(DaemonPeerReceiver::with_policy(
-                        home.clone(),
+                        home.to_path_buf(),
                         receive_enabled.clone(),
                     )),
                     Arc::new(signer),
                 );
             }
-            Err(_) => {}
+            Err(error) => eprintln!("filebeamd: LAN device connection: {error:#}"),
         }
     }
     Ok(())

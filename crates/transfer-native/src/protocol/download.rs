@@ -172,11 +172,17 @@ pub trait PeerReceiveStaging: Send + Sync {
     fn write_target(&self, item: usize, plain: &mut File) -> Result<()>;
 }
 
+/// Locates one ciphertext chunk within a peer receive.
+#[derive(Clone, Copy, Debug)]
+pub struct PeerChunkPosition {
+    pub item_index: usize,
+    pub index: u64,
+    pub chunk_bytes: u64,
+}
+
 pub fn receive_peer_chunk(
     base: &Path,
-    item_index: usize,
-    index: u64,
-    chunk_bytes: u64,
+    position: PeerChunkPosition,
     transfer_id: &str,
     item: &PeerReceiveItem,
     master: &[u8],
@@ -184,9 +190,9 @@ pub fn receive_peer_chunk(
 ) -> Result<u64> {
     authenticate_and_write(AuthenticateAndWriteRequest {
         base,
-        item_index,
-        index,
-        chunk_bytes,
+        item_index: position.item_index,
+        index: position.index,
+        chunk_bytes: position.chunk_bytes,
         transfer_id,
         item: &SavedItem {
             id: item.id.clone(),
@@ -207,31 +213,19 @@ pub fn receive_peer_chunk(
 
 pub fn receive_peer_chunk_staged(
     staging: &dyn PeerReceiveStaging,
-    item_index: usize,
-    index: u64,
-    chunk_bytes: u64,
+    position: PeerChunkPosition,
     transfer_id: &str,
     item: &PeerReceiveItem,
     master: &[u8],
     ciphertext: Vec<u8>,
 ) -> Result<u64> {
-    let (expected, plain) = authenticate_peer_chunk(
+    let PeerChunkPosition {
         item_index,
         index,
         chunk_bytes,
-        transfer_id,
-        &PeerReceiveItem {
-            id: item.id.clone(),
-            name: item.name.clone(),
-            size: item.size,
-            nonce_prefix: item.nonce_prefix.clone(),
-            chunk_count: item.chunk_count,
-            digest: item.digest.clone(),
-            target: item.target.clone(),
-        },
-        master,
-        &ciphertext,
-    )?;
+    } = position;
+    let (expected, plain) =
+        authenticate_peer_chunk(index, chunk_bytes, transfer_id, item, master, &ciphertext)?;
     staging.write_ciphertext(item_index, index, &ciphertext)?;
     staging.write_plain(item_index, index * chunk_bytes, &plain)?;
     Ok(expected)
@@ -2618,7 +2612,6 @@ fn authenticate_and_write(request: AuthenticateAndWriteRequest<'_>) -> Result<u6
         retain_ciphertext,
     } = request;
     let (expected, plain) = authenticate_peer_chunk(
-        item_index,
         index,
         chunk_bytes,
         transfer_id,
@@ -2650,7 +2643,6 @@ fn authenticate_and_write(request: AuthenticateAndWriteRequest<'_>) -> Result<u6
 }
 
 fn authenticate_peer_chunk(
-    _item_index: usize,
     index: u64,
     chunk_bytes: u64,
     transfer_id: &str,

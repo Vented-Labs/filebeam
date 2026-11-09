@@ -17,7 +17,7 @@ pub use account::{
     export_self_key, generate_self_keypair, import_self_key, open_recipient_key,
     seal_recipient_key, unwrap_password_key, validate_self_key, wrap_password_key,
 };
-pub use client::ServiceClient;
+pub use client::{INSTANCE_CA_ENV, ServiceClient, instance_certificate_from_env};
 pub use contacts::{Contact, ContactIdentity, Contacts, ReceivingDefaults};
 pub use device::{
     AccountDevice, DeviceApprovalContext, DeviceApprovalEvidence, DeviceCredentialRedemption,

@@ -3,6 +3,13 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Local IPC protocol version. The signed release catalog advertises the
+/// supported range for each daemon component.
+pub const IPC_VERSION: u32 = 1;
+/// Version of the daemon's persisted profile state. A component is installed
+/// only when it matches the schema the requesting client expects.
+pub const STORAGE_SCHEMA: u32 = 1;
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ApprovalMode {
@@ -56,6 +63,9 @@ pub struct DeviceJob {
     pub prepared: bool,
     #[serde(default)]
     pub expires_at_unix_seconds: u64,
+    /// Why the job failed, or the last error while it waits to be retried.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -70,6 +80,22 @@ pub struct DeviceProvision {
     pub public_key: String,
     pub signing_key: String,
     pub credential: String,
+}
+
+/// Enrollment data printed by a device that is waiting for approval. Approval
+/// signs it with this daemon's device key after the user compares the
+/// candidate's fingerprint out of band.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DeviceApproval {
+    pub instance_origin: String,
+    pub deployment_id: String,
+    pub account_id: u64,
+    pub generation: u64,
+    pub candidate_device_id: String,
+    pub candidate_key_version: u32,
+    pub candidate_public_key: String,
+    pub challenge_sha256: String,
+    pub expires_at_unix: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -160,6 +186,11 @@ pub enum Request {
         id: Uuid,
         action: DeviceJobState,
     },
+    ApproveDevice {
+        version: u32,
+        approval: DeviceApproval,
+        fingerprint: String,
+    },
     Shutdown {
         version: u32,
     },
@@ -173,4 +204,20 @@ pub struct Reply {
     pub destinations: Vec<DestinationGrant>,
     pub jobs: Vec<DeviceJob>,
     pub devices: Vec<DaemonDevice>,
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn release_catalog_advertises_this_daemon_contract() {
+        let writer = include_str!("../../../scripts/release/cli-write-release.php");
+        assert!(writer.contains(&format!(
+            "const DAEMON_IPC_VERSION = {};",
+            super::IPC_VERSION
+        )));
+        assert!(writer.contains(&format!(
+            "const DAEMON_STORAGE_SCHEMA = {};",
+            super::STORAGE_SCHEMA
+        )));
+    }
 }

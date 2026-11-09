@@ -243,25 +243,30 @@ pub(crate) fn peer_prepared_item_metadata(item: &PeerPreparedItem) -> (u64, &str
     (item.source.bytes, &item.source.digest)
 }
 
+/// Per-item key material for preparing peer chunks.
+pub(crate) struct PeerChunkKey<'a> {
+    pub transfer_id: &'a str,
+    pub item_id: &'a str,
+    pub master_key: &'a [u8],
+    pub nonce_prefix: &'a [u8],
+}
+
 pub(crate) fn prepare_peer_chunk(
     item: &PeerPreparedItem,
-    transfer_id: &str,
-    item_id: &str,
+    key: &PeerChunkKey<'_>,
     position: u64,
     chunk_bytes: u64,
-    master_key: &[u8],
-    nonce_prefix: Vec<u8>,
     control: Control,
 ) -> Result<PeerPreparedChunk> {
     let prepared = prepare_one(PreparedInput {
         source: item.source.clone(),
         item: 0,
-        item_id: item_id.into(),
+        item_id: key.item_id.into(),
         position,
         chunk_bytes,
-        prefix: nonce_prefix,
-        key: derive_item_key(master_key, transfer_id, item_id)?,
-        transfer: transfer_id.into(),
+        prefix: key.nonce_prefix.to_vec(),
+        key: derive_item_key(key.master_key, key.transfer_id, key.item_id)?,
+        transfer: key.transfer_id.into(),
         control,
     })?;
     Ok(PeerPreparedChunk {

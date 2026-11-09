@@ -103,39 +103,26 @@ defaults, per-contact overrides, and private automatic receiving with
 ## Registered devices
 
 ```sh
+beam service enable
 beam devices add --name Workstation
-beam devices list
-beam devices pair Laptop --fingerprint FULL_FINGERPRINT
-beam devices rename DEVICE_ID "Work laptop"
-beam devices revoke DEVICE_ID --password-stdin
+beam devices approve --fingerprint FINGERPRINT
+beam devices pair Laptop --fingerprint FINGERPRINT
+beam destinations add dropzone ~/Filebeam/Dropzone --auto-approve
+beam receive enable
+beam to Laptop report.pdf
 beam jobs list
-beam jobs wait JOB_ID
 ```
 
-`devices add` uses the signed-in account to enroll this installation and
-provisions the daemon with its device-scoped credential. Pending enrollment
-state is retained while another verified device approves it.
+These commands send files directly to your own devices through the local
+daemon. Device names are convenience selectors: Beam resolves a name only when
+it is unique, then uses the immutable device ID. Pairing and approval compare a
+full fingerprint from an independent channel and ask you to retype it at an
+interactive terminal. `beam devices revoke` reads the account password from a
+protected prompt, standard input, or an owner-only file, never from
+command-line arguments.
 
-Device names are convenience selectors only. Beam resolves a name only when it
-is unique, then sends the immutable device ID to the daemon. Pairing compares a
-full fingerprint from an independent channel and requires retyping it at an
-interactive terminal before the daemon persists the verification. Device
-revocation reads the account password from a protected prompt, standard input,
-or an owner-only file, never from command-line arguments.
-
-Registered-device sends use the receiver-owned `dropzone` by default:
-`beam to Laptop report.pdf`. Use `--into ALIAS_OR_UUID` to select another
-receiver destination. The receiver resolves aliases and validates the accepted
-grant UUID in its receipt.
-
-Device delivery requires a provisioned local daemon, an explicitly verified
-peer, and a receiver-owned destination grant. `beam to` queues the job, waits
-until its encrypted local snapshot is prepared, then returns a queued result
-(exit code 10); use `--wait` to wait for a verified receiver receipt.
-
-The implemented desktop-daemon path uses local destination grants. Mobile
-receiving, provider destinations, and complete LAN/WAN/relay lifecycle support
-remain incomplete and are not implied by these commands.
+See [Device-to-device transfers](devices.md) for setup, receiving, and
+revocation.
 
 ## End and revoke
 

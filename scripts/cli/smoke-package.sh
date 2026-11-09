@@ -13,6 +13,8 @@ for architecture in x86_64 aarch64; do
     tar -tzf "$directory/$archive" > "$temporary/entries"
     grep -Fxq beam/beam "$temporary/entries"
     [[ $(tar -xOzf "$directory/$archive" beam/version) == "$version" ]]
+    tar -tzf "$directory/$tag-linux-$architecture-filebeamd.tar.gz" > "$temporary/entries"
+    grep -Fxq filebeamd/filebeamd "$temporary/entries"
 done
 (cd "$directory" && sha256sum --check checksums.txt)
 tar -xzf "$directory/$tag-linux-x86_64.tar.gz" -C "$temporary" beam/beam

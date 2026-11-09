@@ -44,13 +44,15 @@ Manage copyright, GitHub, and community links under **Admin > Instance settings 
 
 Configure outgoing SMTP during onboarding or under **Admin > Instance settings > SMTP mail**. Choose STARTTLS (required, usually port 587), implicit TLS (usually port 465), or no TLS for a trusted local relay. Authentication is optional. Saved configuration is encrypted with `APP_KEY`; preserve that key when restoring the database. A blank password field keeps the saved password, while **Clear saved SMTP password** removes it. Disabling **Use saved SMTP settings** deletes the saved configuration and restores the default mail configuration (the log mailer when no environment mailer is selected). Saved changes apply on the next mailer resolution, including queue jobs and Octane requests.
 
-### Optional device wakes
-
-Device push is disabled by default. Set `FILEBEAM_PUSH_ENABLED=true`, then configure **Admin > Instance settings > Optional device wakes** with either or both providers: APNs (`team_id`, `key_id`, `bundle_id`, `.p8 private_key`, optional sandbox) and FCM (`project_id`, `client_email`, service-account `private_key`). The form encrypts private keys with `APP_KEY` and never shows them after saving. Do not place provider private keys in `.env` or in a root secret file.
-
-APNs uses a fresh ES256 provider token at least every 50 minutes. FCM signs a service-account RS256 assertion for the Firebase Messaging OAuth scope and caches only the returned access token until its provider expiry. Wakes contain only an opaque connection ID and device-registry revision, never a filename, transfer, manifest, offer, or other private metadata. They are best-effort background hints; clients must poll normally, and a provider acceptance or failure never indicates that a connection or file transfer succeeded. Registering, revoking, and dispatching device tokens is performed by the native-device integration; revocation must call its push-token cleanup hook.
-
 Operator environment configuration takes precedence as a whole connection: setting any of `MAIL_MAILER`, `MAIL_URL`, `MAIL_SCHEME`, `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD`, or `MAIL_EHLO_DOMAIN` locks SMTP editing and prevents mixing database credentials with environment connection values. Containers also support `MAIL_PASSWORD_FILE`. Keep an explicit `MAIL_MAILER=log` to disable outbound delivery. To use Admin-managed SMTP on an existing deployment, remove transport variables from both the process environment and `.env`, then rebuild configuration and restart persistent workers. `MAIL_FROM_ADDRESS` and `MAIL_FROM_NAME` independently override sender fields without locking the connection. Environment changes require rebuilding cached configuration; Admin changes do not.
+
+### Device-to-device transfers
+
+Users can send files directly between their own registered devices (see [Device-to-device transfers](devices.md)). The feature is off by default. Enable **Registered-device rendezvous** under **Admin > Instance settings**, or set `FILEBEAM_DEVICE_RENDEZVOUS_ENABLED=true`; WebRTC transfers must also be enabled. The same page sets the per-account device limit, rendezvous and presence lifetimes, offline authorization freshness, and the per-device request rate. Devices require the instance to be served over HTTPS.
+
+The instance stores device registrations and relays only connection setup. File names, contents, and receipts never pass through it. Rendezvous state lives in the cache store, so deployments with more than one application server need a shared cache such as Redis. Users can always view and revoke their devices under **Account > My devices**, even while rendezvous is disabled. The scheduler prunes expired enrollments and credentials hourly.
+
+Optional push wakes are disabled by default. Set `FILEBEAM_PUSH_ENABLED=true`, then configure **Admin > Instance settings > Optional device wakes** with APNs (`team_id`, `key_id`, `bundle_id`, `.p8 private_key`, optional sandbox), FCM (`project_id`, `client_email`, service-account `private_key`), or both. The form encrypts private keys with `APP_KEY` and never shows them after saving; do not place provider keys in `.env`. A wake carries only an opaque connection ID and registry revision, never file metadata, and is a best-effort hint.
 
 ### Themes and optional PHP capabilities
 

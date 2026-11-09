@@ -47,7 +47,7 @@ function externalDeviceRaceProof(array $identity, string $challenge): string
 /** @param list<array{mode: string, payload: array<string, mixed>}> $jobs @return list<array{status: int, error: string|null}> */
 function runExternalDeviceRace(array $jobs): array
 {
-    $directory = base_path('../.filebeam/external-device-races/'.bin2hex(random_bytes(8)));
+    $directory = sys_get_temp_dir().'/filebeam-external-device-races-'.bin2hex(random_bytes(8));
     mkdir($directory, 0700, true);
     try {
         return ExternalDeviceRace::release(array_map(fn (array $job): array => ExternalDeviceRace::worker($job['mode'], $job['payload'], $directory), $jobs), $directory);

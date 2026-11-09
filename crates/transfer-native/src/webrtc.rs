@@ -1068,14 +1068,13 @@ impl NativePeer {
         let mut local_id = None;
         let mut remote_id = None;
         for entry in report.iter() {
-            if let RTCStatsReportEntry::Transport(transport) = entry {
-                if !transport.local_certificate_id.is_empty()
-                    && !transport.remote_certificate_id.is_empty()
-                {
-                    local_id = Some(transport.local_certificate_id.as_str());
-                    remote_id = Some(transport.remote_certificate_id.as_str());
-                    break;
-                }
+            if let RTCStatsReportEntry::Transport(transport) = entry
+                && !transport.local_certificate_id.is_empty()
+                && !transport.remote_certificate_id.is_empty()
+            {
+                local_id = Some(transport.local_certificate_id.as_str());
+                remote_id = Some(transport.remote_certificate_id.as_str());
+                break;
             }
         }
         let local_id = local_id.context("DTLS local certificate is unavailable")?;

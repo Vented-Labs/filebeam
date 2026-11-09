@@ -16,6 +16,7 @@ type Device = {
     display_name: string;
     platform: string;
     public_key: string;
+    fingerprint: string;
     key_version: number;
     status: 'pending' | 'active' | 'revoked';
     generation: number;
@@ -35,8 +36,9 @@ const resetOpen = ref(false);
 const active = computed(
     () => inventory.value?.devices.filter((device) => device.status === 'active') ?? [],
 );
+// The same SHA-256 key fingerprint native clients print, shortened for display.
 function fingerprint(device: Device): string {
-    return `${device.public_key.slice(0, 8)}...${device.public_key.slice(-8)}`;
+    return `${device.fingerprint.slice(0, 16).replace(/(.{4})(?!$)/g, '$1 ')}…`;
 }
 function state(device: Device): string {
     return device.status === 'revoked'
@@ -153,7 +155,9 @@ onMounted(load);
                                     <strong>{{ device.display_name }}</strong
                                     ><small
                                         >{{ device.platform }} · key v{{ device.key_version }} ·
-                                        {{ fingerprint(device) }}</small
+                                        <span :title="device.fingerprint">{{
+                                            fingerprint(device)
+                                        }}</span></small
                                     ><small>{{ state(device) }}</small>
                                 </div>
                             </div>

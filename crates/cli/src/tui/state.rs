@@ -21,6 +21,9 @@ use crate::{
     services,
 };
 
+/// Registered devices and device jobs read from the daemon off the UI thread.
+type DaemonSnapshot = Result<(Vec<crate::daemon::Device>, Vec<crate::daemon::Job>), String>;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum NativeAction {
     NoteCreate,
@@ -373,9 +376,7 @@ pub struct State {
     pub native: Option<NativeForm>,
     pub service_result: Option<mpsc::Receiver<Result<Vec<String>, String>>>,
     service_notice: Option<&'static str>,
-    daemon_snapshot: Option<
-        mpsc::Receiver<Result<(Vec<crate::daemon::Device>, Vec<crate::daemon::Job>), String>>,
-    >,
+    daemon_snapshot: Option<mpsc::Receiver<DaemonSnapshot>>,
     daemon_action: Option<mpsc::Receiver<Result<DaemonAction, String>>>,
     daemon_refreshed: Instant,
 }
@@ -2168,6 +2169,7 @@ mod tests {
             grant_id: "dropzone".into(),
             state: "transferring".into(),
             prepared: true,
+            error: None,
         }];
         state.key(KeyCode::Char('4').into()).unwrap();
         assert_eq!(state.mode, Mode::DeviceJobs);
@@ -2231,6 +2233,7 @@ mod tests {
             grant_id: "dropzone".into(),
             state: "transferring".into(),
             prepared: true,
+            error: None,
         }];
         assert!(state.key(KeyCode::Char('q').into()).unwrap());
         assert_eq!(state.device_jobs[0].state, "transferring");

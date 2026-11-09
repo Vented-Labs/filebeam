@@ -390,6 +390,8 @@ fn ensure_stage_space(directory: &File, expected_bytes: u64) -> Result<()> {
     if unsafe { libc::fstatvfs(directory.as_raw_fd(), &mut stats) } != 0 {
         return Err(std::io::Error::last_os_error().into());
     }
+    // `fsblkcnt_t` is narrower than `u64` on some Unix targets.
+    #[allow(clippy::useless_conversion)]
     let available = u64::try_from(stats.f_bavail)
         .ok()
         .and_then(|blocks| blocks.checked_mul(stats.f_frsize))
@@ -583,7 +585,7 @@ mod tests {
     use filebeam_encryption::{derive_item_key, encrypt_chunk};
     use filebeam_transfer::manifest::{DigestValue, ManifestItem, ManifestTree, ManifestTreeEntry};
     use filebeam_transfer_native::protocol::peer::{
-        PeerReceiveItem, publish_item_staged, receive_chunk_staged,
+        PeerChunkPosition, PeerReceiveItem, publish_item_staged, receive_chunk_staged,
     };
     use sha2::{Digest, Sha256};
     use std::{
@@ -915,9 +917,11 @@ mod tests {
         let staging = admitted.staging.as_ref().expect("Unix staging capability");
         receive_chunk_staged(
             staging.as_ref(),
-            0,
-            0,
-            1024,
+            PeerChunkPosition {
+                item_index: 0,
+                index: 0,
+                chunk_bytes: 1024,
+            },
             &offer.metadata.transfer_id,
             &item,
             &master,

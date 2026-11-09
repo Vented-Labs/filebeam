@@ -1,7 +1,7 @@
 #![cfg(unix)]
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     ffi::CString,
     fs::{self, File, OpenOptions},
     io::{Read, Seek, SeekFrom, Write},
@@ -29,11 +29,10 @@ use filebeam_client_core::JobAction;
 use fs2::FileExt;
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
 
 type HmacSha256 = Hmac<Sha256>;
 
-pub const IPC_VERSION: u32 = 1;
 const MAX_MESSAGE_BYTES: u64 = 1024 * 1024;
 
 pub use crate::grants::DestinationGrants;
@@ -191,7 +190,6 @@ pub struct Daemon {
     lan_enabled: Arc<AtomicBool>,
     device_runtime: filebeam_client_core::DeviceRuntime,
     trusted_certificate: Option<reqwest::Certificate>,
-    inbound_connections: Arc<Mutex<HashSet<String>>>,
     dispatcher: Option<crate::dispatcher::Dispatcher>,
     inbound_stop: Arc<AtomicBool>,
     inbound_thread: Option<std::thread::JoinHandle<()>>,
@@ -202,7 +200,10 @@ pub struct Daemon {
 
 impl Daemon {
     pub fn open(home: &Path) -> Result<Self> {
-        Self::open_with_certificate(home, None)
+        Self::open_with_certificate(
+            home,
+            filebeam_client_core::services::instance_certificate_from_env()?,
+        )
     }
 
     /// Opens a daemon for an explicitly configured local instance CA. Normal
@@ -223,6 +224,7 @@ impl Daemon {
         secure_directory(&runtime)?;
         let lock = OpenOptions::new()
             .create(true)
+            .truncate(false)
             .read(true)
             .write(true)
             .open(runtime.join("owner.lock"))?;
@@ -274,7 +276,6 @@ impl Daemon {
             lan_enabled,
             device_runtime,
             trusted_certificate,
-            inbound_connections: Arc::new(Mutex::new(HashSet::new())),
             dispatcher: None,
             inbound_stop: Arc::new(AtomicBool::new(false)),
             inbound_thread: None,
@@ -485,15 +486,32 @@ impl Daemon {
                         confirmation_nonce,
                     }) => {
                         let mut reply = self.reply_for_version(version);
-                        if reply.error.is_none() {
-                            if let Err(error) = self.confirm_peer(
+                        if reply.error.is_none()
+                            && let Err(error) = self.confirm_peer(
                                 &device_id,
                                 key_version,
                                 &fingerprint,
                                 &confirmation_nonce,
-                            ) {
-                                reply.error = Some(error.to_string());
-                            }
+                            )
+                        {
+                            reply.error = Some(error.to_string());
+                        }
+                        reply
+                    }
+                    Ok(Request::ApproveDevice {
+                        version,
+                        approval,
+                        fingerprint,
+                    }) => {
+                        let mut reply = self.reply_for_version(version);
+                        if reply.error.is_none()
+                            && let Err(error) = crate::ControlPlane::new(
+                                &self.home,
+                                self.trusted_certificate.clone(),
+                            )
+                            .approve_device(approval, &fingerprint)
+                        {
+                            reply.error = Some(format!("{error:#}"));
                         }
                         reply
                     }
@@ -666,447 +684,12 @@ impl Daemon {
     }
 }
 
-fn dispatch_once(
-    home: &Path,
-    runtime: &filebeam_client_core::DeviceRuntime,
-    _jobs: &Arc<Mutex<DeviceJobs>>,
-    _active_jobs: &Arc<Mutex<HashMap<uuid::Uuid, ActiveJob>>>,
-    receive_enabled: &Arc<AtomicBool>,
-    _lan_enabled: bool,
-    trusted_certificate: Option<reqwest::Certificate>,
-    inbound_connections: &Arc<Mutex<HashSet<String>>>,
-    refresh: bool,
-) -> Result<()> {
-    let Some(provision) =
-        daemon_store(home)?.load_named::<DeviceProvision>("device-provision-v1.json")?
-    else {
-        return Ok(());
-    };
-    let client = service_client(&provision.instance, trusted_certificate.clone())?;
-    // A successful authenticated sync refreshes the encrypted registry cache;
-    // connection admission still reads the cache through DeviceRegistry gates.
-    if refresh {
-        match client.devices().device_sync(&provision.credential) {
-            Ok(snapshot) => refresh_registry(home, &provision, snapshot)?,
-            Err(error) => {
-                // Only an authenticated control-plane denial or malformed
-                // response invalidates offline trust. Transport and 5xx errors
-                // leave the bounded cache available to the OfflineLan gate.
-                if let Some(failure) = registry_sync_failure(&error.to_string()) {
-                    let store = registry_store(home)?;
-                    let mut registry = filebeam_client_core::device_registry::DeviceRegistry::open(
-                        &store,
-                        registry_scope(&provision)?,
-                        Duration::from_secs(7 * 24 * 60 * 60),
-                    )?;
-                    registry.fail(failure)?;
-                }
-            }
-        }
-    }
-    let store = registry_store(home)?;
-    let scope = registry_scope(&provision)?;
-    let registry = filebeam_client_core::device_registry::DeviceRegistry::open(
-        &store,
-        scope.clone(),
-        Duration::from_secs(7 * 24 * 60 * 60),
-    )?;
-    let signing_key = provision_signing_key(&provision)?;
-    if receive_enabled.load(Ordering::Relaxed) {
-        let signaling = filebeam_transfer_native::webrtc::DeviceSignaling::new(
-            signaling_client(trusted_certificate.clone())?,
-            &provision.instance,
-            &provision.credential,
-        )?;
-        receive_incoming(
-            home,
-            runtime,
-            &registry,
-            &scope,
-            &signaling,
-            &signing_key,
-            receive_enabled.load(Ordering::Relaxed),
-            inbound_connections,
-        )?;
-    }
-    Ok(())
-}
-
-fn registry_sync_failure(
-    message: &str,
-) -> Option<filebeam_client_core::device_registry::SyncFailure> {
-    use filebeam_client_core::device_registry::SyncFailure;
-
-    if message.contains("returned 401") {
-        Some(SyncFailure::Unauthorized)
-    } else if message.contains("returned 403") {
-        Some(SyncFailure::Forbidden)
-    } else if message.contains("native device request returned 4") {
-        Some(SyncFailure::Disabled)
-    } else if message.contains("decode native device response")
-        || message.contains("response exceeds the control-plane limit")
-    {
-        Some(SyncFailure::Malformed)
-    } else {
-        None
-    }
-}
-
-fn receive_incoming(
-    home: &Path,
-    runtime: &filebeam_client_core::DeviceRuntime,
-    registry: &filebeam_client_core::device_registry::DeviceRegistry<'_>,
-    scope: &filebeam_client_core::device_registry::RegistryScope,
-    signaling: &filebeam_transfer_native::webrtc::DeviceSignaling,
-    signing_key: &SigningKey,
-    receive_enabled: bool,
-    inbound_connections: &Arc<Mutex<HashSet<String>>>,
-) -> Result<()> {
-    let incoming =
-        filebeam_transfer_native::runtime::shared_tokio_runtime().block_on(signaling.incoming())?;
-    for connection in incoming.connections {
-        if !inbound_connections
-            .lock()
-            .map_err(|_| anyhow::anyhow!("inbound connection state is poisoned"))?
-            .insert(connection.id.clone())
-        {
-            continue;
-        }
-        let peer =
-            filebeam_client_core::device_registry::DeviceId::parse(connection.source_device_id)?;
-        let session = registry.peer_session(
-            scope,
-            &peer,
-            filebeam_client_core::device_registry::RegistryRoute::Instance,
-            unix_now_i64(),
-        )?;
-        let servers = filebeam_transfer_native::runtime::shared_tokio_runtime()
-            .block_on(signaling.ice_servers(&connection.id))?;
-        let (native_peer, _, channels) = filebeam_transfer_native::runtime::shared_tokio_runtime()
-            .block_on(filebeam_transfer_native::webrtc::connect_device_responder(
-                signaling,
-                &connection.id,
-                &servers,
-                false,
-            ))?;
-        let authenticated = filebeam_transfer_native::runtime::shared_tokio_runtime().block_on(
-            session.authenticate(
-                native_peer,
-                channels,
-                Arc::new(signing_key.clone()),
-                &connection.id,
-            ),
-        )?;
-        runtime.start_peer_receiver(
-            authenticated,
-            Arc::new(DaemonPeerReceiver::new(home.into(), receive_enabled)),
-            Arc::new(signing_key.clone()),
-        );
-    }
-    Ok(())
-}
-
-fn dispatch_outbound(
-    home: &Path,
-    runtime: &filebeam_client_core::DeviceRuntime,
-    jobs: &Arc<Mutex<DeviceJobs>>,
-    active_jobs: &Arc<Mutex<HashMap<uuid::Uuid, ActiveJob>>>,
-    registry: &filebeam_client_core::device_registry::DeviceRegistry<'_>,
-    scope: &filebeam_client_core::device_registry::RegistryScope,
-    trusted_certificate: Option<reqwest::Certificate>,
-    instance: &str,
-    credential: &str,
-    signing_key: SigningKey,
-    lan_enabled: bool,
-) -> Result<()> {
-    let pending = jobs
-        .lock()
-        .map_err(|_| anyhow::anyhow!("device jobs state is poisoned"))?
-        .pending();
-    for job in pending {
-        let peer = filebeam_client_core::device_registry::DeviceId::parse(job.target.clone())?;
-        let target = registry.pinned_target(
-            scope,
-            &peer,
-            filebeam_client_core::device_registry::RegistryRoute::Instance,
-            unix_now_i64(),
-        )?;
-        if !job.prepared {
-            jobs.lock()
-                .map_err(|_| anyhow::anyhow!("device jobs state is poisoned"))?
-                .set_state(job.id, DeviceJobState::Preparing, false)?;
-            let checkpoint = job.id.to_string();
-            let state_home = home.join("transfers");
-            let store =
-                filebeam_transfer_native::checkpoint::Store::create(&state_home, &checkpoint)?;
-            let control = filebeam_transfer_native::control::Control::new(
-                daemon_transfer_settings(state_home),
-                std::sync::mpsc::channel().0,
-            );
-            active_jobs
-                .lock()
-                .map_err(|_| anyhow::anyhow!("active device job state is poisoned"))?
-                .insert(job.id, ActiveJob::Preparing(control.clone()));
-            let local = registry.local_device()?;
-            let sources = job.sources.clone();
-            let job_id = job.id;
-            let sender_id = local.id().to_owned();
-            let sender_key_version = local.key_version();
-            let receiver_id = target.id.as_str().to_owned();
-            let receiver_key_version = target.key_version;
-            let jobs = jobs.clone();
-            let active_jobs = active_jobs.clone();
-            // Preparation can scan and encrypt a large tree. It owns the native
-            // Control in the daemon registry so IPC can interrupt it promptly.
-            std::thread::spawn(move || {
-                let result = filebeam_transfer_native::protocol::peer::prepare_peer_tree_job(
-                    &store,
-                    &sources,
-                    Default::default(),
-                    sender_id,
-                    sender_key_version,
-                    receiver_id,
-                    receiver_key_version,
-                    filebeam_transfer_native::webrtc::FRAME_PAYLOAD_BYTES as u64,
-                    control,
-                );
-                let _ = jobs
-                    .lock()
-                    .map_err(|_| anyhow::anyhow!("device jobs state is poisoned"))
-                    .and_then(|mut jobs| {
-                        let stopped = jobs
-                            .list()
-                            .iter()
-                            .find(|candidate| candidate.id == job_id)
-                            .is_some_and(|candidate| {
-                                matches!(
-                                    candidate.state,
-                                    DeviceJobState::Paused | DeviceJobState::Cancelled
-                                )
-                            });
-                        if stopped {
-                            return Ok(());
-                        }
-                        jobs.set_state(
-                            job_id,
-                            if result.is_ok() {
-                                DeviceJobState::AwaitingPeerConfiguration
-                            } else {
-                                DeviceJobState::Failed
-                            },
-                            result.is_ok(),
-                        )
-                    });
-                let _ = active_jobs.lock().map(|mut active| active.remove(&job_id));
-            });
-            continue;
-        }
-        if lan_enabled
-            && let Some(observation) =
-                lan_runtime::try_send(runtime, registry, scope, &peer, &signing_key, home, &job)?
-        {
-            active_jobs
-                .lock()
-                .map_err(|_| anyhow::anyhow!("active device job state is poisoned"))?
-                .insert(job.id, ActiveJob::Transferring(observation.clone()));
-            jobs.lock()
-                .map_err(|_| anyhow::anyhow!("device jobs state is poisoned"))?
-                .set_state(job.id, DeviceJobState::Transferring, true)?;
-            let jobs = jobs.clone();
-            let active_jobs = active_jobs.clone();
-            let job_id = job.id;
-            std::thread::spawn(move || {
-                loop {
-                    let Some(snapshot) = observation.snapshot() else {
-                        return;
-                    };
-                    let state = match snapshot.job.state {
-                        filebeam_client_core::JobState::Complete => Some(DeviceJobState::Delivered),
-                        filebeam_client_core::JobState::Paused => Some(DeviceJobState::Paused),
-                        filebeam_client_core::JobState::Failed => Some(DeviceJobState::Failed),
-                        _ => None,
-                    };
-                    if let Some(state) = state {
-                        let _ = jobs
-                            .lock()
-                            .map_err(|_| anyhow::anyhow!("device jobs state is poisoned"))
-                            .and_then(|mut jobs| jobs.set_state(job_id, state, true));
-                        let _ = active_jobs.lock().map(|mut active| active.remove(&job_id));
-                        return;
-                    }
-                    std::thread::sleep(Duration::from_millis(250));
-                }
-            });
-            continue;
-        }
-        let session = registry.peer_session(
-            scope,
-            &peer,
-            filebeam_client_core::device_registry::RegistryRoute::Instance,
-            unix_now_i64(),
-        )?;
-        let signaling = filebeam_transfer_native::webrtc::DeviceSignaling::new(
-            signaling_client(trusted_certificate.clone())?,
-            instance,
-            credential,
-        )?;
-        // Host candidates provide a real direct path when the peer is reachable;
-        // the responder obtains the authorized ICE list for its rendezvous ID.
-        let (native_peer, connection, channels) =
-            filebeam_transfer_native::runtime::shared_tokio_runtime().block_on(
-                filebeam_transfer_native::webrtc::connect_device_initiator(
-                    &signaling,
-                    peer.as_str(),
-                    &[],
-                    false,
-                ),
-            )?;
-        let authenticated = filebeam_transfer_native::runtime::shared_tokio_runtime().block_on(
-            session.authenticate(
-                native_peer,
-                channels,
-                Arc::new(signing_key.clone()),
-                &connection.id,
-            ),
-        )?;
-        let store = filebeam_transfer_native::checkpoint::Store::open(
-            &home.join("transfers"),
-            &job.id.to_string(),
-        )?;
-        let prepared = filebeam_transfer_native::protocol::peer::load_peer_job(&store)?;
-        drop(store);
-        let observation = runtime.start_peer_sender(
-            authenticated,
-            prepared,
-            job.grant_id.clone(),
-            None,
-            job.expires_at_unix_seconds,
-        );
-        let mut active = active_jobs
-            .lock()
-            .map_err(|_| anyhow::anyhow!("active device job state is poisoned"))?;
-        active.insert(job.id, ActiveJob::Transferring(observation.clone()));
-        jobs.lock()
-            .map_err(|_| anyhow::anyhow!("device jobs state is poisoned"))?
-            .set_state(job.id, DeviceJobState::Transferring, true)?;
-        drop(active);
-        let jobs = jobs.clone();
-        let active_jobs = active_jobs.clone();
-        std::thread::spawn(move || {
-            loop {
-                let Some(snapshot) = observation.snapshot() else {
-                    return;
-                };
-                match snapshot.job.state {
-                    filebeam_client_core::JobState::Complete => {
-                        let _ = jobs
-                            .lock()
-                            .map_err(|_| anyhow::anyhow!("device jobs state is poisoned"))
-                            .and_then(|mut jobs| {
-                                jobs.set_state(job.id, DeviceJobState::Delivered, true)
-                            });
-                        let _ = active_jobs.lock().map(|mut active| active.remove(&job.id));
-                        return;
-                    }
-                    filebeam_client_core::JobState::Paused => {
-                        let _ = jobs
-                            .lock()
-                            .map_err(|_| anyhow::anyhow!("device jobs state is poisoned"))
-                            .and_then(|mut jobs| {
-                                if jobs
-                                    .list()
-                                    .iter()
-                                    .find(|candidate| candidate.id == job.id)
-                                    .is_some_and(|candidate| {
-                                        candidate.state != DeviceJobState::Cancelled
-                                    })
-                                {
-                                    jobs.set_state(job.id, DeviceJobState::Paused, true)
-                                } else {
-                                    Ok(())
-                                }
-                            });
-                        let _ = active_jobs.lock().map(|mut active| active.remove(&job.id));
-                        return;
-                    }
-                    filebeam_client_core::JobState::Failed => {
-                        let _ = jobs
-                            .lock()
-                            .map_err(|_| anyhow::anyhow!("device jobs state is poisoned"))
-                            .and_then(|mut jobs| {
-                                jobs.set_state(job.id, DeviceJobState::Failed, true)
-                            });
-                        let _ = active_jobs.lock().map(|mut active| active.remove(&job.id));
-                        return;
-                    }
-                    _ => std::thread::sleep(Duration::from_millis(250)),
-                }
-            }
-        });
-    }
-    Ok(())
-}
-
-fn daemon_transfer_settings(
-    state_home: PathBuf,
-) -> filebeam_client_core::control::TransferSettings {
-    filebeam_client_core::control::TransferSettings {
-        state_home: state_home.clone(),
-        max_concurrency: Some(2),
-        memory_budget: 512 * 1024 * 1024,
-        client_user_agent: Some("filebeamd".into()),
-        webrtc_relay_only: false,
-        checkpoint_secret_store: Some(
-            filebeam_transfer_native::checkpoint::FilesystemSecretStore::for_state_root(state_home),
-        ),
-        source_resolver: None,
-    }
-}
-
 pub(crate) fn provision_signing_key(provision: &DeviceProvision) -> Result<SigningKey> {
     let bytes: [u8; 32] = STANDARD
         .decode(&provision.signing_key)?
         .try_into()
         .map_err(|_| anyhow::anyhow!("device signing key has an invalid length"))?;
     Ok(SigningKey::from_bytes(&bytes))
-}
-
-fn service_client(
-    instance: &str,
-    certificate: Option<reqwest::Certificate>,
-) -> Result<filebeam_client_core::services::ServiceClient> {
-    match certificate {
-        Some(certificate) => {
-            filebeam_client_core::services::ServiceClient::new_with_trusted_certificate(
-                instance,
-                certificate,
-            )
-        }
-        None => filebeam_client_core::services::ServiceClient::new(instance),
-    }
-}
-
-fn signaling_client(certificate: Option<reqwest::Certificate>) -> Result<reqwest::Client> {
-    let mut client = reqwest::Client::builder();
-    if let Some(certificate) = certificate {
-        client = client.add_root_certificate(certificate);
-    }
-    client.build().context("create device signaling client")
-}
-
-pub(crate) fn registry_scope(
-    provision: &DeviceProvision,
-) -> Result<filebeam_client_core::device_registry::RegistryScope> {
-    use filebeam_client_core::device_registry::{
-        AccountId, DeploymentId, DeviceGeneration, DeviceId, Origin, RegistryScope,
-    };
-    Ok(RegistryScope {
-        origin: Origin::parse(provision.instance.clone())?,
-        deployment: DeploymentId::parse(provision.deployment.clone())?,
-        account: AccountId(provision.account_id),
-        generation: DeviceGeneration(provision.generation),
-        local_device: DeviceId::parse(provision.device_id.clone())?,
-    })
 }
 
 fn unix_now_u64() -> Result<u64> {
@@ -1720,87 +1303,6 @@ fn receipt_name(job_id: &str) -> String {
     format!("commit-receipt-{job_id}")
 }
 
-fn same_public_key(left: &str, right: &str) -> Result<bool> {
-    let left = STANDARD
-        .decode(left)
-        .context("backend device public key is not base64")?;
-    let right = STANDARD
-        .decode(right)
-        .context("provisioned device public key is not base64")?;
-    Ok(left == right)
-}
-
-fn device_fingerprint(public_key: &str) -> Result<String> {
-    Ok(hex::encode(Sha256::digest(STANDARD.decode(public_key)?)))
-}
-
-fn refresh_registry(
-    home: &Path,
-    provision: &DeviceProvision,
-    snapshot: filebeam_client_core::services::DeviceRegistrySnapshot,
-) -> Result<()> {
-    use filebeam_client_core::device_registry::{
-        AccountId, DeviceGeneration, DeviceRegistry, DeviceStatus, RegistryDevice,
-        RegistryResponse, RegistryScope,
-    };
-
-    let filebeam_client_core::services::DeviceRegistrySnapshot {
-        revision,
-        generation,
-        offline_freshness_seconds,
-        devices: snapshot_devices,
-    } = snapshot;
-    let freshness =
-        offline_freshness_seconds.context("device registry response omitted offline freshness")?;
-    let scope = RegistryScope {
-        origin: filebeam_client_core::device_registry::Origin::parse(provision.instance.clone())?,
-        deployment: filebeam_client_core::device_registry::DeploymentId::parse(
-            provision.deployment.clone(),
-        )?,
-        account: AccountId(provision.account_id),
-        generation: DeviceGeneration(provision.generation),
-        local_device: filebeam_client_core::device_registry::DeviceId::parse(
-            provision.device_id.clone(),
-        )?,
-    };
-    let devices = snapshot_devices
-        .into_iter()
-        .map(|device| {
-            Ok(RegistryDevice {
-                id: filebeam_client_core::device_registry::DeviceId::parse(device.id)?,
-                key_version: device.key_version,
-                // The backend uses padded standard base64; the registry's canonical
-                // wire form is unpadded standard base64.
-                public_key: device.public_key.trim_end_matches('=').into(),
-                status: match device.status.as_str() {
-                    "pending" => DeviceStatus::Pending,
-                    "active" => DeviceStatus::Active,
-                    "revoked" => DeviceStatus::Revoked,
-                    _ => bail!("backend returned an invalid device status"),
-                },
-                generation: DeviceGeneration(device.generation),
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .context("system clock is before Unix epoch")?
-        .as_secs()
-        .try_into()
-        .unwrap_or(i64::MAX);
-    let store = registry_store(home)?;
-    let mut registry = DeviceRegistry::open(&store, scope, Duration::from_secs(7 * 24 * 60 * 60))?;
-    registry.ingest(
-        RegistryResponse {
-            revision,
-            generation: DeviceGeneration(generation),
-            offline_freshness_seconds: freshness,
-            devices,
-        },
-        now,
-    )
-}
-
 #[cfg(target_os = "linux")]
 fn rename_no_replace(root: &ConfinedRoot, staging: &str, destination: &str) -> Result<()> {
     root.verify_identity()?;
@@ -1944,19 +1446,6 @@ pub(crate) fn daemon_store(home: &Path) -> Result<filebeam_transfer_native::chec
             Store::create(&root, "daemon-private-v1")
         }
         Err(error) => Err(error).context("open daemon private checkpoint"),
-    }
-}
-
-pub(crate) fn registry_store(home: &Path) -> Result<filebeam_transfer_native::checkpoint::Store> {
-    use filebeam_transfer_native::checkpoint::Store;
-
-    let root = home.join("registry");
-    match Store::open(&root, "device-registry-v1") {
-        Ok(store) => Ok(store),
-        Err(error) if error.to_string().contains("does not exist") => {
-            Store::create(&root, "device-registry-v1")
-        }
-        Err(error) => Err(error).context("open device registry checkpoint"),
     }
 }
 

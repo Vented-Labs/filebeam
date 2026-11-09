@@ -14,6 +14,7 @@ on:
       - 'crates/cli/**'
       - 'crates/client-config/**'
       - 'crates/client-updater/**'
+      - 'crates/daemon/**'
       - 'crates/encryption/**'
       - 'crates/client-core/**'
       - 'crates/transfer/**'
@@ -103,7 +104,7 @@ jobs:
           path: |
             ${{ env.BEAM_CARGO_CACHE_DIR }}
             crates/cli/target
-          key: beam-cargo-v2-${{ runner.os }}-${{ runner.arch }}-rust1.98.0-${{ hashFiles('docker/cli/Dockerfile') }}-${{ hashFiles('crates/cli/Cargo.lock', 'crates/transfer/Cargo.lock', 'crates/transfer-native/Cargo.lock') }}-${{ hashFiles('crates/cli/src/**', 'crates/cli/tests/**', 'crates/cli/build.rs', 'crates/cli/Cargo.toml', 'crates/client-core/src/**', 'crates/client-core/Cargo.toml', 'crates/client-config/src/**', 'crates/client-config/Cargo.toml', 'crates/client-updater/src/**', 'crates/client-updater/Cargo.toml', 'crates/encryption/src/**', 'crates/encryption/Cargo.toml', 'crates/transfer/src/**', 'crates/transfer/Cargo.toml', 'crates/transfer-native/src/**', 'crates/transfer-native/Cargo.toml') }}
+          key: beam-cargo-v2-${{ runner.os }}-${{ runner.arch }}-rust1.98.0-${{ hashFiles('docker/cli/Dockerfile') }}-${{ hashFiles('crates/cli/Cargo.lock', 'crates/transfer/Cargo.lock', 'crates/transfer-native/Cargo.lock') }}-${{ hashFiles('crates/cli/src/**', 'crates/cli/tests/**', 'crates/cli/build.rs', 'crates/cli/Cargo.toml', 'crates/client-core/src/**', 'crates/client-core/Cargo.toml', 'crates/client-config/src/**', 'crates/client-config/Cargo.toml', 'crates/client-updater/src/**', 'crates/client-updater/Cargo.toml', 'crates/encryption/src/**', 'crates/encryption/Cargo.toml', 'crates/transfer/src/**', 'crates/transfer/Cargo.toml', 'crates/transfer-native/src/**', 'crates/transfer-native/Cargo.toml', 'crates/daemon/src/**', 'crates/daemon/Cargo.toml') }}
           restore-keys: |
             beam-cargo-v2-${{ runner.os }}-${{ runner.arch }}-rust1.98.0-${{ hashFiles('docker/cli/Dockerfile') }}-${{ hashFiles('crates/cli/Cargo.lock', 'crates/transfer/Cargo.lock', 'crates/transfer-native/Cargo.lock') }}-
             beam-cargo-v2-${{ runner.os }}-${{ runner.arch }}-rust1.98.0-${{ hashFiles('docker/cli/Dockerfile') }}-
@@ -160,7 +161,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             crates/cli/target
-          key: beam-check-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.98.0-${{ hashFiles('crates/cli/Cargo.lock', 'crates/transfer/Cargo.lock', 'crates/transfer-native/Cargo.lock') }}-${{ hashFiles('crates/cli/src/**', 'crates/cli/build.rs', 'crates/cli/Cargo.toml', 'crates/transfer/src/**', 'crates/transfer/Cargo.toml', 'crates/transfer-native/src/**', 'crates/transfer-native/Cargo.toml') }}
+          key: beam-check-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.98.0-${{ hashFiles('crates/cli/Cargo.lock', 'crates/transfer/Cargo.lock', 'crates/transfer-native/Cargo.lock') }}-${{ hashFiles('crates/cli/src/**', 'crates/cli/build.rs', 'crates/cli/Cargo.toml', 'crates/transfer/src/**', 'crates/transfer/Cargo.toml', 'crates/transfer-native/src/**', 'crates/transfer-native/Cargo.toml', 'crates/daemon/src/**', 'crates/daemon/Cargo.toml') }}
           restore-keys: |
             beam-check-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.98.0-${{ hashFiles('crates/cli/Cargo.lock', 'crates/transfer/Cargo.lock', 'crates/transfer-native/Cargo.lock') }}-
             beam-check-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.98.0-
@@ -287,7 +288,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             crates/cli/target
-          key: beam-package-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.98.0-${{ hashFiles('crates/cli/Cargo.lock', 'crates/transfer/Cargo.lock', 'crates/transfer-native/Cargo.lock') }}-${{ hashFiles('crates/cli/src/**', 'crates/cli/build.rs', 'crates/cli/Cargo.toml', 'crates/transfer/src/**', 'crates/transfer/Cargo.toml', 'crates/transfer-native/src/**', 'crates/transfer-native/Cargo.toml') }}
+          key: beam-package-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.98.0-${{ hashFiles('crates/cli/Cargo.lock', 'crates/transfer/Cargo.lock', 'crates/transfer-native/Cargo.lock') }}-${{ hashFiles('crates/cli/src/**', 'crates/cli/build.rs', 'crates/cli/Cargo.toml', 'crates/transfer/src/**', 'crates/transfer/Cargo.toml', 'crates/transfer-native/src/**', 'crates/transfer-native/Cargo.toml', 'crates/daemon/src/**', 'crates/daemon/Cargo.toml') }}
           restore-keys: beam-package-${{ runner.os }}-${{ runner.arch }}-${{ matrix.target }}-rust1.98.0-${{ hashFiles('crates/cli/Cargo.lock', 'crates/transfer/Cargo.lock', 'crates/transfer-native/Cargo.lock') }}-
       - name: Derive canonical CLI public key
         shell: bash
@@ -331,7 +332,11 @@ jobs:
             "$RELEASE_TAG-linux-aarch64.tar.gz" \
             "$RELEASE_TAG-macos-x86_64.tar.gz" \
             "$RELEASE_TAG-macos-aarch64.tar.gz" \
-            "$RELEASE_TAG-windows-x86_64.zip"; do
+            "$RELEASE_TAG-windows-x86_64.zip" \
+            "$RELEASE_TAG-linux-x86_64-filebeamd.tar.gz" \
+            "$RELEASE_TAG-linux-aarch64-filebeamd.tar.gz" \
+            "$RELEASE_TAG-macos-x86_64-filebeamd.tar.gz" \
+            "$RELEASE_TAG-macos-aarch64-filebeamd.tar.gz"; do
             test -s "dist/beam/$asset"
           done
           (cd dist/beam && sha256sum "$RELEASE_TAG"-*.tar.gz "$RELEASE_TAG"-*.zip > checksums.txt)

@@ -260,7 +260,13 @@ mod tests {
         let status = std::process::Command::new("mkfifo").arg(&fifo).status()?;
         assert!(status.success());
 
-        assert!(enumerate_source_tree(&[root.clone()], TreeEnumerationOptions::default()).is_err());
+        assert!(
+            enumerate_source_tree(
+                std::slice::from_ref(&root),
+                TreeEnumerationOptions::default()
+            )
+            .is_err()
+        );
         let tree = enumerate_source_tree(
             &[root],
             TreeEnumerationOptions {

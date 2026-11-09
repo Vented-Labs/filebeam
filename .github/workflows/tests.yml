@@ -131,18 +131,21 @@ jobs:
           cargo fmt --manifest-path crates/transfer/Cargo.toml --check
           cargo fmt --manifest-path crates/transfer-native/Cargo.toml --check
           cargo fmt --manifest-path crates/transfer-wasm/Cargo.toml --check
+          cargo fmt --manifest-path crates/daemon/Cargo.toml --check
       - name: Lint Rust
         run: |
           cargo clippy --manifest-path crates/encryption/Cargo.toml --all-targets --locked -- -D warnings
           cargo clippy --manifest-path crates/transfer/Cargo.toml --all-targets --locked -- -D warnings
           cargo clippy --manifest-path crates/transfer-native/Cargo.toml --all-targets --locked -- -D warnings
           cargo clippy --manifest-path crates/transfer-wasm/Cargo.toml --all-targets --locked -- -D warnings
+          cargo clippy --manifest-path crates/daemon/Cargo.toml --all-targets --locked -- -D warnings
       - name: Test Rust
         run: |
           cargo test --manifest-path crates/encryption/Cargo.toml --locked
           cargo test --manifest-path crates/transfer/Cargo.toml --locked
           cargo test --manifest-path crates/transfer-native/Cargo.toml --locked
           cargo test --manifest-path crates/transfer-wasm/Cargo.toml --locked
+          cargo test --manifest-path crates/daemon/Cargo.toml --locked
       - name: Build native browser interoperability client
         run: |
           cargo build --manifest-path crates/cli/Cargo.toml --locked

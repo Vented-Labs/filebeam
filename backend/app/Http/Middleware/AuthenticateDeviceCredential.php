@@ -22,7 +22,10 @@ class AuthenticateDeviceCredential
         abort_unless($credential instanceof DeviceCredential && ($credential->revoked_at === null || $replayingRotation) && $credential->expires_at->isFuture(), 401);
         $device = $credential->device;
         abort_unless($device !== null && $device->status === DeviceStatus::Active && $device->generation === $device->user->device_generation, 403);
-        $credential->update(['last_used_at' => now()]);
+        // Daemons poll every few seconds; record use at most once a minute.
+        if ($credential->last_used_at === null || $credential->last_used_at->lt(now()->subMinute())) {
+            $credential->update(['last_used_at' => now()]);
+        }
         $request->attributes->set('device', $device);
         $request->attributes->set('device_credential', $credential);
 

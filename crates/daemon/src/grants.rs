@@ -160,6 +160,7 @@ pub(crate) fn grant_lock(home: &Path) -> Result<fs::File> {
     let path = home.join("runtime/daemon/grants.lock");
     let file = fs::OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(path)?;

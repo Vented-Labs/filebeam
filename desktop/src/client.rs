@@ -275,6 +275,7 @@ impl Worker {
                 auto_accept,
             } => self.add_device_dropzone(alias, path, auto_accept),
             ClientCommand::SetDeviceReceiving(enabled) => self.set_device_receiving(enabled),
+            ClientCommand::InstallDeviceService => self.install_device_service(),
             ClientCommand::ConfirmDevicePeer {
                 id,
                 verified_fingerprint,
@@ -1260,6 +1261,16 @@ impl Worker {
             bail!("local device service IPC is not available on this platform")
         }
     }
+    fn install_device_service(&mut self) -> Result<()> {
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        {
+            crate::daemon_install::enable(&self.config, crate::VERSION)?;
+            self.refresh_devices()
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        bail!("the local device service is not available on this platform")
+    }
+
     fn set_device_receiving(&mut self, enabled: bool) -> Result<()> {
         #[cfg(target_os = "linux")]
         {
@@ -1495,6 +1506,7 @@ impl Worker {
                 target: job.target,
                 state: format!("{:?}", job.state).to_lowercase(),
                 prepared: job.prepared,
+                error: job.error,
             })
             .collect();
             DeviceDaemonSnapshot {

@@ -21,6 +21,7 @@ pub struct Job {
     pub grant_id: String,
     pub state: String,
     pub prepared: bool,
+    pub error: Option<String>,
 }
 #[derive(Clone, Debug)]
 pub struct Device {
@@ -48,6 +49,7 @@ fn job(value: filebeam_daemon::DeviceJob) -> Job {
         grant_id: value.grant_id,
         state: state.into(),
         prepared: value.prepared,
+        error: value.error,
     }
 }
 
@@ -226,6 +228,22 @@ pub fn confirm_peer(
     reply.error.map_or(Ok(()), |error| bail!(error))
 }
 #[cfg(any(unix, windows))]
+pub fn approve_device(
+    config: &Config,
+    approval: filebeam_daemon::DeviceApproval,
+    fingerprint: &str,
+) -> Result<()> {
+    let reply = filebeam_daemon::request(
+        &config.home,
+        filebeam_daemon::Request::ApproveDevice {
+            version: filebeam_daemon::IPC_VERSION,
+            approval,
+            fingerprint: fingerprint.into(),
+        },
+    )?;
+    reply.error.map_or(Ok(()), |error| bail!(error))
+}
+#[cfg(any(unix, windows))]
 pub fn provision_device(
     config: &Config,
     provision: filebeam_daemon::DeviceProvision,
@@ -374,14 +392,19 @@ pub fn destination_line(destination: &Destination) -> String {
     )
 }
 pub fn job_line(job: &Job) -> String {
-    format!(
+    let mut line = format!(
         "{}\t{}\t{}\t{}\tprepared={}",
         job.id,
         crate::presentation::clean(&job.target),
         crate::presentation::clean(&job.grant_id),
         job.state,
         job.prepared
-    )
+    );
+    if let Some(error) = &job.error {
+        line.push('\t');
+        line.push_str(&crate::presentation::clean(error));
+    }
+    line
 }
 
 pub fn device_line(device: &Device) -> String {
@@ -414,6 +437,7 @@ mod tests {
             grant_id: "drop\x1b]8;;https://invalid\x1b\\zone".into(),
             state: "queued".into(),
             prepared: false,
+            error: Some("\x1b]52;c;bad\x07offline".into()),
         };
         assert!(!device_line(&device).contains('\x1b'));
         assert!(!job_line(&job).contains('\x1b'));

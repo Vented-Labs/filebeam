@@ -3,7 +3,7 @@
 set -euo pipefail
 
 source "$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)/common.sh"
-device_init production-backend
+device_init
 device_require php
 device_require openssl
 device_require socat
@@ -37,7 +37,7 @@ key="$runtime/localhost.key"
 database="$runtime/database/filebeam.sqlite"
 touch "$database"
 chmod 600 "$database"
-openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 1 -subj '/CN=localhost' -addext 'subjectAltName=DNS:localhost' -keyout "$key" -out "$certificate" >/dev/null 2>&1
+openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 1 -subj '/CN=localhost' -addext 'subjectAltName=DNS:localhost' -addext 'basicConstraints=critical,CA:FALSE' -addext 'extendedKeyUsage=serverAuth' -keyout "$key" -out "$certificate" >/dev/null 2>&1
 chmod 600 "$key" "$certificate"
 
 printf '%s\n' \
@@ -66,9 +66,15 @@ cleanup() {
 trap cleanup EXIT
 
 export FILEBEAM_CONTAINER=1 FILEBEAM_DATA_DIR="$runtime" FILEBEAM_VARIANT=light
+# Container mode defaults generated caches and file storage to /run and /storage.
+mkdir -p "$runtime/cache" "$runtime/views" "$runtime/storage" "$runtime/app/framework/sessions" "$runtime/app/framework/cache" "$runtime/app/logs"
+export APP_CONFIG_CACHE="$runtime/cache/config.php" APP_ROUTES_CACHE="$runtime/cache/routes.php" \
+  APP_EVENTS_CACHE="$runtime/cache/events.php" APP_SERVICES_CACHE="$runtime/cache/services.php" \
+  APP_PACKAGES_CACHE="$runtime/cache/packages.php" VIEW_COMPILED_PATH="$runtime/views" \
+  FILEBEAM_FILESTORE_ROOT="$runtime/storage"
 php "$backend/artisan" migrate:fresh --force --no-interaction >/dev/null
 php "$backend/artisan" tinker --execute="App\\Models\\User::query()->create(['name' => 'Device Harness', 'username' => 'device_harness', 'normalized_username' => 'device_harness', 'email' => 'device-harness@example.test', 'password' => Illuminate\\Support\\Facades\\Hash::make('correct horse battery staple')]);" >/dev/null
-php -S "127.0.0.1:$http_port" -t "$backend/public" "$backend/server.php" >"$runtime/http.log" 2>&1 &
+(cd "$backend/public" && PHP_CLI_SERVER_WORKERS=4 exec php -S "127.0.0.1:$http_port" "$backend/vendor/laravel/framework/src/Illuminate/Foundation/resources/server.php") >"$runtime/http.log" 2>&1 &
 php_server=$!
 socat "OPENSSL-LISTEN:$tls_port,reuseaddr,fork,cert=$certificate,key=$key,verify=0" "TCP:127.0.0.1:$http_port" >/dev/null 2>&1 &
 proxy_server=$!
@@ -79,29 +85,18 @@ done
 curl --silent --fail --cacert "$certificate" "$instance/up" >/dev/null
 
 FILEBEAM_DEVICE_INSTANCE="$instance" FILEBEAM_DEVICE_ROOT="$runtime" FILEBEAM_DEVICE_CA="$certificate" \
-  cargo run --locked --manifest-path "$device_root/tests/device/production-backend/Cargo.toml"
+  cargo run --release --locked --manifest-path "$device_root/tests/device/production-backend/Cargo.toml"
 php "$backend/artisan" tinker --execute="if (Illuminate\\Support\\Facades\\DB::table('transfers')->exists() || Illuminate\\Support\\Facades\\DB::table('transfer_items')->exists() || Illuminate\\Support\\Facades\\DB::table('transfer_chunks')->exists() || Illuminate\\Support\\Facades\\DB::table('transfer_chunk_locations')->exists() || Illuminate\\Support\\Facades\\DB::table('transfer_chunk_uploads')->exists() || Illuminate\\Support\\Facades\\DB::table('transfer_key_envelopes')->exists() || Illuminate\\Support\\Facades\\DB::table('filestores')->exists()) { throw new RuntimeException('device transfer created a public transfer or filestore record'); }" >/dev/null
-if python3 - "$database" "$runtime/http.log" <<'PY'
+# The harness writes this text into a hidden file that must travel only between the daemons.
+python3 - "$database" "$runtime/http.log" "$runtime/app/logs" <<'PY'
 import pathlib
 import sys
 
 needle = b'private hidden canary'
-raise SystemExit(any(needle in pathlib.Path(path).read_bytes() for path in sys.argv[1:]))
+paths = [path for arg in sys.argv[1:] for path in (pathlib.Path(arg).rglob('*') if pathlib.Path(arg).is_dir() else [pathlib.Path(arg)])]
+leaked = [str(path) for path in paths if path.is_file() and needle in path.read_bytes()]
+if leaked:
+    print('device private metadata escaped into: ' + ', '.join(leaked), file=sys.stderr)
+    raise SystemExit(1)
 PY
-then
-  printf '%s\n' 'device private metadata escaped into the Laravel database or request log' >&2
-  exit 1
-fi
-printf '%s\n' 'T25 production Laravel TLS registration, approval, pinning, daemon transfer, hash, and receipt: PASS'
-printf '%s\n' 'T26 no public transfer, filestore, chunk, or key-envelope record; synthetic private metadata absent from database and request log: PASS'
-printf '%s\n' 'T19 web revoke during an active direct transfer denies both device authorities and prevents commit within 60 seconds: PASS'
-printf '%s\n' 'T20 web-only revoke denies the revoked credential and new rendezvous admission: PASS'
-if [[ -n ${FILEBEAM_DEVICE_LOG_DIR:-} ]]; then
-  printf '%s\n' \
-    'command: bash scripts/device/production-backend.sh' \
-    'T25: PASS' \
-    'T26: PASS' \
-    'T19: PASS' \
-    'T20: PASS' \
-    > "$FILEBEAM_DEVICE_LOG_DIR/production-backend.scenarios"
-fi
+printf '%s\n' 'Device harness passed: TLS registration and approval, pinned daemons, private tree delivery with a verified receipt, no server-side transfer records, and web revoke during an active transfer.'

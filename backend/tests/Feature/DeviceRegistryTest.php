@@ -178,6 +178,35 @@ test('web revoke invalidates credentials and existing rendezvous authority witho
     expect(Cache::get('filebeam:device-pair:'.$connection))->not->toHaveKey('manifest');
 });
 
+test('the default deployment identifier is valid in native device proofs', function (): void {
+    $user = User::factory()->create();
+    $identity = deviceIdentity();
+    $this->actingAs($user)->postJson('/api/native/v1/devices/enrollment-challenge', [
+        'device_id' => $identity['id'], 'display_name' => 'Test device', 'platform' => 'linux', 'public_key' => $identity['public'], 'key_version' => 1,
+    ], ['Sec-Fetch-Site' => 'same-origin'])
+        ->assertCreated()
+        ->assertJsonPath('data.approval_context.deployment_id', fn (string $deployment): bool => preg_match('/\A[A-Za-z0-9._-]{1,255}\z/', $deployment) === 1);
+});
+
+test('disabling rendezvous keeps inventory and web revoke available but blocks enrollment and signaling', function (): void {
+    $user = User::factory()->create();
+    $identity = deviceIdentity();
+    $credential = enrollDevice($user, $identity)['credential'];
+    InstanceSetting::query()->where('key', 'device_rendezvous')->update(['value' => false]);
+
+    $this->actingAs($user)->getJson('/api/native/v1/devices', ['Sec-Fetch-Site' => 'same-origin'])
+        ->assertOk()
+        ->assertJsonPath('data.devices.0.id', $identity['id'])
+        ->assertJsonPath('data.devices.0.fingerprint', hash('sha256', (string) base64_decode($identity['public'], true)));
+    $this->actingAs($user)->postJson('/api/native/v1/devices/enrollment-challenge', [
+        'device_id' => (string) Str::ulid(), 'display_name' => 'Late device', 'platform' => 'linux', 'public_key' => deviceIdentity()['public'], 'key_version' => 1,
+    ], ['Sec-Fetch-Site' => 'same-origin'])->assertNotFound();
+    $this->getJson('/api/native/v1/devices/sync', ['Authorization' => 'Bearer '.$credential])->assertNotFound();
+    $this->actingAs($user)->deleteJson("/api/native/v1/devices/{$identity['id']}", ['current_password' => 'password'], ['Sec-Fetch-Site' => 'same-origin'])
+        ->assertOk()
+        ->assertJsonPath('data.device.status', DeviceStatus::Revoked->value);
+});
+
 test('a current device alone can register a bounded push token and connection wakes are advisory', function (): void {
     config()->set('filebeam.push.enabled', true);
     app(PushSettings::class)->save(['enabled' => true, 'fcm' => ['project_id' => 'project-123', 'client_email' => 'service@example.test', 'private_key' => devicePushPrivateKey()]]);

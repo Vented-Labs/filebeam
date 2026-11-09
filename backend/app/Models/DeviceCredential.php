@@ -9,7 +9,10 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-/** @property CarbonImmutable $expires_at */
+/**
+ * @property CarbonImmutable $expires_at
+ * @property CarbonImmutable|null $last_used_at
+ */
 #[Fillable(['device_id', 'token_hash', 'expires_at', 'last_used_at', 'revoked_at'])]
 class DeviceCredential extends Model
 {

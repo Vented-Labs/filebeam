@@ -122,6 +122,7 @@ impl DeviceJobs {
             sources,
             state: DeviceJobState::AwaitingPeerConfiguration,
             prepared: false,
+            error: None,
             expires_at_unix_seconds: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .context("system clock is before Unix epoch")?
@@ -189,7 +190,44 @@ impl DeviceJobs {
         }
         job.state = state;
         job.prepared = prepared;
+        if job.state != DeviceJobState::Failed {
+            job.error = None;
+        }
         self.persist()
+    }
+    /// Marks a job failed with a reason, unless a user paused or cancelled it.
+    pub fn fail(&mut self, id: Uuid, reason: &str) -> Result<()> {
+        self.set_state(id, DeviceJobState::Failed, false)?;
+        if let Some(job) = self.jobs.iter_mut().find(|job| job.id == id) {
+            job.error = Some(reason.into());
+        }
+        self.persist()
+    }
+    /// Records why a queued job is still waiting without changing its state.
+    pub fn note_retry(&mut self, id: Uuid, reason: &str) -> Result<()> {
+        let Some(job) = self.jobs.iter_mut().find(|job| job.id == id) else {
+            return Ok(());
+        };
+        if job.error.as_deref() == Some(reason) {
+            return Ok(());
+        }
+        job.error = Some(reason.into());
+        self.persist()
+    }
+    /// Fails queued jobs whose delivery window has passed.
+    pub fn expire(&mut self, now_unix_seconds: u64) -> Result<()> {
+        let mut changed = false;
+        for job in &mut self.jobs {
+            if job.state == DeviceJobState::AwaitingPeerConfiguration
+                && job.expires_at_unix_seconds != 0
+                && job.expires_at_unix_seconds <= now_unix_seconds
+            {
+                job.state = DeviceJobState::Failed;
+                job.error = Some("the job expired before it was delivered".into());
+                changed = true;
+            }
+        }
+        if changed { self.persist() } else { Ok(()) }
     }
     fn persist(&self) -> Result<()> {
         daemon_store(&self.home)?.save_named("device-jobs-v1.json", &self.jobs)
@@ -214,10 +252,42 @@ mod tests {
                 state: DeviceJobState::Paused,
                 prepared: true,
                 expires_at_unix_seconds: 0,
+                error: None,
             }],
         };
         assert!(jobs.set_state(id, DeviceJobState::Delivered, true).is_err());
         jobs.jobs[0].state = DeviceJobState::Cancelled;
         assert!(jobs.set_state(id, DeviceJobState::Failed, true).is_err());
+    }
+
+    #[test]
+    fn expired_queued_jobs_fail_with_a_reason() {
+        let home = tempfile::tempdir().unwrap();
+        let queued = Uuid::new_v4();
+        let paused = Uuid::new_v4();
+        let job = |id, state| DeviceJob {
+            id,
+            target: "peer".into(),
+            grant_id: "dropzone".into(),
+            sources: Vec::new(),
+            state,
+            prepared: true,
+            expires_at_unix_seconds: 10,
+            error: None,
+        };
+        let mut jobs = DeviceJobs {
+            home: home.path().into(),
+            jobs: vec![
+                job(queued, DeviceJobState::AwaitingPeerConfiguration),
+                job(paused, DeviceJobState::Paused),
+            ],
+        };
+        jobs.expire(9).unwrap();
+        assert!(jobs.list().iter().all(|job| job.error.is_none()));
+        jobs.expire(10).unwrap();
+        assert_eq!(jobs.list()[0].state, DeviceJobState::Failed);
+        assert!(jobs.list()[0].error.is_some());
+        assert_eq!(jobs.list()[1].state, DeviceJobState::Paused);
+        assert!(jobs.pending().is_empty());
     }
 }
