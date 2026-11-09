@@ -5,6 +5,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail, ensure};
+use base64::{Engine, engine::general_purpose::STANDARD};
 use crossterm::{
     event::{self, Event, KeyCode},
     terminal::{disable_raw_mode, enable_raw_mode},
@@ -190,6 +191,23 @@ struct PrivateKey {
     value: String,
 }
 
+#[derive(Serialize, Deserialize)]
+struct PendingDeviceEnrollment {
+    id: String,
+    display_name: String,
+    public_key: String,
+    signing_key: String,
+    deployment: String,
+    account_id: u64,
+    generation: u64,
+    challenge: String,
+}
+
+pub enum DeviceAdd {
+    Pending { id: String, fingerprint: String },
+    Provision(filebeam_daemon::DeviceProvision),
+}
+
 fn session_id(instance: &str) -> String {
     format!(
         "account-{}",
@@ -260,6 +278,169 @@ pub fn clear_session(config: &Config, instance: &str) -> Result<()> {
         Store::discard(&root, &id)?;
     }
     Ok(())
+}
+
+pub fn begin_or_resume_device_add(
+    config: &Config,
+    instance: &str,
+    display_name: &str,
+) -> Result<DeviceAdd> {
+    let client = client(config, instance)?;
+    client
+        .account()
+        .session()
+        .context("sign in with `beam account login` before adding a device")?;
+    let store = session_store(config, instance, true)?.expect("create requested a store");
+    if let Some(pending) =
+        store.load_named::<PendingDeviceEnrollment>("pending-device-enrollment")?
+    {
+        let key = signing_key(&pending.signing_key)?;
+        let challenge = device_challenge(&pending);
+        match client.devices().account_device_complete_enrollment(
+            &challenge,
+            &filebeam_client_core::services::enrollment_signature(
+                &key,
+                &pending.id,
+                pending.generation,
+                &pending.challenge,
+            )?,
+        ) {
+            Ok(redemption) => {
+                return Ok(DeviceAdd::Provision(filebeam_daemon::DeviceProvision {
+                    instance: instance.into(),
+                    deployment: pending.deployment,
+                    account_id: pending.account_id,
+                    generation: pending.generation,
+                    device_id: pending.id,
+                    key_version: 1,
+                    public_key: pending.public_key,
+                    signing_key: pending.signing_key,
+                    credential: redemption.credential,
+                }));
+            }
+            Err(error) => {
+                return Err(error).context(
+                    "device enrollment is still awaiting approval; approve it on a verified device, then rerun `beam devices add`",
+                );
+            }
+        }
+    }
+    let mut seed = [0_u8; 32];
+    seed[..16].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
+    seed[16..].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
+    let key = ed25519_dalek::SigningKey::from_bytes(&seed);
+    let id = ulid::Ulid::new().to_string();
+    let public_key = STANDARD.encode(key.verifying_key().to_bytes());
+    let challenge = client.devices().account_device_challenge(
+        &id,
+        display_name,
+        device_platform(),
+        &public_key,
+        1,
+        &["peer-transfer-v1".into()],
+    )?;
+    let pending = PendingDeviceEnrollment {
+        id: id.clone(),
+        display_name: display_name.into(),
+        public_key: public_key.clone(),
+        signing_key: STANDARD.encode(seed),
+        deployment: challenge.approval_context.deployment_id.clone(),
+        account_id: challenge.approval_context.account_id,
+        generation: challenge.device.generation,
+        challenge: challenge.challenge.clone(),
+    };
+    // Persist before enrollment: a second device may need to approve this candidate.
+    store.save_named("pending-device-enrollment", &pending)?;
+    let signature = filebeam_client_core::services::enrollment_signature(
+        &key,
+        &pending.id,
+        pending.generation,
+        &pending.challenge,
+    )?;
+    let enrolled = client
+        .devices()
+        .account_device_enroll(&challenge, &signature)?;
+    match enrolled.credential {
+        Some(credential) => Ok(DeviceAdd::Provision(filebeam_daemon::DeviceProvision {
+            instance: instance.into(),
+            deployment: pending.deployment,
+            account_id: pending.account_id,
+            generation: pending.generation,
+            device_id: pending.id,
+            key_version: 1,
+            public_key: pending.public_key,
+            signing_key: pending.signing_key,
+            credential,
+        })),
+        None => Ok(DeviceAdd::Pending {
+            id: pending.id,
+            fingerprint: device_fingerprint(&public_key)?,
+        }),
+    }
+}
+
+pub fn finish_device_add(config: &Config, instance: &str) -> Result<()> {
+    let store = session_store(config, instance, false)?
+        .context("pending device enrollment state was not found")?;
+    store.remove_named("pending-device-enrollment")
+}
+
+fn device_challenge(
+    pending: &PendingDeviceEnrollment,
+) -> filebeam_client_core::services::DeviceEnrollmentChallenge {
+    filebeam_client_core::services::DeviceEnrollmentChallenge {
+        device: filebeam_client_core::services::AccountDevice {
+            id: pending.id.clone(),
+            display_name: pending.display_name.clone(),
+            platform: device_platform().into(),
+            public_key: pending.public_key.clone(),
+            key_version: 1,
+            status: "pending".into(),
+            generation: pending.generation,
+            last_seen_at: None,
+            presence_expires_at: None,
+            revoked_at: None,
+        },
+        challenge: pending.challenge.clone(),
+        expires_at: None,
+        approval_context: filebeam_client_core::services::DeviceApprovalContext {
+            instance_origin: String::new(),
+            deployment_id: pending.deployment.clone(),
+            account_id: pending.account_id,
+            generation: pending.generation,
+            candidate_device_id: pending.id.clone(),
+            candidate_key_version: 1,
+            candidate_public_key: pending.public_key.clone(),
+            challenge_sha256: String::new(),
+            expires_at_unix: 0,
+            approver_device_id: String::new(),
+            approver_key_version: 0,
+        },
+    }
+}
+
+fn signing_key(value: &str) -> Result<ed25519_dalek::SigningKey> {
+    let bytes: [u8; 32] = STANDARD
+        .decode(value)?
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("pending device signing key is invalid"))?;
+    Ok(ed25519_dalek::SigningKey::from_bytes(&bytes))
+}
+
+fn device_fingerprint(public_key: &str) -> Result<String> {
+    Ok(hex::encode(sha2::Sha256::digest(
+        STANDARD.decode(public_key)?,
+    )))
+}
+
+fn device_platform() -> &'static str {
+    if cfg!(windows) {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else {
+        "linux"
+    }
 }
 
 pub(crate) fn cached_account_id(config: &Config, instance: &str) -> Result<u64> {

@@ -9,7 +9,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-use super::{AccountService, HistoryService, NotesService, TurboService};
+use super::{AccountService, DeviceService, HistoryService, NotesService, TurboService};
 
 #[derive(Clone)]
 pub struct ServiceClient {
@@ -19,6 +19,7 @@ pub struct ServiceClient {
     turbo: TurboService,
     account: AccountService,
     history: HistoryService,
+    device: DeviceService,
     account_intent: Arc<AtomicBool>,
 }
 
@@ -30,6 +31,23 @@ impl ServiceClient {
     /// Restores an opaque Cookie header only into the same validated origin.
     /// This intentionally accepts no URL from persisted state.
     pub fn new_with_cookie_context(instance: &str, context: Option<&str>) -> Result<Self> {
+        Self::build(instance, context, None)
+    }
+
+    /// Adds an explicitly trusted local certificate authority for instance
+    /// management. Hostname and certificate-chain verification remain enabled.
+    pub fn new_with_trusted_certificate(
+        instance: &str,
+        certificate: reqwest::Certificate,
+    ) -> Result<Self> {
+        Self::build(instance, None, Some(certificate))
+    }
+
+    fn build(
+        instance: &str,
+        context: Option<&str>,
+        certificate: Option<reqwest::Certificate>,
+    ) -> Result<Self> {
         let mut instance = Url::parse(instance).context("instance URL is invalid")?;
         if !matches!(instance.scheme(), "http" | "https")
             || instance.host_str().is_none()
@@ -56,13 +74,15 @@ impl ServiceClient {
                 cookies.add_cookie_str(&format!("{pair}; Path=/"), &instance);
             }
         }
-        let http = Client::builder()
+        let mut http = Client::builder()
             .connect_timeout(std::time::Duration::from_secs(15))
             .timeout(std::time::Duration::from_secs(120))
             .cookie_provider(cookies.clone())
-            .user_agent(concat!("filebeam-native/", env!("CARGO_PKG_VERSION")))
-            .build()
-            .context("create service HTTP client")?;
+            .user_agent(concat!("filebeam-native/", env!("CARGO_PKG_VERSION")));
+        if let Some(certificate) = certificate {
+            http = http.add_root_certificate(certificate);
+        }
+        let http = http.build().context("create service HTTP client")?;
         Ok(Self {
             instance: instance.clone(),
             cookies: cookies.clone(),
@@ -75,6 +95,7 @@ impl ServiceClient {
             turbo: TurboService::new(instance.clone(), http.clone()),
             account: AccountService::new(instance.clone(), http.clone(), account_intent.clone()),
             history: HistoryService::new(instance.clone(), http.clone()),
+            device: DeviceService::new(instance.clone(), http.clone()),
             account_intent,
         })
     }
@@ -94,6 +115,9 @@ impl ServiceClient {
 
     pub fn history(&self) -> &HistoryService {
         &self.history
+    }
+    pub fn devices(&self) -> &DeviceService {
+        &self.device
     }
 
     /// A saved session must validate before reservation; never downgrade an

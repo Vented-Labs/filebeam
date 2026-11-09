@@ -4,6 +4,17 @@ pub enum ClientError {
     InvalidInput { detail: String },
     #[error("{detail}")]
     Operation { detail: String },
+    #[error("Registered-device rendezvous is unavailable on this instance")]
+    InstanceUnsupported,
+}
+
+pub fn registry_operation(error: impl std::fmt::Display) -> ClientError {
+    let detail = error.to_string();
+    if detail.contains("INSTANCE_UNSUPPORTED") {
+        ClientError::InstanceUnsupported
+    } else {
+        ClientError::Operation { detail }
+    }
 }
 
 pub type Result<T> = std::result::Result<T, ClientError>;

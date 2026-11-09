@@ -42,6 +42,8 @@ use Illuminate\Support\Fluent;
  * @property ReceivingPolicy $receiving_policy
  * @property bool $auto_download_friends
  * @property int $receiving_revision
+ * @property int $device_registry_revision
+ * @property int $device_generation
  * @property Fluent<string, mixed>|null $settings
  */
 #[Fillable(['name', 'username', 'normalized_username', 'email', 'password', 'plan_id', 'inbox_enabled', 'notification_channel', 'receiving_policy', 'auto_download_friends'])]
@@ -103,6 +105,12 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
         return $this->hasMany(Transfer::class, 'recipient_id');
     }
 
+    /** @return HasMany<Device, $this> */
+    public function devices(): HasMany
+    {
+        return $this->hasMany(Device::class);
+    }
+
     /** @param Builder<self> $query */
     #[Scope]
     protected function activeStaff(Builder $query): void
@@ -133,6 +141,8 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
             'receiving_policy' => ReceivingPolicy::class,
             'auto_download_friends' => 'boolean',
             'receiving_revision' => 'integer',
+            'device_registry_revision' => 'integer',
+            'device_generation' => 'integer',
         ];
     }
 }

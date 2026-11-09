@@ -3,6 +3,7 @@
 mod account;
 mod client;
 pub mod contacts;
+mod device;
 mod history;
 pub mod inbox_receiver;
 pub mod local_state;
@@ -18,6 +19,11 @@ pub use account::{
 };
 pub use client::ServiceClient;
 pub use contacts::{Contact, ContactIdentity, Contacts, ReceivingDefaults};
+pub use device::{
+    AccountDevice, DeviceApprovalContext, DeviceApprovalEvidence, DeviceCredentialRedemption,
+    DeviceEnrollmentChallenge, DeviceEnrollmentResult, DeviceRegistrySnapshot, DeviceService,
+    approval_signature, approval_transcript, enrollment_signature, enrollment_transcript,
+};
 pub use history::{HistoryEntry, HistoryFilter, HistoryPage, HistoryService, RetentionUpdate};
 pub use notes::{
     BurnResult, CreatedNote, NoteCreate, NoteInspection, NoteMetadata, NoteReceiveOptions,

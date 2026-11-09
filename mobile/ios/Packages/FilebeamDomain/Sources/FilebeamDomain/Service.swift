@@ -26,6 +26,8 @@ public struct ReportRequest: Sendable { public let instance: FilebeamInstance; p
 public struct ReportReceipt: Codable, Hashable, Sendable { public let reportID: String?; public let submittedAt: Date?; public init(reportID: String?, submittedAt: Date?) { self.reportID = reportID; self.submittedAt = submittedAt } }
 public struct AccountDeletionRequest: Sendable { public let instance: FilebeamInstance; public let currentPassword: String; public let confirmation: String; public init(instance: FilebeamInstance, currentPassword: String, confirmation: String) { self.instance = instance; self.currentPassword = currentPassword; self.confirmation = confirmation } }
 public struct AccountDeletionResult: Codable, Hashable, Sendable { public let accepted: Bool; public let effectiveAt: Date?; public init(accepted: Bool, effectiveAt: Date?) { self.accepted = accepted; self.effectiveAt = effectiveAt } }
+public struct DeviceEnrollmentRequest: Sendable { public let name: String; public let platform: String; public init(name: String, platform: String) { self.name = name; self.platform = platform } }
+public struct DeviceSendStartRequest: Sendable { public let instance: FilebeamInstance; public let source: FileSource; public let targetDeviceID: String; public init(instance: FilebeamInstance, source: FileSource, targetDeviceID: String) { self.instance = instance; self.source = source; self.targetDeviceID = targetDeviceID } }
 
 /// Bridge implementation delegates to UniFFI/current backend APIs. It must not synthesize success, policy, export, or background states.
 public protocol FilebeamService: Sendable {
@@ -95,6 +97,16 @@ public protocol FilebeamService: Sendable {
     func acceptInvite(_ request: InviteAcceptanceRequest) async throws -> AccountSession
     func report(_ request: ReportRequest) async throws -> ReportReceipt
     func requestAccountDeletion(_ request: AccountDeletionRequest) async throws -> AccountDeletionResult
+    /// An account-instance scoped observation without offers, job state, paths,
+    /// manifests, credentials, or other peer-private metadata.
+    func deviceDirectory(instance: FilebeamInstance) async throws -> DeviceDirectory
+    func enrollDevice(instance: FilebeamInstance, request: DeviceEnrollmentRequest) async throws -> DeviceDirectory
+    func renameDevice(instance: FilebeamInstance, deviceID: String, name: String) async throws -> DeviceDirectory
+    func revokeDevice(instance: FilebeamInstance, deviceID: String, currentPassword: String) async throws -> DeviceDirectory
+    func pendingDevicePairing(instance: FilebeamInstance) async throws -> DevicePairingPayload?
+    func approveDevicePairing(instance: FilebeamInstance, payload: DevicePairingPayload, confirmedFingerprint: String) async throws -> DeviceDirectory
+    func confirmDeviceApprover(instance: FilebeamInstance, confirmedFingerprint: String) async throws -> DeviceDirectory
+    func startDeviceSend(_ request: DeviceSendStartRequest) async throws
 }
 
 public extension FilebeamService {
@@ -111,4 +123,12 @@ public extension FilebeamService {
     func inspectPayload(instance: FilebeamInstance, input: String) async throws -> TransferInspection { throw FilebeamDomainError.unavailable("Transfer inspection is not available in this build.") }
     func downloadCommand(link: String) async throws -> String { throw FilebeamDomainError.unavailable("CLI download formatting is not available in this build.") }
     func transferActivity(checkpointID: String) async throws -> TransferActivity { throw FilebeamDomainError.unavailable("Transfer activity is not available in this build.") }
+    func deviceDirectory(instance: FilebeamInstance) async throws -> DeviceDirectory { throw FilebeamDomainError.unavailable("Device transfers are unavailable until this Filebeam runtime supports registered devices.") }
+    func enrollDevice(instance: FilebeamInstance, request: DeviceEnrollmentRequest) async throws -> DeviceDirectory { throw FilebeamDomainError.unavailable("Device enrollment requires a Filebeam runtime with registered-device support.") }
+    func renameDevice(instance: FilebeamInstance, deviceID: String, name: String) async throws -> DeviceDirectory { throw FilebeamDomainError.unavailable("Device management requires a Filebeam runtime with registered-device support.") }
+    func revokeDevice(instance: FilebeamInstance, deviceID: String, currentPassword: String) async throws -> DeviceDirectory { throw FilebeamDomainError.unavailable("Device management requires a Filebeam runtime with registered-device support.") }
+    func pendingDevicePairing(instance: FilebeamInstance) async throws -> DevicePairingPayload? { throw FilebeamDomainError.unavailable("Device pairing requires a Filebeam runtime with registered-device support.") }
+    func approveDevicePairing(instance: FilebeamInstance, payload: DevicePairingPayload, confirmedFingerprint: String) async throws -> DeviceDirectory { throw FilebeamDomainError.unavailable("Device pairing requires a Filebeam runtime with registered-device support.") }
+    func confirmDeviceApprover(instance: FilebeamInstance, confirmedFingerprint: String) async throws -> DeviceDirectory { throw FilebeamDomainError.unavailable("Device pairing requires a Filebeam runtime with registered-device support.") }
+    func startDeviceSend(_ request: DeviceSendStartRequest) async throws { throw FilebeamDomainError.unavailable("Device transfers are unavailable until this Filebeam runtime supports registered devices.") }
 }

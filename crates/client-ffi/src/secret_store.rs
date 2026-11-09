@@ -11,6 +11,37 @@ pub trait SecretStoreCallback: Send + Sync {
     fn remove(&self, scope: String) -> std::result::Result<(), ClientError>;
 }
 
+/// Typed device-key operations. The host key remains in platform custody and
+/// this interface cannot sign caller-selected bytes.
+#[uniffi::export(foreign)]
+pub trait DeviceKeySignerCallback: Send + Sync {
+    fn sign_enrollment(
+        &self,
+        device_id: String,
+        generation: u64,
+        challenge: String,
+    ) -> std::result::Result<Vec<u8>, ClientError>;
+    fn sign_approval(
+        &self,
+        approval: crate::services::DeviceApprovalPayload,
+    ) -> std::result::Result<Vec<u8>, ClientError>;
+}
+
+/// Platform-owned storage for revocable device credentials. Credential values
+/// are never returned by registry records or kept in Rust persistence.
+#[uniffi::export(foreign)]
+pub trait DeviceCredentialStoreCallback: Send + Sync {
+    fn store(
+        &self,
+        instance: String,
+        device_id: String,
+        credential: String,
+    ) -> std::result::Result<(), ClientError>;
+    fn load(&self, instance: String, device_id: String)
+    -> std::result::Result<String, ClientError>;
+    fn remove(&self, instance: String, device_id: String) -> std::result::Result<(), ClientError>;
+}
+
 struct HostSecretStore(Arc<dyn SecretStoreCallback>);
 
 impl SecretStore for HostSecretStore {

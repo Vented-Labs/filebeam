@@ -1,4 +1,4 @@
-use crate::{ClientConfig, Result, SecretStoreCallback, invalid, operation};
+use crate::{ClientConfig, Result, SecretStoreCallback, SourceCallback, invalid, operation};
 use filebeam_client_core::{self as core, control::TransferSettings};
 use std::sync::Arc;
 
@@ -10,6 +10,7 @@ pub struct NativeRuntime {
     pub(crate) _application: core::ClientRuntime,
     pub(crate) scheduler: core::Scheduler,
     pub(crate) settings: TransferSettings,
+    pub(crate) device_runtime: core::DeviceRuntime,
 }
 
 #[uniffi::export]
@@ -25,12 +26,27 @@ impl NativeRuntime {
     ) -> Result<Self> {
         Self::build(config, Some(secret_store))
     }
+    #[uniffi::constructor]
+    pub fn new_with_secret_store_and_source(
+        config: ClientConfig,
+        secret_store: Arc<dyn SecretStoreCallback>,
+        source: Arc<dyn SourceCallback>,
+    ) -> Result<Self> {
+        Self::build_with_source(config, Some(secret_store), Some(source))
+    }
 }
 
 impl NativeRuntime {
     fn build(
         config: ClientConfig,
         secret_store: Option<Arc<dyn SecretStoreCallback>>,
+    ) -> Result<Self> {
+        Self::build_with_source(config, secret_store, None)
+    }
+    fn build_with_source(
+        config: ClientConfig,
+        secret_store: Option<Arc<dyn SecretStoreCallback>>,
+        source: Option<Arc<dyn SourceCallback>>,
     ) -> Result<Self> {
         if !(64..=512).contains(&config.memory_budget_mib)
             || !(1..=4).contains(&config.max_concurrency)
@@ -59,7 +75,18 @@ impl NativeRuntime {
         if let Some(secret_store) = secret_store {
             crate::secret_store::install(&mut settings, secret_store);
         }
+        if let Some(source) = source {
+            crate::source::install(&mut settings, source);
+        }
         let application = core::ClientRuntime::process_global(core::ApplicationSettings::new(
+            settings.clone(),
+            core::SchedulerLimits {
+                workers: config.max_concurrency as usize,
+                memory_bytes,
+            },
+        ))
+        .map_err(operation)?;
+        let device_runtime = core::DeviceRuntime::new(core::ApplicationSettings::new(
             settings.clone(),
             core::SchedulerLimits {
                 workers: config.max_concurrency as usize,
@@ -71,6 +98,7 @@ impl NativeRuntime {
             scheduler: application.scheduler(),
             settings,
             _application: application,
+            device_runtime,
         })
     }
     pub(crate) fn reserve_service_memory(
@@ -80,6 +108,33 @@ impl NativeRuntime {
         self.scheduler
             .try_reserve_service_memory(bytes)
             .map_err(operation)
+    }
+
+    pub(crate) fn registry_store(
+        &self,
+        id: &str,
+    ) -> anyhow::Result<filebeam_transfer_native::checkpoint::Store> {
+        let root = &self.settings.state_home;
+        let secrets = self.settings.checkpoint_secret_store.clone();
+        if root.join(id).exists() {
+            match secrets {
+                Some(secrets) => {
+                    filebeam_transfer_native::checkpoint::Store::open_with_secret_store(
+                        root, id, secrets,
+                    )
+                }
+                None => filebeam_transfer_native::checkpoint::Store::open(root, id),
+            }
+        } else {
+            match secrets {
+                Some(secrets) => {
+                    filebeam_transfer_native::checkpoint::Store::create_with_secret_store(
+                        root, id, secrets,
+                    )
+                }
+                None => filebeam_transfer_native::checkpoint::Store::create(root, id),
+            }
+        }
     }
 }
 

@@ -100,6 +100,43 @@ See [Contacts and receiving](contacts.md) for mutual friend requests, account
 defaults, per-contact overrides, and private automatic receiving with
 `beam inbox watch`.
 
+## Registered devices
+
+```sh
+beam devices add --name Workstation
+beam devices list
+beam devices pair Laptop --fingerprint FULL_FINGERPRINT
+beam devices rename DEVICE_ID "Work laptop"
+beam devices revoke DEVICE_ID --password-stdin
+beam jobs list
+beam jobs wait JOB_ID
+```
+
+`devices add` uses the signed-in account to enroll this installation and
+provisions the daemon with its device-scoped credential. Pending enrollment
+state is retained while another verified device approves it.
+
+Device names are convenience selectors only. Beam resolves a name only when it
+is unique, then sends the immutable device ID to the daemon. Pairing compares a
+full fingerprint from an independent channel and requires retyping it at an
+interactive terminal before the daemon persists the verification. Device
+revocation reads the account password from a protected prompt, standard input,
+or an owner-only file, never from command-line arguments.
+
+Registered-device sends use the receiver-owned `dropzone` by default:
+`beam to Laptop report.pdf`. Use `--into ALIAS_OR_UUID` to select another
+receiver destination. The receiver resolves aliases and validates the accepted
+grant UUID in its receipt.
+
+Device delivery requires a provisioned local daemon, an explicitly verified
+peer, and a receiver-owned destination grant. `beam to` queues the job, waits
+until its encrypted local snapshot is prepared, then returns a queued result
+(exit code 10); use `--wait` to wait for a verified receiver receipt.
+
+The implemented desktop-daemon path uses local destination grants. Mobile
+receiving, provider destinations, and complete LAN/WAN/relay lifecycle support
+remain incomplete and are not implied by these commands.
+
 ## End and revoke
 
 ```sh

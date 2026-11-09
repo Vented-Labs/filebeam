@@ -6,6 +6,7 @@ use App\Http\Controllers\AccountKeyController;
 use App\Http\Controllers\Api\V1\TurboTransferController;
 use App\Http\Controllers\AppleAppSiteAssociationController;
 use App\Http\Controllers\ContactController;
+use App\Http\Controllers\DeviceController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\InboxController;
 use App\Http\Controllers\ReceiveController;
@@ -43,6 +44,7 @@ Route::middleware('auth')->group(function (): void {
     Route::delete('/account/history/{id}', [TransferHistoryController::class, 'destroy'])->whereUlid('id')->middleware('throttle:transfer-writing')->name('history.destroy');
     Route::patch('/account/history/{id}/retention', [TransferHistoryController::class, 'extend'])->whereUlid('id')->middleware('throttle:transfer-writing')->name('history.extend');
     Route::get('/account/contacts', [ContactController::class, 'page'])->name('contacts.index');
+    Route::get('/account/devices', [DeviceController::class, 'page'])->name('devices.index');
     Route::get('/account/keys', [AccountKeyController::class, 'index'])->name('account.keys.index');
     Route::post('/account/keys', [AccountKeyController::class, 'store'])->middleware('throttle:account-key-writing')->name('account.keys.store');
     Route::patch('/account/keys/{bundle}', [AccountKeyController::class, 'update'])->name('account.keys.update');

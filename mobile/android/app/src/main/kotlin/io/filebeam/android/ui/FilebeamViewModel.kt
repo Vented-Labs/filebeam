@@ -16,6 +16,7 @@ import io.filebeam.android.platform.services.AccountSessionRegistry
 import io.filebeam.android.platform.services.ServiceState
 import io.filebeam.android.platform.security.DraftLoadResult
 import io.filebeam.android.platform.security.EncryptedDraftStore
+import io.filebeam.android.platform.devices.DeviceDirectory
 import io.filebeam.rust.Transport
 import io.filebeam.rust.LinkInspection
 import io.filebeam.rust.presentShareLink
@@ -52,6 +53,7 @@ class FilebeamViewModel(application: Application) : AndroidViewModel(application
     val notes = app.notes
     val turbo = app.turbo
     val inbox = app.inbox
+    private val devices = app.devices
     val transfers = coordinator.state
     val settings = app.settings.values.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AppSettings())
 
@@ -79,6 +81,14 @@ class FilebeamViewModel(application: Application) : AndroidViewModel(application
     var receiveIngress by mutableStateOf<ReceiveIngress?>(null)
         private set
     var exportSource: String? = null
+    var deviceDirectory by mutableStateOf<DeviceDirectory?>(null)
+        private set
+    var deviceDirectoryError by mutableStateOf<String?>(null)
+        private set
+    var deviceOperationError by mutableStateOf<String?>(null)
+        private set
+    var deviceTargetId by mutableStateOf<String?>(null)
+        private set
 
     // Transitional screen properties. They are backed by the durable draft rather than SavedStateHandle/Bundle.
     val selectedFiles: List<Uri> get() = sendDraft.sources.map(SelectedSource::uri)
@@ -143,6 +153,7 @@ class FilebeamViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch { settings.collect {
             if (!instanceTransaction.dirty) instanceTransaction = InstanceSettingsTransaction(committed = it)
             refreshSendDiscovery()
+            refreshDevices()
         } }
         viewModelScope.launch { accounts.state.collect { refreshSendDiscovery() } }
         viewModelScope.launch(Dispatchers.IO) {
@@ -296,6 +307,91 @@ class FilebeamViewModel(application: Application) : AndroidViewModel(application
             if (state is SendDiscoveryState.Ready && noteDraft.isFresh() && noteDraft.driver == null) {
                 updateNote { it.copy(driver = state.policy.defaultDriver) }
             }
+        }
+    }
+
+    /** This is observation only. It must not invent readiness from a session or start a transfer. */
+    fun refreshDevices() {
+        val origin = runCatching { AccountSessionRegistry.normalizeOrigin(settings.value.instance) }.getOrElse {
+            deviceDirectory = null
+            deviceDirectoryError = "Enter a valid instance before checking devices."
+            return
+        }
+        viewModelScope.launch {
+            runCatching { withContext(Dispatchers.IO) { devices.directory(origin) } }.fold(
+                onSuccess = { directory ->
+                    if (settings.value.instance == origin) {
+                        deviceDirectory = directory
+                        deviceDirectoryError = null
+                    }
+                },
+                onFailure = { error ->
+                    if (settings.value.instance == origin) {
+                        deviceDirectory = null
+                        deviceDirectoryError = error.message ?: "Unable to load registered devices."
+                    }
+                },
+            )
+        }
+    }
+
+    fun enrollThisDevice(name: String, platform: String) {
+        val origin = runCatching { AccountSessionRegistry.normalizeOrigin(settings.value.instance) }.getOrElse {
+            deviceOperationError = "Enter a valid instance before registering this device."
+            return
+        }
+        if (name.isBlank()) {
+            deviceOperationError = "Enter a device name."
+            return
+        }
+        viewModelScope.launch {
+            runCatching { withContext(Dispatchers.IO) { devices.enroll(origin, name.trim(), platform) } }.fold(
+                onSuccess = { directory -> if (settings.value.instance == origin) { deviceDirectory = directory; deviceDirectoryError = null; deviceOperationError = null } },
+                onFailure = { error -> deviceOperationError = error.message ?: "Unable to register this device." },
+            )
+        }
+    }
+
+    fun renameDevice(deviceId: String, name: String) = updateDeviceDirectory("Enter a device name.") { origin -> devices.rename(origin, deviceId, name.trim()) }
+
+    fun revokeDevice(deviceId: String, currentPassword: String) {
+        if (currentPassword.isBlank()) { deviceOperationError = "Enter your current password to revoke a device."; return }
+        updateDeviceDirectory("Invalid device action.") { origin -> devices.revoke(origin, deviceId, currentPassword) }
+    }
+
+    fun pairingPayload(onReady: (String) -> Unit) {
+        val origin = runCatching { AccountSessionRegistry.normalizeOrigin(settings.value.instance) }.getOrElse { deviceOperationError = "Enter a valid instance before pairing."; return }
+        viewModelScope.launch {
+            runCatching { withContext(Dispatchers.IO) { devices.pendingApprovalPayload(origin) } }.fold(
+                onSuccess = { value -> if (value == null) deviceOperationError = "Register this device first, then share its pairing payload." else onReady(value) },
+                onFailure = { error -> deviceOperationError = error.message ?: "Unable to load the pairing payload." },
+            )
+        }
+    }
+
+    fun approvePairing(payload: String, fingerprint: String) = updateDeviceDirectory("Enter a valid instance before pairing.") { origin -> devices.approvePayload(origin, payload, fingerprint) }
+    fun confirmApprover(fingerprint: String) = updateDeviceDirectory("Enter a valid instance before pairing.") { origin -> devices.confirmApprover(origin, fingerprint) }
+    fun selectDeviceTarget(id: String?) { deviceTargetId = id }
+    fun sendToDevice() {
+        val target = deviceTargetId ?: run { deviceOperationError = "Choose a verified device."; return }
+        val source = sendDraft.sources.singleOrNull() ?: run { deviceOperationError = "Device transfer currently sends one selected document at a time."; return }
+        val size = source.sizeBytes ?: run { deviceOperationError = "Selected document size is unavailable."; return }
+        val origin = runCatching { AccountSessionRegistry.normalizeOrigin(settings.value.instance) }.getOrElse { deviceOperationError = "Enter a valid instance before sending."; return }
+        viewModelScope.launch {
+            runCatching { withContext(Dispatchers.IO) { devices.send(origin, source.displayName, source.identity, size, target) } }.fold(
+                onSuccess = { navigate(Destination.Transfers); deviceOperationError = null },
+                onFailure = { deviceOperationError = it.message ?: "Unable to start device transfer." },
+            )
+        }
+    }
+
+    private fun updateDeviceDirectory(invalid: String, operation: suspend (String) -> DeviceDirectory) {
+        val origin = runCatching { AccountSessionRegistry.normalizeOrigin(settings.value.instance) }.getOrElse { deviceOperationError = invalid; return }
+        viewModelScope.launch {
+            runCatching { withContext(Dispatchers.IO) { operation(origin) } }.fold(
+                onSuccess = { directory -> if (settings.value.instance == origin) { deviceDirectory = directory; deviceDirectoryError = null; deviceOperationError = null } },
+                onFailure = { error -> deviceOperationError = error.message ?: "Unable to update registered devices." },
+            )
         }
     }
 

@@ -50,6 +50,17 @@ struct SendComposerView: View {
                 HStack { Text("To @\(recipient.username)"); Button("Clear recipient") { model.drafts.files.options.recipient = nil } }
             }
             Text("Encrypted on your device before sharing.").foregroundStyle(.secondary)
+            if let directory = model.deviceDirectory {
+                Picker("Paired device", selection: $model.deviceTargetID) {
+                    Text("No device").tag(String?.none)
+                    ForEach(directory.devices.filter { $0.id != directory.currentDeviceID && $0.trust == .verified && $0.canReceive }) { device in
+                        Text("\(device.name) (\(device.availability.rawValue))").tag(Optional(device.id))
+                    }
+                }
+                Button("Send selected document to device") { Task { _ = await model.startDeviceSend() } }
+                    .disabled(model.deviceTargetID == nil || model.drafts.files.sources.count != 1)
+                Text("Paired devices remain selectable when sleeping; open Filebeam on the target to receive immediately.").font(.footnote).foregroundStyle(.secondary)
+            }
             TransportPicker(transport: $model.drafts.files.options.transport)
             if model.drafts.files.sources.isEmpty { VStack(spacing: 12) { Image("FilebeamMark").resizable().scaledToFit().frame(width: 48, height: 68).accessibilityHidden(true); ContentUnavailableView("No files selected", systemImage: "document.badge.plus", description: Text("Choose files to prepare them for sharing.")) } }
             ForEach(model.drafts.files.sources) { source in

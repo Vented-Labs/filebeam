@@ -40,6 +40,7 @@ Schedule::call(function (): void {
 
 Schedule::command('filebeam:prune-transfers')->everyFifteenMinutes()->withoutOverlapping();
 Schedule::command('filebeam:prune-transfer-history')->daily()->withoutOverlapping();
+Schedule::command('filebeam:prune-devices')->hourly()->withoutOverlapping();
 
 Schedule::call(function (): void {
     $lock = new ActivityLock(storage_path('app/update-activity.lock'));

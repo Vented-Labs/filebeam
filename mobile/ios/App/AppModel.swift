@@ -4,7 +4,7 @@ import FilebeamDomain
 
 @MainActor @Observable
 final class AppModel {
-    enum Tab: Hashable { case send, receive, transfers, inbox, settings }
+    enum Tab: Hashable { case send, receive, devices, transfers, inbox, settings }
 
     let service: any FilebeamService
     private(set) var instance: FilebeamInstance
@@ -20,6 +20,11 @@ final class AppModel {
     var session: AccountSession?
     var transfers: [TransferSnapshot] = []
     var records: [TransferRecord] = []
+    var deviceDirectory: DeviceDirectory?
+    var deviceDirectoryError: String?
+    var deviceOperationError: String?
+    var pendingDevicePairing: DevicePairingPayload?
+    var deviceTargetID: String?
     var inboxItems: [InboxItem] = []
     var inboxUnreadCount: UInt64 = 0
     var inboxError: String?
@@ -81,6 +86,7 @@ final class AppModel {
         await refreshPolicy()
         await refreshSession()
         await refreshTransfers()
+        await refreshDevices()
     }
 
     func persistDrafts(_ value: ComposerDrafts) async {
@@ -123,9 +129,12 @@ final class AppModel {
             inboxUnreadCount = 0
             inboxError = nil
             policy = nil
+            deviceDirectory = nil
+            deviceDirectoryError = nil
             drafts = draftsByOrigin[candidate.origin] ?? ComposerDrafts()
             await refreshPolicy()
             await refreshSession()
+            await refreshDevices()
             return true
         } catch {
             instanceChangeError = message(error)
@@ -162,6 +171,74 @@ final class AppModel {
     func refreshTransfers() async {
         do { records = try await service.savedTransfers() }
         catch { operationError = message(error) }
+    }
+
+    /// A directory refresh only observes the instance-authoritative registry.
+    /// It never treats an account session as a ready receiver or starts a job.
+    func refreshDevices() async {
+        let origin = instance
+        do {
+            let directory = try await service.deviceDirectory(instance: origin)
+            guard instance == origin else { return }
+            deviceDirectory = directory
+            deviceDirectoryError = nil
+        } catch {
+            guard instance == origin else { return }
+            deviceDirectory = nil
+            deviceDirectoryError = message(error)
+        }
+    }
+
+    func enrollThisDevice(name: String, platform: String) async {
+        await updateDevices { try await self.service.enrollDevice(instance: self.instance, request: .init(name: name, platform: platform)) }
+    }
+
+    func renameDevice(id: String, name: String) async {
+        await updateDevices { try await self.service.renameDevice(instance: self.instance, deviceID: id, name: name) }
+    }
+
+    func revokeDevice(id: String, currentPassword: String) async {
+        await updateDevices { try await self.service.revokeDevice(instance: self.instance, deviceID: id, currentPassword: currentPassword) }
+    }
+    func loadDevicePairing() async {
+        do { pendingDevicePairing = try await service.pendingDevicePairing(instance: instance) }
+        catch { deviceOperationError = message(error) }
+    }
+    func approveDevicePairing(_ payload: DevicePairingPayload, fingerprint: String) async {
+        await updateDevices { try await self.service.approveDevicePairing(instance: self.instance, payload: payload, confirmedFingerprint: fingerprint) }
+    }
+    func confirmDeviceApprover(fingerprint: String) async {
+        await updateDevices { try await self.service.confirmDeviceApprover(instance: self.instance, confirmedFingerprint: fingerprint) }
+    }
+    func startDeviceSend() async -> Bool {
+        guard let target = deviceTargetID,
+              let device = deviceDirectory?.devices.first(where: { $0.id == target && $0.trust == .verified && $0.canReceive }),
+              device.id != deviceDirectory?.currentDeviceID else {
+            deviceOperationError = "Choose a paired device."
+            return false
+        }
+        guard drafts.files.sources.count == 1, let source = drafts.files.sources.first, case .ready = source.state else {
+            deviceOperationError = "Device transfer sends one prepared document at a time."
+            return false
+        }
+        do {
+            try await service.startDeviceSend(.init(instance: instance, source: source, targetDeviceID: device.id))
+            deviceOperationError = nil
+            selectedTab = .transfers
+            return true
+        } catch {
+            deviceOperationError = message(error)
+            return false
+        }
+    }
+
+    private func updateDevices(_ operation: () async throws -> DeviceDirectory) async {
+        do {
+            let directory = try await operation()
+            guard directory.instance == instance else { return }
+            deviceDirectory = directory
+            deviceOperationError = nil
+        } catch { deviceOperationError = message(error) }
     }
 
     func importSources(_ urls: [URL], importer: @escaping ([URL]) async -> [FileSource]) {

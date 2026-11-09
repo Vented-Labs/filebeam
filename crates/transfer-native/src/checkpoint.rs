@@ -20,6 +20,32 @@ use serde::{Serialize, de::DeserializeOwned};
 #[path = "checkpoint/windows.rs"]
 mod windows;
 
+/// Holds the Windows profile directory and every ancestor open without delete
+/// sharing after validating their handles. Keep this alive while using secrets
+/// rooted below the profile.
+#[cfg(windows)]
+pub use windows::PrivateProfileGuard;
+
+/// Holds a destination directory and each ancestor after validating that
+/// untrusted principals cannot redirect or modify received content.
+#[cfg(windows)]
+pub use windows::TrustedDirectoryGuard;
+
+#[cfg(windows)]
+pub fn create_private_profile(path: &Path) -> Result<PrivateProfileGuard> {
+    windows::create_private_profile(path)
+}
+
+#[cfg(windows)]
+pub fn guard_private_profile(path: &Path) -> Result<PrivateProfileGuard> {
+    windows::guard_private_profile(path)
+}
+
+#[cfg(windows)]
+pub fn guard_trusted_directory(path: &Path) -> Result<TrustedDirectoryGuard> {
+    windows::guard_trusted_directory(path)
+}
+
 const MAX_CHECKPOINT_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_IMMUTABLE_BYTES: u64 = 25_000_000;
 const LOCK_NAME: &str = "lock";
@@ -160,6 +186,12 @@ impl Store {
 
     pub fn path(&self) -> &Path {
         &self.directory
+    }
+
+    /// Stable local owner ID used to reopen this already-created job through a
+    /// `Control` that shares the same configured secret store.
+    pub fn id(&self) -> &str {
+        &self.id
     }
 
     /// Atomically replace the checkpoint. A write or sync failure leaves the

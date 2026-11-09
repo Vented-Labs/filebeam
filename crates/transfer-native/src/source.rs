@@ -3,6 +3,8 @@
 //! Protocol checkpoints store `SourceSpec`; platform handles stay local and are
 //! duplicated for each read so no asynchronous task borrows a provider FD.
 
+pub mod tree;
+
 use std::{
     fs::{self, File, OpenOptions},
     io::{self, Read, Seek, SeekFrom, Write},
