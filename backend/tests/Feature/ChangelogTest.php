@@ -70,6 +70,10 @@ function fakeGithub(array $pages, ?int $latest = null, bool $public = true, ?int
     });
 }
 
+beforeEach(function (): void {
+    config(['changelog.sync' => true]);
+});
+
 afterEach(function (): void {
     unset($GLOBALS['changelogUpstream']);
 });

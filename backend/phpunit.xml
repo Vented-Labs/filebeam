@@ -46,5 +46,7 @@
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
+        <!-- Scheduled syncs run as child processes outside HTTP fakes; tests opt in explicitly. -->
+        <env name="FILEBEAM_CHANGELOG_SYNC" value="false" force="true"/>
     </php>
 </phpunit>
