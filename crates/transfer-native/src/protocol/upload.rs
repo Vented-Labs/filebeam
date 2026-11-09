@@ -3364,7 +3364,7 @@ mod tests {
         assert!(
             archive
                 .file_names()
-                .any(|name| name == "fotos/ni\u{00f1}o/archivo.txt")
+                .any(|name| name.is_ok_and(|name| name == "fotos/ni\u{00f1}o/archivo.txt"))
         );
     }
 }
