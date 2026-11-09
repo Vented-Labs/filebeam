@@ -100,6 +100,7 @@ export const iconNames = [
     'os-macos',
     'os-windows',
     'globe',
+    'tag',
     'os-linux',
     'social-discord',
     'social-x',
@@ -119,6 +120,8 @@ export const iconNames = [
     'webrtc-p2p',
     'end-to-end-encrypted',
     'fast-and-simple',
+    'laptop',
+    'terminal',
 ] as const;
 export type IconName = (typeof iconNames)[number];
 export const iconMarkup: Record<IconName, string> = {
@@ -261,6 +264,7 @@ export const iconMarkup: Record<IconName, string> = {
     'os-windows':
         '<g clip-path="url(#clip0_4418_6555)"> <path opacity="0.4" fill-rule="evenodd" clip-rule="evenodd" d="M22 2L12 4V11H22V2Z" stroke="currentColor" stroke-width="1.5" stroke-miterlimit="10" stroke-linejoin="round"/> <path fill-rule="evenodd" clip-rule="evenodd" d="M22 22L12 20V13H22V22Z" stroke="currentColor" stroke-width="1.5" stroke-miterlimit="10" stroke-linejoin="round"/> <path fill-rule="evenodd" clip-rule="evenodd" d="M10 4.30078L2 6.00079V11.0008H10V4.30078Z" stroke="currentColor" stroke-width="1.5" stroke-miterlimit="10" stroke-linejoin="round"/> <path opacity="0.4" fill-rule="evenodd" clip-rule="evenodd" d="M10 19.7L2 18V13H10V19.7Z" stroke="currentColor" stroke-width="1.5" stroke-miterlimit="10" stroke-linejoin="round"/> </g> <defs> <clipPath id="clip0_4418_6555"> <rect width="24" height="24" fill="currentColor"/> </clipPath> </defs>',
     globe: '<g clip-path="url(#clip0_4418_5791)"> <path d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/> <g opacity="0.4"> <path d="M7.99961 3H8.99961C7.04961 8.84 7.04961 15.16 8.99961 21H7.99961" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/> <path d="M15 3C16.95 8.84 16.95 15.16 15 21" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/> <path d="M3 16V15C8.84 16.95 15.16 16.95 21 15V16" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/> <path d="M3 8.99961C8.84 7.04961 15.16 7.04961 21 8.99961" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/> </g> </g> <defs> <clipPath id="clip0_4418_5791"> <rect width="24" height="24" fill="currentColor"/> </clipPath> </defs>',
+    tag: '<g clip-path="url(#clip0_4418_169603)"> <path d="M4.16989 15.2998L8.69989 19.8298C10.5599 21.6898 13.5799 21.6898 15.4499 19.8298L19.8399 15.4398C21.6999 13.5798 21.6999 10.5598 19.8399 8.6898L15.2999 4.1698C14.3499 3.2198 13.0399 2.7098 11.6999 2.7798L6.69989 3.0198C4.69989 3.1098 3.10989 4.6998 3.00989 6.6898L2.76989 11.6898C2.70989 13.0398 3.21989 14.3498 4.16989 15.2998Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/> <path opacity="0.4" d="M9.5 12C10.8807 12 12 10.8807 12 9.5C12 8.11929 10.8807 7 9.5 7C8.11929 7 7 8.11929 7 9.5C7 10.8807 8.11929 12 9.5 12Z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/> </g> <defs> <clipPath id="clip0_4418_169603"> <rect width="24" height="24" fill="currentColor"/> </clipPath> </defs>',
     'os-linux':
         '<g transform="scale(.75)"><path d="M11.2 13.2c-.7-4.9.9-8.7 4.8-8.7s5.5 3.8 4.8 8.7c2.1 2.1 3.2 5.1 2.7 8.1-.4 2.5-2 5.1-4.3 6.2-1.9.9-4.5.9-6.4 0-2.3-1.1-3.9-3.7-4.3-6.2-.5-3 .6-6 2.7-8.1Z" fill="currentColor"/><ellipse cx="13.8" cy="11.2" rx="1.45" ry="2.15" fill="var(--fb-surface-sunken)"/><ellipse cx="18.2" cy="11.2" rx="1.45" ry="2.15" fill="var(--fb-surface-sunken)"/><circle cx="14.25" cy="10.75" r=".55" fill="currentColor"/><circle cx="17.75" cy="10.75" r=".55" fill="currentColor"/><path d="m13.2 13.3 2.8-1.5 2.8 1.5-2.8 2.4-2.8-2.4Z" fill="#d8a657"/><path d="M12 17.3c1.1-1 2.4-1.5 4-1.5s2.9.5 4 1.5c.4 3-.2 6.7-4 8.1-3.8-1.4-4.4-5.1-4-8.1Z" fill="var(--fb-surface-raised)"/><path d="M11.8 25.1c-2.1-.2-3.7.7-4.2 2.3 2.2.7 4.2.4 5.8-.8l-1.6-1.5Zm8.4 0c2.1-.2 3.7.7 4.2 2.3-2.2.7-4.2.4-5.8-.8l1.6-1.5Z" fill="#d8a657"/></g>',
     'social-discord':
@@ -299,6 +303,9 @@ export const iconMarkup: Record<IconName, string> = {
         '<g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"> <path d="M9.5 10H14.5C16.9 10 17.5 10.6 17.5 13V18C17.5 20.4 16.9 21 14.5 21H9.5C7.1 21 6.5 20.4 6.5 18V13C6.5 10.6 7.1 10 9.5 10Z"/> <path d="M12 14.5V16.5"/> <g opacity="0.4"> <path d="M8.5 10V6.5C8.5 3.75 9.6 2.5 12 2.5C14.4 2.5 15.5 3.75 15.5 6.5V10"/> <path d="M4.5 14.5H6.5M17.5 14.5H19.5"/> <path d="M4.5 14.5C4.5 15.19 3.94 15.75 3.25 15.75C2.56 15.75 2 15.19 2 14.5C2 13.81 2.56 13.25 3.25 13.25C3.94 13.25 4.5 13.81 4.5 14.5Z"/> <path d="M22 14.5C22 15.19 21.44 15.75 20.75 15.75C20.06 15.75 19.5 15.19 19.5 14.5C19.5 13.81 20.06 13.25 20.75 13.25C21.44 13.25 22 13.81 22 14.5Z"/> </g> </g>',
     'fast-and-simple':
         '<g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"> <g opacity="0.4"> <path d="M4.45 19C3.19 17.43 2.5 15.42 2.5 13.25C2.5 8 6.75 3.75 12 3.75C17.25 3.75 21.5 8 21.5 13.25C21.5 15.42 20.81 17.43 19.55 19"/> <path d="M5.5 13.25H7M7.4 8.65L8.45 9.7M12 6.75V8.25M17 13.25H18.5"/> </g> <path d="M13.24 12.01L17 8.25"/> <path d="M13.75 13.25C13.75 14.22 12.97 15 12 15C11.03 15 10.25 14.22 10.25 13.25C10.25 12.28 11.03 11.5 12 11.5C12.97 11.5 13.75 12.28 13.75 13.25Z"/> <path d="M8.5 20.25H15.5"/> </g>',
+    laptop: '<g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"> <path d="M6.5 4.5H17.5C19.38 4.5 20 5.12 20 7V15.5H4V7C4 5.12 4.62 4.5 6.5 4.5Z"/> <path d="M2 15.5H22V16.75C22 18.63 21.38 19.5 19.5 19.5H4.5C2.62 19.5 2 18.63 2 16.75V15.5Z"/> <g opacity="0.4"> <path d="M10 17.5H14"/> <path d="M7 12.5H17"/> </g> </g>',
+    terminal:
+        '<g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"> <path d="M7 3.5H17C20 3.5 21 4.5 21 7.5V16.5C21 19.5 20 20.5 17 20.5H7C4 20.5 3 19.5 3 16.5V7.5C3 4.5 4 3.5 7 3.5Z"/> <g opacity="0.4"> <path d="M7.5 9L10.5 12L7.5 15"/> <path d="M12.5 15H16.5"/> </g> </g>',
 };
 export const iconsaxSourceDigest =
-    '8788d51164eba4531709e9c79089647acf5b999ac6139021d01635c95b35c7a5';
+    '81ca78db7c24a6bda6f78b6bff2d51cbb720716efaa5bde298cde6c6b192da2d';

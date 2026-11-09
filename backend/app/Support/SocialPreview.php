@@ -19,6 +19,8 @@ class SocialPreview
             'home' => 'home',
             'receive.show', 'receive.domain' => 'receive',
             'transfers.show' => 'transfer',
+            'features.index' => 'features',
+            'changelog.index', 'changelog.show', 'changelog.by-id' => 'changelog',
             default => null,
         };
 
@@ -33,14 +35,18 @@ class SocialPreview
                 'home' => $name.' | Secure file sharing',
                 'receive' => 'Send files securely with '.$name,
                 'transfer' => 'Receive files securely with '.$name,
+                'features' => 'Features | '.$name,
+                'changelog' => 'Changelog | '.$name,
             },
             'description' => match ($card) {
                 'home' => 'End-to-end encrypted file sharing with '.$name.'.',
                 'receive' => 'Send end-to-end encrypted files to a recipient with '.$name.'.',
                 'transfer' => 'Receive an end-to-end encrypted file transfer with '.$name.'.',
+                'features' => 'End-to-end encrypted files and notes, sending to friends, transfer history, and a CLI.',
+                'changelog' => 'Release notes for '.$name.'.',
             },
             'url' => $request->url(),
-            'image_url' => $this->imageUrl($card),
+            'image_url' => $this->imageUrl(in_array($card, ['features', 'changelog'], true) ? 'home' : $card),
         ];
     }
 

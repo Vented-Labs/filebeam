@@ -53,6 +53,8 @@ export type FilebeamConfig = {
     };
     registration_enabled?: boolean;
     anonymous_uploads_enabled: boolean;
+    username_routing_enabled?: boolean;
+    changelog?: { enabled: boolean; version_url: string | null };
     file_retention_options?: number[];
     note_retention_options?: number[];
     transport_policy?: {

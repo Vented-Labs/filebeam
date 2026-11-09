@@ -5,8 +5,10 @@ declare(strict_types=1);
 use App\Http\Controllers\AccountKeyController;
 use App\Http\Controllers\Api\V1\TurboTransferController;
 use App\Http\Controllers\AppleAppSiteAssociationController;
+use App\Http\Controllers\ChangelogController;
 use App\Http\Controllers\ContactController;
 use App\Http\Controllers\DeviceController;
+use App\Http\Controllers\FeaturesController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\InboxController;
 use App\Http\Controllers\ReceiveController;
@@ -67,6 +69,15 @@ if (is_string(config('filebeam.username_domain'))) {
 }
 
 Route::get('/.well-known/apple-app-site-association', AppleAppSiteAssociationController::class)->name('apple-app-site-association');
+
+// Registered after the username host so its single-segment usernames keep precedence there.
+Route::get('/features', FeaturesController::class)->name('features.index');
+
+if (config('changelog.enabled')) {
+    Route::get('/changelog', [ChangelogController::class, 'index'])->name('changelog.index');
+    Route::get('/changelog/id/{githubReleaseId}', [ChangelogController::class, 'byId'])->whereNumber('githubReleaseId')->name('changelog.by-id');
+    Route::get('/changelog/{tag}', [ChangelogController::class, 'show'])->where('tag', '[A-Za-z0-9][A-Za-z0-9._+-]{0,99}')->name('changelog.show');
+}
 
 Route::get('/{transferId}', fn (string $transferId): Response => Inertia::render('Transfer', [
     'transferId' => $transferId,

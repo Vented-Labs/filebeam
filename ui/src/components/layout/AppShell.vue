@@ -11,6 +11,7 @@ import {
     DropdownMenuItem,
     DropdownMenuPortal,
     DropdownMenuRoot,
+    DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from 'reka-ui';
 import BrandLogo from '../brand/BrandLogo.vue';
@@ -19,7 +20,7 @@ import AppLink from '../primitives/AppLink.vue';
 import AuthLink from '../auth/AuthLink.vue';
 import CliFooterLauncher from '../cli/CliFooterLauncher.vue';
 import Icon, { type IconName } from '../primitives/Icon.vue';
-import { computed, nextTick, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useBranding } from '../../lib/branding';
 import type { CommunityLink, SocialPlatform } from '../../types';
 
@@ -33,8 +34,18 @@ const props = withDefaults(
         homeAction?: () => void;
         registrationEnabled?: boolean;
         communityLinks?: CommunityLink[];
+        currentPath?: string;
+        changelogEnabled?: boolean;
+        versionUrl?: string | null;
     }>(),
-    { user: null, registrationEnabled: true, communityLinks: () => [] },
+    {
+        user: null,
+        registrationEnabled: true,
+        communityLinks: () => [],
+        currentPath: '/',
+        changelogEnabled: true,
+        versionUrl: null,
+    },
 );
 const socialIcons: Record<SocialPlatform, IconName> = {
     discord: 'social-discord',
@@ -60,6 +71,47 @@ const branding = useBranding();
 const githubUrl = computed(() => props.githubUrl ?? branding.value.github_url);
 const copyrightHolder = computed(() => props.copyrightHolder ?? branding.value.copyright_holder);
 const copyrightUrl = computed(() => props.copyrightUrl ?? branding.value.copyright_url ?? null);
+
+const path = computed(() => props.currentPath.split(/[?#]/, 1)[0] || '/');
+const destinations = computed(() =>
+    [
+        { href: '/features', label: 'Features', active: path.value === '/features' },
+        {
+            href: '/changelog',
+            label: 'Changelog',
+            active: path.value === '/changelog' || path.value.startsWith('/changelog/'),
+            hidden: !props.changelogEnabled,
+        },
+    ].filter((item) => !item.hidden),
+);
+// One persistent dot slides between destinations as the shell stays mounted across visits.
+const primaryNavigation = ref<HTMLElement | null>(null);
+const indicator = reactive({ x: 0, visible: false, ready: false });
+let navigationObserver: ResizeObserver | undefined;
+function placeIndicator(): void {
+    const active = primaryNavigation.value?.querySelector<HTMLElement>('[aria-current="page"]');
+    if (!active || active.offsetParent === null) {
+        indicator.visible = false;
+        return;
+    }
+    indicator.x = active.offsetLeft + active.offsetWidth / 2 - 2;
+    indicator.visible = true;
+}
+watch(path, () => void nextTick(placeIndicator));
+onMounted(() => {
+    placeIndicator();
+    // Enable motion only after the first placement so the dot never slides in on load.
+    requestAnimationFrame(() => (indicator.ready = true));
+    if (typeof ResizeObserver !== 'undefined' && primaryNavigation.value) {
+        navigationObserver = new ResizeObserver(placeIndicator);
+        navigationObserver.observe(primaryNavigation.value);
+    }
+});
+onBeforeUnmount(() => navigationObserver?.disconnect());
+
+const versionHref = computed(() =>
+    props.changelogEnabled ? (props.versionUrl ?? '/changelog') : null,
+);
 
 const information = [
     {
@@ -93,7 +145,7 @@ function openInformation(item: Information, returnFocus: HTMLElement | null): vo
     });
 }
 
-function openDesktopInformation(item: Information, event: MouseEvent): void {
+function openFooterInformation(item: Information, event: MouseEvent): void {
     openInformation(item, event.currentTarget as HTMLElement);
 }
 
@@ -128,53 +180,83 @@ function goHome(event: MouseEvent): void {
             <AppLink v-else href="/" class="fb-header__brand" :aria-label="`${branding.name} home`"
                 ><BrandLogo
             /></AppLink>
-            <nav class="fb-header__nav fb-desktop-nav" aria-label="Primary navigation">
-                <button
-                    v-for="item in information"
-                    :key="item.title"
+            <nav
+                ref="primaryNavigation"
+                class="fb-header__nav fb-primary-nav"
+                aria-label="Primary navigation"
+            >
+                <span
+                    class="fb-nav-indicator"
+                    :class="{ 'fb-nav-indicator--ready': indicator.ready }"
+                    :style="{
+                        transform: `translateX(${indicator.x}px)`,
+                        opacity: indicator.visible ? 1 : 0,
+                    }"
+                    aria-hidden="true"
+                />
+                <AppLink
+                    v-for="item in destinations"
+                    :key="item.href"
+                    :href="item.href"
                     class="fb-nav-link"
-                    @click="openDesktopInformation(item, $event)"
+                    :aria-current="item.active ? 'page' : undefined"
+                    prefetch
+                    >{{ item.label }}</AppLink
                 >
-                    {{ item.title }}
-                </button>
                 <a
                     class="fb-nav-link fb-nav-link--github"
                     :href="githubUrl"
                     target="_blank"
                     rel="noopener noreferrer"
-                    ><span>GitHub</span><Icon name="arrow-up-right" :size="14"
+                    ><span>GitHub</span><Icon name="arrow-up-right" :size="13"
                 /></a>
             </nav>
             <div class="fb-header__actions">
-                <AppLink v-if="user" href="/account/history" class="fb-button fb-button--ghost"
-                    >History</AppLink
-                >
-                <AppLink v-if="user" href="/account/contacts" class="fb-button fb-button--ghost"
-                    >Contacts</AppLink
-                >
-                <AppLink
-                    v-if="user?.unread_inbox_notifications"
-                    href="/account/inbox"
-                    class="fb-button fb-button--ghost"
-                    :aria-label="`${user.unread_inbox_notifications} new inbox notifications`"
-                    ><Icon name="folder" :size="18" />{{ user.unread_inbox_notifications }}</AppLink
-                >
-                <AppLink
-                    v-if="user"
-                    class="fb-button fb-button--ghost fb-account-link"
-                    href="/account"
-                    >{{ user.username || user.name }}</AppLink
-                >
-                <template v-else
-                    ><AuthLink class="fb-button fb-button--ghost fb-sign-in-link" href="/login"
-                        >Sign in</AuthLink
-                    ><AuthLink
-                        v-if="registrationEnabled"
-                        class="fb-button fb-button--secondary"
-                        href="/register"
-                        >Register</AuthLink
-                    ></template
-                >
+                <div class="fb-header__account">
+                    <template v-if="user">
+                        <AppLink
+                            href="/account/history"
+                            class="fb-nav-link"
+                            :aria-current="path === '/account/history' ? 'page' : undefined"
+                            >History</AppLink
+                        >
+                        <AppLink
+                            href="/account/contacts"
+                            class="fb-nav-link"
+                            :aria-current="path === '/account/contacts' ? 'page' : undefined"
+                            >Contacts</AppLink
+                        >
+                        <AppLink
+                            v-if="user.unread_inbox_notifications"
+                            href="/account/inbox"
+                            class="fb-nav-link fb-nav-link--inbox"
+                            :aria-label="`${user.unread_inbox_notifications} new inbox notifications`"
+                            ><Icon name="folder" :size="16" />{{
+                                user.unread_inbox_notifications
+                            }}</AppLink
+                        >
+                        <AppLink
+                            class="fb-nav-link fb-account-link fb-header__slot"
+                            href="/account"
+                            :aria-current="path === '/account' ? 'page' : undefined"
+                            >{{ user.username || user.name }}</AppLink
+                        >
+                    </template>
+                    <template v-else>
+                        <AuthLink
+                            class="fb-nav-link fb-sign-in-link"
+                            :class="{ 'fb-header__slot': !registrationEnabled }"
+                            href="/login"
+                            >Sign in</AuthLink
+                        >
+                        <AuthLink
+                            v-if="registrationEnabled"
+                            class="fb-button fb-button--secondary fb-header__button fb-register-link fb-header__slot"
+                            href="/register"
+                            >Register</AuthLink
+                        >
+                    </template>
+                </div>
             </div>
             <DropdownMenuRoot :modal="false">
                 <DropdownMenuTrigger as-child>
@@ -192,56 +274,13 @@ function goHome(event: MouseEvent): void {
                         :side-offset="8"
                         align="end"
                     >
-                        <DropdownMenuItem v-if="user" as-child>
+                        <DropdownMenuItem v-for="item in destinations" :key="item.href" as-child>
                             <AppLink
-                                href="/account/history"
+                                :href="item.href"
                                 class="fb-select-item fb-mobile-nav__item"
-                                >History</AppLink
+                                :aria-current="item.active ? 'page' : undefined"
+                                >{{ item.label }}</AppLink
                             >
-                        </DropdownMenuItem>
-                        <DropdownMenuItem v-if="user" as-child>
-                            <AppLink href="/account" class="fb-select-item fb-mobile-nav__item"
-                                >Account</AppLink
-                            >
-                        </DropdownMenuItem>
-                        <DropdownMenuItem v-if="user" as-child>
-                            <AppLink
-                                href="/account/contacts"
-                                class="fb-select-item fb-mobile-nav__item"
-                                >Contacts</AppLink
-                            >
-                        </DropdownMenuItem>
-                        <DropdownMenuItem v-if="user" as-child>
-                            <AppLink
-                                href="/account/inbox"
-                                class="fb-select-item fb-mobile-nav__item"
-                                >Inbox</AppLink
-                            >
-                        </DropdownMenuItem>
-                        <DropdownMenuItem v-if="user" as-child>
-                            <AppLink
-                                href="/account/devices"
-                                class="fb-select-item fb-mobile-nav__item"
-                                >My devices</AppLink
-                            >
-                        </DropdownMenuItem>
-                        <DropdownMenuItem v-if="!user" as-child>
-                            <AuthLink href="/login" class="fb-select-item fb-mobile-nav__item"
-                                >Sign in</AuthLink
-                            >
-                        </DropdownMenuItem>
-                        <DropdownMenuItem v-if="!user && registrationEnabled" as-child>
-                            <AuthLink href="/register" class="fb-select-item fb-mobile-nav__item"
-                                >Register</AuthLink
-                            >
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                            v-for="item in information"
-                            :key="item.title"
-                            class="fb-select-item fb-mobile-nav__item"
-                            @select="openMobileInformation(item)"
-                        >
-                            {{ item.title }}
                         </DropdownMenuItem>
                         <DropdownMenuItem as-child>
                             <a
@@ -252,6 +291,78 @@ function goHome(event: MouseEvent): void {
                             >
                                 <span>GitHub</span>
                             </a>
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator class="fb-mobile-nav__separator" />
+                        <template v-if="user">
+                            <DropdownMenuItem as-child>
+                                <AppLink
+                                    href="/account/history"
+                                    class="fb-select-item fb-mobile-nav__item"
+                                    :aria-current="path === '/account/history' ? 'page' : undefined"
+                                    >History</AppLink
+                                >
+                            </DropdownMenuItem>
+                            <DropdownMenuItem as-child>
+                                <AppLink
+                                    href="/account"
+                                    class="fb-select-item fb-mobile-nav__item"
+                                    :aria-current="path === '/account' ? 'page' : undefined"
+                                    >Account</AppLink
+                                >
+                            </DropdownMenuItem>
+                            <DropdownMenuItem as-child>
+                                <AppLink
+                                    href="/account/contacts"
+                                    class="fb-select-item fb-mobile-nav__item"
+                                    :aria-current="
+                                        path === '/account/contacts' ? 'page' : undefined
+                                    "
+                                    >Contacts</AppLink
+                                >
+                            </DropdownMenuItem>
+                            <DropdownMenuItem as-child>
+                                <AppLink
+                                    href="/account/inbox"
+                                    class="fb-select-item fb-mobile-nav__item"
+                                    :aria-current="path === '/account/inbox' ? 'page' : undefined"
+                                    >Inbox<span
+                                        v-if="user.unread_inbox_notifications"
+                                        class="fb-mobile-nav__count"
+                                        >{{ user.unread_inbox_notifications }}</span
+                                    ></AppLink
+                                >
+                            </DropdownMenuItem>
+                            <DropdownMenuItem as-child>
+                                <AppLink
+                                    href="/account/devices"
+                                    class="fb-select-item fb-mobile-nav__item"
+                                    :aria-current="path === '/account/devices' ? 'page' : undefined"
+                                    >My devices</AppLink
+                                >
+                            </DropdownMenuItem>
+                        </template>
+                        <template v-else>
+                            <DropdownMenuItem as-child>
+                                <AuthLink href="/login" class="fb-select-item fb-mobile-nav__item"
+                                    >Sign in</AuthLink
+                                >
+                            </DropdownMenuItem>
+                            <DropdownMenuItem v-if="registrationEnabled" as-child>
+                                <AuthLink
+                                    href="/register"
+                                    class="fb-select-item fb-mobile-nav__item"
+                                    >Register</AuthLink
+                                >
+                            </DropdownMenuItem>
+                        </template>
+                        <DropdownMenuSeparator class="fb-mobile-nav__separator" />
+                        <DropdownMenuItem
+                            v-for="item in information"
+                            :key="item.title"
+                            class="fb-select-item fb-mobile-nav__item fb-mobile-nav__item--quiet"
+                            @select="openMobileInformation(item)"
+                        >
+                            {{ item.title }}
                         </DropdownMenuItem>
                     </DropdownMenuContent>
                 </DropdownMenuPortal>
@@ -282,14 +393,31 @@ function goHome(event: MouseEvent): void {
             <div class="fb-footer__identity flex items-center gap-3">
                 <BrandLogo />
                 <AppearancePopover />
-                <span
-                    class="fb-footer__version text-xs font-normal text-[var(--fb-text-muted)]"
-                    :title="`v${branding.version}`"
+                <AppLink
+                    v-if="versionHref"
+                    :href="versionHref"
+                    class="fb-footer__version"
+                    :title="`Release notes for v${branding.version}`"
+                    :aria-label="`Release notes for v${branding.version}`"
+                    >v{{ branding.version }}</AppLink
+                >
+                <span v-else class="fb-footer__version" :title="`v${branding.version}`"
                     >v{{ branding.version }}</span
                 >
             </div>
             <CliFooterLauncher />
             <div class="fb-footer__right">
+                <nav class="fb-footer__links" aria-label="Information">
+                    <button
+                        v-for="item in information"
+                        :key="item.title"
+                        type="button"
+                        class="fb-footer__link"
+                        @click="openFooterInformation(item, $event)"
+                    >
+                        {{ item.title }}
+                    </button>
+                </nav>
                 <nav
                     v-if="communityLinks.length"
                     class="fb-footer__community"
@@ -324,8 +452,12 @@ function goHome(event: MouseEvent): void {
 </template>
 
 <style scoped>
-.fb-mobile-nav {
-    display: none;
+.fb-header {
+    /* Centre the header content at the design's 1400px frame without an extra wrapper. */
+    min-height: 5.5rem;
+    gap: 2.25rem;
+    padding-inline: max(clamp(1rem, 4vw, 3rem), calc((100% - 81.5rem) / 2));
+    border-bottom-color: transparent;
 }
 .fb-header__brand {
     min-width: 0;
@@ -343,10 +475,83 @@ function goHome(event: MouseEvent): void {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+.fb-header__nav {
+    gap: 1.8rem;
+}
+.fb-header .fb-nav-link {
+    position: relative;
+    min-height: 2rem;
+    padding: 0.5rem 0;
+    border-radius: 0.25rem;
+    font-size: 0.75rem;
+}
+.fb-header .fb-nav-link:hover,
+.fb-header .fb-nav-link:active {
+    background: transparent;
+    color: var(--fb-text);
+}
+.fb-header .fb-nav-link[aria-current='page'] {
+    color: var(--fb-text);
+}
+.fb-header__nav {
+    position: relative;
+}
+.fb-nav-indicator {
+    position: absolute;
+    bottom: -3px;
+    left: 0;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--fb-accent-text);
+    pointer-events: none;
+    transition: opacity var(--fb-duration-control) ease;
+}
+.fb-nav-indicator--ready {
+    transition:
+        transform 420ms var(--fb-ease),
+        opacity var(--fb-duration-control) ease;
+}
+@media (prefers-reduced-motion: reduce) {
+    .fb-nav-indicator--ready {
+        transition: opacity var(--fb-duration-control) ease;
+    }
+}
+.fb-nav-link--github {
+    gap: 0.25rem;
+}
+.fb-nav-link--github .fb-icon {
+    opacity: 0.65;
+}
+.fb-header__actions {
+    gap: 1.25rem;
+}
+.fb-header__account {
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+}
+.fb-nav-link--inbox {
+    gap: 0.3rem;
+}
+.fb-header__button {
+    min-height: 2.625rem;
+    padding: 0.5625rem 1.125rem;
+    font-size: 0.75rem;
+}
+.fb-account-link {
+    max-width: 10rem;
+    display: block;
+    white-space: nowrap;
+}
+.fb-mobile-nav {
+    display: none;
+}
 .fb-footer {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 556px) minmax(0, 1fr);
     column-gap: 20px;
+    padding-inline: max(clamp(1rem, 4vw, 3rem), calc((100% - 81.5rem) / 2));
 }
 .fb-footer__right {
     display: flex;
@@ -354,6 +559,25 @@ function goHome(event: MouseEvent): void {
     align-items: center;
     justify-content: end;
     gap: 20px;
+}
+.fb-footer__links {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+}
+.fb-footer__link {
+    min-height: 2rem;
+    padding: 0 0.1rem;
+    border: 0;
+    border-radius: 0.25rem;
+    background: transparent;
+    color: var(--fb-text-muted);
+    font: inherit;
+    cursor: pointer;
+    transition: color var(--fb-duration-control) ease;
+}
+.fb-footer__link:hover {
+    color: var(--fb-text);
 }
 .fb-footer__copyright {
     text-align: right;
@@ -385,8 +609,20 @@ function goHome(event: MouseEvent): void {
     min-width: 0;
     max-width: min(12rem, 25vw);
     overflow: hidden;
+    border-radius: 0.375rem;
+    background: transparent;
+    color: var(--fb-text-muted);
+    font-size: 0.6875rem;
+    text-decoration: none;
     text-overflow: ellipsis;
     white-space: nowrap;
+    transition:
+        color var(--fb-duration-control) ease,
+        background-color var(--fb-duration-control) ease;
+}
+a.fb-footer__version:hover {
+    background: var(--fb-surface-hover);
+    color: var(--fb-accent-text);
 }
 @media (min-width: 1200px) and (max-width: 1350px) {
     .fb-footer {
@@ -402,48 +638,41 @@ function goHome(event: MouseEvent): void {
         display: none;
     }
 }
-@media (min-width: 901px) and (max-width: 1100px) {
+
+/* Account links collapse into the menu first; one action stays beside the primary links. */
+@media (max-width: 1100px) {
     .fb-header {
-        gap: 0.75rem;
-        padding-inline: 1.5rem;
+        gap: 1.6rem;
     }
     .fb-header__nav {
-        gap: 0;
+        gap: 1.5rem;
     }
-    .fb-nav-link {
-        padding-inline: 0.4rem;
-    }
-}
-
-@media (max-width: 900px) {
-    .fb-header {
-        flex-wrap: nowrap;
-    }
-
-    .fb-header .fb-desktop-nav {
+    .fb-header__account > :not(.fb-header__slot) {
         display: none;
     }
-    .fb-header {
-        gap: 0.5rem;
-    }
-    .fb-header .fb-header__actions {
-        margin-left: auto;
-    }
-    .fb-header__actions .fb-sign-in-link {
-        display: none;
-    }
-    .fb-header__actions .fb-account-link {
-        max-width: 7rem;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        display: block;
-    }
-
     .fb-header .fb-mobile-nav {
         display: inline-flex;
         flex: none;
+        margin-left: -0.75rem;
     }
+}
+@media (max-width: 850px) {
+    .fb-header {
+        min-height: 4.875rem;
+        gap: 1.25rem;
+    }
+    .fb-header__nav {
+        gap: 1.2rem;
+    }
+    .fb-header .fb-nav-link {
+        font-size: 0.6875rem;
+    }
+    .fb-header__button {
+        padding-inline: 0.75rem;
+        font-size: 0.6875rem;
+    }
+}
+@media (max-width: 900px) {
     .fb-footer {
         grid-template-columns: minmax(18rem, 1fr) minmax(0, 1fr);
     }
@@ -451,38 +680,84 @@ function goHome(event: MouseEvent): void {
         flex-wrap: wrap;
     }
 }
-@media (max-width: 560px) {
-    .fb-header .fb-mobile-nav {
-        margin-inline-start: auto;
+@media (max-width: 650px) {
+    .fb-header {
+        min-height: 4.75rem;
+        gap: 1rem;
     }
-    .fb-header .fb-header__actions {
+    .fb-header .fb-nav-link--github,
+    .fb-header__actions {
         display: none;
     }
+    .fb-header .fb-mobile-nav {
+        margin-left: -0.25rem;
+    }
+}
+@media (max-width: 560px) {
     .fb-footer {
         grid-template-columns: minmax(0, 1fr);
     }
+    .fb-footer__right {
+        justify-content: start;
+    }
 }
-
-.fb-mobile-nav__content {
-    min-width: 10rem;
-}
-@media (max-width: 380px) {
+@media (max-width: 400px) {
+    .fb-header .fb-primary-nav {
+        display: none;
+    }
+    .fb-header .fb-mobile-nav {
+        margin-left: auto;
+    }
     .fb-header__brand :deep(.fb-brand__lockup) {
         max-width: 7rem;
         height: auto;
     }
 }
 
+.fb-mobile-nav__content {
+    min-width: 11rem;
+}
 .fb-mobile-nav__item {
     width: 100%;
     box-sizing: border-box;
+    gap: 0.5rem;
     color: var(--fb-text-muted);
     text-decoration: none;
 }
-
 .fb-mobile-nav__item:hover,
 .fb-mobile-nav__item[data-highlighted] {
     color: var(--fb-text);
+}
+.fb-mobile-nav__item[aria-current='page'] {
+    color: var(--fb-text);
+}
+.fb-mobile-nav__item[aria-current='page']::after {
+    content: '';
+    width: 4px;
+    height: 4px;
+    margin-left: auto;
+    border-radius: 50%;
+    background: var(--fb-accent-text);
+}
+.fb-mobile-nav__item--action {
+    color: var(--fb-accent-text);
+    font-weight: 600;
+}
+.fb-mobile-nav__item--quiet {
+    font-size: 0.75rem;
+}
+.fb-mobile-nav__count {
+    margin-left: auto;
+    padding: 0 0.4rem;
+    border-radius: 999px;
+    background: var(--fb-accent-surface);
+    color: var(--fb-accent-text);
+    font-size: 0.6875rem;
+}
+.fb-mobile-nav__separator {
+    height: 1px;
+    margin: 0.25rem 0.5rem;
+    background: var(--fb-line-faint);
 }
 @media (min-width: 901px) and (max-height: 1000px) {
     .fb-header {

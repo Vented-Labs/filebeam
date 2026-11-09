@@ -74,7 +74,7 @@ function testPublishedPackageUpgrade(string $root, string $baseline, string $can
         'DB_DATABASE' => $database['database'], 'DB_USERNAME' => $database['username'], 'DB_PASSWORD' => $database['password'],
         'DB_SSLMODE' => 'disable', 'CACHE_STORE' => 'file', 'SESSION_DRIVER' => 'file',
         'QUEUE_CONNECTION' => 'sync', 'FILEBEAM_CRON_QUEUE_ENABLED' => 'false',
-        'FILEBEAM_AUTO_UPDATES_ENABLED' => 'false', 'INERTIA_SSR_ENABLED' => 'false',
+        'FILEBEAM_AUTO_UPDATES_ENABLED' => 'false', 'INERTIA_SSR_ENABLED' => 'false', 'FILEBEAM_CHANGELOG_SYNC' => 'false',
         'APP_CONFIG_CACHE' => $installation.'/backend/bootstrap/cache/config.php',
         'PHP_INI_SCAN_DIR' => (getenv('PHP_INI_SCAN_DIR') ?: '').PATH_SEPARATOR.$work.'/ini',
         'FILEBEAM_UPDATER_FIXTURE_URL' => $releaseUrl.'/',
@@ -181,15 +181,22 @@ function testPublishedPackageUpgrade(string $root, string $baseline, string $can
             throw new RuntimeException('Laravel cron did not complete the queued package upgrade.');
         }
         $assertPreserved();
-        $publish('99.0.2', true);
-        $run([$installation.'/update.php', 'v99.0.2'], [], true);
+        // The baseline's updater ran the first upgrade; this one runs the candidate's updater.
+        $publish('99.0.2');
+        $upgrade = $run([$installation.'/update.php', 'v99.0.2']);
+        if (($status()['state'] ?? null) !== 'complete' || ! str_contains($upgrade->getOutput(), 'Release note synchronization is skipped: disabled.')) {
+            throw new RuntimeException('The candidate updater did not refresh release notes after a completed upgrade.');
+        }
+        $assertPreserved();
+        $publish('99.0.3', true);
+        $run([$installation.'/update.php', 'v99.0.3'], [], true);
         $journal = json_decode(file_get_contents($installation.'/.filebeam/journal.json'), true, flags: JSON_THROW_ON_ERROR);
         if ($journal['phase'] !== 'migrating' || ! is_file($installation.'/backend/storage/framework/down') || ! is_file($journal['database_backup'])
             || $run([$installation.'/update.php', '--recover'], [], true)->isSuccessful()) {
             throw new RuntimeException('Migration failure did not retain maintenance mode and a database backup.');
         }
         $assertPreserved();
-        echo "Published-package upgrade, real cron, safe backup-failure recovery, and migration fail-closed checks passed.\n";
+        echo "Published-package upgrade, real cron, release-note refresh, safe backup-failure recovery, and migration fail-closed checks passed.\n";
     } finally {
         $web->stop(2);
         $releaseServer->stop(2);

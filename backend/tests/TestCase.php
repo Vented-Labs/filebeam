@@ -41,6 +41,8 @@ abstract class TestCase extends BaseTestCase
         $app = parent::createApplication();
         // PHP tests must not depend on a developer's running SSR process.
         $app['config']->set('inertia.ssr.enabled', false);
+        // Scheduled syncs run as child processes outside HTTP fakes and test transactions.
+        $app['config']->set('changelog.sync', false);
         $themeDirectory = $app->storagePath('framework/testing/themes-'.bin2hex(random_bytes(8)));
         $this->themeDirectories[] = $themeDirectory;
         $app['config']->set('theme.storage_directory', $themeDirectory);

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Middleware;
 
 use App\Enums\Feature;
+use App\Models\ChangelogRelease;
 use App\Models\User;
 use App\Notifications\InboxTransferCompleted;
 use App\Support\Branding;
@@ -95,6 +96,10 @@ class HandleInertiaRequests extends Middleware
                 'anonymous_uploads_enabled' => $enabled('anonymous_uploads'),
                 'username_routing_enabled' => $enabled('username_routing'),
                 'transport_policy' => fn (): array => app(TransportPolicy::class)->configuration($request->user() instanceof User ? $request->user() : null),
+                'changelog' => fn (): array => [
+                    'enabled' => (bool) config('changelog.enabled'),
+                    'version_url' => ChangelogRelease::versionUrl((string) config('version.version')),
+                ],
             ],
         ];
     }

@@ -26,7 +26,10 @@ const props = defineProps<{ config?: CliConfig }>();
 const open = defineModel<boolean>('open', { default: false });
 const emit = defineEmits<{ closeAutoFocus: [event: Event] }>();
 const selectedPlatform = ref<CliPlatform>();
-const dialogTitle = ref<HTMLElement>();
+// DialogTitle's as-child slot replaces template refs, so the title is found from the opened content.
+function focusTitle(event: Event): void {
+    (event.target as HTMLElement | null)?.querySelector<HTMLElement>('.fb-dialog__title')?.focus();
+}
 const installCommand = computed(() => {
     if (!selectedPlatform.value) return;
     try {
@@ -54,14 +57,14 @@ const examples = [
             <DialogOverlay class="fb-dialog__overlay" />
             <DialogContent
                 class="fb-dialog__content cli-install-dialog"
-                @open-auto-focus.prevent="dialogTitle?.focus()"
+                @open-auto-focus.prevent="focusTitle"
                 @close-auto-focus="emit('closeAutoFocus', $event)"
             >
                 <p class="cli-install-dialog__eyebrow">
                     <Icon name="code" :size="16" />Filebeam / terminal
                 </p>
                 <DialogTitle as-child>
-                    <h2 ref="dialogTitle" class="fb-dialog__title" tabindex="-1">Install CLI</h2>
+                    <h2 class="fb-dialog__title" tabindex="-1">Install CLI</h2>
                 </DialogTitle>
                 <DialogDescription class="fb-dialog__description"
                     >Use Filebeam from your terminal.</DialogDescription

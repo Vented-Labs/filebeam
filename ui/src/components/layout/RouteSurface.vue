@@ -69,11 +69,14 @@ export default defineComponent({
                             registrationEnabled: page.props.filebeam.registration_enabled,
                             communityLinks: page.props.filebeam.community_links,
                             homeAction: goHome,
+                            currentPath: backgroundUrl,
+                            changelogEnabled: page.props.filebeam.changelog?.enabled ?? false,
+                            versionUrl: page.props.filebeam.changelog?.version_url ?? null,
                         },
                         () => [
                             h(
                                 PageTransition,
-                                { key: 'background', pageKey: backgroundUrl },
+                                { key: 'background', pageKey: backgroundUrl.split(/[?#]/, 1)[0] },
                                 () => renderedBackground,
                             ),
                             authentication ? h('div', { key: 'authentication' }, [child]) : null,

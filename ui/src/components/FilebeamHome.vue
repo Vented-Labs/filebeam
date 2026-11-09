@@ -15,7 +15,6 @@ import { useEncryptedUpload } from '../composables/useEncryptedUpload';
 import { ciphertextBytes, formatBytes } from '../lib/format';
 import AnimatedHeight from './layout/AnimatedHeight.vue';
 import AnimatedReveal from './layout/AnimatedReveal.vue';
-import TrustFeatures from './layout/TrustFeatures.vue';
 import NoteComposer from './notes/NoteComposer.vue';
 import AttachedNoteToggle from './notes/AttachedNoteToggle.vue';
 import { validateAttachedNote, MAX_ATTACHED_NOTE_BYTES } from '../lib/attached-note';
@@ -759,7 +758,6 @@ onBeforeUnmount(() => {
                 ></TransferOptions>
             </section>
         </template>
-        <TrustFeatures class="prism-trust" />
         <Toast
             v-model:open="transferDeletedToastOpen"
             title="Transfer deleted"
@@ -939,10 +937,6 @@ onBeforeUnmount(() => {
     justify-content: space-between;
     margin: 0 0 0.5rem;
 }
-.prism-trust {
-    margin-top: 1rem;
-    padding: 0 0.375rem;
-}
 .prism-card-enter-active,
 .prism-card-leave-active,
 .prism-mode-card-enter-active,
@@ -1001,17 +995,6 @@ button:disabled {
 @media (min-width: 901px) and (max-height: 1000px) {
     .prism-page {
         padding-block: 0.5rem;
-    }
-    .prism-trust {
-        margin-top: 0.75rem;
-    }
-    .prism-trust :deep(p) {
-        line-height: 1.5;
-    }
-}
-@media (min-width: 901px) and (max-height: 760px) {
-    .prism-trust {
-        margin-top: 0.5rem;
     }
 }
 </style>
