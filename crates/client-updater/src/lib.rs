@@ -1546,11 +1546,11 @@ mod tests {
 
     #[test]
     fn isolated_profiles_receive_distinct_stable_service_names() {
-        let left = Path::new("/tmp/filebeam-profile-a");
-        let right = Path::new("/tmp/filebeam-profile-b");
-        let left_name = daemon_service_name(left).unwrap();
-        assert_eq!(left_name, daemon_service_name(left).unwrap());
-        assert_ne!(left_name, daemon_service_name(right).unwrap());
+        let left = env::temp_dir().join("filebeam-profile-a");
+        let right = env::temp_dir().join("filebeam-profile-b");
+        let left_name = daemon_service_name(&left).unwrap();
+        assert_eq!(left_name, daemon_service_name(&left).unwrap());
+        assert_ne!(left_name, daemon_service_name(&right).unwrap());
         assert!(left_name.starts_with("filebeam-daemon-"));
     }
 

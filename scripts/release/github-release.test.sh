@@ -15,7 +15,10 @@ sha=$(sha256sum "$app/filebeam-$tag.zip" | cut -d' ' -f1)
 size=$(stat --format=%s "$app/filebeam-$tag.zip")
 printf '{"tag":"%s","commit":"%s","package":{"path":"versions/%s/filebeam-%s.zip","sha256":"%s","size":%s}}\n' "$tag" "$commit" "$tag" "$tag" "$sha" "$size" > "$app/release.json"
 cli_tag="beam-$tag"
-for target in linux-x86_64.tar.gz linux-aarch64.tar.gz macos-x86_64.tar.gz macos-aarch64.tar.gz windows-x86_64.zip; do printf '%s\n' "$target" > "$cli/$cli_tag-$target"; done
+for target in linux-x86_64.tar.gz linux-aarch64.tar.gz macos-x86_64.tar.gz macos-aarch64.tar.gz windows-x86_64.zip \
+    linux-x86_64-filebeamd.tar.gz linux-aarch64-filebeamd.tar.gz macos-x86_64-filebeamd.tar.gz macos-aarch64-filebeamd.tar.gz; do
+    printf '%s\n' "$target" > "$cli/$cli_tag-$target"
+done
 (cd "$cli" && sha256sum "$cli_tag"-*.tar.gz "$cli_tag"-*.zip > checksums.txt)
 printf '%s\n' "${tag#v}" > "$cli/version"
 printf 'public key\n' > "$cli/public-key"
