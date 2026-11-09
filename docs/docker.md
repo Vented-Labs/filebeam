@@ -82,7 +82,7 @@ Set these environment variables to size the runtime:
 
 - `FILEBEAM_PG_SHARED_BUFFERS` (Omnibus, default `128MB`) and `FILEBEAM_PG_MAX_CONNECTIONS` (default `100`).
 - `FILEBEAM_VALKEY_MAXMEMORY` (Omnibus, default `256mb`).
-- `FILEBEAM_WORKERS` (default `2`), `FILEBEAM_THREADS` (default `4`), and `MAX_REQUESTS` (default `500`).
+- `FILEBEAM_WORKERS` (default `2`), `FILEBEAM_THREADS` (default `4`), and `MAX_REQUESTS` (default `500`). `FILEBEAM_THREADS` counts the PHP threads for requests that application workers do not serve; worker threads are started in addition to them.
 - `FILEBEAM_SHUTDOWN_TIMEOUT` bounds application draining and process shutdown (default `90` seconds, range `1`–`300`). Configure it below the orchestrator's stop grace period. For TrueNAS's 60-second Docker shutdown limit, use `50` seconds with a 60-second container grace period.
 - `CHUNK_MAX_SIZE`, up to 25,000,000 encrypted bytes.
 - `FILEBEAM_MAX_REQUEST_BYTES` configures Caddy's request-body limit and defaults to `25000000`.
