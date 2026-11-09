@@ -10,28 +10,28 @@
             "iconsax": "0.1.1",
             "typescript": "^6.0.3",
             "vite": "npm:@voidzero-dev/vite-plus-core@1.0.0",
-            "vite-plus": "1.0.0",
+            "vite-plus": "1.5.1",
             "vue": "^3.5.42",
-            "vue-tsc": "^3.3.11"
+            "vue-tsc": "^3.3.14"
         },
         "backend/package.json": {
             "@filebeam/ui": "file:../ui",
             "@fontsource-variable/inter": "^5.3.0",
             "@fontsource-variable/jetbrains-mono": "^5.3.0",
-            "@inertiajs/vite": "^3.0.0",
-            "@inertiajs/vue3": "^3.0.0",
+            "@inertiajs/vite": "^3.8.0",
+            "@inertiajs/vue3": "^3.8.0",
             "@laravel/multiplex": "^0.4.1",
             "@laravel/vite-plugin-wayfinder": "^0.1.3",
             "@tailwindcss/vite": "^4.1.11",
-            "@types/node": "^26.4.1",
+            "@types/node": "^26.6.6",
             "@vitejs/plugin-vue": "^6.0.0",
-            "concurrently": "^10.0.3",
+            "concurrently": "^10.0.6",
             "laravel-vite-plugin": "^3.1",
             "tailwindcss": "^4.1.1",
             "vite": "npm:@voidzero-dev/vite-plus-core@1.0.0",
-            "vite-plus": "1.0.0",
+            "vite-plus": "1.5.1",
             "vue": "^3.5.13",
-            "vue-tsc": "^3.3.11"
+            "vue-tsc": "^3.3.14"
         },
         "ui/package.json": {
             "@codemirror/commands": "^6.11.0",
@@ -41,10 +41,10 @@
             "@codemirror/lang-json": "^6.0.2",
             "@codemirror/lang-markdown": "^6.5.2",
             "@codemirror/lang-php": "^6.0.2",
-            "@codemirror/language": "^6.12.4",
+            "@codemirror/language": "^6.13.1",
             "@codemirror/state": "^6.7.4",
-            "@codemirror/view": "^6.43.11",
-            "@inertiajs/vue3": "^3.7.0",
+            "@codemirror/view": "^6.43.15",
+            "@inertiajs/vue3": "^3.8.0",
             "@lezer/highlight": "^1.2.3",
             "codemirror": "^6.0.2",
             "reka-ui": "^2.6.0",
@@ -74,12 +74,12 @@
         }
     },
     "npmResolved": {
-        "count": 367,
-        "sha256": "7dae400fc68535d6c333eeb9f314c655a09156a04a9c16315a27b6c1f3c5d966"
+        "count": 381,
+        "sha256": "3623c6deac5cff2c51bd8b2dda7fe4c7f54355068fce01eb7c6aff1547774714"
     },
     "composerResolved": {
         "count": 181,
-        "sha256": "17fd2ace4bc98a4095682c3d608a893e95e72dc5648efad636fac17a60f1a8d6",
+        "sha256": "74bc18f7094d113e2627ebe7f510686de57ab070c9344fe9f8621a5fb94226c0",
         "exceptions": {
             "blade-ui-kit/blade-heroicons": "2.7.0"
         }
