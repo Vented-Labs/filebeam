@@ -2466,16 +2466,16 @@
         },
         {
             "name": "laminas/laminas-diactoros",
-            "version": "3.8.0",
+            "version": "3.9.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/laminas/laminas-diactoros.git",
-                "reference": "60c182916b2749480895601649563970f3f12ec4"
+                "reference": "4ab9fe10869ac0cd46fa78e641b6d0f4389bc6b4"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/laminas/laminas-diactoros/zipball/60c182916b2749480895601649563970f3f12ec4",
-                "reference": "60c182916b2749480895601649563970f3f12ec4",
+                "url": "https://api.github.com/repos/laminas/laminas-diactoros/zipball/4ab9fe10869ac0cd46fa78e641b6d0f4389bc6b4",
+                "reference": "4ab9fe10869ac0cd46fa78e641b6d0f4389bc6b4",
                 "shasum": ""
             },
             "require": {
@@ -2491,6 +2491,7 @@
                 "psr/http-message-implementation": "^1.1 || ^2.0"
             },
             "require-dev": {
+                "boundwize/structarmed": "^0.17.7",
                 "ext-curl": "*",
                 "ext-dom": "*",
                 "ext-gd": "*",
@@ -2546,11 +2547,11 @@
             },
             "funding": [
                 {
-                    "url": "https://funding.communitybridge.org/projects/laminas-project",
-                    "type": "community_bridge"
+                    "url": "https://crowdfunding.linuxfoundation.org/initiatives/laminas-project",
+                    "type": "custom"
                 }
             ],
-            "time": "2025-10-12T15:31:36+00:00"
+            "time": "2026-10-08T08:19:47+00:00"
         },
         {
             "name": "laravel/framework",
@@ -2785,16 +2786,16 @@
         },
         {
             "name": "laravel/octane",
-            "version": "v2.20.0",
+            "version": "v2.21.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/laravel/octane.git",
-                "reference": "df4c38dcddc5f51e36e7f1d788841130c4fb8f45"
+                "reference": "ce755128c9c2be39adcf8b50ec757c97b3b30eb7"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/laravel/octane/zipball/df4c38dcddc5f51e36e7f1d788841130c4fb8f45",
-                "reference": "df4c38dcddc5f51e36e7f1d788841130c4fb8f45",
+                "url": "https://api.github.com/repos/laravel/octane/zipball/ce755128c9c2be39adcf8b50ec757c97b3b30eb7",
+                "reference": "ce755128c9c2be39adcf8b50ec757c97b3b30eb7",
                 "shasum": ""
             },
             "require": {
@@ -2870,7 +2871,7 @@
                 "issues": "https://github.com/laravel/octane/issues",
                 "source": "https://github.com/laravel/octane"
             },
-            "time": "2026-08-23T17:25:20+00:00"
+            "time": "2026-10-05T14:39:46+00:00"
         },
         {
             "name": "laravel/prompts",
@@ -8153,16 +8154,16 @@
         },
         {
             "name": "symfony/psr-http-message-bridge",
-            "version": "v8.1.0",
+            "version": "v8.1.9",
             "source": {
                 "type": "git",
                 "url": "https://github.com/symfony/psr-http-message-bridge.git",
-                "reference": "67fd34de15ded1763aa1e330fe345f080a94022c"
+                "reference": "cfa8f3ac693fec234a91d8745b45ed9a81a0b799"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/symfony/psr-http-message-bridge/zipball/67fd34de15ded1763aa1e330fe345f080a94022c",
-                "reference": "67fd34de15ded1763aa1e330fe345f080a94022c",
+                "url": "https://api.github.com/repos/symfony/psr-http-message-bridge/zipball/cfa8f3ac693fec234a91d8745b45ed9a81a0b799",
+                "reference": "cfa8f3ac693fec234a91d8745b45ed9a81a0b799",
                 "shasum": ""
             },
             "require": {
@@ -8216,7 +8217,7 @@
                 "psr-7"
             ],
             "support": {
-                "source": "https://github.com/symfony/psr-http-message-bridge/tree/v8.1.0"
+                "source": "https://github.com/symfony/psr-http-message-bridge/tree/v8.1.9"
             },
             "funding": [
                 {
@@ -8236,7 +8237,7 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-05-29T05:06:50+00:00"
+            "time": "2026-10-07T08:21:34+00:00"
         },
         {
             "name": "symfony/routing",
