@@ -38,6 +38,8 @@ body {
 }
 .fb-shell__content {
     flex: 1;
+    /* Page-wide ambient washes must never create horizontal scrolling. */
+    overflow-x: clip;
 }
 .fb-header,
 .fb-footer {
@@ -574,28 +576,6 @@ textarea.fb-input {
     color: var(--fb-text);
     background: var(--fb-wash-hover);
 }
-.fb-trust-features {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: clamp(1.2rem, 2vw, 1.625rem);
-}
-.fb-trust-feature {
-    display: flex;
-    gap: 0.625rem;
-    color: var(--fb-accent-text);
-}
-.fb-trust-feature h2 {
-    margin: 0;
-    color: var(--fb-text);
-    font-size: 0.6875rem;
-    font-weight: 500;
-}
-.fb-trust-feature p {
-    margin: 0.25rem 0 0;
-    color: var(--fb-text-subtle);
-    font-size: 0.625rem;
-    line-height: 1.7;
-}
 .fb-footer {
     min-height: 5.5rem;
     display: flex;
@@ -675,31 +655,7 @@ textarea.fb-input {
     outline-offset: 3px;
     box-shadow: none;
 }
-@media (max-width: 720px) {
-    .fb-header {
-        min-height: auto;
-        flex-wrap: wrap;
-        gap: 0.45rem 0.8rem;
-        padding-block: 0.75rem;
-    }
-    .fb-header__nav {
-        order: 3;
-        width: 100%;
-        margin-left: 0;
-        overflow-x: auto;
-    }
-    .fb-header__actions {
-        margin-left: auto;
-    }
-    .fb-trust-features {
-        grid-template-columns: repeat(2, 1fr);
-    }
-}
 @media (max-width: 390px) {
-    .fb-header {
-        gap: 0.4rem;
-        padding-inline: 0.7rem;
-    }
     .fb-brand__wordmark {
         font-size: 1.3rem;
     }
@@ -707,27 +663,11 @@ textarea.fb-input {
         width: 1.9rem;
         height: 1.9rem;
     }
-    .fb-header__actions {
-        gap: 0.15rem;
-    }
     .fb-button {
         padding-inline: 0.5rem;
     }
-    .fb-nav-link {
-        padding-inline: 0.46rem;
-        font-size: 0.84rem;
-    }
-    .fb-nav-link--github span,
-    .fb-nav-link--github .fb-icon:last-child {
-        display: none;
-    }
     .fb-footer {
         padding-block: 1rem;
-    }
-}
-@media (max-width: 480px) {
-    .fb-trust-features {
-        grid-template-columns: 1fr;
     }
 }
 @media (prefers-reduced-motion: reduce) {

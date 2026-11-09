@@ -93,6 +93,33 @@ absolute HTTPS URL for a publicly accessible 1200x630 PNG. Rebuild Laravel's
 configuration cache after changing it. Filebeam does not fetch the override;
 social crawlers request it directly.
 
+### Release notes
+
+`/changelog` shows release notes from a local mirror of the configured public
+GitHub repository's published releases. Visitors never trigger GitHub requests.
+The scheduler refreshes the newest releases every 15 minutes and reconciles the
+full archive daily. Import the archive once after deploying or changing the
+repository:
+
+```sh
+php artisan filebeam:sync-changelog --full
+```
+
+Failed checks keep the saved notes, back off exponentially, and honor GitHub
+rate-limit headers; `--force` retries immediately. After 24 hours without a
+successful check the page shows when notes were last refreshed. Releases that
+disappear upstream are hidden only after two complete scans miss them.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `FILEBEAM_CHANGELOG_ENABLED` | `true` | Set `false` to remove the page, its routes, and navigation. |
+| `FILEBEAM_CHANGELOG_SYNC` | `true` | Set `false` to stop outbound checks and keep the saved mirror. |
+| `FILEBEAM_CHANGELOG_REPOSITORY` | `Vented-Labs/filebeam` | Public `owner/repository` to mirror. |
+| `FILEBEAM_CHANGELOG_TOKEN` | unset | Optional read-only token for busy shared egress addresses. Never sent to browsers. |
+| `FILEBEAM_CHANGELOG_IMAGE_ORIGINS` | GitHub attachment origins | Comma-separated HTTPS origins whose raster images render inline; other images become links. |
+
+Rebuild Laravel's configuration cache after changing these values.
+
 See [WebRTC transfers](webrtc.md) before enabling the storage-free WebRTC driver. It covers STUN/TURN credentials, shared-cache signaling requirements, peer/relay warnings, limits, and the HTTP fallback behavior.
 
 The scheduler prunes expired staging data every 15 minutes; this is required to reclaim capacity. For manual deployments containing database migrations, run these before serving the release:

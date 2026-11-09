@@ -4,6 +4,7 @@ import { nextTick, onBeforeUnmount, ref } from 'vue';
 defineProps<{ pageKey: string }>();
 const surface = ref<HTMLElement>();
 const changing = ref(false);
+const tall = ref(false);
 let frame = 0;
 let finishTimer: ReturnType<typeof setTimeout> | undefined;
 let transitionId = 0;
@@ -13,6 +14,7 @@ function finish(id = transitionId): void {
     clearTimeout(finishTimer);
     if (surface.value) surface.value.style.height = 'auto';
     changing.value = false;
+    tall.value = false;
 }
 
 function beforeLeave(element: Element): void {
@@ -32,6 +34,15 @@ function enter(element: Element): void {
     void nextTick(() => {
         if (!surface.value || id !== transitionId) return;
         const targetHeight = element.getBoundingClientRect().height;
+        const startHeight = surface.value.getBoundingClientRect().height;
+        // Animating height across long pages relayouts the whole document every frame and
+        // drags the footer through the viewport; long pages only cross-fade.
+        if (Math.max(targetHeight, startHeight) > window.innerHeight) {
+            tall.value = true;
+            surface.value.style.height = 'auto';
+            finishTimer = setTimeout(() => finish(id), 320);
+            return;
+        }
         cancelAnimationFrame(frame);
         frame = requestAnimationFrame(() => {
             if (surface.value && id === transitionId)
@@ -60,6 +71,7 @@ onBeforeUnmount(() => {
         ref="surface"
         class="fb-page-transition"
         :data-changing="changing || undefined"
+        :data-tall="tall || undefined"
         @transitionend="transitionEnd"
     >
         <Transition
@@ -108,6 +120,20 @@ onBeforeUnmount(() => {
 .fb-page-leave-to {
     opacity: 0;
     transform: translateY(-10px);
+}
+/* Long content pages: a short, composited fade with a slight rise and no height animation. */
+.fb-page-transition[data-tall] {
+    overflow: visible;
+    transition: none;
+}
+.fb-page-transition[data-tall] .fb-page-enter-active {
+    transition:
+        opacity 300ms cubic-bezier(0.25, 1, 0.5, 1),
+        transform 300ms cubic-bezier(0.25, 1, 0.5, 1);
+    will-change: opacity, transform;
+}
+.fb-page-transition[data-tall] .fb-page-enter-from {
+    transform: translateY(6px);
 }
 @media (prefers-reduced-motion: reduce) {
     .fb-page-transition[data-changing],

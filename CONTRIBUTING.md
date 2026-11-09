@@ -133,6 +133,27 @@ Open a focused pull request with tests and documentation appropriate to the beha
 
 Use the Bug report or Feature request templates. Questions belong in [Discussions](https://github.com/Vented-Labs/filebeam/discussions). Report security issues through the [private vulnerability form](https://github.com/Vented-Labs/filebeam/security/advisories/new), not public issues.
 
+## Release Notes
+
+GitHub Releases is the source for the public changelog. The release name is the
+title and the body is rendered as Markdown; raw HTML is removed. Start with a
+short introductory paragraph, then use `##` sections such as Added, Changed, and
+Fixed. Pull request and issue links render as compact references, and a leading
+`**Planned:**` in a list item becomes a Planned label.
+
+To place a built-in illustration, add a standalone comment surrounded by blank
+lines at the top level of the body:
+
+```md
+<!-- filebeam:graphic friends-devices -->
+```
+
+Available graphics are `friends-devices` and `theme-presets`, implemented in
+`ui/src/components/changelog/graphics/`. Each new graphic needs a reviewed
+component and an entry in both renderer allowlists. Older instances ignore
+unknown graphics, so the surrounding text must describe the change on its own.
+Screenshots can use ordinary Markdown images uploaded to the release.
+
 ## Release Packages
 
 Release publishing requires `R2_ENDPOINT_URL` to be the HTTPS Cloudflare R2 account

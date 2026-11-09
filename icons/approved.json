@@ -110,7 +110,8 @@
             "source": "global",
             "variant": "null",
             "note": "iconsax@0.1.1 serializes this Twotone artwork under a null key; the checker requires the Twotone opacity group."
-        }
+        },
+        "tag": "tag"
     },
     "customIcons": {
         "http-server": {
@@ -132,6 +133,16 @@
             "path": "icons/custom/fast-and-simple.svg",
             "sha256": "d4c658b63d8eff92123777b31c3c8144e693b7a0927e0a74cf0fa79dd1e45863",
             "description": "Original Filebeam artwork: fast and simple sharing; not Iconsax artwork."
+        },
+        "laptop": {
+            "path": "icons/custom/laptop.svg",
+            "sha256": "93c19f19909b63c96ec3bd66796a2c22f9eb28ff4d0c1518aa705ea62d32abc9",
+            "description": "Original Filebeam artwork: laptop destination; not Iconsax artwork."
+        },
+        "terminal": {
+            "path": "icons/custom/terminal.svg",
+            "sha256": "be140f4fae22703a58004ed0b939d82dcb27a20023963e992ecfd5e34c749acd",
+            "description": "Original Filebeam artwork: terminal window; not Iconsax artwork."
         }
     },
     "brandIcons": {

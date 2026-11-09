@@ -81,6 +81,12 @@ Schedule::command('queue:work', [
         && ! app(InstallationState::class)->requiresSetup())
     ->withoutOverlapping(10);
 
+$changelogSync = fn (): bool => (bool) config('changelog.enabled')
+    && (bool) config('changelog.sync')
+    && ! app(InstallationState::class)->requiresSetup();
+Schedule::command('filebeam:sync-changelog')->everyFifteenMinutes()->when($changelogSync)->withoutOverlapping(15);
+Schedule::command('filebeam:sync-changelog', ['--full'])->dailyAt('04:20')->when($changelogSync)->withoutOverlapping(30);
+
 Schedule::call(fn (): array => app(ReleaseChecker::class)->checkAndInstallAutomaticUpdate())
     ->name('filebeam:check-updates')
     ->daily()

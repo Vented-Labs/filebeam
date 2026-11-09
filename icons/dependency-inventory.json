@@ -67,6 +67,7 @@
             "laravel/sail": "^1.53",
             "laravel/tinker": "^3.0",
             "laravel/wayfinder": "^0.1.14",
+            "league/commonmark": "^2.10",
             "league/flysystem-aws-s3-v3": "^3.35",
             "mockery/mockery": "^1.6",
             "nunomaduro/collision": "^8.9.3",
