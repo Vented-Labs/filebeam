@@ -722,7 +722,9 @@ impl StagingDirectory {
         Self { directory, targets }
     }
 
-    fn open(&self, name: &str, flags: libc::c_int, mode: libc::mode_t) -> Result<File> {
+    // `openat` reads its mode as a promoted variadic `c_uint`; `mode_t` is
+    // narrower on macOS.
+    fn open(&self, name: &str, flags: libc::c_int, mode: libc::c_uint) -> Result<File> {
         let name = CString::new(name)?;
         let fd = unsafe {
             libc::openat(
@@ -1285,8 +1287,11 @@ fn object_identity(directory: &File, name: &str) -> Result<Option<CommitObjectId
         )
     } == 0
     {
+        // `dev_t` is signed on macOS.
+        #[allow(clippy::useless_conversion)]
+        let device = u64::try_from(stat.st_dev).context("file has an invalid device number")?;
         return Ok(Some(CommitObjectIdentity {
-            device: stat.st_dev,
+            device,
             inode: stat.st_ino,
         }));
     }
