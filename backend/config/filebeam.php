@@ -69,6 +69,29 @@ if (! is_array($appleAppIds) || ! array_is_list($appleAppIds) || array_filter($a
     throw new InvalidArgumentException('FILEBEAM_IOS_APP_IDS must contain unique TEAM.bundle identifiers with a 10-character uppercase alphanumeric Team ID and case-sensitive dotted bundle ID.');
 }
 
+$androidAppsValue = env('FILEBEAM_ANDROID_APPS', '');
+
+if (! is_string($androidAppsValue)) {
+    throw new InvalidArgumentException('FILEBEAM_ANDROID_APPS must be a JSON object of package names to certificate fingerprints.');
+}
+
+$androidApps = [];
+if (trim($androidAppsValue) !== '') {
+    $decodedAndroidApps = json_decode(trim($androidAppsValue), true, 512, JSON_THROW_ON_ERROR);
+    if (! is_array($decodedAndroidApps) || array_is_list($decodedAndroidApps)) {
+        throw new InvalidArgumentException('FILEBEAM_ANDROID_APPS must be a JSON object of package names to certificate fingerprints.');
+    }
+    foreach ($decodedAndroidApps as $package => $fingerprints) {
+        $fingerprints = is_string($fingerprints) ? [$fingerprints] : $fingerprints;
+        $validFingerprints = is_array($fingerprints) && array_is_list($fingerprints) && $fingerprints !== []
+            && array_filter($fingerprints, static fn (mixed $value): bool => is_string($value) && preg_match('/^[0-9A-F]{2}(?::[0-9A-F]{2}){31}$/', $value) === 1) === $fingerprints;
+        if (! is_string($package) || preg_match('/^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$/', $package) !== 1 || ! $validFingerprints) {
+            throw new InvalidArgumentException('FILEBEAM_ANDROID_APPS must map dotted package names to colon-separated uppercase SHA-256 certificate fingerprints.');
+        }
+        $androidApps[] = ['package' => $package, 'fingerprints' => $fingerprints];
+    }
+}
+
 $transportDriversValue = env('FILEBEAM_ENABLED_TRANSFER_DRIVERS');
 
 if ($transportDriversValue !== null && ! is_string($transportDriversValue)) {
@@ -200,6 +223,9 @@ return [
     'username_domain' => $usernameDomain,
     'apple' => [
         'app_ids' => $appleAppIds,
+    ],
+    'android' => [
+        'apps' => $androidApps,
     ],
     'branding' => $branding,
 

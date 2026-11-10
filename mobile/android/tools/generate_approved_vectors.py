@@ -10,7 +10,66 @@ from xml.etree import ElementTree as ET
 ROOT = Path(__file__).resolve().parents[3]
 SOURCE = ROOT / "backend/resources/icons/iconsax"
 OUTPUT = ROOT / "mobile/android/app/src/main/res/drawable"
-ICONS = {"add": "plus", "archive": "archive", "file": "file", "folder": "folder", "download": "download", "shield": "shield", "settings": "settings", "storage": "storage", "transfers": "transfers", "upload": "upload"}
+ICONS = [
+    "alert",
+    "archive",
+    "arrow-left",
+    "arrow-right",
+    "arrow-up",
+    "arrow-up-right",
+    "bell",
+    "bolt",
+    "book",
+    "brush",
+    "check",
+    "chevron-down",
+    "chevron-up",
+    "clock",
+    "code",
+    "color",
+    "copy",
+    "download",
+    "eye",
+    "eye-off",
+    "file",
+    "folder",
+    "globe",
+    "heart",
+    "help",
+    "image",
+    "info",
+    "key",
+    "laptop",
+    "link",
+    "lock",
+    "login",
+    "logout",
+    "mobile",
+    "monitor",
+    "moon",
+    "music",
+    "note",
+    "notification",
+    "plus",
+    "rotate-left",
+    "rotate-right",
+    "search",
+    "settings",
+    "shield",
+    "slash",
+    "storage",
+    "sun",
+    "terminal",
+    "transfers",
+    "trash",
+    "unlock",
+    "updates",
+    "upload",
+    "user",
+    "users",
+    "video",
+    "x",
+]
 ANDROID = "http://schemas.android.com/apk/res/android"
 
 def emit_path(node: ET.Element, inherited_alpha: float, paths: list[str]) -> None:
@@ -27,7 +86,8 @@ def emit_path(node: ET.Element, inherited_alpha: float, paths: list[str]) -> Non
         if not child.tag.endswith("defs"):
             emit_path(child, alpha, paths)
 
-for output_name, source_name in ICONS.items():
+for source_name in ICONS:
+    output_name = source_name.replace("-", "_")
     root = ET.parse(SOURCE / f"{source_name}.svg").getroot()
     paths: list[str] = []
     emit_path(root, 1, paths)

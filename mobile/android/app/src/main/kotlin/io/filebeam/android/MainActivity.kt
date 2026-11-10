@@ -11,73 +11,61 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.lifecycle.lifecycleScope
 import androidx.core.content.ContextCompat
 import androidx.core.content.IntentCompat
-import androidx.core.net.toUri
-import io.filebeam.android.ui.FilebeamScreen
-import io.filebeam.android.ui.FilebeamViewModel
-import kotlinx.coroutines.launch
-import java.io.InputStream
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import io.filebeam.android.platform.background.TransferScheduler
+import io.filebeam.android.ui.shell.AppModel
+import io.filebeam.android.ui.shell.FilebeamApp
+import io.filebeam.android.ui.shell.HostActions
+import io.filebeam.android.ui.shell.Incoming
+import io.filebeam.android.ui.shell.Route
+import io.filebeam.android.ui.shell.Tab
 
-class MainActivity : ComponentActivity() {
-    private val model: FilebeamViewModel by viewModels()
-    private var pendingStart: (() -> Unit)? = null
-    private val notifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
-        pendingStart?.invoke()
-        pendingStart = null
+class MainActivity : ComponentActivity(), HostActions {
+    private val model: AppModel by viewModels()
+
+    // Each launcher serves one request at a time; its callback is cleared once delivered.
+    private var onFiles: ((List<Uri>) -> Unit)? = null
+    private var onFolder: ((Uri?) -> Unit)? = null
+    private var onCreated: ((Uri?) -> Unit)? = null
+    private var onOpened: ((Uri?) -> Unit)? = null
+    private var afterNotifications: (() -> Unit)? = null
+
+    private val filePicker = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        uris.forEach(::persistRead)
+        onFiles?.invoke(uris)
+        onFiles = null
     }
-    private val files = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        uris.forEach { uri ->
-            try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-            catch (_: SecurityException) { /* Transient providers are materialized while access is held. */ }
-        }
-        if (uris.isNotEmpty()) model.appendFiles(uris)
+    private val folderPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        uri?.let(::persistRead)
+        onFolder?.invoke(uri)
+        onFolder = null
     }
-    private val tree = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        uri?.let {
-            try { contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-            catch (_: SecurityException) { /* Providers may offer only a transient read grant. */ }
-            lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                runCatching { model.coordinator.storage.flattenDocumentTree(it) }
-                    .onSuccess { sources -> kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                        model.appendFiles(sources.map { source -> source.uri }, sources.associate { source -> source.uri.toString() to source.relativePath })
-                    } }
-                    .onFailure { error -> model.coordinator.message(error.message ?: getString(R.string.source_unavailable)) }
-            }
-        }
+    private var createMimeType = "application/octet-stream"
+    private val documentCreator = registerForActivityResult(
+        object : ActivityResultContracts.CreateDocument("application/octet-stream") {
+            override fun createIntent(context: android.content.Context, input: String) = super.createIntent(context, input).setType(createMimeType)
+        },
+    ) { uri ->
+        onCreated?.invoke(uri)
+        onCreated = null
     }
-    private val save = registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
-        val source = model.exportSource
-        if (uri != null && source != null) model.coordinator.export(source, uri)
-        model.exportSource = null
+    private val documentOpener = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        onOpened?.invoke(uri)
+        onOpened = null
     }
-    private val exportAccountKey = registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
-        if (uri != null) lifecycleScope.launch { runCatching { (application as FilebeamApplication).accounts.exportKeyTo(uri) }.onFailure { model.coordinator.message(it.message) } }
-    }
-    private val importAccountKey = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            runCatching { contentResolver.openInputStream(uri)?.use(InputStream::readAccountKey) ?: error("Could not open the selected key file")
-            }.onSuccess { value -> runCatching { (application as FilebeamApplication).accounts.importKey(value) }.onFailure { model.coordinator.message(it.message) } }
-                .onFailure { model.coordinator.message(it.message) }
-        }
+    private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+        afterNotifications?.invoke()
+        afterNotifications = null
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         if (savedInstanceState == null) acceptIntent(intent)
-        setContent {
-            FilebeamScreen(
-                model,
-                ::startWithNotificationPermission,
-                pickFiles = { files.launch(arrayOf("*/*")) },
-                pickTree = { tree.launch(null) },
-                saveFile = { source -> model.exportSource = source; save.launch(java.io.File(source).name) },
-                exportAccountKey = { exportAccountKey.launch("filebeam-account-key.fbsk1") },
-                importAccountKey = { importAccountKey.launch(arrayOf("text/plain", "application/octet-stream")) },
-            )
-        }
+        setContent { FilebeamApp(model, this) }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -86,47 +74,92 @@ class MainActivity : ComponentActivity() {
         acceptIntent(intent)
     }
 
-    private fun startWithNotificationPermission(start: () -> Unit) {
+    override fun pickFiles(onResult: (List<Uri>) -> Unit) {
+        onFiles = onResult
+        filePicker.launch(arrayOf("*/*"))
+    }
+
+    override fun pickFolder(onResult: (Uri?) -> Unit) {
+        onFolder = onResult
+        folderPicker.launch(null)
+    }
+
+    override fun createDocument(suggestedName: String, mimeType: String, onResult: (Uri?) -> Unit) {
+        onCreated = onResult
+        createMimeType = mimeType
+        documentCreator.launch(suggestedName)
+    }
+
+    override fun openDocument(mimeTypes: Array<String>, onResult: (Uri?) -> Unit) {
+        onOpened = onResult
+        documentOpener.launch(mimeTypes)
+    }
+
+    override fun withNotifications(then: () -> Unit) {
         if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            pendingStart = start
-            notifications.launch(Manifest.permission.POST_NOTIFICATIONS)
-        } else start()
+            afterNotifications = then
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            then()
+        }
+    }
+
+    private fun persistRead(uri: Uri) {
+        // Providers may offer only a transient grant; sources are snapshotted while access is held.
+        try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: SecurityException) {}
     }
 
     private fun acceptIntent(intent: Intent) {
         when (intent.action) {
-            Intent.ACTION_VIEW -> intent.dataString?.let { value ->
-                val route = value.toUri().pathSegments.firstOrNull()
-                if (route in setOf("notes", "turbo", "account", "settings", "receive", "transfers", "inbox")) model.navigateLegacy(route)
-                else model.receiveLink(value)
-            }
+            Intent.ACTION_VIEW -> intent.data?.let(::acceptLink)
             Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE -> {
                 val uris = buildList {
                     IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)?.let(::add)
                     IntentCompat.getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)?.let(::addAll)
                     intent.clipData?.let { clip -> repeat(clip.itemCount) { clip.getItemAt(it).uri?.let(::add) } }
                 }.filter { it.scheme == "content" }.distinct()
-                uris.forEach { uri ->
-                    try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-                    catch (_: SecurityException) { /* The coordinator snapshots transient grants while available. */ }
+                uris.forEach(::persistRead)
+                val text = intent.getStringExtra(Intent.EXTRA_TEXT)
+                when {
+                    uris.isNotEmpty() -> {
+                        model.deliver(Incoming.Files(uris))
+                        model.navigate(tab = Tab.Send)
+                    }
+                    !text.isNullOrBlank() -> {
+                        model.deliver(Incoming.Text(text))
+                        model.navigate(tab = Tab.Send)
+                    }
                 }
-                if (uris.isNotEmpty()) model.appendFiles(uris)
-                else intent.getStringExtra(Intent.EXTRA_TEXT)?.let(model::receiveLink)
             }
         }
-        intent.getStringExtra("route")?.let(model::navigateLegacy)
+        // Transfer notifications carry an opaque route; they always land on Transfers.
+        if (intent.hasExtra(TransferScheduler.EXTRA_ROUTE)) model.navigate(tab = Tab.Transfers)
     }
-}
 
-private fun InputStream.readAccountKey(): String {
-    val maximumBytes = 16 * 1024
-    val bytes = ByteArray(maximumBytes + 1)
-    var length = 0
-    while (length < bytes.size) {
-        val read = read(bytes, length, bytes.size - length)
-        if (read < 0) break
-        length += read
+    /** Routes an https link on the app-link host to the screen that understands it. */
+    private fun acceptLink(uri: Uri) {
+        val segments = uri.pathSegments
+        when (segments.firstOrNull()) {
+            "u" -> segments.getOrNull(1)?.let { model.navigate(route = Route.Recipient(it.lowercase())) }
+            "invitations" -> segments.getOrNull(1)?.let {
+                model.deliver(Incoming.Invitation(it))
+                model.navigate(route = Route.Auth("invitation"))
+            }
+            "verify-email" -> {
+                model.deliver(Incoming.VerifyEmail(uri.toString()))
+                model.navigate(route = Route.Auth("verify"))
+            }
+            "reset-password" -> segments.getOrNull(1)?.let {
+                model.deliver(Incoming.ResetPassword(it, uri.getQueryParameter("email")))
+                model.navigate(route = Route.Auth("reset"))
+            }
+            "account" -> model.navigate(route = Route.Account)
+            "features" -> model.navigate(route = Route.Tour)
+            "changelog" -> model.navigate(route = Route.Changelog)
+            else -> {
+                model.deliver(Incoming.TransferLink(uri.toString()))
+                model.navigate(tab = Tab.Receive)
+            }
+        }
     }
-    require(length <= maximumBytes) { "Key file is too large" }
-    return bytes.copyOf(length).toString(Charsets.US_ASCII)
 }

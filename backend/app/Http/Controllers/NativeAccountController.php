@@ -21,6 +21,7 @@ use App\Support\EffectivePlan;
 use App\Support\InstanceSettings;
 use App\Support\NativeSession;
 use App\Support\ReceivingPermissions;
+use App\Support\Theming\Theme;
 use App\Support\TransportPolicy;
 use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Auth\Events\Verified;
@@ -39,7 +40,7 @@ class NativeAccountController extends Controller
 {
     private const string RECIPIENT_UNAVAILABLE_MESSAGE = 'This account or receiving inbox is unavailable on this instance. Check the username and try again.';
 
-    public function policy(Request $request, EffectivePlan $plans, InstanceSettings $settings, TransportPolicy $transport, Branding $branding): JsonResponse
+    public function policy(Request $request, EffectivePlan $plans, InstanceSettings $settings, TransportPolicy $transport, Branding $branding, Theme $theme): JsonResponse
     {
         $user = $this->optionalUser($request);
         $plan = $user === null ? $plans->default() : $user->plan;
@@ -52,11 +53,19 @@ class NativeAccountController extends Controller
             'instance' => [
                 'name' => config('app.name'),
                 'url' => rtrim((string) config('app.url'), '/'),
+                'version' => config('filebeam.version'),
+                'changelogEnabled' => (bool) config('changelog.enabled'),
             ],
-            'branding' => ['githubUrl' => $branding['github_url'], 'communityLinks' => $branding['community_links']],
+            'branding' => [
+                'primaryColor' => $theme->primary(),
+                'copyright' => trim($branding['copyright_year'].' '.$branding['copyright_holder']),
+                'githubUrl' => $branding['github_url'],
+                'communityLinks' => $branding['community_links'],
+            ],
             'account' => [
                 'registrationEnabled' => $settings->boolean('registration'),
                 'usernameRoutingEnabled' => $settings->boolean('username_routing'),
+                'deviceRendezvousEnabled' => $settings->boolean('device_rendezvous'),
                 'contactsVersion' => 1,
                 'inboxStagingVersion' => 1,
             ],

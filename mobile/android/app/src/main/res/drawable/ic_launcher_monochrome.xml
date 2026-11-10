@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Filebeam mark geometry from backend/public/brand/filebeam-mark.svg. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" xmlns:aapt="http://schemas.android.com/aapt" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <group android:translateX="36.8" android:translateY="29.6" android:scaleX="0.2" android:scaleY="0.2">
+        <path android:fillColor="#000000" android:pathData="M14 65L140 3C153 -3 168 5 168 20L168 42C168 57 165 63 153 69L81 105L145 134L79 166C90 171 93 178 93 191L93 225C93 239 84 248 70 242L16 216C5 211 0 203 0 191L0 87C0 77 5 69 14 65Z"/>
+    </group>
+</vector>

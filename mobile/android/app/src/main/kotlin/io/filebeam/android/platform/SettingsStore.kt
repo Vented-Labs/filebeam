@@ -20,7 +20,8 @@ internal fun migrateAppearance(prefs: MutablePreferences) {
 
 data class AppSettings(
     val instance: String = "https://filebeam.io",
-    val relayOnly: Boolean = false,
+    /** On by default so live transfers never reveal a network address unless the user opts in. */
+    val relayOnly: Boolean = true,
     /** Retained only so independently-owned legacy Settings UI compiles; it is never persisted or honored. */
     @Deprecated("Appearance always follows the device") val dynamicColor: Boolean = true,
 )
@@ -44,7 +45,7 @@ class SettingsStore(private val context: Context) {
 
     private fun readSettings(prefs: Preferences) = AppSettings(
         instance = prefs[instance] ?: "https://filebeam.io",
-        relayOnly = prefs[relay] ?: false,
+        relayOnly = prefs[relay] ?: true,
     )
 
 }

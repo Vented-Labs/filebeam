@@ -10,6 +10,7 @@ use App\Models\ChangelogSyncState;
 use App\Services\Changelog\ReleaseNodeTree;
 use App\Services\Changelog\ReleaseSynchronizer;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -22,6 +23,42 @@ class ChangelogController extends Controller
 
     public function index(ChangelogIndexRequest $request): Response
     {
+        return Inertia::render('Changelog/Index', $this->listing($request));
+    }
+
+    /** The release list for native clients, with the same filters and paging as the page. */
+    public function apiIndex(ChangelogIndexRequest $request): JsonResponse
+    {
+        $listing = $this->listing($request);
+
+        return response()->json(['data' => [
+            'releases' => $listing['releases'],
+            'filters' => $listing['filters'],
+            'versions' => $listing['versions'](),
+            'has_prereleases' => $listing['has_prereleases'](),
+            'archive' => $listing['archive'](),
+            'source_url' => $listing['source_url'],
+        ]], 200, ['Cache-Control' => 'public, max-age=300']);
+    }
+
+    /** One release with its neighbours, for native readers. */
+    public function apiShow(string $tag): JsonResponse
+    {
+        $release = ChangelogRelease::query()->public()->where('tag', $tag)->select(self::Summary)->first();
+        abort_if($release === null || $release->tag !== $tag, 404);
+        $state = ChangelogSyncState::query()->find(ChangelogRelease::currentSource());
+
+        return response()->json(['data' => [
+            'release' => $this->release($release, $state),
+            'newer' => $this->adjacent($release, 'newer'),
+            'older' => $this->adjacent($release, 'older'),
+            'archive' => $this->archive($state),
+        ]], 200, ['Cache-Control' => 'public, max-age=300']);
+    }
+
+    /** @return array<string, mixed> */
+    private function listing(ChangelogIndexRequest $request): array
+    {
         $term = $request->term();
         $prereleases = $request->includesPrereleases();
         $state = ChangelogSyncState::query()->find(ChangelogRelease::currentSource());
@@ -33,7 +70,7 @@ class ChangelogController extends Controller
             ->withQueryString();
         $featured = $term === '' && $page->currentPage() === 1;
 
-        return Inertia::render('Changelog/Index', [
+        return [
             'releases' => [
                 'data' => $page->getCollection()->values()->map(fn (ChangelogRelease $release, int $index): array => [
                     ...$this->release($release, $state),
@@ -50,7 +87,7 @@ class ChangelogController extends Controller
             'has_prereleases' => fn (): bool => ChangelogRelease::query()->public()->where('prerelease', true)->exists(),
             'archive' => fn (): array => $this->archive($state),
             'source_url' => 'https://github.com/'.config('changelog.repository').'/releases',
-        ]);
+        ];
     }
 
     public function show(string $tag): Response
