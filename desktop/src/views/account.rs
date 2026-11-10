@@ -20,7 +20,7 @@ use gpui_component::{
 use crate::{
     client::DesktopClient,
     model::{ClientCommand, DesktopSnapshot, NotificationChannel},
-    theme::{Palette, palette_for},
+    theme::Palette,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -251,7 +251,7 @@ impl Render for AccountPanel {
             }
             self.clear_secret_drafts = false;
         }
-        let p = palette_for(Theme::global(cx).mode);
+        let p = crate::theme::palette(cx);
         let page = if self.snapshot.account.authenticated && self.task == Task::Profile {
             self.profile(p, window, cx)
         } else if self.snapshot.account.authenticated && self.task == Task::Keys {
@@ -264,7 +264,7 @@ impl Render for AccountPanel {
         let authenticated = self.snapshot.account.authenticated;
         let content = div()
             .w_full()
-            .bg(p.page)
+            .bg(p.background)
             .text_color(p.text)
             .child(if authenticated {
                 div().flex_none().child(page)
@@ -496,7 +496,12 @@ impl AccountPanel {
                                 .flex()
                                 .flex_col()
                                 .gap(px(8.))
-                                .child(div().text_size(px(12.)).text_color(p.muted).child(label))
+                                .child(
+                                    div()
+                                        .text_size(px(12.))
+                                        .text_color(p.text_muted)
+                                        .child(label),
+                                )
                                 .child(choices),
                         );
                     }
@@ -703,9 +708,9 @@ impl AccountPanel {
             .child(div().flex().flex_row().flex_wrap().gap(px(20.)).children([
                 card(p).flex_1().min_w(px(370.)).child(
                     div().flex().items_center().gap(px(14.)).child(
-                        div().size(px(50.)).flex().items_center().justify_center().rounded(px(14.)).bg(p.selected).text_color(p.accent).text_size(px(17.)).child(initials)
-                    ).child(div().flex_1().child(div().text_size(px(20.)).child(username.to_owned())).child(div().text_size(px(12.)).text_color(p.muted).child(format!("@{username}")))).child(
-                        div().px(px(9.)).py(px(5.)).rounded(px(8.)).bg(if account.email_verified { p.selected } else { p.inset }).text_size(px(11.)).text_color(if account.email_verified { p.success } else { p.warning }).child(if account.email_verified { "Verified" } else { "Verification required" })
+                        div().size(px(50.)).flex().items_center().justify_center().rounded(px(14.)).bg(p.selected_surface).text_color(p.accent_text).text_size(px(17.)).child(initials)
+                    ).child(div().flex_1().child(div().text_size(px(20.)).child(username.to_owned())).child(div().text_size(px(12.)).text_color(p.text_muted).child(format!("@{username}")))).child(
+                        div().px(px(9.)).py(px(5.)).rounded(px(8.)).bg(if account.email_verified { p.selected_surface } else { p.sunken }).text_size(px(11.)).text_color(if account.email_verified { p.success.ink } else { p.warning.ink }).child(if account.email_verified { "Verified" } else { "Verification required" })
                     )
                 ).child(meta(p, "Email", account.email.as_deref().unwrap_or("Unknown")))
                 .child(copy_value(p, "Receiving link", &receiving))
@@ -739,7 +744,7 @@ impl AccountPanel {
                     .child(
                         div()
                             .text_size(px(11.))
-                            .text_color(p.muted)
+                            .text_color(p.text_muted)
                             .child("Private key material is never rendered, copied, or logged."),
                     )
                     .child(
@@ -1161,7 +1166,7 @@ impl InboxPanel {
 }
 impl Render for InboxPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let p = palette_for(Theme::global(cx).mode);
+        let p = crate::theme::palette(cx);
         let account = &self.snapshot.account;
         let username = account.username.as_deref().unwrap_or("your account");
         let initials: String = username.chars().take(2).collect::<String>().to_uppercase();
@@ -1182,8 +1187,8 @@ impl Render for InboxPanel {
                         .items_center()
                         .justify_center()
                         .rounded(px(11.))
-                        .bg(p.selected)
-                        .text_color(p.accent)
+                        .bg(p.selected_surface)
+                        .text_color(p.accent_text)
                         .child(initials),
                 )
                 .child(
@@ -1193,7 +1198,7 @@ impl Render for InboxPanel {
                         .child(
                             div()
                                 .text_size(px(11.))
-                                .text_color(p.muted)
+                                .text_color(p.text_muted)
                                 .child("Your receiving address"),
                         ),
                 )
@@ -1201,8 +1206,8 @@ impl Render for InboxPanel {
                     div()
                         .text_size(px(11.))
                         .text_color(match account.key_custody {
-                            crate::model::KeyCustody::Locked { .. } => p.warning,
-                            _ => p.success,
+                            crate::model::KeyCustody::Locked { .. } => p.warning.ink,
+                            _ => p.success.ink,
                         })
                         .child(match account.key_custody {
                             crate::model::KeyCustody::Locked { .. } => "Key locked",
@@ -1251,13 +1256,13 @@ impl Render for InboxPanel {
                         .px(px(16.))
                         .py(px(14.))
                         .border_b_1()
-                        .border_color(p.border_soft)
+                        .border_color(p.line_soft)
                         .child(section_title(p, "folder", "Shared with you"))
                         .child(
                             div()
                                 .mt(px(4.))
                                 .text_size(px(10.))
-                                .text_color(p.subtle)
+                                .text_color(p.text_subtle)
                                 .child(format!("{} delivery record(s)", self.snapshot.inbox.len())),
                         ),
                 );
@@ -1285,9 +1290,9 @@ impl Render for InboxPanel {
                     .flex()
                     .justify_between()
                     .border_t_1()
-                    .border_color(p.border_soft)
+                    .border_color(p.line_soft)
                     .text_size(px(10.))
-                    .text_color(p.subtle)
+                    .text_color(p.text_subtle)
                     .child("Account-addressed content")
                     .child("Separate from transfers"),
             );
@@ -1366,7 +1371,7 @@ impl Render for InboxPanel {
             "inbox-page-scroll",
             &self.page_scroll,
             window,
-            div().bg(p.page).text_color(p.text).child(content),
+            div().bg(p.background).text_color(p.text).child(content),
         )
     }
 }
@@ -1385,10 +1390,14 @@ fn inbox_row(
         .items_center()
         .gap(px(12.))
         .border_b_1()
-        .border_color(p.border_soft)
-        .bg(if selected { p.selected } else { p.surface })
+        .border_color(p.line_soft)
+        .bg(if selected {
+            p.selected_surface
+        } else {
+            p.surface
+        })
         .hover(|style| style.bg(p.hover))
-        .active(|style| style.bg(p.selected))
+        .active(|style| style.bg(p.selected_surface))
         .child(
             div()
                 .size(px(34.))
@@ -1398,7 +1407,7 @@ fn inbox_row(
                 .justify_center()
                 .rounded(px(8.))
                 .bg(p.raised)
-                .text_color(p.accent)
+                .text_color(p.accent_text)
                 .child(Icon::default().path("icons/folder.svg").size(px(17.))),
         )
         .child(
@@ -1414,7 +1423,7 @@ fn inbox_row(
                     div()
                         .mt(px(3.))
                         .text_size(px(10.))
-                        .text_color(p.subtle)
+                        .text_color(p.text_subtle)
                         .child(format!(
                             "{} · {}",
                             byte_size(item.ciphertext_bytes),
@@ -1426,7 +1435,11 @@ fn inbox_row(
             div()
                 .w(px(104.))
                 .text_size(px(10.))
-                .text_color(if selected { p.accent } else { p.subtle })
+                .text_color(if selected {
+                    p.accent_text
+                } else {
+                    p.text_subtle
+                })
                 .child(if selected { "Selected" } else { "Inspect" }),
         )
         .on_click(on_click)
@@ -1511,8 +1524,8 @@ fn section_title(p: Palette, icon: &str, title: &str) -> gpui::Div {
                 .items_center()
                 .justify_center()
                 .rounded(px(6.))
-                .bg(p.selected)
-                .text_color(p.accent)
+                .bg(p.selected_surface)
+                .text_color(p.accent_text)
                 .child(
                     Icon::default()
                         .path(format!("icons/{icon}.svg"))
@@ -1525,11 +1538,11 @@ fn copy_value(p: Palette, label: &str, value: &str) -> gpui::Div {
     div()
         .p(px(10.))
         .rounded(px(8.))
-        .bg(p.inset)
+        .bg(p.sunken)
         .child(
             div()
                 .text_size(px(10.))
-                .text_color(p.subtle)
+                .text_color(p.text_subtle)
                 .child(label.to_owned()),
         )
         .child(div().text_size(px(12.)).child(value.to_owned()))
@@ -1552,8 +1565,8 @@ fn empty_state(p: Palette, icon: &str, title: &str, detail: &str) -> gpui::Div {
                 .px(px(8.))
                 .py(px(5.))
                 .rounded(px(7.))
-                .bg(p.selected)
-                .text_color(p.accent)
+                .bg(p.selected_surface)
+                .text_color(p.accent_text)
                 .child(icon.to_owned()),
         )
         .child(div().text_size(px(18.)).child(title.to_owned()))
@@ -1561,7 +1574,7 @@ fn empty_state(p: Palette, icon: &str, title: &str, detail: &str) -> gpui::Div {
             div()
                 .max_w(px(360.))
                 .text_size(px(12.))
-                .text_color(p.muted)
+                .text_color(p.text_muted)
                 .child(detail.to_owned()),
         )
 }
@@ -1576,7 +1589,12 @@ fn auth_switches(p: Palette, task: Task, cx: &mut Context<AccountPanel>) -> gpui
         .flex()
         .items_center()
         .gap(px(8.))
-        .child(div().text_size(px(11.)).text_color(p.muted).child(primary))
+        .child(
+            div()
+                .text_size(px(11.))
+                .text_color(p.text_muted)
+                .child(primary),
+        )
         .child(
             Button::new("account-switch-task")
                 .label(secondary)
@@ -1592,7 +1610,7 @@ fn section_heading(p: Palette, title: &str, detail: &str) -> gpui::Div {
         .child(
             div()
                 .text_size(px(12.))
-                .text_color(p.muted)
+                .text_color(p.text_muted)
                 .child(detail.to_owned()),
         )
 }
@@ -1604,7 +1622,7 @@ fn field(p: Palette, label: &str, input: &Entity<InputState>) -> gpui::Div {
         .child(
             div()
                 .text_size(px(11.))
-                .text_color(p.muted)
+                .text_color(p.text_muted)
                 .child(label.to_owned()),
         )
         .child(Input::new(input).w_full().bordered(true))
@@ -1613,11 +1631,11 @@ fn meta(p: Palette, label: &str, value: &str) -> gpui::Div {
     div()
         .p(px(10.))
         .rounded(px(8.))
-        .bg(p.inset)
+        .bg(p.sunken)
         .child(
             div()
                 .text_size(px(10.))
-                .text_color(p.subtle)
+                .text_color(p.text_subtle)
                 .child(label.to_owned()),
         )
         .child(div().text_size(px(12.)).child(value.to_owned()))
@@ -1625,7 +1643,7 @@ fn meta(p: Palette, label: &str, value: &str) -> gpui::Div {
 fn status(p: Palette, value: Option<&str>) -> gpui::Div {
     div()
         .text_size(px(11.))
-        .text_color(p.muted)
+        .text_color(p.text_muted)
         .child(value.unwrap_or("").to_owned())
 }
 fn custody_label(value: &crate::model::KeyCustody) -> &'static str {

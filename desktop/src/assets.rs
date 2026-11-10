@@ -1,41 +1,19 @@
-//! Embedded product assets. Iconsax Free artwork remains under `assets/NOTICE`.
+//! Embedded product assets: approved icons, bundled fonts and their notices.
+//! Iconsax Free artwork and the font licences remain under `assets/NOTICE`.
 
-use std::{
-    borrow::Cow,
-    sync::{Arc, LazyLock},
-};
+use std::borrow::Cow;
 
-use gpui::{
-    AssetSource, Img, InteractiveElement, RenderImage, Result, SharedString, Stateful, img,
-};
+use gpui::{AssetSource, Result, SharedString};
 use gpui_component::Icon;
 
 include!("../assets/native_assets.rs");
-
-pub const FOLDED_F_MARK: &[u8] = include_bytes!("../assets/filebeam-mark.svg");
-static FOLDED_F_MARK_RENDER: LazyLock<Arc<RenderImage>> = LazyLock::new(|| {
-    let mut image = image::load_from_memory(include_bytes!("../assets/brand/filebeam-mark.png"))
-        .expect("bundled Filebeam mark must decode")
-        .to_rgba8();
-    // GPUI's image renderer consumes BGRA pixels.
-    let pixels: &mut [u8] = image.as_mut();
-    for [red, _, blue, _] in pixels.as_chunks_mut::<4>().0 {
-        std::mem::swap(red, blue);
-    }
-    Arc::new(RenderImage::new(vec![image::Frame::new(image)]))
-});
 
 /// Checked-in SVG assets exposed to GPUI; no filesystem or network lookup is involved.
 pub struct Assets;
 
 impl AssetSource for Assets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
-        Ok(match path {
-            "brand/filebeam-mark.png" => Some(Cow::Borrowed(include_bytes!(
-                "../assets/brand/filebeam-mark.png"
-            ))),
-            _ => native_asset(path).map(Cow::Borrowed),
-        })
+        Ok(native_asset(path).map(Cow::Borrowed))
     }
 
     fn list(&self, path: &str) -> Result<Vec<SharedString>> {
@@ -47,17 +25,30 @@ impl AssetSource for Assets {
     }
 }
 
+/// The bundled UI and code typefaces. Static instances, because the Linux text
+/// system renders a variable font at its default weight only.
+pub fn fonts() -> Vec<Cow<'static, [u8]>> {
+    macro_rules! font {
+        ($name:literal) => {
+            Cow::Borrowed(include_bytes!(concat!("../assets/fonts/", $name)) as &'static [u8])
+        };
+    }
+    vec![
+        font!("Inter-Regular.ttf"),
+        font!("Inter-Medium.ttf"),
+        font!("Inter-SemiBold.ttf"),
+        font!("Inter-Bold.ttf"),
+        font!("InterDisplay-SemiBold.ttf"),
+        font!("InterDisplay-Bold.ttf"),
+        font!("JetBrainsMono-Regular.ttf"),
+        font!("JetBrainsMono-Medium.ttf"),
+    ]
+}
+
 pub type IconName = &'static str;
 
 pub fn icon(name: &str) -> Icon {
     Icon::default().path(icon_path(name).expect("approved native icon"))
-}
-
-/// GPUI SVG elements are alpha masks; retain a decoded transparent raster to
-/// preserve the approved gradients across native view rebuilds.
-pub fn mark() -> Stateful<Img> {
-    // Img retains asynchronous decode state only when it has a global element ID.
-    img(FOLDED_F_MARK_RENDER.clone()).id("filebeam-mark")
 }
 
 /// Aliases required by GPUI Component controls, mapped to approved Iconsax assets.

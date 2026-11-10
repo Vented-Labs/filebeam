@@ -579,7 +579,7 @@ impl SettingsPanel {
 
 impl Render for SettingsPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let p = theme::palette_for(gpui_component::theme::Theme::global(cx).mode);
+        let p = theme::palette(cx);
         let notifications_available = self.notifications_available.unwrap_or(false);
         let presence_available = self
             .presence
@@ -613,7 +613,7 @@ impl Render for SettingsPanel {
             .child(
                 div()
                     .text_size(px(11.))
-                    .text_color(p.muted)
+                    .text_color(p.text_muted)
                     .child("A default for new transfers. Existing jobs keep their own origin."),
             )
             .child(
@@ -654,7 +654,7 @@ impl Render for SettingsPanel {
                 appearance_preview(p, "Light", selected_appearance == "Light", cx),
                 appearance_preview(p, "Dark", selected_appearance == "Dark", cx),
             ]))
-            .child(div().text_size(px(11.)).text_color(p.muted).child("Follow your operating system by default. System accessibility settings take precedence."))
+            .child(div().text_size(px(11.)).text_color(p.text_muted).child("Follow your operating system by default. System accessibility settings take precedence."))
             .child(Switch::new("reduced-motion").label("Reduce motion").checked(self.reduced_motion).on_click(cx.listener(|this, checked, window, cx| this.set_reduced_motion(*checked, window, cx))));
         let workspace = group(p, "code", "Keyboard & workspace")
             .child(meta(p, "Command palette", "Ctrl-K"))
@@ -698,7 +698,7 @@ impl Render for SettingsPanel {
             );
         let devices = group(p, "monitor", "My devices")
             .child(
-                div().text_size(px(11.)).text_color(p.muted).child(
+                div().text_size(px(11.)).text_color(p.text_muted).child(
                     "A registered device is not trusted for transfers until this daemon records an explicit verified key pin.",
                 ),
             )
@@ -805,7 +805,7 @@ impl Render for SettingsPanel {
             .child(
                 div()
                     .text_size(px(11.))
-                    .text_color(p.muted)
+                    .text_color(p.text_muted)
                     .child("Configuration is shared with the CLI."),
             );
         let network = group(p, "transfers", "Network & transfer behavior")
@@ -839,7 +839,7 @@ impl Render for SettingsPanel {
             div()
                 .w_full()
                 .min_w_0()
-                .bg(p.page)
+                .bg(p.background)
                 .text_color(p.text)
                 .child(
                     div()
@@ -864,8 +864,8 @@ impl Render for SettingsPanel {
                                         .flex_wrap()
                                         .gap(px(6.))
                                         .text_size(px(11.))
-                                        .child(div().text_color(p.subtle).child("Status"))
-                                        .child(div().min_w_0().text_color(p.muted).child(
+                                        .child(div().text_color(p.text_subtle).child("Status"))
+                                        .child(div().min_w_0().text_color(p.text_muted).child(
                                             self.status.as_deref().unwrap_or("Ready.").to_owned(),
                                         )),
                                 ),
@@ -959,7 +959,7 @@ fn group(p: Palette, icon: &str, name: &str) -> gpui::Div {
                     Icon::default()
                         .path(format!("icons/{icon}.svg"))
                         .size(px(18.))
-                        .text_color(p.accent),
+                        .text_color(p.accent_text),
                 )
                 .child(div().min_w_0().text_size(px(15.)).child(name.to_owned())),
         )
@@ -989,20 +989,36 @@ fn appearance_preview(
         .p(px(8.))
         .rounded(px(9.))
         .border_1()
-        .border_color(if selected { p.accent } else { p.border })
-        .bg(if selected { p.selected } else { p.inset })
+        .border_color(if selected { p.accent_text } else { p.border })
+        .bg(if selected {
+            p.selected_surface
+        } else {
+            p.sunken
+        })
         .cursor_pointer()
         .hover(move |style| {
             style
-                .bg(if selected { p.selected } else { p.hover })
-                .border_color(if selected { p.focus } else { p.muted })
+                .bg(if selected {
+                    p.selected_surface
+                } else {
+                    p.hover
+                })
+                .border_color(if selected {
+                    p.choice_border
+                } else {
+                    p.text_muted
+                })
         })
         .child(frame)
         .child(
             div()
                 .mt(px(7.))
                 .text_size(px(11.))
-                .text_color(if selected { p.accent } else { p.muted })
+                .text_color(if selected {
+                    p.accent_text
+                } else {
+                    p.text_muted
+                })
                 .child(
                     if name == "System" {
                         "Follow system"
@@ -1035,7 +1051,7 @@ fn mini_theme_frame(background: u32, sidebar: u32, accent: u32) -> gpui::Div {
 fn label(p: Palette, text: &str) -> gpui::Div {
     div()
         .text_size(px(11.))
-        .text_color(p.muted)
+        .text_color(p.text_muted)
         .child(text.to_owned())
 }
 fn meta(p: Palette, name: &str, value: &str) -> gpui::Div {
@@ -1044,11 +1060,11 @@ fn meta(p: Palette, name: &str, value: &str) -> gpui::Div {
         .min_w_0()
         .p(px(9.))
         .rounded(px(7.))
-        .bg(p.inset)
+        .bg(p.sunken)
         .child(
             div()
                 .text_size(px(10.))
-                .text_color(p.subtle)
+                .text_color(p.text_subtle)
                 .child(name.to_owned()),
         )
         .child(div().min_w_0().text_size(px(12.)).child(value.to_owned()))

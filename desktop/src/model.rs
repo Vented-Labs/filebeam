@@ -215,7 +215,7 @@ pub struct JobSnapshot {
     pub peer_warning: Option<String>,
     pub capabilities: TransferCapabilities,
 }
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TransferDirection {
     Send,
     Receive,
@@ -635,6 +635,8 @@ impl ClientCommand {
             Self::AcceptInvitation { .. } => "accept invitation",
             Self::Report { .. } => "report transfer",
             Self::DeleteAccount { .. } => "delete account",
+            Self::SendFiles(_) => "share",
+            Self::CreateNote(_) => "note",
             _ => "command",
         }
     }

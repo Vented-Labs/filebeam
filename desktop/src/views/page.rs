@@ -14,7 +14,7 @@ pub fn heading(p: Palette, title: &str, detail: &str) -> Div {
         .child(
             div()
                 .text_size(px(12.))
-                .text_color(p.muted)
+                .text_color(p.text_muted)
                 .child(detail.to_owned()),
         )
 }

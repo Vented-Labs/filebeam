@@ -8,8 +8,11 @@ pub const VERSION: u32 = 1;
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct UiState {
     pub version: u32,
-    pub inspector_width: f32,
     pub window: Option<WindowGeometry>,
+    /// The encoded colour source (`preset:<id>` or `custom:<rrggbb>`). Appearance is
+    /// a per-device choice and is deliberately not part of the shared configuration.
+    #[serde(default)]
+    pub accent: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -25,8 +28,8 @@ impl Default for UiState {
     fn default() -> Self {
         Self {
             version: VERSION,
-            inspector_width: 306.0,
             window: None,
+            accent: None,
         }
     }
 }
@@ -36,7 +39,6 @@ impl UiState {
         if self.version != VERSION {
             return Self::default();
         }
-        self.inspector_width = self.inspector_width.clamp(260.0, 420.0);
         self.window = self.window.filter(|window| {
             window.width.is_finite()
                 && window.height.is_finite()
@@ -54,25 +56,36 @@ mod tests {
     use super::*;
 
     #[test]
-    fn geometry_is_clamped_and_unknown_versions_are_discarded() {
-        assert_eq!(
-            UiState {
-                version: VERSION,
-                inspector_width: 999.0,
-                window: None
-            }
-            .normalized()
-            .inspector_width,
-            420.0
-        );
+    fn undersized_geometry_and_unknown_versions_are_discarded() {
+        let small = UiState {
+            version: VERSION,
+            window: Some(WindowGeometry {
+                x: 0.0,
+                y: 0.0,
+                width: 400.0,
+                height: 300.0,
+                maximized: false,
+            }),
+            accent: Some("preset:teal".into()),
+        }
+        .normalized();
+        assert_eq!(small.window, None);
+        assert_eq!(small.accent.as_deref(), Some("preset:teal"));
         assert_eq!(
             UiState {
                 version: 2,
-                inspector_width: 300.0,
-                window: None
+                window: None,
+                accent: Some("preset:teal".into()),
             }
             .normalized(),
             UiState::default()
         );
+    }
+
+    #[test]
+    fn state_written_by_earlier_versions_still_loads() {
+        let state: UiState =
+            serde_json::from_str(r#"{"version":1,"inspector_width":306.0,"window":null}"#).unwrap();
+        assert_eq!(state.normalized(), UiState::default());
     }
 }

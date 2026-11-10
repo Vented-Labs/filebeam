@@ -5,6 +5,10 @@ use anyhow::{Context, Result};
 use filebeam_desktop::{app, client::DesktopClient, visual};
 
 fn main() -> Result<()> {
+    // Renderer selection and presentation failures are reported through `log`.
+    let _ = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn"))
+        .format_timestamp_millis()
+        .try_init();
     let mut arguments = std::env::args().skip(1);
     let id = arguments.next().unwrap_or_else(|| "send-empty".into());
     let mut theme = None;

@@ -18,7 +18,7 @@ use gpui_component::{
 use crate::{
     client::DesktopClient,
     model::{ClientCommand, DesktopSnapshot, JobSnapshot, TransferState, VerifiedResult},
-    theme::{Palette, palette_for},
+    theme::Palette,
 };
 use gpui_component::theme::Theme;
 
@@ -360,7 +360,7 @@ impl TransfersPanel {
 
 impl Render for TransfersPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let p = palette_for(Theme::global(cx).mode);
+        let p = crate::theme::palette(cx);
         let vertical_padding = workspace_vertical_padding(window);
         // Keep the detail pane at compact desktop widths by folding progress into
         // the transfer column rather than allowing fixed columns to overflow.
@@ -446,7 +446,7 @@ impl Render for TransfersPanel {
                                     .flex()
                                     .items_center()
                                     .border_b_1()
-                                    .border_color(p.border_soft)
+                                    .border_color(p.line_soft)
                                     .child(
                                         div()
                                             .flex_1()
@@ -468,7 +468,7 @@ impl Render for TransfersPanel {
                                                     .text_ellipsis()
                                                     .truncate()
                                                     .text_size(px(10.))
-                                                    .text_color(p.subtle)
+                                                    .text_color(p.text_subtle)
                                                     .child("TRANSFER"),
                                             )
                                             .child(
@@ -480,7 +480,7 @@ impl Render for TransfersPanel {
                                                     .text_ellipsis()
                                                     .truncate()
                                                     .text_size(px(10.))
-                                                    .text_color(p.subtle)
+                                                    .text_color(p.text_subtle)
                                                     .child("STATUS"),
                                             )
                                             .when(compact, |this| {
@@ -496,7 +496,7 @@ impl Render for TransfersPanel {
                                                         .text_ellipsis()
                                                         .truncate()
                                                         .text_size(px(10.))
-                                                        .text_color(p.subtle)
+                                                        .text_color(p.text_subtle)
                                                         .child("SIZE / PROGRESS"),
                                                 )
                                             })
@@ -509,7 +509,7 @@ impl Render for TransfersPanel {
                                                     .text_ellipsis()
                                                     .truncate()
                                                     .text_size(px(10.))
-                                                    .text_color(p.subtle)
+                                                    .text_color(p.text_subtle)
                                                     .child("ACTION"),
                                             ),
                                     )
@@ -600,14 +600,14 @@ fn transfer_row(
         .items_center()
         .gap(px(ROW_GAP))
         .border_b_1()
-        .border_color(p.border_soft)
+        .border_color(p.line_soft)
         .bg(if selected == Some(id.as_str()) {
-            p.selected
+            p.selected_surface
         } else {
             p.surface
         })
         .hover(|style| style.bg(p.hover))
-        .active(|style| style.bg(p.selected))
+        .active(|style| style.bg(p.selected_surface))
         .child(
             div()
                 .size(px(34.))
@@ -633,7 +633,7 @@ fn transfer_row(
                     div()
                         .mt(px(3.))
                         .text_size(px(10.))
-                        .text_color(p.subtle)
+                        .text_color(p.text_subtle)
                         .child(format!(
                             "{} · {}",
                             direction_label(&job),
@@ -645,7 +645,7 @@ fn transfer_row(
                         div()
                             .mt(px(3.))
                             .text_size(px(10.))
-                            .text_color(p.muted)
+                            .text_color(p.text_muted)
                             .child(progress_line(&job)),
                     )
                     .when(progress_percent(&job).is_some(), |this| {
@@ -662,7 +662,7 @@ fn transfer_row(
                     .child(
                         div()
                             .text_size(px(11.))
-                            .text_color(p.muted)
+                            .text_color(p.text_muted)
                             .child(progress_line(&job)),
                     )
                     .when(progress_percent(&job).is_some(), |this| {
@@ -758,7 +758,7 @@ fn details(
         .child(div().text_size(px(20.)).child(job.progress.name.clone()))
         .child(
             div()
-                .text_color(p.muted)
+                .text_color(p.text_muted)
                 .child(format!("{} | {}", job.id, job.progress.phase)),
         )
         .child(
@@ -776,7 +776,7 @@ fn details(
             .child(
                 div()
                     .text_size(px(12.))
-                    .text_color(p.muted)
+                    .text_color(p.text_muted)
                     .child("Receipt"),
             )
             .child(div().text_size(px(12.)).child(url.clone()))
@@ -818,7 +818,12 @@ fn details(
             ));
         }
     }
-    body.children(notice.map(|message| div().text_size(px(11.)).text_color(p.muted).child(message)))
+    body.children(notice.map(|message| {
+        div()
+            .text_size(px(11.))
+            .text_color(p.text_muted)
+            .child(message)
+    }))
 }
 
 fn action_buttons(job: &JobSnapshot, cx: &mut Context<TransfersPanel>) -> impl IntoElement {
@@ -966,19 +971,19 @@ fn file_icon(job: &JobSnapshot) -> &'static str {
         "file"
     }
 }
-fn file_color(job: &JobSnapshot, p: Palette) -> gpui::Rgba {
+fn file_color(job: &JobSnapshot, p: Palette) -> gpui::Hsla {
     if matches!(file_icon(job), "archive" | "video") {
-        p.warning
+        p.warning.ink
     } else {
-        p.accent
+        p.accent_text
     }
 }
-fn status_color(job: &JobSnapshot, p: Palette) -> gpui::Rgba {
+fn status_color(job: &JobSnapshot, p: Palette) -> gpui::Hsla {
     match job.state {
-        TransferState::Complete => p.success,
-        TransferState::Failed => p.danger,
-        TransferState::Paused | TransferState::PauseRequested => p.warning,
-        TransferState::Running => p.accent,
+        TransferState::Complete => p.success.ink,
+        TransferState::Failed => p.danger.ink,
+        TransferState::Paused | TransferState::PauseRequested => p.warning.ink,
+        TransferState::Running => p.accent_text,
     }
 }
 fn status_pill(job: &JobSnapshot, p: Palette, compact: bool) -> impl IntoElement {
@@ -990,7 +995,7 @@ fn status_pill(job: &JobSnapshot, p: Palette, compact: bool) -> impl IntoElement
             .px(px(7.))
             .py(px(4.))
             .rounded(px(6.))
-            .bg(p.inset)
+            .bg(p.sunken)
             .text_size(px(10.))
             .text_color(status_color(job, p))
             .child("●")
@@ -1052,7 +1057,7 @@ fn workspace_vertical_padding(window: &Window) -> f32 {
     if window.viewport_size().width < px(1100.) {
         21.
     } else {
-        crate::theme::tokens::geometry::WORKSPACE_VERTICAL_PADDING
+        28.
     }
 }
 fn visible_fingerprint(snapshot: &DesktopSnapshot) -> String {

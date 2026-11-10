@@ -1,4 +1,4 @@
-//! Atomic persistence for the desktop's non-sensitive layout geometry.
+//! Atomic persistence for the desktop's non-sensitive window geometry and look.
 
 use std::{
     fs, io,
@@ -35,11 +35,10 @@ mod tests {
     use crate::ui_state::{UiState, WindowGeometry};
 
     #[test]
-    fn persistence_round_trip_is_private_and_geometry_only() {
+    fn persistence_round_trip_is_private_and_holds_no_user_content() {
         let temp = tempfile::tempdir().unwrap();
         let state = UiState {
             version: 1,
-            inspector_width: 400.0,
             window: Some(WindowGeometry {
                 x: 1.0,
                 y: 2.0,
@@ -47,6 +46,7 @@ mod tests {
                 height: 800.0,
                 maximized: false,
             }),
+            accent: Some("custom:12ab9f".into()),
         };
         save(temp.path(), &state).unwrap();
         assert_eq!(load(temp.path()), state);

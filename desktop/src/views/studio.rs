@@ -27,7 +27,7 @@ pub fn unavailable(inbox: bool, palette: Palette) -> impl IntoElement {
                 .bg(palette.surface)
                 .border_1()
                 .border_color(palette.border)
-                .text_color(palette.muted)
+                .text_color(palette.text_muted)
                 .child("This workspace is unavailable."),
         )
 }

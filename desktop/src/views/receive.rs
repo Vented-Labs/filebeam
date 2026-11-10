@@ -21,7 +21,7 @@ use crate::{
         ClientCommand, DesktopSnapshot, PromptAnswer, PromptKind, ReceiveKind, TransferDirection,
         TransferState,
     },
-    theme::{Palette, palette_for},
+    theme::Palette,
 };
 use gpui_component::theme::Theme;
 
@@ -458,7 +458,7 @@ impl ReceivePanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
-        let p = palette_for(Theme::global(cx).mode);
+        let p = crate::theme::palette(cx);
         let validation = self.validation(cx);
         let receive = cx.listener(Self::inspect);
         let paste = cx.listener(Self::paste);
@@ -495,8 +495,8 @@ impl ReceivePanel {
                                             .items_center()
                                             .justify_center()
                                             .rounded(px(12.))
-                                            .bg(p.selected)
-                                            .text_color(p.accent)
+                                            .bg(p.selected_surface)
+                                            .text_color(p.accent_text)
                                             .child(
                                                 Icon::default()
                                                     .path("icons/download.svg")
@@ -509,7 +509,7 @@ impl ReceivePanel {
                                             .child(
                                                 div()
                                                     .text_size(px(12.))
-                                                    .text_color(p.muted)
+                                                    .text_color(p.text_muted)
                                                     .child("Files and notes, from any Filebeam client."),
                                             ),
                                     ),
@@ -517,10 +517,10 @@ impl ReceivePanel {
                             .child(
                                 div()
                                     .text_size(px(12.))
-                                    .text_color(p.muted)
+                                    .text_color(p.text_muted)
                                     .child("Paste a complete Filebeam link or enter a transfer ID. Full links retain their origin and key fragment."),
                             )
-                            .child(div().text_size(px(11.)).text_color(p.muted).child("TRANSFER LINK OR ID"))
+                            .child(div().text_size(px(11.)).text_color(p.text_muted).child("TRANSFER LINK OR ID"))
                             .child(
                                 div()
                                     .flex()
@@ -544,7 +544,7 @@ impl ReceivePanel {
                             .child(
                                 div()
                                     .text_size(px(11.))
-                                    .text_color(if validation.is_ok() { p.muted } else { p.subtle })
+                                    .text_color(if validation.is_ok() { p.text_muted } else { p.text_subtle })
                                     .child(validation.clone().unwrap_or_else(|error| error)),
                             )
                             .child(
@@ -554,12 +554,12 @@ impl ReceivePanel {
                                     .items_center()
                                     .gap(px(10.))
                                     .border_t_1()
-                                    .border_color(p.border_soft)
+                                    .border_color(p.line_soft)
                                     .child(
                                         Icon::default()
                                             .path("icons/key.svg")
                                             .size(px(15.))
-                                            .text_color(p.subtle),
+                                            .text_color(p.text_subtle),
                                     )
                                     .child(
                                         div()
@@ -574,7 +574,7 @@ impl ReceivePanel {
                                                 div()
                                                     .mt(px(3.))
                                                     .text_size(px(11.))
-                                                    .text_color(p.subtle)
+                                                    .text_color(p.text_subtle)
                                                     .child("Enter it only when Filebeam requests it."),
                                             ),
                                     ),
@@ -587,7 +587,7 @@ impl ReceivePanel {
                                     .border_1()
                                     .border_color(p.border)
                                     .text_size(px(11.))
-                                    .text_color(p.muted)
+                                    .text_color(p.text_muted)
                                     .child("Links stay intact, including the decryption key. You choose when to start."),
                             ),
                     )
@@ -601,12 +601,12 @@ impl ReceivePanel {
                             .bg(p.raised)
                             .rounded_b(px(17.))
                             .border_t_1()
-                            .border_color(p.border_soft)
+                            .border_color(p.line_soft)
                             .child(
                                 div()
                                     .flex_1()
                                     .text_size(px(11.))
-                                    .text_color(p.muted)
+                                    .text_color(p.text_muted)
                                     .child("Verify first. Save when ready."),
                             )
                             .child(
@@ -621,7 +621,7 @@ impl ReceivePanel {
                             ),
                         ),
                     )
-            .when_some(self.status.clone(), |this, status| this.child(div().text_size(px(12.)).text_color(p.muted).child(status)))
+            .when_some(self.status.clone(), |this, status| this.child(div().text_size(px(12.)).text_color(p.text_muted).child(status)))
             .child(self.jobs(p))
             .child(self.previews(window, cx, p))
             .child(self.verified(cx, p))
@@ -860,7 +860,7 @@ impl ReceivePanel {
                         "Saved to folder"
                     }))
                     .child(
-                        div().text_size(px(11.)).text_color(p.muted).child(
+                        div().text_size(px(11.)).text_color(p.text_muted).child(
                             result
                                 .export_error
                                 .as_ref()
@@ -919,7 +919,7 @@ impl ReceivePanel {
                     .child(
                         div()
                             .text_size(px(11.))
-                            .text_color(p.muted)
+                            .text_color(p.text_muted)
                             .child(format!("{} ({total})", job.progress.phase)),
                     )
             }))
@@ -962,14 +962,14 @@ impl ReceivePanel {
 
 impl Render for ReceivePanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let p = palette_for(Theme::global(cx).mode);
+        let p = crate::theme::palette(cx);
         let content = self.render_content(window, cx);
         crate::views::page::scroller(
             "receive-page-scroll",
             &self.page_scroll,
             window,
             div()
-                .bg(p.page)
+                .bg(p.background)
                 .text_color(p.text)
                 .child(div().flex_none().child(content)),
         )

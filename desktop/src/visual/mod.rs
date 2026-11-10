@@ -22,12 +22,42 @@ pub const SCENARIOS: &[Scenario] = &[
         theme: "dark",
     },
     Scenario {
-        id: "send-queue",
+        id: "send-files",
         destination: "send",
         theme: "dark",
     },
     Scenario {
-        id: "send-errors",
+        id: "send-attach-note",
+        destination: "send",
+        theme: "dark",
+    },
+    Scenario {
+        id: "send-status",
+        destination: "send",
+        theme: "dark",
+    },
+    Scenario {
+        id: "send-share-progress",
+        destination: "send",
+        theme: "dark",
+    },
+    Scenario {
+        id: "send-share-ready",
+        destination: "send",
+        theme: "dark",
+    },
+    Scenario {
+        id: "send-share-split",
+        destination: "send",
+        theme: "dark",
+    },
+    Scenario {
+        id: "send-share-live",
+        destination: "send",
+        theme: "dark",
+    },
+    Scenario {
+        id: "send-share-failed",
         destination: "send",
         theme: "dark",
     },
@@ -48,16 +78,6 @@ pub const SCENARIOS: &[Scenario] = &[
     },
     Scenario {
         id: "send-lifetime",
-        destination: "send",
-        theme: "dark",
-    },
-    Scenario {
-        id: "send-preferences",
-        destination: "send",
-        theme: "dark",
-    },
-    Scenario {
-        id: "send-preferences-scroll",
         destination: "send",
         theme: "dark",
     },
@@ -261,6 +281,56 @@ pub fn snapshot(id: &str) -> Option<DesktopSnapshot> {
                 },
             ),
         }),
+        "send-share-progress"
+        | "send-share-ready"
+        | "send-share-split"
+        | "send-share-live"
+        | "send-share-failed" => {
+            let mut share = job(
+                "j-share",
+                "Launch assets.zip",
+                TransferDirection::Send,
+                TransferState::Running,
+                830_988_288,
+                38,
+                "Uploading",
+            );
+            match scenario.id {
+                "send-share-progress" => share.capabilities.can_pause = true,
+                "send-share-failed" => {
+                    share.state = TransferState::Failed;
+                    share.error = Some(error(
+                        ClientErrorCode::Network,
+                        "error sending request for url",
+                    ));
+                }
+                other => {
+                    share.state = TransferState::Complete;
+                    share.progress.completed_bytes = 830_988_288;
+                    share.progress.phase = "Link ready".into();
+                    share.share_url = Some(
+                        "https://studio.fixture.invalid/01JD8Q4XK7M2N9P3R5T6V8W0YZ#k=v1.fixture-key-material".into(),
+                    );
+                    share.cli_command = Some(
+                        "beam down 'https://studio.fixture.invalid/01JD8Q4XK7M2N9P3R5T6V8W0YZ#k=v1.fixture-key-material'".into(),
+                    );
+                    if other == "send-share-split" {
+                        share.share_url = Some(
+                            "https://studio.fixture.invalid/01JD8Q4XK7M2N9P3R5T6V8W0YZ".into(),
+                        );
+                        share.separate_key = Some("v1.fixture-key-material".into());
+                        share.cli_command = None;
+                    }
+                    if other == "send-share-live" {
+                        share.state = TransferState::Running;
+                        share.progress.completed_bytes = 0;
+                        share.progress.phase = "Waiting for recipient".into();
+                        share.capabilities.can_end_live = true;
+                    }
+                }
+            }
+            snapshot.jobs.push(share);
+        }
         "transfers-mixed" | "dialogs" => snapshot.jobs = mixed_jobs(),
         "transfers-scroll-end" => snapshot.jobs = scroll_jobs(),
         "inbox-locked" => {

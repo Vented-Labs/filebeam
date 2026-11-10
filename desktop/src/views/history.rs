@@ -16,7 +16,6 @@ use gpui_component::{
 use crate::{
     client::DesktopClient,
     model::{ClientCommand, HistorySnapshot},
-    theme::palette_for,
 };
 
 pub struct HistoryPanel {
@@ -196,7 +195,7 @@ impl HistoryPanel {
 
 impl Render for HistoryPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let p = palette_for(Theme::global(cx).mode);
+        let p = crate::theme::palette(cx);
         let mut body = div()
             .flex()
             .flex_col()
@@ -228,7 +227,10 @@ impl Render for HistoryPanel {
                                     .flex_col()
                                     .gap(px(6.))
                                     .child(
-                                        div().text_size(px(10.)).text_color(p.muted).child("Type"),
+                                        div()
+                                            .text_size(px(10.))
+                                            .text_color(p.text_muted)
+                                            .child("Type"),
                                     )
                                     .child(
                                         Select::new(&self.kind_select)
@@ -245,7 +247,7 @@ impl Render for HistoryPanel {
                                     .child(
                                         div()
                                             .text_size(px(10.))
-                                            .text_color(p.muted)
+                                            .text_color(p.text_muted)
                                             .child("Transport"),
                                     )
                                     .child(
@@ -263,7 +265,7 @@ impl Render for HistoryPanel {
                                     .child(
                                         div()
                                             .text_size(px(10.))
-                                            .text_color(p.muted)
+                                            .text_color(p.text_muted)
                                             .child("Status"),
                                     )
                                     .child(
@@ -286,18 +288,18 @@ impl Render for HistoryPanel {
                             .px(px(16.))
                             .py(px(10.))
                             .border_t_1()
-                            .border_color(p.border_soft)
+                            .border_color(p.line_soft)
                             .flex()
                             .items_center()
                             .gap(px(8.))
                             .text_size(px(11.))
-                            .text_color(p.subtle)
+                            .text_color(p.text_subtle)
                             .child(crate::assets::icon("lock").size(px(14.)))
                             .child("Names and share-link keys stay on your device."),
                     ),
             );
         if let Some(error) = self.notice.as_ref().or(self.snapshot.error.as_ref()) {
-            body = body.child(div().text_color(p.danger).child(error.clone()));
+            body = body.child(div().text_color(p.danger.ink).child(error.clone()));
         }
         if self.pending {
             body = body.child(div().child("Updating history…"));
@@ -320,15 +322,15 @@ impl Render for HistoryPanel {
                             div()
                                 .size(px(48.))
                                 .rounded(px(12.))
-                                .bg(p.selected)
-                                .text_color(p.accent)
+                                .bg(p.selected_surface)
+                                .text_color(p.accent_text)
                                 .flex()
                                 .items_center()
                                 .justify_center()
                                 .child(crate::assets::icon("clock").size(px(24.))),
                         )
                         .child(div().text_size(px(16.)).child("No transfers to show"))
-                        .child(div().text_size(px(12.)).text_color(p.muted).child(
+                        .child(div().text_size(px(12.)).text_color(p.text_muted).child(
                             "Sign in to load your history, or adjust the selected filters.",
                         )),
                 );
@@ -459,8 +461,8 @@ impl Render for HistoryPanel {
                                 div()
                                     .size(px(36.))
                                     .rounded(px(9.))
-                                    .bg(p.selected)
-                                    .text_color(p.accent)
+                                    .bg(p.selected_surface)
+                                    .text_color(p.accent_text)
                                     .flex()
                                     .items_center()
                                     .justify_center()
@@ -488,7 +490,7 @@ impl Render for HistoryPanel {
                                         div()
                                             .mt(px(3.))
                                             .text_size(px(10.))
-                                            .text_color(p.subtle)
+                                            .text_color(p.text_subtle)
                                             .child(entry.id.clone()),
                                     ),
                             )
@@ -501,14 +503,14 @@ impl Render for HistoryPanel {
                                     .text_size(px(10.))
                                     .text_color(
                                         if matches!(entry.status.as_str(), "available" | "live") {
-                                            p.success
+                                            p.success.ink
                                         } else if matches!(
                                             entry.status.as_str(),
                                             "pending" | "deleting"
                                         ) {
-                                            p.warning
+                                            p.warning.ink
                                         } else {
-                                            p.muted
+                                            p.text_muted
                                         },
                                     )
                                     .child(status_label(&entry.status)),
@@ -518,7 +520,7 @@ impl Render for HistoryPanel {
                         div()
                             .pl(px(48.))
                             .text_size(px(11.))
-                            .text_color(p.muted)
+                            .text_color(p.text_muted)
                             .child(format!(
                                 "{} encrypted · {} · {}",
                                 format_bytes(
@@ -540,14 +542,14 @@ impl Render for HistoryPanel {
                         div()
                             .pl(px(48.))
                             .text_size(px(11.))
-                            .text_color(p.subtle)
+                            .text_color(p.text_subtle)
                             .child(format!("Created {}", entry.created_at)),
                     )
                     .child(
                         div()
                             .pl(px(48.))
                             .text_size(px(11.))
-                            .text_color(p.muted)
+                            .text_color(p.text_muted)
                             .child(format!(
                                 "{} {}",
                                 if entry.removed_at.is_some() {
@@ -563,7 +565,7 @@ impl Render for HistoryPanel {
                             .pt(px(10.))
                             .mt(px(4.))
                             .border_t_1()
-                            .border_color(p.border_soft)
+                            .border_color(p.line_soft)
                             .child(actions),
                     ),
             );
