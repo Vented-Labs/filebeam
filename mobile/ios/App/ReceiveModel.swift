@@ -111,6 +111,7 @@ final class ReceiveModel {
         password = value
         if let jobID, let prompt = app.snapshot(jobID)?.prompt, prompt.kind == .password {
             answered.insert(prompt.id)
+            passwordAttempts = 1
             try? await app.service.respondToPrompt(jobID: jobID, promptID: prompt.id, value: value)
             stage = .unlocking(.preparing)
             drive()
@@ -208,6 +209,7 @@ final class ReceiveModel {
                     return
                 case .paused:
                     if case .downloading(let items, _) = stage { stage = .files(items) }
+                    else if case .files = stage {} else { stage = .unavailable("The transfer stopped before it finished. Open the link again to continue.") }
                     return
                 case .failed:
                     stage = .unavailable(snapshot.error)
