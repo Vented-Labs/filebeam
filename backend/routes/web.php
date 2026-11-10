@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\AccountKeyController;
+use App\Http\Controllers\AndroidAssetLinksController;
 use App\Http\Controllers\Api\V1\TurboTransferController;
 use App\Http\Controllers\AppleAppSiteAssociationController;
 use App\Http\Controllers\ChangelogController;
@@ -69,6 +70,7 @@ if (is_string(config('filebeam.username_domain'))) {
 }
 
 Route::get('/.well-known/apple-app-site-association', AppleAppSiteAssociationController::class)->name('apple-app-site-association');
+Route::get('/.well-known/assetlinks.json', AndroidAssetLinksController::class)->name('android-asset-links');
 
 // Registered after the username host so its single-segment usernames keep precedence there.
 Route::get('/features', FeaturesController::class)->name('features.index');

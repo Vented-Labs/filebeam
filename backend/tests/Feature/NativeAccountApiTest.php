@@ -249,6 +249,11 @@ test('native policy is effective for guests and accounts without exposing privat
         ->assertJsonPath('data.account.registrationEnabled', false)
         ->assertJsonPath('data.account.usernameRoutingEnabled', true)
         ->assertJsonPath('data.transfer.limits.http.maximum_transfer_bytes', $guestPlan->maximum_transfer_bytes)
+        ->assertJsonPath('data.instance.version', config('filebeam.version'))
+        ->assertJsonPath('data.instance.changelogEnabled', (bool) config('changelog.enabled'))
+        ->assertJsonPath('data.branding.primaryColor', '#8b35ff')
+        ->assertJsonPath('data.account.deviceRendezvousEnabled', false)
+        ->assertJsonStructure(['data' => ['branding' => ['copyright', 'githubUrl', 'communityLinks']]])
         ->assertJsonMissing(['turn_secret', 'encrypted_private_key', 'encrypted_manifest']);
     $this->actingAs($user)->getJson('/api/native/v1/policy')->assertOk()
         ->assertJsonPath('data.transfer.limits.http.maximum_transfer_bytes', $accountPlan->maximum_transfer_bytes)
