@@ -84,6 +84,7 @@ fun FilebeamApp(model: AppModel, host: HostActions) {
 private fun RouteContent(route: Route) {
     when (route) {
         Route.Home -> Home()
+        Route.Settings -> io.filebeam.android.ui.feature.settings.SettingsScreen()
         else -> Placeholder(route)
     }
 }

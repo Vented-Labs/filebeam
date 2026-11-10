@@ -656,6 +656,11 @@ class TransferCoordinator(
         complete(runCatching { withContext(Dispatchers.IO) { platformClient().savedTransferDetails(id).presentation() } })
     }
 
+    /** Receiver sessions for a sent transfer; empty when the checkpoint has none or cannot be read. */
+    suspend fun activity(checkpointId: String): List<io.filebeam.rust.TransferActivityRecord> = withContext(Dispatchers.IO) {
+        runCatching { platformClient().transferActivity(checkpointId).records }.getOrDefault(emptyList())
+    }
+
     private fun association(id: String): PendingTransferStore {
         require(UUID.fromString(id).toString() == id)
         return PendingTransferStore(context, "transfer-$id")

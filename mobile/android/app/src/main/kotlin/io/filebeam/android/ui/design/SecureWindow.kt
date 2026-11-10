@@ -1,6 +1,8 @@
 package io.filebeam.android.ui.design
 
 import android.app.Activity
+import android.util.Log
+import io.filebeam.android.BuildConfig
 import android.view.WindowManager
 import androidx.activity.compose.LocalActivity
 import androidx.compose.runtime.Composable
@@ -11,6 +13,8 @@ import java.util.WeakHashMap
 @Composable
 fun SecureWindowEffect() {
     val activity = LocalActivity.current
+    // Debug builds can opt out for evidence capture: adb shell setprop log.tag.FilebeamCapture DEBUG
+    if (BuildConfig.DEBUG && Log.isLoggable("FilebeamCapture", Log.DEBUG)) return
     DisposableEffect(activity) {
         activity?.let(SecureWindows::acquire)
         onDispose { activity?.let(SecureWindows::release) }

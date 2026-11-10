@@ -73,6 +73,7 @@ fun BrandBar(modifier: Modifier = Modifier, actions: @Composable RowScope.() -> 
         FilebeamMark(height = 26.dp)
         FbText(stringResource(R.string.app_name), Modifier.padding(start = Space.sm).weight(1f), style = Fb.type.title.copy(fontWeight = androidx.compose.ui.text.font.FontWeight(800)))
         actions()
+        IconAction(R.drawable.ic_approved_settings, stringResource(R.string.settings_open), { navigator.push(Route.Settings) })
         val interaction = remember { MutableInteractionSource() }
         val label = account?.let { stringResource(R.string.account_signed_in_as, it.username) } ?: stringResource(R.string.account_open)
         Box(

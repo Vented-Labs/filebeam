@@ -11,4 +11,241 @@
     </plurals>
     <string name="account_open">Sign in or create an account</string>
     <string name="account_signed_in_as">Account, signed in as %1$s</string>
+    <!-- Common -->
+    <string name="cancel">Cancel</string>
+    <string name="done">Done</string>
+    <string name="copy">Copy</string>
+    <plurals name="duration_minutes">
+        <item quantity="one">%1$d minute</item>
+        <item quantity="other">%1$d minutes</item>
+    </plurals>
+    <plurals name="duration_hours">
+        <item quantity="one">%1$d hour</item>
+        <item quantity="other">%1$d hours</item>
+    </plurals>
+    <plurals name="duration_days">
+        <item quantity="one">%1$d day</item>
+        <item quantity="other">%1$d days</item>
+    </plurals>
+    <plurals name="duration_years">
+        <item quantity="one">%1$d year</item>
+        <item quantity="other">%1$d years</item>
+    </plurals>
+    <string name="relative_future">in %1$s</string>
+    <string name="relative_past">%1$s ago</string>
+    <string name="relative_now">moments ago</string>
+    <string name="relative_soon">in under a minute</string>
+    <string name="expiry_expires">Expires %1$s</string>
+    <string name="expiry_expired">Expired</string>
+    <string name="auth_sign_in">Sign in</string>
+
+    <!-- Transfer phases -->
+    <string name="phase_connecting">Connecting</string>
+    <string name="phase_preparing">Preparing encryption</string>
+    <string name="phase_archiving">Creating ZIP archive</string>
+    <string name="phase_encrypting">Encrypting</string>
+    <string name="phase_sending">Encrypting and uploading</string>
+    <string name="phase_receiving">Decrypting download</string>
+    <string name="phase_verifying">Verifying integrity</string>
+    <string name="phase_finalizing">Finalizing encrypted transfer</string>
+    <string name="phase_waiting">Waiting for the sender</string>
+    <string name="phase_unlocking">Unlocking your transfer</string>
+    <string name="phase_retrying">Retrying interrupted transfer</string>
+    <string name="phase_reconnecting">Waiting for a connection</string>
+    <string name="phase_storing">Storing encrypted chunks</string>
+    <string name="phase_pausing">Pausing</string>
+    <string name="phase_paused">Paused</string>
+    <string name="phase_exporting">Saving file</string>
+    <string name="phase_failed">Could not finish</string>
+    <string name="phase_complete">Complete</string>
+
+    <!-- Send -->
+    <string name="send_mode_files">Files</string>
+    <string name="send_mode_notes">Notes</string>
+    <string name="transport_http">HTTP</string>
+    <string name="transport_http_caption">Download later</string>
+    <string name="transport_webrtc">WebRTC</string>
+    <string name="transport_webrtc_caption">Keep the app open</string>
+    <string name="limit_per_transfer">%1$s per transfer</string>
+    <string name="limit_per_note">%1$s per note</string>
+    <string name="limit_unlimited">Unlimited transfer size</string>
+    <plurals name="limit_file_count">
+        <item quantity="one">Up to %1$d file</item>
+        <item quantity="other">Up to %1$d files</item>
+    </plurals>
+    <string name="send_hero_lead">Send your files</string>
+    <string name="send_hero_accent">privately</string>
+    <string name="send_hero_body">They are encrypted on this device before they leave it.</string>
+    <string name="send_choose_files">Choose files</string>
+    <string name="send_choose_folder">Choose a folder</string>
+    <string name="send_folder_failed">That folder could not be read.</string>
+    <string name="send_queue_title">Your files</string>
+    <plurals name="send_queue_ready">
+        <item quantity="one">%1$d ready to protect</item>
+        <item quantity="other">%1$d ready to protect</item>
+    </plurals>
+    <string name="send_add_more">Add more</string>
+    <string name="send_remove_file">Remove %1$s</string>
+    <string name="send_size_unknown">Size unknown</string>
+    <string name="send_source_unavailable">This file can no longer be read. Remove it and choose it again.</string>
+    <plurals name="send_duplicates_skipped">
+        <item quantity="one">%1$d duplicate file was already in the queue.</item>
+        <item quantity="other">%1$d duplicate files were already in the queue.</item>
+    </plurals>
+    <plurals name="send_limit_reached">
+        <item quantity="one">Only %1$d more file can be added (maximum %2$d).</item>
+        <item quantity="other">Only %1$d more files can be added (maximum %2$d).</item>
+    </plurals>
+    <string name="attach_note">Attach note</string>
+    <string name="attach_note_description">Send context alongside your files.</string>
+    <string name="attach_note_footer">Same encryption. Same expiry as the files.</string>
+    <string name="option_password">Password</string>
+    <string name="option_password_none">Optional</string>
+    <string name="option_password_set">Password set</string>
+    <string name="option_unavailable_friend">Not used for friends</string>
+    <string name="option_retention">Retained for</string>
+    <string name="option_link_lifetime">Link lifetime</string>
+    <string name="option_friend">Send to friend</string>
+    <string name="option_friend_none">Off</string>
+    <string name="option_friend_selected">\@%1$s</string>
+    <string name="option_include_key">Include key in link</string>
+    <string name="option_include_key_off">Share the decryption key separately.</string>
+    <string name="option_zip">Combine into a ZIP</string>
+    <string name="option_zip_description">Recipients download one archive.</string>
+    <string name="option_burn">Burn on read</string>
+    <string name="option_burn_stored">Removed after the first successful decrypt.</string>
+    <string name="option_burn_live">Revoked after the first successful decrypt.</string>
+    <string name="retention_hint">How long the encrypted transfer stays available.</string>
+    <string name="retention_live_hint">The server may shorten this lifetime.</string>
+    <string name="send_turbo">Turbo Transfer</string>
+    <string name="send_encrypted">Send encrypted</string>
+    <string name="send_to_inbox">Send to inbox</string>
+    <string name="send_note">Send encrypted note</string>
+    <string name="send_footer">Encrypted on this device before upload.</string>
+    <string name="send_footer_turbo">Turbo shares the link while files are still uploading.</string>
+    <string name="send_use_webrtc">Use WebRTC</string>
+    <string name="send_policy_unavailable">This instance could not be reached. Check the connection in Settings.</string>
+    <string name="send_transport_disabled">This instance has turned off the selected transfer method.</string>
+    <plurals name="send_too_many_files">
+        <item quantity="one">This transfer method accepts %1$d file at a time.</item>
+        <item quantity="other">This transfer method accepts up to %1$d files at a time.</item>
+    </plurals>
+    <string name="send_too_large">This encrypted transfer exceeds the %1$s limit.</string>
+    <string name="send_note_too_large">This note exceeds the %1$s limit.</string>
+    <string name="send_attached_note_invalid">The attached note needs between 1 byte and 64 KiB of text.</string>
+    <string name="send_source_error">One of the files can no longer be read.</string>
+    <string name="send_gate_title">Sign in to share files</string>
+    <string name="send_gate_body">This instance only accepts transfers from signed-in accounts.</string>
+
+    <!-- Password -->
+    <string name="password_title">Transfer password</string>
+    <string name="password_subtitle">Recipients need this as well as the link. It never leaves this device.</string>
+    <string name="password_placeholder">At least 8 characters</string>
+    <string name="password_length_rule">Use at least 8 characters.</string>
+    <string name="password_generate">Generate secure password</string>
+    <string name="password_remove">Remove</string>
+    <string name="password_show">Show password</string>
+    <string name="password_hide">Hide password</string>
+
+    <!-- Friends -->
+    <string name="friend_title">Send to a friend</string>
+    <string name="friend_subtitle">Files go to their encrypted inbox. Stored transfers only, without a password.</string>
+    <string name="friend_username">Username</string>
+    <string name="friend_username_placeholder">\@username</string>
+    <string name="friend_use_username">Use this username</string>
+    <string name="friend_not_found">No inbox was found for that username.</string>
+    <string name="friend_selected">Files will go to \@%1$s\'s inbox.</string>
+    <string name="friend_clear">Clear</string>
+    <string name="friend_list">Friends</string>
+    <string name="friend_none">Friends you add appear here for quick sending.</string>
+
+    <!-- Notes -->
+    <string name="note_title_placeholder">Untitled note</string>
+    <string name="note_language">Language</string>
+    <string name="note_wrap">Wrap</string>
+    <string name="note_placeholder">Write or paste a private note</string>
+    <string name="note_counter">%1$s / %2$s</string>
+
+    <!-- Share result -->
+    <string name="share_ready_title">Your encrypted link is ready</string>
+    <string name="share_live_title">Your live transfer is ready</string>
+    <string name="share_live_eyebrow">Live transfer</string>
+    <string name="share_live_body">Keep Filebeam open while recipients download. No payload is stored.</string>
+    <string name="share_turbo_body">Uploading is still in progress. Keep Filebeam open until it finishes.</string>
+    <string name="share_preparing_body">Your files are being encrypted on this device.</string>
+    <string name="share_key_fragment_note">The key stays in the link fragment and is never sent to the server.</string>
+    <string name="share_key_separate_note">Share the generated key separately.</string>
+    <string name="share_key_and_password_note">Share the generated key and the password separately.</string>
+    <string name="share_copy_link">Copy link</string>
+    <string name="share_copy_key">Copy key</string>
+    <string name="share_share">Share link</string>
+    <string name="share_link_label">Filebeam link</string>
+    <string name="share_key_label">Filebeam key</string>
+    <string name="share_link_copied">Link copied</string>
+    <string name="share_key_copied">Key copied</string>
+    <string name="share_retention_starts">Retention starts when uploading finishes.</string>
+    <string name="share_burn_pill">Burns after the first read</string>
+    <string name="share_file_progress">File %1$d of %2$d · %3$s</string>
+    <string name="share_new_transfer">New transfer</string>
+    <string name="share_send_more">Send more files</string>
+    <string name="share_delete_now">Delete now</string>
+    <string name="share_delete_title">Delete this transfer for everyone?</string>
+    <string name="share_delete_body">The link stops working immediately. This cannot be undone.</string>
+    <string name="share_deleted">Transfer deleted</string>
+    <string name="share_cancel_upload">Cancel upload</string>
+    <string name="share_cancel_title">Cancel this upload?</string>
+    <string name="share_cancel_body">Uploading stops and your selection returns to the composer.</string>
+    <string name="share_keep_uploading">Keep uploading</string>
+    <string name="share_stop_live">Stop live transfer</string>
+    <string name="share_stop_title">Stop the live transfer?</string>
+    <string name="share_stop_body">Recipients who are still downloading will be cut off.</string>
+    <string name="share_failed_title">The transfer could not finish</string>
+    <string name="share_failed_body">Nothing was shared. Your selection is still in the composer.</string>
+    <string name="share_paused_title">Transfer paused</string>
+    <string name="share_paused_body">Resume it from Transfers, or go back to change the selection.</string>
+    <string name="share_back_to_composer">Back to composer</string>
+    <string name="share_inbox_sending_title">Sending to inbox</string>
+    <string name="share_inbox_done_title">Files sent</string>
+    <string name="share_inbox_body">Encrypted for \@%1$s. Only their account key can open them.</string>
+
+    <!-- CLI -->
+    <string name="cli_title">Download with CLI</string>
+    <string name="cli_subtitle">Run this command in a terminal.</string>
+    <string name="cli_copied">Command copied</string>
+    <string name="cli_unavailable">This transfer is not currently available for CLI download.</string>
+    <string name="cli_unavailable_notes">Notes are opened in the app or the browser.</string>
+    <string name="cli_unavailable_live">Live transfers are received in the app or the browser.</string>
+
+    <!-- Download activity -->
+    <string name="activity_title">Download activity</string>
+    <string name="activity_recipients">Recipient activity</string>
+    <string name="activity_anonymous">Anonymous</string>
+    <string name="activity_empty">Download activity will appear here.</string>
+    <string name="activity_download">Download %1$d</string>
+    <string name="activity_all_files">All files</string>
+    <plurals name="activity_files">
+        <item quantity="one">%1$d file</item>
+        <item quantity="other">%1$d files</item>
+    </plurals>
+    <string name="activity_downloading">Downloading</string>
+    <string name="activity_waiting">Waiting to resume</string>
+    <string name="activity_verifying">Verifying</string>
+    <string name="activity_completed">Completed</string>
+    <string name="activity_cancelled">Cancelled</string>
+    <string name="activity_failed">Could not finish</string>
+    <string name="activity_lost">Connection lost</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_connection">Connection</string>
+    <string name="settings_instance">Filebeam instance</string>
+    <string name="settings_instance_hint">The server this app sends through and signs in to.</string>
+    <string name="settings_instance_invalid">Enter a full address such as https://filebeam.io.</string>
+    <string name="settings_instance_unreachable">That instance did not answer. Check the address and your connection.</string>
+    <string name="settings_instance_saved">Connected</string>
+    <string name="settings_relay_only">Relay-only live transfers</string>
+    <string name="settings_relay_only_description">Route WebRTC through the instance\'s TURN relay so peers never see your address.</string>
+    <string name="settings_busy">Finish or pause the running transfer before changing the connection.</string>
+    <string name="settings_check_and_save">Check and save</string>
+    <string name="settings_open">Settings</string>
 </resources>
