@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\V1\TurboTransferController;
 use App\Http\Controllers\Api\V1\WebRtcTransferController;
 use App\Http\Controllers\Auth\AuthenticatedSessionController;
 use App\Http\Controllers\Auth\RegisteredUserController;
+use App\Http\Controllers\ChangelogController;
 use App\Http\Controllers\ContactController;
 use App\Http\Controllers\DeviceController;
 use App\Http\Controllers\FileReportController;
@@ -32,6 +33,10 @@ use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function (): void {
     Route::get('/info', InfoController::class)->name('api.info');
+    if (config('changelog.enabled')) {
+        Route::get('/changelog', [ChangelogController::class, 'apiIndex'])->middleware('throttle:60,1')->name('api.changelog.index');
+        Route::get('/changelog/{tag}', [ChangelogController::class, 'apiShow'])->where('tag', '[A-Za-z0-9][A-Za-z0-9._+-]{0,99}')->middleware('throttle:60,1')->name('api.changelog.show');
+    }
     Route::get('/desktop/releases', DesktopReleaseController::class)->middleware('throttle:60,1')->name('api.desktop.releases');
 
     Route::post('/transfers', [TransferController::class, 'store'])

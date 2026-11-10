@@ -316,6 +316,43 @@ impl AccountService {
     pub fn policy(&self) -> Result<serde_json::Value> {
         self.get("api/native/v1/policy")
     }
+    /// One page of the instance's public release notes.
+    pub fn changelog(
+        &self,
+        page: u32,
+        term: Option<&str>,
+        prereleases: bool,
+    ) -> Result<serde_json::Value> {
+        let mut endpoint = url(&self.instance, "api/v1/changelog")?;
+        {
+            let mut query = endpoint.query_pairs_mut();
+            query.append_pair("page", &page.max(1).to_string());
+            if let Some(term) = term.filter(|term| !term.trim().is_empty()) {
+                query.append_pair("q", term.trim());
+            }
+            if prereleases {
+                query.append_pair("prereleases", "1");
+            }
+        }
+        let path = match endpoint.query() {
+            Some(query) => format!("api/v1/changelog?{query}"),
+            None => "api/v1/changelog".to_owned(),
+        };
+        self.get(&path)
+    }
+    /// One release with its neighbours. Tags are restricted to the server's alphabet.
+    pub fn changelog_release(&self, tag: &str) -> Result<serde_json::Value> {
+        let valid = !tag.is_empty()
+            && tag.len() <= 100
+            && tag.as_bytes()[0].is_ascii_alphanumeric()
+            && tag.bytes().all(|byte| {
+                byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'+' | b'-')
+            });
+        if !valid {
+            bail!("invalid release tag");
+        }
+        self.get(&format!("api/v1/changelog/{tag}"))
+    }
     pub fn invitation(&self, token: &str) -> Result<Invitation> {
         self.get(&format!("api/native/v1/invitations/{token}"))
     }

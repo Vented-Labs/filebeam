@@ -187,6 +187,30 @@ test('release pages resolve real tags and return 404 for unknown or hidden relea
     $this->get('/changelog/v0.2.0')->assertNotFound();
 });
 
+test('native clients read the same listing and releases as JSON', function (): void {
+    fakeGithub([array_map(fn (int $id): array => githubRelease($id, "v0.$id.0"), range(7, 1))], latest: 6);
+    synchronize();
+
+    $this->getJson('/api/v1/changelog')->assertOk()
+        ->assertJsonCount(5, 'data.releases.data')
+        ->assertJsonPath('data.releases.data.0.tag', 'v0.7.0')
+        ->assertJsonPath('data.releases.data.0.featured', true)
+        ->assertJsonPath('data.releases.data.1.latest', true)
+        ->assertJsonPath('data.releases.last_page', 2)
+        ->assertJsonPath('data.versions.5.page', 2)
+        ->assertJsonPath('data.archive.state', 'ready')
+        ->assertJsonMissingPath('data.releases.data.0.body');
+    $this->getJson('/api/v1/changelog?page=2')->assertOk()->assertJsonPath('data.releases.data.0.tag', 'v0.2.0');
+    $this->getJson('/api/v1/changelog?q='.str_repeat('a', 121))->assertUnprocessable();
+
+    $this->getJson('/api/v1/changelog/v0.3.0')->assertOk()
+        ->assertJsonPath('data.release.tag', 'v0.3.0')
+        ->assertJsonPath('data.newer.tag', 'v0.4.0')
+        ->assertJsonPath('data.older.tag', 'v0.2.0')
+        ->assertJsonStructure(['data' => ['release' => ['document' => ['blocks']]]]);
+    $this->getJson('/api/v1/changelog/v9.9.9')->assertNotFound();
+});
+
 test('a cold mirror reports an unavailable archive instead of an empty changelog', function (): void {
     $this->get('/changelog')->assertOk()->assertInertia(fn (Assert $page) => $page->where('archive.state', 'unavailable')->has('releases.data', 0));
 });

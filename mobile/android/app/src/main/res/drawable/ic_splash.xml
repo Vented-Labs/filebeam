@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Filebeam mark geometry from backend/public/brand/filebeam-mark.svg. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" xmlns:aapt="http://schemas.android.com/aapt" android:width="192dp" android:height="192dp" android:viewportWidth="288" android:viewportHeight="288">
+    <group android:translateX="91" android:translateY="55.5" android:scaleX="0.63" android:scaleY="0.63">
+        <path android:pathData="M14 65L140 3C153 -3 168 5 168 20L168 42C168 57 165 63 153 69L81 105L145 134L79 166C90 171 93 178 93 191L93 225C93 239 84 248 70 242L16 216C5 211 0 203 0 191L0 87C0 77 5 69 14 65Z" android:fillColor="#8B35FF"/>
+        <path android:pathData="M14 65C5 69 0 77 0 87L0 158C0 150 4 145 12 141L81 105L14 73C8 70 8 68 14 65Z">
+            <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="0" android:startY="91" android:endX="81" android:endY="87"><item android:offset="0" android:color="#C568F5"/><item android:offset="1" android:color="#E7A1FF"/></gradient></aapt:attr>
+        </path>
+        <path android:pathData="M14 65L140 3C153 -3 168 5 168 20L168 42C168 57 165 63 153 69L81 105L14 73C8 70 8 68 14 65Z">
+            <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="8" android:startY="76" android:endX="150" android:endY="5"><item android:offset="0" android:color="#6421D8"/><item android:offset="0.52" android:color="#8B35FF"/><item android:offset="1" android:color="#C75BFA"/></gradient></aapt:attr>
+        </path>
+        <path android:pathData="M12 141L81 105L145 134L79 166Z">
+            <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="13" android:startY="135" android:endX="116" android:endY="106"><item android:offset="0" android:color="#5020B5"/><item android:offset="0.55" android:color="#7228E8"/><item android:offset="1" android:color="#9D3AFF"/></gradient></aapt:attr>
+        </path>
+        <path android:pathData="M12 141L79 166C90 171 93 178 93 191L93 225C93 239 84 248 70 242L16 216C5 211 0 203 0 191L0 158C0 150 4 145 12 141Z">
+            <aapt:attr name="android:fillColor"><gradient android:type="linear" android:startX="-8" android:startY="129" android:endX="63" android:endY="216"><item android:offset="0" android:color="#8B35FF"/><item android:offset="1" android:color="#963BFF"/></gradient></aapt:attr>
+        </path>
+    </group>
+</vector>

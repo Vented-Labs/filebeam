@@ -20,6 +20,8 @@ import java.io.File
 
 class FilebeamApplication : Application() {
     val settings by lazy { SettingsStore(this) }
+    val appearance by lazy { io.filebeam.android.data.AppearanceStore(this) }
+    val instances by lazy { io.filebeam.android.data.InstanceRepository(accountSessions) }
     val nativeRuntime by lazy {
         NativeRuntime.newWithSecretStore(
             ClientConfig(
