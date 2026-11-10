@@ -63,7 +63,7 @@ jobs:
       commit: ${{ steps.verify.outputs.commit }}
       tag: ${{ steps.verify.outputs.tag }}
     steps:
-      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
+      - uses: useblacksmith/checkout@2b9fe87d796feea153b455ec2f3125b471a7b0e7 # v1
         with:
           persist-credentials: false
           ref: refs/heads/master
@@ -84,14 +84,14 @@ jobs:
     env:
       BEAM_DOCKER_BUILD: 'false'
     steps:
-      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
+      - uses: useblacksmith/checkout@2b9fe87d796feea153b455ec2f3125b471a7b0e7 # v1
         with:
           persist-credentials: false
           # CLI containers need Git objects without the host's mirror mount.
           dissociate: true
           ref: ${{ needs.validate-ref.outputs.commit || github.ref }}
       - name: Set up cached CLI builder
-        uses: useblacksmith/setup-docker-builder@19215110ab936351210feebdfa5b440b4493e184 # v2
+        uses: useblacksmith/setup-docker-builder@06dd9c83a5d541274d2e3ac67625560979275267 # v2
         with:
           cache-key: docker/cli/Dockerfile
       - name: Build CLI tooling image once
@@ -145,7 +145,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
-      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
+      - uses: useblacksmith/checkout@2b9fe87d796feea153b455ec2f3125b471a7b0e7 # v1
         with:
           persist-credentials: false
       - name: Install Rust
@@ -198,7 +198,7 @@ jobs:
       RELEASE_COMMIT: ${{ needs.validate-ref.outputs.commit }}
       BEAM_DOCKER_BUILD: 'false'
     steps:
-      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
+      - uses: useblacksmith/checkout@2b9fe87d796feea153b455ec2f3125b471a7b0e7 # v1
         with:
           persist-credentials: false
           dissociate: true
@@ -217,7 +217,7 @@ jobs:
           public_key=$(php scripts/release/cli-public-key.php derive)
           printf 'BEAM_RELEASE_PUBLIC_KEY=%s\n' "$public_key" >> "$GITHUB_ENV"
       - name: Set up cached CLI builder
-        uses: useblacksmith/setup-docker-builder@19215110ab936351210feebdfa5b440b4493e184 # v2
+        uses: useblacksmith/setup-docker-builder@06dd9c83a5d541274d2e3ac67625560979275267 # v2
         with:
           cache-key: docker/cli/Dockerfile
       - name: Build CLI tooling image once
@@ -265,7 +265,7 @@ jobs:
       RELEASE_TAG: ${{ needs.validate-ref.outputs.tag }}
       RELEASE_COMMIT: ${{ needs.validate-ref.outputs.commit }}
     steps:
-      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
+      - uses: useblacksmith/checkout@2b9fe87d796feea153b455ec2f3125b471a7b0e7 # v1
         with:
           persist-credentials: false
           ref: ${{ env.RELEASE_COMMIT }}
@@ -316,7 +316,7 @@ jobs:
     env:
       RELEASE_TAG: ${{ needs.validate-ref.outputs.tag }}
     steps:
-      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
+      - uses: useblacksmith/checkout@2b9fe87d796feea153b455ec2f3125b471a7b0e7 # v1
         with:
           persist-credentials: false
           ref: ${{ needs.validate-ref.outputs.commit }}
@@ -359,7 +359,7 @@ jobs:
       RELEASE_TAG: ${{ needs.validate-ref.outputs.tag }}
       RELEASE_COMMIT: ${{ needs.validate-ref.outputs.commit }}
     steps:
-      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
+      - uses: useblacksmith/checkout@2b9fe87d796feea153b455ec2f3125b471a7b0e7 # v1
         with:
           persist-credentials: false
           ref: ${{ env.RELEASE_COMMIT }}
@@ -397,7 +397,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     environment: release
     steps:
-      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
+      - uses: useblacksmith/checkout@2b9fe87d796feea153b455ec2f3125b471a7b0e7 # v1
         with:
           persist-credentials: false
       - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962

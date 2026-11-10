@@ -99,7 +99,7 @@ jobs:
       commit: ${{ steps.verify.outputs.commit }}
       tested-by: ${{ steps.tested.outputs.tested-by }}
     steps:
-      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
+      - uses: useblacksmith/checkout@2b9fe87d796feea153b455ec2f3125b471a7b0e7 # v1
         with:
           persist-credentials: false
           ref: refs/heads/master
@@ -127,7 +127,7 @@ jobs:
       RELEASE_TAG: ${{ needs.validate-ref.outputs.tag }}
       RELEASE_COMMIT: ${{ needs.validate-ref.outputs.commit }}
     steps:
-      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
+      - uses: useblacksmith/checkout@2b9fe87d796feea153b455ec2f3125b471a7b0e7 # v1
         with:
           persist-credentials: false
           ref: ${{ env.RELEASE_COMMIT }}
@@ -176,7 +176,7 @@ jobs:
       RELEASE_TAG: ${{ needs.validate-ref.outputs.tag }}
       RELEASE_COMMIT: ${{ needs.validate-ref.outputs.commit }}
     steps:
-      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
+      - uses: useblacksmith/checkout@2b9fe87d796feea153b455ec2f3125b471a7b0e7 # v1
         with:
           persist-credentials: false
           ref: refs/heads/master
@@ -212,7 +212,7 @@ jobs:
       WITHDRAWN: ${{ inputs.withdrawn }}
       NOTES_URL: ${{ inputs.notes_url }}
     steps:
-      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
+      - uses: useblacksmith/checkout@2b9fe87d796feea153b455ec2f3125b471a7b0e7 # v1
         with:
           persist-credentials: false
           ref: refs/heads/master
@@ -236,7 +236,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     environment: release
     steps:
-      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
+      - uses: useblacksmith/checkout@2b9fe87d796feea153b455ec2f3125b471a7b0e7 # v1
         with:
           persist-credentials: false
           ref: refs/heads/master
@@ -260,7 +260,7 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     environment: release
     steps:
-      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
+      - uses: useblacksmith/checkout@2b9fe87d796feea153b455ec2f3125b471a7b0e7 # v1
         with: {persist-credentials: false, ref: refs/heads/master}
       - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962
         with: {php-version: '8.5', extensions: sodium, coverage: none}
@@ -281,7 +281,7 @@ jobs:
       revision: ${{ steps.tags.outputs.revision }}
       advance_aliases: ${{ steps.tags.outputs.advance_aliases }}
     steps:
-      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
+      - uses: useblacksmith/checkout@2b9fe87d796feea153b455ec2f3125b471a7b0e7 # v1
         with:
           persist-credentials: false
           ref: refs/heads/master
@@ -340,13 +340,13 @@ jobs:
       IMAGE: ${{ matrix.image }}
       IMAGE_TAG: ${{ needs.docker-plan.outputs.revision }}-${{ matrix.arch }}
     steps:
-      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
+      - uses: useblacksmith/checkout@2b9fe87d796feea153b455ec2f3125b471a7b0e7 # v1
         with:
           persist-credentials: false
           dissociate: true
           ref: ${{ env.RELEASE_COMMIT }}
       - name: Set up cached production builder
-        uses: useblacksmith/setup-docker-builder@19215110ab936351210feebdfa5b440b4493e184 # v2
+        uses: useblacksmith/setup-docker-builder@06dd9c83a5d541274d2e3ac67625560979275267 # v2
         with:
           cache-key: docker/production/Dockerfile
           platforms: ${{ matrix.platform }}
@@ -406,7 +406,7 @@ jobs:
       REVISION: ${{ needs.docker-plan.outputs.revision }}
       ADVANCE_ALIASES: ${{ needs.docker-plan.outputs.advance_aliases }}
     steps:
-      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
+      - uses: useblacksmith/checkout@2b9fe87d796feea153b455ec2f3125b471a7b0e7 # v1
         with:
           persist-credentials: false
           ref: ${{ needs.validate-ref.outputs.commit }}
@@ -479,7 +479,7 @@ jobs:
       GH_REPO: ${{ github.repository }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
+      - uses: useblacksmith/checkout@2b9fe87d796feea153b455ec2f3125b471a7b0e7 # v1
         with:
           persist-credentials: false
           ref: ${{ env.RELEASE_COMMIT }}
