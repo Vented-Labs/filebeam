@@ -130,6 +130,9 @@ struct Worker {
     prepared_receives: Arc<Mutex<HashMap<String, PreparedReceive>>>,
     journal: DesktopJournal,
     next_message_id: u64,
+    next_operation_id: u64,
+    /// Failed link-management jobs already reported as a message.
+    reported_management_failures: std::collections::HashSet<JobId>,
     inbox_receiver: Option<(Control, thread::JoinHandle<()>)>,
     account_id: std::cell::Cell<u64>,
     next_device_daemon_poll: Instant,
@@ -229,6 +232,8 @@ impl Worker {
             prepared_receives: Arc::new(Mutex::new(HashMap::new())),
             journal,
             next_message_id: 0,
+            next_operation_id: 0,
+            reported_management_failures: std::collections::HashSet::new(),
             inbox_receiver: None,
             account_id: std::cell::Cell::new(0),
             next_device_daemon_poll: Instant::now(),
@@ -487,16 +492,21 @@ impl Worker {
                 self.service()?.account().verify_email_link(&link)
             }
             ClientCommand::SetInboxEnabled(enabled) => {
-                self.service()?.account().set_inbox_enabled(enabled)
+                self.service()?.account().set_inbox_enabled(enabled)?;
+                lock(&self.snapshot).account.inbox_enabled = enabled;
+                Ok(())
             }
-            ClientCommand::SetNotificationChannel(channel) => self
-                .service()?
-                .account()
-                .set_notification_channel(if channel == NotificationChannel::Mail {
-                    "mail"
-                } else {
-                    "database"
-                }),
+            ClientCommand::SetNotificationChannel(channel) => {
+                self.service()?.account().set_notification_channel(
+                    if channel == NotificationChannel::Mail {
+                        "mail"
+                    } else {
+                        "database"
+                    },
+                )?;
+                lock(&self.snapshot).account.notification_channel = Some(channel);
+                Ok(())
+            }
             ClientCommand::DeleteInboxItem { id } => {
                 self.service()?.account().delete_inbox_item(&id)
             }
@@ -523,11 +533,13 @@ impl Worker {
             ClientCommand::DeleteAccount {
                 current_password,
                 confirmation,
-            } => self
-                .service()?
-                .account()
-                .delete_account(&Zeroizing::new(current_password), &confirmation)
-                .map(|_| ()),
+            } => {
+                self.service()?
+                    .account()
+                    .delete_account(&Zeroizing::new(current_password), &confirmation)?;
+                // The account is gone; nothing saved for it may outlive it.
+                self.forget_session()
+            }
             ClientCommand::Shutdown { wait_ms } => {
                 if let Some((control, _)) = self.inbox_receiver.take() {
                     control.cancel();
@@ -1919,15 +1931,22 @@ impl Worker {
     }
     fn refresh_inbox(&mut self) -> Result<()> {
         let inbox = self.service()?.account().inbox()?;
-        lock(&self.snapshot).inbox = inbox
+        let mut snapshot = lock(&self.snapshot);
+        // A delivery's parts never change, so an inspected one keeps them.
+        let mut inspected: HashMap<String, Vec<String>> = snapshot
+            .inbox
+            .drain(..)
+            .map(|item| (item.id, item.item_ids))
+            .collect();
+        snapshot.inbox = inbox
             .into_iter()
             .map(|item| InboxItem {
+                item_ids: inspected.remove(&item.id).unwrap_or_default(),
                 id: item.id,
                 ciphertext_bytes: item.ciphertext_bytes,
                 item_count: item.item_count,
                 completed_at: item.completed_at,
                 expires_at: item.expires_at,
-                item_ids: Vec::new(),
             })
             .collect();
         Ok(())
@@ -2064,6 +2083,9 @@ impl Worker {
         self.service = Some(service);
         self.set_account(session);
         self.refresh_policy();
+        // Without this the account reads as having no receiving key until the
+        // next full refresh.
+        let _ = self.refresh_key_custody();
         let _ = self.refresh_contacts();
         self.start_inbox_receiver()?;
         Ok(())
@@ -2085,6 +2107,8 @@ impl Worker {
             &email,
             &Zeroizing::new(password),
         )?;
+        // A new account stays signed in across restarts, as a sign-in does.
+        self.state.save_session(&service)?;
         self.service = Some(service);
         self.set_account(session);
         self.refresh_policy();
@@ -2127,13 +2151,27 @@ impl Worker {
         if let Some((control, _)) = self.inbox_receiver.take() {
             control.cancel();
         }
-        self.service()?.account().logout()?;
+        match self.service()?.account().logout() {
+            Ok(()) => {}
+            // The server already ended this session; finish signing out here.
+            Err(error) if is_auth_error(&error) => {}
+            Err(error) => return Err(error),
+        }
+        self.forget_session()
+    }
+    /// Drops the saved session and everything shown for the signed-in account.
+    fn forget_session(&mut self) -> Result<()> {
+        self.account_id.set(0);
+        if let Some((control, _)) = self.inbox_receiver.take() {
+            control.cancel();
+        }
         self.state.clear_session()?;
         self.service = None;
         let mut snapshot = lock(&self.snapshot);
         snapshot.history = HistorySnapshot::default();
         snapshot.account = AccountSnapshot::default();
         snapshot.contacts = None;
+        snapshot.inbox.clear();
         snapshot.auto_receiving = false;
         snapshot.staged_inbox.clear();
         Ok(())
@@ -2141,9 +2179,17 @@ impl Worker {
     fn set_account(&self, session: filebeam_client_core::services::AccountSession) {
         self.account_id.set(session.id);
         let mut snapshot = lock(&self.snapshot);
-        if snapshot.account.email.as_deref() != Some(session.email.as_str()) {
+        let same_account = snapshot.account.email.as_deref() == Some(session.email.as_str());
+        if !same_account {
             snapshot.history = HistorySnapshot::default();
         }
+        // The key state is refreshed on its own; refreshing a session must not
+        // briefly report that the account has no key.
+        let key_custody = if same_account {
+            std::mem::take(&mut snapshot.account.key_custody)
+        } else {
+            KeyCustody::Unknown
+        };
         snapshot.account = AccountSnapshot {
             authenticated: true,
             email: Some(session.email),
@@ -2156,7 +2202,7 @@ impl Worker {
             } else {
                 NotificationChannel::Database
             }),
-            key_custody: KeyCustody::Unknown,
+            key_custody,
         };
     }
     fn publish(&mut self) {
@@ -2172,7 +2218,25 @@ impl Worker {
         let mut jobs = Vec::new();
         let mut prompts = Vec::new();
         let mut results = Vec::new();
+        let mut management_failures = Vec::new();
+        self.reported_management_failures
+            .retain(|id| active_job_ids.contains(id));
         for mut entry in snapshots {
+            // Revoking a link or ending a live session runs as its own job, which
+            // no transfer row represents. Its failure is reported once instead.
+            if let Some(operation) = management_operation(entry.kind)
+                && entry.job.state == filebeam_client_core::JobState::Failed
+                && self.reported_management_failures.insert(entry.id)
+            {
+                management_failures.push((
+                    operation,
+                    entry
+                        .job
+                        .error
+                        .clone()
+                        .unwrap_or_else(|| "the request did not complete".into()),
+                ));
+            }
             // A preparation and its download can share a checkpoint. Actions and
             // retained selections address the process-owned job, not that record.
             let id = entry.id.0.to_string();
@@ -2230,7 +2294,12 @@ impl Worker {
                 .prepared_receive_titles
                 .get(&entry.id)
                 .map(String::as_str);
+            // An inbox download runs as a service job but is a received transfer.
+            let received = self.receive_roots.contains_key(&entry.id);
             let mut job = map_job(id, entry, title);
+            if received && job.direction == TransferDirection::Service {
+                job.direction = TransferDirection::Receive;
+            }
             job.separate_key = separate_key;
             job.cli_command = job.share_url.as_deref().and_then(|link| {
                 filebeam_client_core::link_presentation::format_download_with_cli(link).ok()
@@ -2244,6 +2313,14 @@ impl Worker {
             jobs.push(job);
         }
         let mut snapshot = lock(&self.snapshot);
+        for (operation, detail) in management_failures {
+            record_message(
+                &mut snapshot,
+                &mut self.next_message_id,
+                operation,
+                anyhow::anyhow!(detail),
+            );
+        }
         jobs.extend(
             snapshot
                 .device_directory
@@ -2307,13 +2384,27 @@ impl Worker {
         let mut snapshot = lock(&self.snapshot);
         record_message(&mut snapshot, &mut self.next_message_id, operation, error);
     }
-    fn complete(&self, operation: &str) {
+    fn complete(&mut self, operation: &str) {
         if operation != "command" {
-            lock(&self.snapshot).operations.push(OperationStatus {
+            self.next_operation_id += 1;
+            let mut snapshot = lock(&self.snapshot);
+            snapshot.operations.push(OperationStatus {
+                id: self.next_operation_id,
                 operation: operation.into(),
-                detail: "completed".into(),
             });
+            if snapshot.operations.len() > MESSAGE_HISTORY_CAPACITY {
+                snapshot.operations.remove(0);
+            }
         }
+    }
+}
+
+/// The operation name a failed link-management job is reported under.
+fn management_operation(kind: JobKind) -> Option<&'static str> {
+    match kind {
+        JobKind::Revoke => Some("revoke link"),
+        JobKind::EndLive => Some("end live session"),
+        _ => None,
     }
 }
 
@@ -2324,13 +2415,23 @@ fn record_message(
     error: anyhow::Error,
 ) {
     *next_message_id += 1;
+    // A request that never reached the instance says so, whatever its outermost
+    // context happens to be called.
+    let error = if is_transport_failure(&error) {
+        ClientError {
+            code: ClientErrorCode::Network,
+            detail: UNREACHABLE.into(),
+        }
+    } else {
+        ClientError {
+            code: classify(&error),
+            detail: sanitize(&error),
+        }
+    };
     snapshot.messages.push(ClientMessage {
         id: *next_message_id,
         operation: operation.into(),
-        error: ClientError {
-            code: classify(&error),
-            detail: sanitize(&error),
-        },
+        error,
     });
     if snapshot.messages.len() > MESSAGE_HISTORY_CAPACITY {
         snapshot.messages.remove(0);
@@ -2632,6 +2733,17 @@ fn export_verified(paths: &[String], private_root: &Path, destination: &Path) ->
     let _ = fs::remove_dir_all(&staging);
     result
 }
+/// What a failed request reports when it could not be sent at all.
+const UNREACHABLE: &str = "could not connect to the instance";
+
+/// Whether any cause is the HTTP client failing to send, as opposed to the
+/// instance answering with an error.
+fn is_transport_failure(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .any(|cause| cause.to_string().contains("error sending request"))
+}
+
 fn classify(error: &anyhow::Error) -> ClientErrorCode {
     let text = error.to_string().to_ascii_lowercase();
     if text.contains("queue") || text.contains("scheduler") || text.contains("busy") {
@@ -2806,6 +2918,45 @@ mod tests {
             sanitize(&anyhow::anyhow!("password abc")),
             "operation failed; sensitive detail was withheld"
         );
+    }
+    #[test]
+    fn a_request_that_was_never_sent_is_reported_as_unreachable() {
+        let mut snapshot = DesktopSnapshot::default();
+        let mut next_id = 0;
+        let unsent = anyhow::anyhow!("error sending request for url (https://example.test/x)")
+            .context("native account request");
+        record_message(&mut snapshot, &mut next_id, "refresh", unsent);
+        record_message(
+            &mut snapshot,
+            &mut next_id,
+            "refresh",
+            anyhow::anyhow!("native account request returned 503"),
+        );
+        assert!(snapshot.messages[0].error.code == ClientErrorCode::Network);
+        assert_eq!(snapshot.messages[0].error.detail, UNREACHABLE);
+        assert_eq!(
+            snapshot.messages[1].error.detail,
+            "native account request returned 503"
+        );
+    }
+    #[test]
+    fn only_link_management_jobs_report_their_own_failure() {
+        assert_eq!(management_operation(JobKind::Revoke), Some("revoke link"));
+        assert_eq!(
+            management_operation(JobKind::EndLive),
+            Some("end live session")
+        );
+        for kind in [
+            JobKind::Upload,
+            JobKind::Download,
+            JobKind::Resume,
+            JobKind::Service,
+            JobKind::Note,
+            JobKind::LiveNote,
+            JobKind::Device,
+        ] {
+            assert_eq!(management_operation(kind), None);
+        }
     }
     #[test]
     fn message_events_are_monotonic_and_history_is_bounded() {

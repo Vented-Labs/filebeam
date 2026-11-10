@@ -1,33 +1,42 @@
+//! Transfers on this device: what is moving, waiting and done, with the link and
+//! actions for the selected one. All transfer work stays in the service worker.
+
 use std::{rc::Rc, sync::Arc, time::Duration};
 
-use gpui::prelude::FluentBuilder;
 use gpui::{
-    AppContext, ClipboardItem, Context, Entity, InteractiveElement, IntoElement, ParentElement,
-    PathPromptOptions, Render, SharedString, StatefulInteractiveElement, Styled, Subscription,
-    Task, Window, actions, div, px, size,
+    AnyElement, AppContext, ClipboardItem, Context, Entity, InteractiveElement, IntoElement,
+    ParentElement, PathPromptOptions, Render, SharedString, StatefulInteractiveElement, Styled,
+    Subscription, Window, actions, div, prelude::FluentBuilder, px, size,
 };
 use gpui_component::{
-    Disableable, Icon, Selectable, VirtualListScrollHandle, WindowExt,
-    button::{Button, ButtonVariants},
-    input::{Input, InputEvent, InputState},
+    VirtualListScrollHandle,
+    input::{InputEvent, InputState},
     menu::{ContextMenuExt, PopupMenuItem},
     scroll::ScrollableElement,
     v_virtual_list,
 };
 
 use crate::{
+    assets::icon,
     client::DesktopClient,
-    model::{ClientCommand, DesktopSnapshot, JobSnapshot, TransferState, VerifiedResult},
-    theme::{Palette, palette_for},
+    live::Live,
+    model::{
+        ClientCommand, DesktopSnapshot, JobSnapshot, TransferDirection, TransferState,
+        VerifiedResult,
+    },
+    theme::{self, Palette, tokens::geometry},
+    ui::{
+        Hugged, MotionExt, TextExt, Tone, button, dialog, feedback,
+        field::{self, copy_field},
+        format, motion, page,
+        progress::{percent_label, progress},
+        row, surface, text,
+    },
 };
-use gpui_component::theme::Theme;
 
-const ROW_HEIGHT: f32 = 82.;
-const ROW_PADDING: f32 = 16.;
-const ROW_GAP: f32 = 12.;
-const ROW_ICON_WIDTH: f32 = 34.;
-const DETAIL_WIDTH: f32 = 330.;
-const ACTION_WIDTH: f32 = 68.;
+const ROW_HEIGHT: f32 = row::Fit::PANEL.slot_height();
+const DETAIL_WIDTH: f32 = 372.;
+const DETAIL_WIDTH_COMPACT: f32 = 316.;
 
 actions!(
     transfers_panel,
@@ -40,20 +49,74 @@ actions!(
     ]
 );
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+/// Registers the selected-transfer shortcuts. Call once per application.
+pub fn bind_keys(cx: &mut gpui::App) {
+    let key = |suffix: &str| format!("{}-shift-{suffix}", crate::shell::modifier());
+    cx.bind_keys([
+        gpui::KeyBinding::new(&key("p"), PauseSelected, None),
+        gpui::KeyBinding::new(&key("r"), ResumeSelected, None),
+        gpui::KeyBinding::new(&key("e"), EndLiveSelected, None),
+        gpui::KeyBinding::new(&key("v"), RevokeSelected, None),
+        gpui::KeyBinding::new(&key("d"), DiscardSelected, None),
+    ]);
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Filter {
     All,
     Active,
     Completed,
+    Failed,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+impl Filter {
+    const ALL: [Self; 4] = [Self::All, Self::Active, Self::Completed, Self::Failed];
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::Active => "In progress",
+            Self::Completed => "Completed",
+            Self::Failed => "Needs attention",
+        }
+    }
+
+    fn matches(self, job: &JobSnapshot) -> bool {
+        match self {
+            Self::All => true,
+            Self::Active => !matches!(job.state, TransferState::Complete | TransferState::Failed),
+            Self::Completed => job.state == TransferState::Complete,
+            Self::Failed => job.state == TransferState::Failed,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Sort {
+    Recent,
     Name,
     Progress,
 }
 
-#[derive(Clone, Copy)]
+impl Sort {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Recent => "Newest first",
+            Self::Name => "By name",
+            Self::Progress => "By progress",
+        }
+    }
+
+    const fn next(self) -> Self {
+        match self {
+            Self::Recent => Self::Name,
+            Self::Name => Self::Progress,
+            Self::Progress => Self::Recent,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum JobAction {
     Pause,
     Resume,
@@ -63,145 +126,249 @@ enum JobAction {
     Export,
 }
 
-/// A retained transfer workspace. It owns UI state only; all transfer work stays in DesktopClient.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Copied {
+    Link,
+    Key,
+    Command,
+    Id,
+}
+
+/// A retained transfer workspace. It owns presentation state only.
 pub struct TransfersPanel {
     client: Arc<DesktopClient>,
+    live: Entity<Live>,
     selected_id: Option<String>,
     filter: Filter,
     sort: Sort,
     search: Entity<InputState>,
     rows: Vec<JobSnapshot>,
-    snapshot: DesktopSnapshot,
-    notice: Option<String>,
-    receipt_revision: u64,
+    copied: Option<Copied>,
+    copy_generation: u64,
     scroll_handle: VirtualListScrollHandle,
     _subscriptions: Vec<Subscription>,
-    _refresh: Task<()>,
+}
+
+/// Runtime job identifiers are assigned in order, so a larger one is newer.
+fn recency(job: &JobSnapshot) -> u64 {
+    job.id.parse::<u64>().unwrap_or(0)
+}
+
+fn fraction(job: &JobSnapshot) -> Option<f32> {
+    job.progress
+        .total_bytes
+        .filter(|total| *total > 0)
+        .map(|total| (job.progress.completed_bytes as f32 / total as f32).clamp(0., 1.))
+}
+
+fn transferred(job: &JobSnapshot) -> String {
+    match job.progress.total_bytes {
+        Some(total) if job.state == TransferState::Complete => format::bytes(total),
+        Some(total) => format!(
+            "{} of {}",
+            format::bytes(job.progress.completed_bytes),
+            format::bytes(total)
+        ),
+        None => format::bytes(job.progress.completed_bytes),
+    }
+}
+
+fn direction_label(job: &JobSnapshot) -> &'static str {
+    let finished = job.state == TransferState::Complete;
+    match job.direction {
+        TransferDirection::Send if finished => "Sent",
+        TransferDirection::Send => "Sending",
+        TransferDirection::Receive if finished => "Received",
+        TransferDirection::Receive => "Receiving",
+        TransferDirection::Note => "Note",
+        TransferDirection::Service => "Service",
+    }
+}
+
+/// The whole size when it is known, otherwise what has moved so far.
+fn size_label(job: &JobSnapshot) -> String {
+    format::bytes(
+        job.progress
+            .total_bytes
+            .unwrap_or(job.progress.completed_bytes),
+    )
+}
+
+fn status(job: &JobSnapshot) -> (String, Tone) {
+    match job.state {
+        TransferState::Complete if job.capabilities.can_export => {
+            ("Verified".into(), Tone::Success)
+        }
+        TransferState::Complete => ("Complete".into(), Tone::Success),
+        TransferState::Failed => ("Needs attention".into(), Tone::Danger),
+        TransferState::Paused => ("Paused".into(), Tone::Warning),
+        TransferState::PauseRequested => ("Pausing".into(), Tone::Warning),
+        TransferState::Running if job.progress.phase.is_empty() => {
+            ("In progress".into(), Tone::Accent)
+        }
+        TransferState::Running => (job.progress.phase.clone(), Tone::Accent),
+    }
+}
+
+fn display_name(job: &JobSnapshot) -> String {
+    if job.progress.name.is_empty() {
+        match job.direction {
+            TransferDirection::Note => "Encrypted note".into(),
+            _ => "Transfer".into(),
+        }
+    } else {
+        job.progress.name.clone()
+    }
+}
+
+fn tile_icon(job: &JobSnapshot) -> &'static str {
+    if job.direction == TransferDirection::Note {
+        "note"
+    } else {
+        format::file_icon(&job.progress.name)
+    }
+}
+
+/// The one action a row offers without opening its details.
+fn quick_action(job: &JobSnapshot) -> Option<(&'static str, JobAction)> {
+    let can = &job.capabilities;
+    if can.can_resume {
+        Some(("Resume", JobAction::Resume))
+    } else if can.can_pause {
+        Some(("Pause", JobAction::Pause))
+    } else if can.can_export {
+        Some(("Save", JobAction::Export))
+    } else {
+        None
+    }
+}
+
+fn confirmation(action: JobAction) -> Option<(&'static str, &'static str, &'static str)> {
+    match action {
+        JobAction::EndLive => Some((
+            "End this live session?",
+            "The connection closes for both people. Anything not yet received stops.",
+            "End session",
+        )),
+        JobAction::Revoke => Some((
+            "Revoke this link?",
+            "The link stops working and the encrypted content is removed from the server.",
+            "Revoke link",
+        )),
+        JobAction::Discard => Some((
+            "Remove from this device?",
+            "The local record and any privately held copy are removed. A shared link keeps \
+             working until it expires or is revoked.",
+            "Remove",
+        )),
+        JobAction::Pause | JobAction::Resume | JobAction::Export => None,
+    }
 }
 
 impl TransfersPanel {
-    pub fn new(
-        client: Arc<DesktopClient>,
-        _: std::path::PathBuf,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Self {
+    pub fn new(live: Entity<Live>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let client = live.read(cx).client().clone();
         let search = cx.new(|cx| InputState::new(window, cx).placeholder("Search transfers"));
-        cx.bind_keys([
-            gpui::KeyBinding::new("ctrl-shift-p", PauseSelected, None),
-            gpui::KeyBinding::new("ctrl-shift-r", ResumeSelected, None),
-            gpui::KeyBinding::new("ctrl-shift-e", EndLiveSelected, None),
-            gpui::KeyBinding::new("ctrl-shift-v", RevokeSelected, None),
-            gpui::KeyBinding::new("ctrl-shift-d", DiscardSelected, None),
-        ]);
-        let client_for_refresh = client.clone();
-        let refresh = cx.spawn(async move |this, cx| {
-            let mut previous = String::new();
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(250))
-                    .await;
-                let snapshot = client_for_refresh.snapshot();
-                let fingerprint = visible_fingerprint(&snapshot);
-                if fingerprint != previous {
-                    previous = fingerprint;
-                    if this
-                        .update(cx, |this, cx| {
-                            this.snapshot = snapshot;
-                            this.rebuild_rows(cx);
-                        })
-                        .is_err()
-                    {
-                        return;
-                    }
-                }
-            }
-        });
-        let mut panel = Self {
-            snapshot: client.snapshot(),
-            client,
-            selected_id: None,
-            filter: Filter::All,
-            sort: Sort::Name,
-            search: search.clone(),
-            rows: Vec::new(),
-            notice: None,
-            receipt_revision: 0,
-            scroll_handle: VirtualListScrollHandle::new(),
-            _subscriptions: Vec::new(),
-            _refresh: refresh,
-        };
-        panel.rebuild_rows(cx);
-        panel
-            ._subscriptions
-            .push(cx.subscribe(&search, |this, _, event: &InputEvent, cx| {
+        let subscriptions = vec![
+            cx.subscribe(&search, |this, _, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Change) {
                     this.rebuild_rows(cx);
                 }
-            }));
+            }),
+            cx.observe(&live, |this, _, cx| this.rebuild_rows(cx)),
+        ];
+        let mut panel = Self {
+            client,
+            live,
+            selected_id: None,
+            filter: Filter::All,
+            sort: Sort::Recent,
+            search,
+            rows: Vec::new(),
+            copied: None,
+            copy_generation: 0,
+            scroll_handle: VirtualListScrollHandle::new(),
+            _subscriptions: subscriptions,
+        };
+        panel.rebuild_rows(cx);
         panel
     }
 
     pub fn select_job(&mut self, id: String, cx: &mut Context<Self>) {
-        if self.snapshot.jobs.iter().any(|job| job.id == id) {
+        if self.snapshot(cx).jobs.iter().any(|job| job.id == id) {
+            if self.selected_id.as_deref() != Some(&id) {
+                self.copied = None;
+            }
             self.selected_id = Some(id);
             cx.notify();
         }
     }
 
+    fn snapshot(&self, cx: &Context<Self>) -> Arc<DesktopSnapshot> {
+        self.live.read(cx).snapshot()
+    }
+
     fn rebuild_rows(&mut self, cx: &mut Context<Self>) {
-        let query = self.search.read(cx).value().to_lowercase();
-        self.rows = self.snapshot.jobs.clone();
-        self.rows.retain(|job| {
-            matches!(self.filter, Filter::All)
-                || matches!(self.filter, Filter::Active)
-                    && !matches!(job.state, TransferState::Complete)
-                || matches!(self.filter, Filter::Completed)
-                    && matches!(job.state, TransferState::Complete)
-        });
-        self.rows.retain(|job| {
-            query.is_empty()
-                || job.id.to_lowercase().contains(&query)
-                || job.progress.name.to_lowercase().contains(&query)
-        });
-        self.rows.sort_by(|a, b| match self.sort {
-            Sort::Name => a
-                .progress
-                .name
-                .cmp(&b.progress.name)
-                .then_with(|| a.id.cmp(&b.id)),
-            Sort::Progress => a
-                .progress
-                .completed_bytes
-                .cmp(&b.progress.completed_bytes)
-                .then_with(|| a.id.cmp(&b.id)),
-        });
-        // Selection is keyed by stable job ID and is intentionally not cleared by filters.
+        let snapshot = self.snapshot(cx);
+        let query = self.search.read(cx).value().trim().to_lowercase();
+        self.rows = snapshot
+            .jobs
+            .iter()
+            .filter(|job| job.is_transfer() && self.filter.matches(job))
+            .filter(|job| {
+                query.is_empty()
+                    || job.id.to_lowercase().contains(&query)
+                    || job.progress.name.to_lowercase().contains(&query)
+            })
+            .cloned()
+            .collect();
+        match self.sort {
+            // Stable, so jobs without a numeric identifier keep the service's order.
+            Sort::Recent => self.rows.sort_by_key(|job| std::cmp::Reverse(recency(job))),
+            Sort::Name => self.rows.sort_by(|a, b| {
+                a.progress
+                    .name
+                    .to_lowercase()
+                    .cmp(&b.progress.name.to_lowercase())
+                    .then_with(|| a.id.cmp(&b.id))
+            }),
+            Sort::Progress => self.rows.sort_by(|a, b| {
+                fraction(b)
+                    .unwrap_or(0.)
+                    .total_cmp(&fraction(a).unwrap_or(0.))
+                    .then_with(|| a.id.cmp(&b.id))
+            }),
+        }
+        // Selection is keyed by job and survives filtering, but not removal.
+        if let Some(id) = &self.selected_id
+            && !snapshot.jobs.iter().any(|job| &job.id == id)
+        {
+            self.selected_id = None;
+        }
         cx.notify();
     }
 
+    fn set_filter(&mut self, filter: Filter, cx: &mut Context<Self>) {
+        self.filter = filter;
+        self.rebuild_rows(cx);
+    }
+
     fn dispatch(&mut self, action: JobAction, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(job) = self.selected_job().cloned() else {
+        let Some(id) = self.selected_id.clone() else {
             return;
         };
-        if requires_confirmation(action) {
-            let entity = cx.entity();
-            window.open_dialog(cx, move |dialog, _, _| {
-                let entity = entity.clone();
-                let job_id = job.id.clone();
-                dialog
-                    .title(confirmation_title(action))
-                    .child(confirmation_copy(action))
-                    .on_ok(move |_, window, cx| {
-                        entity.update(cx, |this, cx| {
-                            this.perform(action, job_id.clone(), window, cx)
-                        });
-                        true
-                    })
+        let Some((title, detail, confirm)) = confirmation(action) else {
+            self.perform(action, id, window, cx);
+            return;
+        };
+        let entity = cx.entity();
+        dialog::prompt(title)
+            .body(detail)
+            .confirm(confirm)
+            .destructive()
+            .open(window, cx, move |window, cx| {
+                entity.update(cx, |this, cx| this.perform(action, id.clone(), window, cx));
             });
-        } else {
-            self.perform(action, job.id, window, cx);
-        }
     }
 
     fn pause_selected(&mut self, _: &PauseSelected, window: &mut Window, cx: &mut Context<Self>) {
@@ -237,37 +404,36 @@ impl TransfersPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if matches!(action, JobAction::Export) {
-            self.export(id, cx);
-            return;
-        }
-        let command = match action {
-            JobAction::Pause => ClientCommand::Pause { id },
-            JobAction::Resume => ClientCommand::Resume { id },
-            JobAction::EndLive => ClientCommand::EndLive { id },
-            JobAction::Revoke => ClientCommand::Revoke { id },
-            JobAction::Discard => ClientCommand::Discard { id },
-            JobAction::Export => unreachable!(),
-        };
-        let operation = command.operation();
-        match self.client.dispatch(command) {
-            Ok(()) => self.notice = Some("Action requested.".into()),
-            Err(error) => {
-                crate::toast::error(format!("{operation} failed"), error.to_string(), window, cx);
-                self.notice = None;
+        let (command, failure) = match action {
+            JobAction::Export => {
+                self.export(id, window, cx);
+                return;
             }
+            JobAction::Pause => (ClientCommand::Pause { id }, "Could not pause"),
+            JobAction::Resume => (ClientCommand::Resume { id }, "Could not resume"),
+            JobAction::EndLive => (ClientCommand::EndLive { id }, "Could not end the session"),
+            JobAction::Revoke => (ClientCommand::Revoke { id }, "Could not revoke the link"),
+            JobAction::Discard => (ClientCommand::Discard { id }, "Could not remove it"),
+        };
+        if let Err(error) = self.client.dispatch(command) {
+            crate::toast::error(
+                failure,
+                format::readable_error(&error.to_string()),
+                window,
+                cx,
+            );
         }
         cx.notify();
     }
 
-    fn export(&mut self, id: String, cx: &mut Context<Self>) {
+    fn export(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
         let receiver = cx.prompt_for_paths(PathPromptOptions {
             files: false,
             directories: true,
             multiple: false,
-            prompt: Some("Choose export folder".into()),
+            prompt: Some("Save here".into()),
         });
-        cx.spawn(async move |this, cx| {
+        cx.spawn_in(window, async move |this, cx| {
             let Ok(Ok(Some(paths))) = receiver.await else {
                 return;
             };
@@ -275,20 +441,16 @@ impl TransfersPanel {
                 return;
             };
             let _ = this.update_in(cx, |this, window, cx| {
-                match this.client.dispatch(ClientCommand::ExportVerified {
+                if let Err(error) = this.client.dispatch(ClientCommand::ExportVerified {
                     transfer_id: id,
                     destination,
                 }) {
-                    Ok(()) => this.notice = Some("Verified export submitted.".into()),
-                    Err(error) => {
-                        this.notice = None;
-                        crate::toast::error(
-                            "Export verified failed",
-                            error.to_string(),
-                            window,
-                            cx,
-                        );
-                    }
+                    crate::toast::error(
+                        "Could not save",
+                        format::readable_error(&error.to_string()),
+                        window,
+                        cx,
+                    );
                 }
                 cx.notify();
             });
@@ -296,59 +458,18 @@ impl TransfersPanel {
         .detach();
     }
 
-    fn selected_job(&self) -> Option<&JobSnapshot> {
-        self.selected_id
-            .as_ref()
-            .and_then(|id| self.snapshot.jobs.iter().find(|job| &job.id == id))
-    }
-
-    fn copy_receipt(&mut self, cx: &mut Context<Self>) {
-        let Some(value) = self.selected_job().and_then(|job| job.share_url.clone()) else {
-            return;
-        };
-        self.copy_value(value, "Receipt", cx);
-    }
-
-    fn copy_key(&mut self, cx: &mut Context<Self>) {
-        let Some(value) = self.selected_job().and_then(|job| job.separate_key.clone()) else {
-            return;
-        };
-        self.copy_value(value, "Key", cx);
-    }
-
-    fn copy_cli(&mut self, cx: &mut Context<Self>) {
-        let Some(value) = self.selected_job().and_then(|job| job.cli_command.clone()) else {
-            return;
-        };
-        self.copy_value(value, "CLI command", cx);
-    }
-
-    fn copy_value(&mut self, value: String, label: &str, cx: &mut Context<Self>) {
-        cx.write_to_clipboard(ClipboardItem::new_string(value.clone()));
-        self.notice = match cx
-            .read_from_clipboard()
-            .and_then(|item| item.text())
-            .filter(|text| text == &value)
-        {
-            Some(_) => Some(format!("{label} copied to the clipboard.")),
-            None => Some(format!("The system clipboard did not confirm the {label}.")),
-        };
-        self.receipt_revision = self.receipt_revision.wrapping_add(1);
-        let revision = self.receipt_revision;
-        let selected = self.selected_id.clone();
+    fn copy(&mut self, value: String, kind: Copied, cx: &mut Context<Self>) {
+        cx.write_to_clipboard(ClipboardItem::new_string(value));
+        self.copied = Some(kind);
+        self.copy_generation = self.copy_generation.wrapping_add(1);
+        let generation = self.copy_generation;
         cx.spawn(async move |this, cx| {
             cx.background_executor()
-                .timer(Duration::from_millis(2200))
+                .timer(Duration::from_millis(1800))
                 .await;
             let _ = this.update(cx, |this, cx| {
-                let still_selected = this.selected_id == selected
-                    && this.selected_job().is_some_and(|job| {
-                        job.share_url.as_deref() == Some(&value)
-                            || job.separate_key.as_deref() == Some(&value)
-                            || job.cli_command.as_deref() == Some(&value)
-                    });
-                if this.receipt_revision == revision && still_selected {
-                    this.notice = None;
+                if this.copy_generation == generation {
+                    this.copied = None;
                     cx.notify();
                 }
             });
@@ -360,727 +481,846 @@ impl TransfersPanel {
 
 impl Render for TransfersPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let p = palette_for(Theme::global(cx).mode);
-        let vertical_padding = workspace_vertical_padding(window);
-        // Keep the detail pane at compact desktop widths by folding progress into
-        // the transfer column rather than allowing fixed columns to overflow.
-        let compact = window.viewport_size().width < px(1100.);
-        let selected = self.selected_job().cloned();
+        let p = theme::palette(cx);
+        let snapshot = self.snapshot(cx);
+        let compact = page::is_compact(window);
+        let listed: Vec<_> = snapshot
+            .jobs
+            .iter()
+            .filter(|job| job.is_transfer())
+            .collect();
+        let selected = self
+            .selected_id
+            .as_ref()
+            .and_then(|id| snapshot.jobs.iter().find(|job| &job.id == id))
+            .cloned();
         let verified = selected.as_ref().and_then(|job| {
-            self.snapshot
+            snapshot
                 .verified_results
                 .iter()
                 .find(|result| result.transfer_id == job.id)
                 .cloned()
         });
-        let sizes = Rc::new(vec![size(px(1.), px(ROW_HEIGHT)); self.rows.len()]);
-        div()
-            .size_full()
-            .min_h_0()
-            .flex()
-            .flex_col()
-            .px(px(if compact { 21. } else { 36. }))
-            .child(
-                div()
+        let filtering = self.filter != Filter::All || !self.search.read(cx).value().is_empty();
+        let header_entrance = motion::entrance("transfers-toolbar", 1, window, cx);
+        let body_entrance = motion::entrance("transfers-body", 2, window, cx);
+
+        let chips: Vec<_> = Filter::ALL
+            .into_iter()
+            .filter_map(|filter| {
+                let count = listed.iter().filter(|job| filter.matches(job)).count();
+                // "Needs attention" only appears when something does.
+                (filter != Filter::Failed || count > 0).then(|| {
+                    let id = SharedString::from(format!("transfer-filter-{}", filter.label()));
+                    if self.filter == filter {
+                        button::tonal(id)
+                    } else {
+                        button::ghost(id)
+                    }
+                    .small()
+                    .label(format!("{}  {count}", filter.label()))
+                    .on_click(cx.listener(move |this, _, _, cx| this.set_filter(filter, cx)))
+                })
+            })
+            .collect();
+
+        let list: AnyElement = if self.rows.is_empty() {
+            let (title, body) = if filtering {
+                ("No transfers match", "Try a different filter or search.")
+            } else {
+                (
+                    "Nothing here yet",
+                    "Transfers you send and receive on this device appear here.",
+                )
+            };
+            let reset = filtering.then(|| {
+                button::secondary("transfers-clear-filters")
+                    .label("Show all transfers")
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.search
+                            .update(cx, |input, cx| input.set_value("", window, cx));
+                        this.set_filter(Filter::All, cx);
+                    }))
+                    .into_any_element()
+            });
+            div()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(feedback::empty_state("transfers", title, body).action(reset))
+                .into_any_element()
+        } else {
+            let sizes = Rc::new(vec![size(px(1.), px(ROW_HEIGHT)); self.rows.len()]);
+            div()
+                .size_full()
+                .min_h_0()
+                .relative()
+                .child(
+                    v_virtual_list(
+                        cx.entity(),
+                        "transfer-rows",
+                        sizes,
+                        move |this, range, _, cx| {
+                            range
+                                .filter_map(|index| this.rows.get(index).cloned())
+                                .map(|job| this.row(job, p, cx))
+                                .collect()
+                        },
+                    )
                     .size_full()
-                    .min_h_0()
-                    .max_w(px(crate::theme::tokens::geometry::CONTENT_MAX))
-                    .mx_auto()
-                    .flex()
-                    .flex_col()
-                    .pt(px(vertical_padding))
-                    .pb(px(vertical_padding))
-                    .gap(px(crate::views::page::HEADER_GAP))
-                    .child(crate::views::page::heading(
+                    .hugged()
+                    .track_scroll(&self.scroll_handle),
+                )
+                .vertical_scrollbar(&self.scroll_handle)
+                .into_any_element()
+        };
+
+        let detail = self.detail(selected, verified, p, window, cx);
+        let header = page::header(
+            p,
+            "Transfers",
+            "Running, paused and finished transfers on this device.",
+            window,
+            cx,
+        );
+        page::fixed(
+            window,
+            geometry::CONTENT_MAX,
+            div()
+                .size_full()
+                .min_h_0()
+                .flex()
+                .flex_col()
+                .gap(px(16.))
+                .child(header)
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.))
+                        .entering(header_entrance)
+                        .children(chips)
+                        .child(div().flex_1())
+                        .child(
+                            div()
+                                .w(px(if compact { 180. } else { 240. }))
+                                .flex_none()
+                                .child(
+                                    field::input(p, &self.search)
+                                        .id("transfer-search")
+                                        .prefix(
+                                            icon("search").size(px(15.)).text_color(p.text_subtle),
+                                        )
+                                        .cleanable(true),
+                                ),
+                        )
+                        .child(
+                            button::secondary("sort-transfers")
+                                .icon("sort")
+                                .label(self.sort.label())
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.sort = this.sort.next();
+                                    this.rebuild_rows(cx);
+                                })),
+                        ),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_h_0()
+                        .flex()
+                        .gap(px(16.))
+                        .entering(body_entrance)
+                        .child(
+                            surface::panel(p)
+                                .flex_1()
+                                .min_w_0()
+                                .min_h_0()
+                                .overflow_hidden()
+                                .child(list),
+                        )
+                        .child(
+                            surface::panel(p)
+                                .w(px(if compact {
+                                    DETAIL_WIDTH_COMPACT
+                                } else {
+                                    DETAIL_WIDTH
+                                }))
+                                .flex_none()
+                                .min_h_0()
+                                .overflow_hidden()
+                                .child(detail),
+                        ),
+                ),
+        )
+        .on_action(cx.listener(Self::pause_selected))
+        .on_action(cx.listener(Self::resume_selected))
+        .on_action(cx.listener(Self::end_live_selected))
+        .on_action(cx.listener(Self::revoke_selected))
+        .on_action(cx.listener(Self::discard_selected))
+    }
+}
+
+impl TransfersPanel {
+    fn row(
+        &self,
+        job: JobSnapshot,
+        p: Palette,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let selected = self.selected_id.as_deref() == Some(job.id.as_str());
+        let (label, tone) = status(&job);
+        let active = !matches!(job.state, TransferState::Complete | TransferState::Failed);
+        let quick = quick_action(&job);
+        let id = job.id.clone();
+        let panel = cx.entity();
+        let capabilities = job.capabilities.clone();
+        let menu_id = job.id.clone();
+        let meta = format!("{} · {}", direction_label(&job), transferred(&job));
+
+        row::slot()
+            .id(SharedString::from(format!("transfer-{}", job.id)))
+            .h(px(ROW_HEIGHT))
+            .child(
+                row::hugging(p, row::Fit::PANEL, selected)
+                    .child(row::lead_tile(
                         p,
-                        "Transfers",
-                        "A clear view of what is moving, waiting, and ready.",
+                        row::Fit::PANEL,
+                        tile_icon(&job),
+                        job.state != TransferState::Failed,
                     ))
                     .child(
                         div()
                             .flex_1()
-                            .min_h_0()
+                            .min_w_0()
                             .flex()
                             .flex_col()
-                            .rounded(px(12.))
-                            .bg(p.surface)
-                            .border_1()
-                            .border_color(p.border)
+                            .gap(px(3.))
                             .child(
+                                text::body_strong(display_name(&job))
+                                    .single_line()
+                                    .text_color(p.text),
+                            )
+                            .child(if active && fraction(&job).is_some() {
                                 div()
-                                    .px(px(14.))
-                                    .py(px(12.))
                                     .flex()
                                     .items_center()
-                                    .gap(px(8.))
-                                    .border_b_1()
-                                    .border_color(p.border)
-                                    .child(filter_button(
-                                        "all",
-                                        "All",
-                                        self.filter == Filter::All,
-                                        Filter::All,
-                                        cx,
-                                    ))
-                                    .child(filter_button(
-                                        "active",
-                                        "Active",
-                                        self.filter == Filter::Active,
-                                        Filter::Active,
-                                        cx,
-                                    ))
-                                    .child(filter_button(
-                                        "completed",
-                                        "Completed",
-                                        self.filter == Filter::Completed,
-                                        Filter::Completed,
-                                        cx,
-                                    ))
-                                    .child(div().flex_1())
-                                    .child(Input::new(&self.search).w(px(190.)))
-                                    .child(sort_button(self.sort, cx)),
+                                    .gap(px(10.))
+                                    .child(
+                                        div().w(px(120.)).flex_none().child(
+                                            progress(
+                                                SharedString::from(format!(
+                                                    "row-progress-{}",
+                                                    job.id
+                                                )),
+                                                fraction(&job),
+                                            )
+                                            .height(4.),
+                                        ),
+                                    )
+                                    .child(
+                                        text::caption(meta).single_line().text_color(p.text_muted),
+                                    )
+                            } else {
+                                div().child(
+                                    text::caption(meta).single_line().text_color(p.text_muted),
+                                )
+                            }),
+                    )
+                    .child(feedback::pill(p, label, tone))
+                    .when_some(quick, |this, (name, action)| {
+                        let action_id = job.id.clone();
+                        this.child(
+                            button::secondary(SharedString::from(format!("row-action-{}", job.id)))
+                                .small()
+                                .label(name)
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.select_job(action_id.clone(), cx);
+                                    this.dispatch(action, window, cx);
+                                })),
+                        )
+                    }),
+            )
+            .on_click(cx.listener(move |this, _, _, cx| this.select_job(id.clone(), cx)))
+            .context_menu(move |menu, _, _| {
+                let item = |label: &'static str, action: JobAction, allowed: bool| {
+                    let (panel, id) = (panel.clone(), menu_id.clone());
+                    PopupMenuItem::new(label)
+                        .disabled(!allowed)
+                        .on_click(move |_, window, cx| {
+                            let id = id.clone();
+                            panel.update(cx, |this, cx| {
+                                this.select_job(id, cx);
+                                this.dispatch(action, window, cx);
+                            });
+                        })
+                };
+                menu.item(item("Pause", JobAction::Pause, capabilities.can_pause))
+                    .item(item("Resume", JobAction::Resume, capabilities.can_resume))
+                    .item(item(
+                        "Save to folder",
+                        JobAction::Export,
+                        capabilities.can_export,
+                    ))
+                    .separator()
+                    .item(item(
+                        "End live session",
+                        JobAction::EndLive,
+                        capabilities.can_end_live,
+                    ))
+                    .item(item(
+                        "Revoke link",
+                        JobAction::Revoke,
+                        capabilities.can_revoke,
+                    ))
+                    .item(item(
+                        "Remove from this device",
+                        JobAction::Discard,
+                        capabilities.can_discard,
+                    ))
+            })
+    }
+
+    fn detail(
+        &mut self,
+        job: Option<JobSnapshot>,
+        verified: Option<VerifiedResult>,
+        p: Palette,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(job) = job else {
+            return div()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    feedback::empty_state(
+                        "info",
+                        "Select a transfer",
+                        "Its link, progress and actions appear here.",
+                    )
+                    .tone(Tone::Neutral),
+                )
+                .into_any_element();
+        };
+        let entrance = motion::entrance_with(
+            SharedString::from(format!("transfer-detail-{}", job.id)),
+            0,
+            8.,
+            motion::enter_quick(),
+            window,
+            cx,
+        );
+        let (label, tone) = status(&job);
+        let progress_fraction = fraction(&job);
+        let active = !matches!(job.state, TransferState::Complete | TransferState::Failed);
+        let can = job.capabilities.clone();
+        let copy = |value: String, kind: Copied| {
+            cx.listener(move |this, _, _, cx| this.copy(value.clone(), kind, cx))
+        };
+        let act = |action: JobAction| {
+            cx.listener(move |this, _, window, cx| this.dispatch(action, window, cx))
+        };
+
+        let mut facts = vec![
+            ("Kind", direction_label(&job).to_owned()),
+            ("Size", size_label(&job)),
+        ];
+        if job.progress.item_count > 1 {
+            facts.push((
+                "Items",
+                if active {
+                    format!("{} of {}", job.progress.item_index, job.progress.item_count)
+                } else {
+                    job.progress.item_count.to_string()
+                },
+            ));
+        }
+        if let Some(origin) = &job.origin {
+            facts.push(("Instance", format::host(origin)));
+        }
+
+        let primary = if can.can_resume {
+            Some(
+                button::primary("detail-resume")
+                    .label("Resume")
+                    .on_click(act(JobAction::Resume)),
+            )
+        } else if can.can_export {
+            Some(
+                button::primary("detail-export")
+                    .icon("folder")
+                    .label(
+                        if verified.as_ref().is_some_and(|r| r.export_error.is_some()) {
+                            "Try another folder"
+                        } else if verified
+                            .as_ref()
+                            .is_some_and(|r| !r.exported_paths.is_empty())
+                        {
+                            "Save another copy"
+                        } else {
+                            "Save to folder"
+                        },
+                    )
+                    .on_click(act(JobAction::Export)),
+            )
+        } else if can.can_pause {
+            Some(
+                button::secondary("detail-pause")
+                    .label("Pause")
+                    .on_click(act(JobAction::Pause)),
+            )
+        } else {
+            None
+        };
+
+        div()
+            .id("transfer-detail-scroll")
+            .size_full()
+            .overflow_y_scrollbar()
+            .p(px(20.))
+            .flex()
+            .flex_col()
+            .gap(px(16.))
+            .entering(entrance)
+            .child(
+                div()
+                    .flex()
+                    .items_start()
+                    .gap(px(12.))
+                    .child(row::icon_tile(
+                        p,
+                        tile_icon(&job),
+                        44.,
+                        job.state != TransferState::Failed,
+                    ))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .items_start()
+                            .gap(px(6.))
+                            .child(text::subtitle(display_name(&job)).text_color(p.text))
+                            .child(feedback::pill(p, label, tone)),
+                    ),
+            )
+            .when(active, |this| {
+                this.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(6.))
+                        .child(
+                            progress(
+                                SharedString::from(format!("detail-progress-{}", job.id)),
+                                progress_fraction,
+                            )
+                            .height(8.),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .justify_between()
+                                .child(text::caption(transferred(&job)).text_color(p.text_muted))
+                                .when_some(progress_fraction, |this, fraction| {
+                                    this.child(
+                                        text::caption(percent_label(fraction))
+                                            .text_color(p.text_muted),
+                                    )
+                                }),
+                        ),
+                )
+            })
+            .when_some(job.error.as_ref(), |this, error| {
+                this.child(feedback::notice(
+                    p,
+                    format::readable_error(&error.detail),
+                    Tone::Danger,
+                ))
+            })
+            .when_some(job.peer_warning.clone(), |this, warning| {
+                this.child(feedback::notice(p, warning, Tone::Warning))
+            })
+            .when_some(job.share_url.clone(), |this, link| {
+                this.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(8.))
+                        .child(text::eyebrow("Share").text_color(p.text_subtle))
+                        .child(
+                            copy_field("copy-receipt", "link", link.clone())
+                                .action("Copy link")
+                                .primary()
+                                .copied(self.copied == Some(Copied::Link))
+                                .on_copy(copy(link, Copied::Link)),
+                        )
+                        .when_some(job.separate_key.clone(), |this, key| {
+                            this.child(
+                                // The key is never drawn; only the clipboard receives it.
+                                copy_field("copy-receipt-key", "key", "Decryption key · hidden")
+                                    .action("Copy key")
+                                    .copied(self.copied == Some(Copied::Key))
+                                    .on_copy(copy(key, Copied::Key)),
+                            )
+                        })
+                        .when_some(job.cli_command.clone(), |this, command| {
+                            this.child(
+                                copy_field("copy-receipt-cli", "terminal", command.clone())
+                                    .action("Copy")
+                                    .copied(self.copied == Some(Copied::Command))
+                                    .on_copy(copy(command, Copied::Command)),
+                            )
+                        }),
+                )
+            })
+            .when_some(verified, |this, result| {
+                this.when_some(result.export_error.as_ref(), |this, error| {
+                    this.child(feedback::notice(
+                        p,
+                        format::readable_error(&error.detail),
+                        Tone::Danger,
+                    ))
+                })
+                .when(!result.exported_paths.is_empty(), |this| {
+                    this.child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(8.))
+                            .child(text::eyebrow("Saved to").text_color(p.text_subtle))
+                            .child(
+                                surface::well(p)
+                                    .px(px(12.))
+                                    .py(px(10.))
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(4.))
+                                    .children(result.exported_paths.iter().map(|path| {
+                                        text::code(path.display().to_string())
+                                            .single_line()
+                                            .text_color(p.text_muted)
+                                    })),
+                            ),
+                    )
+                })
+            })
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.))
+                    .child(text::eyebrow("Details").text_color(p.text_subtle))
+                    .children(
+                        facts
+                            .into_iter()
+                            .map(|(name, value)| row::fact(p, name, value)),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .gap(px(12.))
+                            .child(
+                                text::small("Transfer ID")
+                                    .flex_none()
+                                    .text_color(p.text_muted),
                             )
                             .child(
-                                div()
-                                    .h(px(35.))
-                                    .flex()
-                                    .items_center()
-                                    .border_b_1()
-                                    .border_color(p.border_soft)
-                                    .child(
-                                        div()
-                                            .flex_1()
-                                            .min_w_0()
-                                            .h_full()
-                                            .px(px(ROW_PADDING))
-                                            .flex()
-                                            .items_center()
-                                            .gap(px(ROW_GAP))
-                                            .border_r_1()
-                                            .border_color(p.border)
-                                            .child(div().w(px(ROW_ICON_WIDTH)))
-                                            .child(
-                                                div()
-                                                    .w(px(name_width(compact)))
-                                                    .min_w_0()
-                                                    .overflow_hidden()
-                                                    .whitespace_nowrap()
-                                                    .text_ellipsis()
-                                                    .truncate()
-                                                    .text_size(px(10.))
-                                                    .text_color(p.subtle)
-                                                    .child("TRANSFER"),
-                                            )
-                                            .child(
-                                                div()
-                                                    .w(px(status_width(compact)))
-                                                    .min_w_0()
-                                                    .overflow_hidden()
-                                                    .whitespace_nowrap()
-                                                    .text_ellipsis()
-                                                    .truncate()
-                                                    .text_size(px(10.))
-                                                    .text_color(p.subtle)
-                                                    .child("STATUS"),
-                                            )
-                                            .when(compact, |this| {
-                                                this.child(div().flex_1().min_w_0())
-                                            })
-                                            .when(!compact, |this| {
-                                                this.child(
-                                                    div()
-                                                        .flex_1()
-                                                        .min_w_0()
-                                                        .overflow_hidden()
-                                                        .whitespace_nowrap()
-                                                        .text_ellipsis()
-                                                        .truncate()
-                                                        .text_size(px(10.))
-                                                        .text_color(p.subtle)
-                                                        .child("SIZE / PROGRESS"),
-                                                )
-                                            })
-                                            .child(
-                                                div()
-                                                    .w(px(ACTION_WIDTH))
-                                                    .min_w_0()
-                                                    .overflow_hidden()
-                                                    .whitespace_nowrap()
-                                                    .text_ellipsis()
-                                                    .truncate()
-                                                    .text_size(px(10.))
-                                                    .text_color(p.subtle)
-                                                    .child("ACTION"),
-                                            ),
-                                    )
-                                    .child(div().w(px(DETAIL_WIDTH)).flex_none().h_full()),
-                            )
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_h_0()
-                                    .flex()
-                                    .child(
-                                        div()
-                                            .flex_1()
-                                            .min_w_0()
-                                            .min_h_0()
-                                            .relative()
-                                            .flex()
-                                            .flex_col()
-                                            .overflow_hidden()
-                                            .border_r_1()
-                                            .border_color(p.border)
-                                            .child(
-                                                v_virtual_list(
-                                                    cx.entity(),
-                                                    "transfer-rows",
-                                                    sizes,
-                                                    move |this, range, _, cx| {
-                                                        range
-                                                            .filter_map(|index| {
-                                                                this.rows.get(index).cloned()
-                                                            })
-                                                            .map(|job| {
-                                                                transfer_row(
-                                                                    job,
-                                                                    this.selected_id.as_deref(),
-                                                                    compact,
-                                                                    p,
-                                                                    cx,
-                                                                )
-                                                            })
-                                                            .collect()
-                                                    },
-                                                )
-                                                .flex_1()
-                                                .min_h_0()
-                                                .pb(px(vertical_padding))
-                                                .track_scroll(&self.scroll_handle),
-                                            )
-                                            .vertical_scrollbar(&self.scroll_handle),
-                                    )
-                                    .child(details(
-                                        selected,
-                                        verified,
-                                        self.notice.clone(),
-                                        vertical_padding,
-                                        p,
-                                        cx,
+                                button::ghost("copy-transfer-id")
+                                    .small()
+                                    .icon(if self.copied == Some(Copied::Id) {
+                                        "check"
+                                    } else {
+                                        "copy"
+                                    })
+                                    .label(format::abbreviated(
+                                        job.checkpoint_id.as_deref().unwrap_or(&job.id),
+                                        8,
+                                        4,
+                                    ))
+                                    .tooltip("Copy the transfer ID")
+                                    .on_click(copy(
+                                        job.checkpoint_id.clone().unwrap_or_else(|| job.id.clone()),
+                                        Copied::Id,
                                     )),
                             ),
                     ),
             )
-            .on_action(cx.listener(Self::pause_selected))
-            .on_action(cx.listener(Self::resume_selected))
-            .on_action(cx.listener(Self::end_live_selected))
-            .on_action(cx.listener(Self::revoke_selected))
-            .on_action(cx.listener(Self::discard_selected))
-    }
-}
-
-fn transfer_row(
-    job: JobSnapshot,
-    selected: Option<&str>,
-    compact: bool,
-    p: Palette,
-    cx: &mut Context<TransfersPanel>,
-) -> impl IntoElement + use<> {
-    let id = job.id.clone();
-    let action_id = id.clone();
-    let panel = cx.entity();
-    let context_id = id.clone();
-    let capabilities = job.capabilities.clone();
-    let row_action = row_action(&job);
-    div()
-        .id(SharedString::from(format!("transfer-{}", id)))
-        .h(px(ROW_HEIGHT))
-        .px(px(ROW_PADDING))
-        .flex()
-        .items_center()
-        .gap(px(ROW_GAP))
-        .border_b_1()
-        .border_color(p.border_soft)
-        .bg(if selected == Some(id.as_str()) {
-            p.selected
-        } else {
-            p.surface
-        })
-        .hover(|style| style.bg(p.hover))
-        .active(|style| style.bg(p.selected))
-        .child(
-            div()
-                .size(px(34.))
-                .flex_none()
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(px(8.))
-                .bg(p.raised)
-                .text_color(file_color(&job, p))
-                .child(
-                    Icon::default()
-                        .path(format!("icons/{}.svg", file_icon(&job)))
-                        .size(px(18.)),
-                ),
-        )
-        .child(
-            div()
-                .w(px(name_width(compact)))
-                .min_w_0()
-                .child(div().text_size(px(13.)).child(job.progress.name.clone()))
-                .child(
-                    div()
-                        .mt(px(3.))
-                        .text_size(px(10.))
-                        .text_color(p.subtle)
-                        .child(format!(
-                            "{} · {}",
-                            direction_label(&job),
-                            job.progress.phase
-                        )),
-                )
-                .when(compact, |this| {
-                    this.child(
-                        div()
-                            .mt(px(3.))
-                            .text_size(px(10.))
-                            .text_color(p.muted)
-                            .child(progress_line(&job)),
-                    )
-                    .when(progress_percent(&job).is_some(), |this| {
-                        this.child(progress_bar(&job, p))
+            .child(
+                div()
+                    .mt_auto()
+                    .pt(px(4.))
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.))
+                    .children(primary.map(|action| action.fill()))
+                    .when(can.can_pause && can.can_export, |this| {
+                        this.child(
+                            button::secondary("detail-pause")
+                                .fill()
+                                .label("Pause")
+                                .on_click(act(JobAction::Pause)),
+                        )
                     })
-                }),
-        )
-        .child(status_pill(&job, p, compact))
-        .when(!compact, |this| {
-            this.child(
-                div()
-                    .flex_1()
-                    .min_w(px(100.))
-                    .child(
-                        div()
-                            .text_size(px(11.))
-                            .text_color(p.muted)
-                            .child(progress_line(&job)),
-                    )
-                    .when(progress_percent(&job).is_some(), |this| {
-                        this.child(progress_bar(&job, p))
-                    }),
-            )
-        })
-        .when(compact, |this| this.child(div().flex_1().min_w_0()))
-        .child(
-            Button::new(SharedString::from(format!("row-action-{}", job.id)))
-                .label(row_action.0)
-                .ghost()
-                .w(px(ACTION_WIDTH))
-                .disabled(!row_action.2)
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    this.select_job(action_id.clone(), cx);
-                    this.dispatch(row_action.1, window, cx);
-                })),
-        )
-        .on_click(cx.listener(move |this, _, _, cx| this.select_job(id.clone(), cx)))
-        .context_menu(move |menu, _, _| {
-            context_action(
-                menu,
-                "Pause",
-                JobAction::Pause,
-                capabilities.can_pause,
-                panel.clone(),
-                context_id.clone(),
-            )
-            .item(
-                PopupMenuItem::new("Resume")
-                    .disabled(!capabilities.can_resume)
-                    .on_click({
-                        let panel = panel.clone();
-                        let id = context_id.clone();
-                        move |_, window, cx| {
-                            let id = id.clone();
-                            panel.update(cx, |this, cx| {
-                                this.select_job(id, cx);
-                                this.dispatch(JobAction::Resume, window, cx);
-                            });
-                        }
-                    }),
-            )
-        })
-}
-
-fn context_action(
-    menu: gpui_component::menu::PopupMenu,
-    label: &'static str,
-    action: JobAction,
-    allowed: bool,
-    panel: Entity<TransfersPanel>,
-    id: String,
-) -> gpui_component::menu::PopupMenu {
-    menu.item(
-        PopupMenuItem::new(label)
-            .disabled(!allowed)
-            .on_click(move |_, window, cx| {
-                let id = id.clone();
-                panel.update(cx, |this, cx| {
-                    this.select_job(id, cx);
-                    this.dispatch(action, window, cx);
-                });
-            }),
-    )
-}
-
-fn details(
-    job: Option<JobSnapshot>,
-    verified: Option<VerifiedResult>,
-    notice: Option<String>,
-    bottom_padding: f32,
-    p: Palette,
-    cx: &mut Context<TransfersPanel>,
-) -> impl IntoElement {
-    let mut body = div()
-        .id("transfer-detail-scroll")
-        .w(px(DETAIL_WIDTH))
-        .flex_none()
-        .min_w_0()
-        .min_h_0()
-        .overflow_y_scrollbar()
-        .p(px(20.))
-        .pb(px(bottom_padding))
-        .flex()
-        .flex_col()
-        .gap(px(12.));
-    let Some(job) = job else {
-        return body.child("Select a transfer to see its details.");
-    };
-    body = body
-        .child(div().text_size(px(20.)).child(job.progress.name.clone()))
-        .child(
-            div()
-                .text_color(p.muted)
-                .child(format!("{} | {}", job.id, job.progress.phase)),
-        )
-        .child(
-            div()
-                .child(format!("Progress: {}", progress_line(&job)))
-                .child(format!(
-                    "Committed: {}",
-                    bytes(job.progress.committed_bytes)
-                ))
-                .child(format!("On wire: {}", bytes(job.progress.wire_bytes))),
-        )
-        .child(action_buttons(&job, cx));
-    if let Some(url) = job.share_url.as_ref() {
-        body = body
-            .child(
-                div()
-                    .text_size(px(12.))
-                    .text_color(p.muted)
-                    .child("Receipt"),
-            )
-            .child(div().text_size(px(12.)).child(url.clone()))
-            .child(
-                Button::new("copy-receipt")
-                    .label("Copy receipt")
-                    .on_click(cx.listener(|this, _, _, cx| this.copy_receipt(cx))),
-            );
-    }
-    if job.separate_key.is_some() {
-        body = body.child(
-            Button::new("copy-receipt-key")
-                .label("Copy key")
-                .on_click(cx.listener(|this, _, _, cx| this.copy_key(cx))),
-        );
-    }
-    if job.cli_command.is_some() {
-        body = body.child(
-            Button::new("copy-receipt-cli")
-                .label("Copy CLI command")
-                .on_click(cx.listener(|this, _, _, cx| this.copy_cli(cx))),
-        );
-    }
-    if let Some(result) = verified {
-        if !result.exported_paths.is_empty() {
-            body = body.child(format!(
-                "Saved: {}",
-                result
-                    .exported_paths
-                    .iter()
-                    .map(|path| path.display().to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ));
-        }
-        if result.export_error.is_some() && job.capabilities.can_retry_export {
-            body = body.child(Button::new("retry-export").label("Retry export").on_click(
-                cx.listener(|this, _, window, cx| this.dispatch(JobAction::Export, window, cx)),
-            ));
-        }
-    }
-    body.children(notice.map(|message| div().text_size(px(11.)).text_color(p.muted).child(message)))
-}
-
-fn action_buttons(job: &JobSnapshot, cx: &mut Context<TransfersPanel>) -> impl IntoElement {
-    let mut row = div().flex().flex_wrap().gap(px(8.));
-    for (name, action, allowed) in [
-        ("Pause", JobAction::Pause, job.capabilities.can_pause),
-        ("Resume", JobAction::Resume, job.capabilities.can_resume),
-        (
-            "End live",
-            JobAction::EndLive,
-            job.capabilities.can_end_live,
-        ),
-        ("Revoke", JobAction::Revoke, job.capabilities.can_revoke),
-        ("Discard", JobAction::Discard, job.capabilities.can_discard),
-        (
-            "Export verified",
-            JobAction::Export,
-            job.capabilities.can_export,
-        ),
-    ] {
-        if allowed {
-            row = row.child(
-                Button::new(SharedString::from(format!("{}-{}", name, job.id)))
-                    .label(name)
-                    .on_click(
-                        cx.listener(move |this, _, window, cx| this.dispatch(action, window, cx)),
+                    .when(
+                        can.can_end_live || can.can_revoke || can.can_discard,
+                        |this| {
+                            this.child(surface::hairline(p)).child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .items_start()
+                                    .gap(px(2.))
+                                    .when(can.can_end_live, |this| {
+                                        this.child(
+                                            button::danger("detail-end-live")
+                                                .small()
+                                                .icon("x")
+                                                .label("End live session")
+                                                .on_click(act(JobAction::EndLive)),
+                                        )
+                                    })
+                                    .when(can.can_revoke, |this| {
+                                        this.child(
+                                            button::danger("detail-revoke")
+                                                .small()
+                                                .icon("slash")
+                                                .label("Revoke link")
+                                                .on_click(act(JobAction::Revoke)),
+                                        )
+                                    })
+                                    .when(can.can_discard, |this| {
+                                        this.child(
+                                            button::danger("detail-discard")
+                                                .small()
+                                                .icon("trash")
+                                                .label("Remove from this device")
+                                                .on_click(act(JobAction::Discard)),
+                                        )
+                                    }),
+                            )
+                        },
                     ),
-            );
+            )
+            .into_any_element()
+    }
+}
+
+#[cfg(feature = "visual-test")]
+impl TransfersPanel {
+    pub fn confirm_revoke_for_capture(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.dispatch(JobAction::Revoke, window, cx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::{TestAppContext, WindowHandle, test::TestWindowExt as _};
+    use gpui_component::Root;
+
+    use super::*;
+    use crate::{
+        model::{TransferCapabilities, TransferProgress},
+        testing::{self, Commands},
+    };
+
+    fn job(
+        id: &str,
+        name: &str,
+        direction: TransferDirection,
+        state: TransferState,
+    ) -> JobSnapshot {
+        JobSnapshot {
+            id: id.into(),
+            direction,
+            state,
+            progress: TransferProgress {
+                name: name.into(),
+                total_bytes: Some(100),
+                completed_bytes: if state == TransferState::Complete {
+                    100
+                } else {
+                    40
+                },
+                ..TransferProgress::default()
+            },
+            share_url: None,
+            separate_key: None,
+            cli_command: None,
+            checkpoint_id: None,
+            origin: None,
+            error: None,
+            peer_warning: None,
+            capabilities: TransferCapabilities::default(),
         }
     }
-    row
-}
 
-fn filter_button(
-    id: &'static str,
-    label: &'static str,
-    selected: bool,
-    filter: Filter,
-    cx: &mut Context<TransfersPanel>,
-) -> impl IntoElement {
-    Button::new(id)
-        .label(label)
-        .ghost()
-        .selected(selected)
-        .on_click(cx.listener(move |this, _, _, cx| {
-            this.filter = filter;
-            this.rebuild_rows(cx);
-        }))
-}
+    fn panel(
+        cx: &mut TestAppContext,
+        jobs: Vec<JobSnapshot>,
+    ) -> (WindowHandle<Root>, Entity<TransfersPanel>, Commands) {
+        testing::rooted(
+            cx,
+            DesktopSnapshot {
+                jobs,
+                ..DesktopSnapshot::default()
+            },
+            TransfersPanel::new,
+        )
+    }
 
-fn sort_button(sort: Sort, cx: &mut Context<TransfersPanel>) -> impl IntoElement {
-    Button::new("sort-transfers")
-        .label(if sort == Sort::Name {
-            "Sort: name"
-        } else {
-            "Sort: progress"
-        })
-        .ghost()
-        .on_click(cx.listener(|this, _, _, cx| {
-            this.sort = if this.sort == Sort::Name {
-                Sort::Progress
-            } else {
-                Sort::Name
+    fn mixed() -> Vec<JobSnapshot> {
+        vec![
+            job(
+                "1",
+                "b.zip",
+                TransferDirection::Send,
+                TransferState::Complete,
+            ),
+            job(
+                "2",
+                "a.pdf",
+                TransferDirection::Receive,
+                TransferState::Running,
+            ),
+            job(
+                "3",
+                "prepare",
+                TransferDirection::Service,
+                TransferState::Complete,
+            ),
+            job("4", "c.mp4", TransferDirection::Send, TransferState::Failed),
+        ]
+    }
+
+    #[gpui::test]
+    fn the_list_hides_internal_jobs_and_shows_the_newest_first(cx: &mut TestAppContext) {
+        let (_window, panel, _commands) = panel(cx, mixed());
+        panel.update(cx, |panel, cx| {
+            let ids = |panel: &TransfersPanel| {
+                panel
+                    .rows
+                    .iter()
+                    .map(|job| job.id.clone())
+                    .collect::<Vec<_>>()
             };
-            this.rebuild_rows(cx);
-        }))
-}
+            assert_eq!(ids(panel), ["4", "2", "1"]);
 
-fn progress_line(job: &JobSnapshot) -> String {
-    let count = if job.progress.item_count > 0 {
-        format!(
-            " | {}/{} items",
-            job.progress.item_index, job.progress.item_count
-        )
-    } else {
-        String::new()
-    };
-    match job.progress.total_bytes {
-        Some(total) => format!(
-            "{} / {}{}",
-            bytes(job.progress.completed_bytes),
-            bytes(total),
-            count
-        ),
-        None => format!(
-            "{} transferred (size unknown){}",
-            bytes(job.progress.completed_bytes),
-            count
-        ),
+            panel.sort = Sort::Name;
+            panel.rebuild_rows(cx);
+            assert_eq!(ids(panel), ["2", "1", "4"]);
+
+            panel.set_filter(Filter::Active, cx);
+            assert_eq!(ids(panel), ["2"]);
+            panel.set_filter(Filter::Failed, cx);
+            assert_eq!(ids(panel), ["4"]);
+            panel.set_filter(Filter::Completed, cx);
+            assert_eq!(ids(panel), ["1"]);
+        });
     }
-}
-fn bytes(value: u64) -> String {
-    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
-    let mut value = value as f64;
-    let mut unit = 0;
-    while value >= 1024. && unit < UNITS.len() - 1 {
-        value /= 1024.;
-        unit += 1;
+
+    #[gpui::test]
+    fn selection_survives_filtering_and_removal_waits_for_confirmation(cx: &mut TestAppContext) {
+        let mut jobs = mixed();
+        jobs[0].capabilities.can_pause = true;
+        jobs[0].capabilities.can_discard = true;
+        let (window, panel, commands) = panel(cx, jobs);
+        let act = |cx: &mut TestAppContext, action: JobAction| {
+            testing::in_window(cx, window, |window, cx| {
+                panel.update(cx, |panel, cx| panel.dispatch(action, window, cx));
+            });
+        };
+        let click = |cx: &mut TestAppContext, id: &'static str| {
+            testing::in_window(cx, window, |window, cx| {
+                window.render_frame(cx);
+                window.click(id, cx);
+            });
+        };
+
+        panel.update(cx, |panel, cx| {
+            panel.select_job("1".into(), cx);
+            panel.select_job("missing".into(), cx);
+            assert_eq!(panel.selected_id.as_deref(), Some("1"));
+            panel.set_filter(Filter::Active, cx);
+            assert_eq!(panel.selected_id.as_deref(), Some("1"));
+        });
+        act(cx, JobAction::Pause);
+        assert!(matches!(
+            commands.try_recv(),
+            Ok(ClientCommand::Pause { id }) if id == "1"
+        ));
+
+        // Cancelling leaves the transfer alone; confirming removes it.
+        act(cx, JobAction::Discard);
+        assert!(commands.try_recv().is_err(), "removal asks first");
+        click(cx, "dialog-cancel");
+        assert!(commands.try_recv().is_err());
+        act(cx, JobAction::Discard);
+        click(cx, "dialog-confirm");
+        assert!(matches!(
+            commands.try_recv(),
+            Ok(ClientCommand::Discard { id }) if id == "1"
+        ));
     }
-    if unit == 0 {
-        format!("{value:.0} {}", UNITS[unit])
-    } else {
-        format!("{value:.1} {}", UNITS[unit])
+
+    #[gpui::test]
+    fn rows_and_the_detail_pane_render_for_every_state(cx: &mut TestAppContext) {
+        let mut jobs = mixed();
+        // Both could be paused, but only the transfer is listed with its action.
+        jobs[1].capabilities.can_pause = true;
+        jobs[2].capabilities.can_pause = true;
+        jobs[0].share_url = Some("https://files.example/1#k=v1.key".into());
+        jobs[0].capabilities.can_revoke = true;
+        let (window, panel, _commands) = panel(cx, jobs);
+        testing::in_window(cx, window, |window, cx| {
+            window.render_frame(cx);
+            window.render_frame(cx);
+            assert!(window.try_find("transfer-search").is_some());
+            assert!(window.try_find("sort-transfers").is_some());
+            assert!(window.try_find("row-action-2").is_some());
+            assert!(window.try_find("row-action-3").is_none());
+        });
+        panel.update(cx, |panel, cx| panel.select_job("1".into(), cx));
+        testing::in_window(cx, window, |window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("copy-receipt").is_some());
+            assert!(window.try_find("detail-revoke").is_some());
+        });
     }
-}
-fn progress_percent(job: &JobSnapshot) -> Option<f32> {
-    job.progress
-        .total_bytes
-        .filter(|total| *total > 0)
-        .map(|total| (job.progress.completed_bytes as f32 / total as f32).clamp(0., 1.))
-}
-fn progress_bar(job: &JobSnapshot, p: Palette) -> impl IntoElement {
-    let width = progress_percent(job).unwrap_or_default() * 150.;
-    div()
-        .mt(px(6.))
-        .w(px(150.))
-        .h(px(3.))
-        .rounded(px(2.))
-        .bg(p.border)
-        .child(
-            div()
-                .h_full()
-                .w(px(width))
-                .rounded(px(2.))
-                .bg(status_color(job, p)),
-        )
-}
-fn direction_label(job: &JobSnapshot) -> &'static str {
-    match job.direction {
-        crate::model::TransferDirection::Send => "Sent",
-        crate::model::TransferDirection::Receive => "Received",
-        crate::model::TransferDirection::Note => "Note",
-        crate::model::TransferDirection::Service => "Service",
+
+    #[test]
+    fn statuses_and_quick_actions_follow_capabilities() {
+        let mut running = job("1", "a", TransferDirection::Send, TransferState::Running);
+        assert_eq!(status(&running).0, "In progress");
+        assert_eq!(direction_label(&running), "Sending");
+        running.progress.phase = "Uploading".into();
+        assert_eq!(status(&running).0, "Uploading");
+        assert_eq!(quick_action(&running), None);
+        running.capabilities.can_pause = true;
+        assert_eq!(quick_action(&running), Some(("Pause", JobAction::Pause)));
+        running.capabilities.can_resume = true;
+        assert_eq!(quick_action(&running), Some(("Resume", JobAction::Resume)));
+
+        let mut done = job(
+            "2",
+            "a",
+            TransferDirection::Receive,
+            TransferState::Complete,
+        );
+        assert_eq!(status(&done), ("Complete".into(), Tone::Success));
+        assert_eq!(direction_label(&done), "Received");
+        done.capabilities.can_export = true;
+        assert_eq!(status(&done).0, "Verified");
+        assert_eq!(transferred(&done), "100 B");
+        assert_eq!(size_label(&running), "100 B");
+        assert!(confirmation(JobAction::Pause).is_none());
+        assert!(confirmation(JobAction::Revoke).is_some());
     }
-}
-fn file_icon(job: &JobSnapshot) -> &'static str {
-    let name = job.progress.name.to_lowercase();
-    if name.ends_with(".zip") || name.ends_with(".tar") || name.ends_with(".gz") {
-        "archive"
-    } else if name.ends_with(".mp4") || name.ends_with(".mov") || name.ends_with(".mkv") {
-        "video"
-    } else if name.ends_with(".txt") || name.ends_with(".md") || name.ends_with(".note") {
-        "note"
-    } else {
-        "file"
-    }
-}
-fn file_color(job: &JobSnapshot, p: Palette) -> gpui::Rgba {
-    if matches!(file_icon(job), "archive" | "video") {
-        p.warning
-    } else {
-        p.accent
-    }
-}
-fn status_color(job: &JobSnapshot, p: Palette) -> gpui::Rgba {
-    match job.state {
-        TransferState::Complete => p.success,
-        TransferState::Failed => p.danger,
-        TransferState::Paused | TransferState::PauseRequested => p.warning,
-        TransferState::Running => p.accent,
-    }
-}
-fn status_pill(job: &JobSnapshot, p: Palette, compact: bool) -> impl IntoElement {
-    div().w(px(status_width(compact))).child(
-        div()
-            .flex()
-            .items_center()
-            .gap(px(5.))
-            .px(px(7.))
-            .py(px(4.))
-            .rounded(px(6.))
-            .bg(p.inset)
-            .text_size(px(10.))
-            .text_color(status_color(job, p))
-            .child("●")
-            .child(state_label(job)),
-    )
-}
-fn name_width(compact: bool) -> f32 {
-    if compact { 180. } else { 260. }
-}
-fn status_width(compact: bool) -> f32 {
-    if compact { 140. } else { 193. }
-}
-fn state_label(job: &JobSnapshot) -> String {
-    match job.state {
-        TransferState::Complete if job.capabilities.can_export => "Verified · ready to save".into(),
-        TransferState::Complete => "Complete".into(),
-        TransferState::Failed => "Needs attention".into(),
-        TransferState::Paused => "Paused".into(),
-        TransferState::PauseRequested => "Pausing".into(),
-        TransferState::Running => job.progress.phase.clone(),
-    }
-}
-fn row_action(job: &JobSnapshot) -> (&'static str, JobAction, bool) {
-    if job.capabilities.can_resume {
-        ("Resume", JobAction::Resume, true)
-    } else if job.capabilities.can_pause {
-        ("Pause", JobAction::Pause, true)
-    } else if job.capabilities.can_export {
-        ("Save", JobAction::Export, true)
-    } else if job.capabilities.can_discard {
-        ("Discard", JobAction::Discard, true)
-    } else {
-        ("Details", JobAction::Pause, false)
-    }
-}
-fn requires_confirmation(action: JobAction) -> bool {
-    matches!(
-        action,
-        JobAction::EndLive | JobAction::Revoke | JobAction::Discard
-    )
-}
-fn confirmation_title(action: JobAction) -> &'static str {
-    match action {
-        JobAction::EndLive => "End live transfer",
-        JobAction::Revoke => "Revoke transfer",
-        JobAction::Discard => "Discard transfer",
-        _ => "Confirm action",
-    }
-}
-fn confirmation_copy(action: JobAction) -> &'static str {
-    match action {
-        JobAction::EndLive => "This ends the live session for both peers.",
-        JobAction::Revoke => "This revokes the shared transfer.",
-        JobAction::Discard => "This removes the local transfer record.",
-        _ => "",
-    }
-}
-fn workspace_vertical_padding(window: &Window) -> f32 {
-    if window.viewport_size().width < px(1100.) {
-        21.
-    } else {
-        crate::theme::tokens::geometry::WORKSPACE_VERTICAL_PADDING
-    }
-}
-fn visible_fingerprint(snapshot: &DesktopSnapshot) -> String {
-    let jobs = snapshot
-        .jobs
-        .iter()
-        .map(|job| {
-            format!(
-                "{}:{:?}:{}:{}:{}",
-                job.id,
-                job.state as u8,
-                job.progress.completed_bytes,
-                job.progress.committed_bytes,
-                job.progress.wire_bytes
-            )
-        })
-        .collect::<String>();
-    let exports = snapshot
-        .verified_results
-        .iter()
-        .map(|result| {
-            format!(
-                "{}:{:?}:{:?}",
-                result.transfer_id,
-                result.exported_paths,
-                result.export_error.is_some()
-            )
-        })
-        .collect::<String>();
-    format!("{jobs}|{exports}")
 }

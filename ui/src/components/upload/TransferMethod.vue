@@ -87,14 +87,18 @@ function hideOutgoing(element: Element): void {
                 :value="item"
                 class="transfer-method__card"
                 :disabled="disabled || (item === 'webrtc' && !webRtcSupported)"
-                :aria-label="item === 'http' ? 'HTTP (stored)' : 'WebRTC (live)'"
+                :aria-label="
+                    item === 'http' ? 'Server (send via Filebeam server)' : 'P2P (send via WebRTC)'
+                "
             >
                 <span class="transfer-method__icon" aria-hidden="true">
                     <Icon :name="item === 'http' ? 'http-server' : 'webrtc-p2p'" :size="18" />
                 </span>
                 <span class="transfer-method__copy">
-                    <strong>{{ item === 'http' ? 'HTTP' : 'WebRTC' }}</strong>
-                    <small>{{ item === 'http' ? 'Download later.' : 'Keep tabs open.' }}</small>
+                    <strong>{{ item === 'http' ? 'Server' : 'P2P' }}</strong>
+                    <small>{{
+                        item === 'http' ? 'Send via Filebeam server.' : 'Send via WebRTC.'
+                    }}</small>
                 </span>
             </RadioGroupItem>
         </RadioGroupRoot>
@@ -120,7 +124,7 @@ function hideOutgoing(element: Element): void {
             :show="enabledDrivers.includes('webrtc') && !webRtcSupported"
         >
             <p class="transfer-method__unsupported">
-                WebRTC is not supported by this browser. Choose HTTP to share.
+                WebRTC is not supported by this browser. Choose Server to share.
             </p>
         </AnimatedReveal>
     </section>

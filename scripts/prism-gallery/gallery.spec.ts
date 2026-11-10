@@ -145,8 +145,8 @@ test('exercises password, queue, method, notification, dialog, and interrupted m
     await page.getByRole('button', { name: 'Rotate rows' }).click();
 
     await page.getByRole('button', { name: /^Methods & retention/ }).click();
-    await page.getByRole('radio', { name: 'WebRTC (live)' }).click();
-    await expect(page.getByRole('radio', { name: 'WebRTC (live)' })).toBeChecked();
+    await page.getByRole('radio', { name: 'P2P (send via WebRTC)' }).click();
+    await expect(page.getByRole('radio', { name: 'P2P (send via WebRTC)' })).toBeChecked();
     await page.getByRole('button', { name: 'Notes', exact: true }).click();
     await expect(page.getByRole('switch', { name: 'Burn on read' })).toBeVisible();
     await page.getByRole('combobox', { name: 'Retention period' }).click();
@@ -231,15 +231,19 @@ test('keeps material, policy, keyboard, collision, and toast contracts exact', a
 
     await page.getByRole('button', { name: /^Methods & retention/ }).click();
     await page.getByRole('button', { name: 'HTTP only' }).click();
-    await expect(page.getByRole('radio', { name: 'HTTP (stored)' })).toBeChecked();
-    await expect(page.getByRole('radio', { name: 'WebRTC (live)' })).toHaveCount(0);
+    await expect(
+        page.getByRole('radio', { name: 'Server (send via Filebeam server)' }),
+    ).toBeChecked();
+    await expect(page.getByRole('radio', { name: 'P2P (send via WebRTC)' })).toHaveCount(0);
     await page.getByRole('button', { name: 'WebRTC only' }).click();
-    await expect(page.getByRole('radio', { name: 'WebRTC (live)' })).toBeChecked();
-    await expect(page.getByRole('radio', { name: 'HTTP (stored)' })).toHaveCount(0);
+    await expect(page.getByRole('radio', { name: 'P2P (send via WebRTC)' })).toBeChecked();
+    await expect(
+        page.getByRole('radio', { name: 'Server (send via Filebeam server)' }),
+    ).toHaveCount(0);
 
     await page.getByRole('button', { name: 'Both finite' }).click();
     await page.setViewportSize({ width: 390, height: 844 });
-    const live = page.getByRole('radio', { name: 'WebRTC (live)' });
+    const live = page.getByRole('radio', { name: 'P2P (send via WebRTC)' });
     await live.click();
     await page.waitForTimeout(400);
     const [indicator, selected] = await Promise.all([

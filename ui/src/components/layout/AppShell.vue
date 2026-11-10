@@ -18,6 +18,7 @@ import BrandLogo from '../brand/BrandLogo.vue';
 import AppearancePopover from './AppearancePopover.vue';
 import AppLink from '../primitives/AppLink.vue';
 import AuthLink from '../auth/AuthLink.vue';
+import AppInstallButton from './AppInstallButton.vue';
 import CliFooterLauncher from '../cli/CliFooterLauncher.vue';
 import Icon, { type IconName } from '../primitives/Icon.vue';
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
@@ -211,6 +212,7 @@ function goHome(event: MouseEvent): void {
                     ><span>GitHub</span><Icon name="arrow-up-right" :size="13"
                 /></a>
             </nav>
+            <AppInstallButton />
             <div class="fb-header__actions">
                 <div class="fb-header__account">
                     <template v-if="user">
@@ -538,6 +540,10 @@ function goHome(event: MouseEvent): void {
     min-height: 2.625rem;
     padding: 0.5625rem 1.125rem;
     font-size: 0.75rem;
+}
+.fb-header :deep(.app-install-entry) {
+    min-height: 2.625rem;
+    padding-block: 0.5625rem;
 }
 .fb-account-link {
     max-width: 10rem;

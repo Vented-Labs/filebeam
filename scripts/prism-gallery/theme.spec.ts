@@ -80,7 +80,7 @@ for (const preset of presets)
                 await visual(page.getByTestId('theme-controls')).toHaveScreenshot(
                     `${preset}-${mode}-focus.png`,
                 );
-                await page.getByRole('radio', { name: 'WebRTC (live)' }).click();
+                await page.getByRole('radio', { name: 'P2P (send via WebRTC)' }).click();
                 await visual(page.getByTestId('theme-transfer')).toHaveScreenshot(
                     `${preset}-${mode}-live.png`,
                 );

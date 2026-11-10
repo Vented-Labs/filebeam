@@ -140,7 +140,7 @@ enum Command {
     /// Encrypt and upload files or directories.
     Up {
         files: Vec<PathBuf>,
-        /// Transfer over the HTTP relay or directly over WebRTC.
+        /// How to send the files.
         #[arg(long, value_enum, default_value_t = Transport::Http)]
         transport: Transport,
         /// Publish a Turbo HTTP transfer so recipients can receive verified chunks while uploading.
@@ -728,7 +728,9 @@ fn wait_for_delivery(
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum Transport {
+    /// Server: send via Filebeam server.
     Http,
+    /// P2P: send via WebRTC.
     Webrtc,
 }
 

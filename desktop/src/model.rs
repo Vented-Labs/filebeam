@@ -169,14 +169,9 @@ pub enum DeviceAvailability {
 }
 #[derive(Clone, Default)]
 pub enum KeyCustody {
+    /// No receiving key is set up, or its state has not been read yet.
     #[default]
     Unknown,
-    /// Retained for existing view consumers; new snapshots use `Configured`.
-    Local,
-    /// Retained for existing view consumers; new snapshots use `Locked` or `Configured`.
-    PasswordWrapped,
-    /// Retained for existing view consumers; new snapshots use `Locked`.
-    ServerWrapped,
     PendingBackup {
         generation_id: String,
         fingerprint: String,
@@ -215,7 +210,16 @@ pub struct JobSnapshot {
     pub peer_warning: Option<String>,
     pub capabilities: TransferCapabilities,
 }
-#[derive(Clone, Copy, PartialEq, Eq)]
+
+impl JobSnapshot {
+    /// Whether a person started this as a transfer. Internal work, such as preparing
+    /// a manifest or revoking a link, is tracked as a job too but is not one.
+    pub fn is_transfer(&self) -> bool {
+        self.direction != TransferDirection::Service
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TransferDirection {
     Send,
     Receive,
@@ -364,10 +368,12 @@ pub struct ClientMessage {
     pub operation: String,
     pub error: ClientError,
 }
+/// A command the service finished without an error.
 #[derive(Clone)]
 pub struct OperationStatus {
+    /// Increases with every completion, so a view can tell a new one from an old one.
+    pub id: u64,
     pub operation: String,
-    pub detail: String,
 }
 #[derive(Clone, PartialEq, Eq)]
 pub struct ClientError {
@@ -590,6 +596,7 @@ impl ClientCommand {
     pub fn operation(&self) -> &'static str {
         match self {
             Self::ReloadSettings => "reload settings",
+            Self::Refresh => "refresh",
             Self::RefreshDevices => "refresh devices",
             Self::EnrollDevice { .. } => "enroll device",
             Self::ApproveDeviceEnrollment { .. } => "approve device enrollment",
@@ -616,6 +623,7 @@ impl ClientCommand {
             Self::ExportReceivingKey { .. } => "export receiving key",
             Self::ConfirmReceivingKeyBackup { .. } => "confirm receiving-key backup",
             Self::ReceiveInbox { .. } => "receive inbox",
+            Self::RefreshInbox => "refresh inbox",
             Self::InspectReceive { .. } => "inspect receive",
             Self::SelectReceiveItems { .. } => "select receive items",
             Self::StartPreparedReceive { .. } => "start prepared receive",
@@ -635,6 +643,8 @@ impl ClientCommand {
             Self::AcceptInvitation { .. } => "accept invitation",
             Self::Report { .. } => "report transfer",
             Self::DeleteAccount { .. } => "delete account",
+            Self::SendFiles(_) => "share",
+            Self::CreateNote(_) => "note",
             _ => "command",
         }
     }

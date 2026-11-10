@@ -81,15 +81,15 @@ struct TransportRail: View {
     @Environment(\.theme) private var theme
     @Binding var transport: Transport
     let showFileCount: Bool
-    var liveCaption = "Keep the app open"
+    var liveCaption = "Send via WebRTC"
 
     var body: some View {
         let policy = model.policy
         let driver = policy?.driver(for: transport)
         VStack(alignment: .leading, spacing: Space.md) {
             SegmentedRail(segments: [
-                Segment(value: Transport.http, label: "HTTP", customIcon: .httpServer, caption: "Download later", enabled: policy?.enabledTransports.contains(.http) ?? true),
-                Segment(value: Transport.webRTC, label: "WebRTC", customIcon: .webrtcP2p, caption: liveCaption, enabled: policy?.enabledTransports.contains(.webRTC) ?? true),
+                Segment(value: Transport.http, label: "Server", customIcon: .httpServer, caption: "Send via Filebeam server", enabled: policy?.enabledTransports.contains(.http) ?? true),
+                Segment(value: Transport.webRTC, label: "P2P", customIcon: .webrtcP2p, caption: liveCaption, enabled: policy?.enabledTransports.contains(.webRTC) ?? true),
             ], selection: $transport)
             HStack(spacing: Space.sm) {
                 FbIcon(.storage, size: 18)
@@ -166,7 +166,7 @@ private struct FilesComposer: View {
 
         if let blocker, let message = blocker.message {
             Notice(message, tone: .danger) {
-                if blocker.offersWebRTC { FbButton("Use WebRTC", kind: .secondary, height: 40, fill: false) { send.setTransport(.webRTC) } }
+                if blocker.offersWebRTC { FbButton("Use P2P", kind: .secondary, height: 40, fill: false) { send.setTransport(.webRTC) } }
             }
             .transition(.opacity.combined(with: .move(edge: .top)))
         }

@@ -1,7 +1,21 @@
-//! Development-only deterministic snapshots for native Studio visual capture.
+//! Development-only synthetic snapshots for native visual capture. Timestamps are
+//! placed relative to now so that relative labels read as they would in use.
 //! This module is compiled only with `--features visual-test`.
 
-use crate::model::*;
+use crate::{model::*, ui::format};
+
+/// An RFC 3339 timestamp `hours` from now; negative values are in the past.
+fn at(hours: i64) -> String {
+    let instant = format::now() + hours * 3600;
+    let (year, month, day) = format::civil_from_days(instant.div_euclid(86_400));
+    let seconds = instant.rem_euclid(86_400);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        seconds / 3600,
+        seconds % 3600 / 60,
+        seconds % 60
+    )
+}
 
 #[derive(Clone, Copy)]
 pub struct Scenario {
@@ -22,12 +36,42 @@ pub const SCENARIOS: &[Scenario] = &[
         theme: "dark",
     },
     Scenario {
-        id: "send-queue",
+        id: "send-files",
         destination: "send",
         theme: "dark",
     },
     Scenario {
-        id: "send-errors",
+        id: "send-attach-note",
+        destination: "send",
+        theme: "dark",
+    },
+    Scenario {
+        id: "send-status",
+        destination: "send",
+        theme: "dark",
+    },
+    Scenario {
+        id: "send-share-progress",
+        destination: "send",
+        theme: "dark",
+    },
+    Scenario {
+        id: "send-share-ready",
+        destination: "send",
+        theme: "dark",
+    },
+    Scenario {
+        id: "send-share-split",
+        destination: "send",
+        theme: "dark",
+    },
+    Scenario {
+        id: "send-share-live",
+        destination: "send",
+        theme: "dark",
+    },
+    Scenario {
+        id: "send-share-failed",
         destination: "send",
         theme: "dark",
     },
@@ -48,16 +92,6 @@ pub const SCENARIOS: &[Scenario] = &[
     },
     Scenario {
         id: "send-lifetime",
-        destination: "send",
-        theme: "dark",
-    },
-    Scenario {
-        id: "send-preferences",
-        destination: "send",
-        theme: "dark",
-    },
-    Scenario {
-        id: "send-preferences-scroll",
         destination: "send",
         theme: "dark",
     },
@@ -117,12 +151,52 @@ pub const SCENARIOS: &[Scenario] = &[
         theme: "dark",
     },
     Scenario {
+        id: "receive-preview",
+        destination: "receive",
+        theme: "dark",
+    },
+    Scenario {
+        id: "receive-note",
+        destination: "receive",
+        theme: "dark",
+    },
+    Scenario {
+        id: "receive-note-opened",
+        destination: "receive",
+        theme: "dark",
+    },
+    Scenario {
+        id: "receive-progress",
+        destination: "receive",
+        theme: "dark",
+    },
+    Scenario {
         id: "transfers-mixed",
         destination: "transfers",
         theme: "dark",
     },
     Scenario {
         id: "transfers-scroll-end",
+        destination: "transfers",
+        theme: "dark",
+    },
+    Scenario {
+        id: "transfers-selected",
+        destination: "transfers",
+        theme: "dark",
+    },
+    Scenario {
+        id: "transfers-receipt",
+        destination: "transfers",
+        theme: "dark",
+    },
+    Scenario {
+        id: "transfers-failed",
+        destination: "transfers",
+        theme: "dark",
+    },
+    Scenario {
+        id: "transfers-empty",
         destination: "transfers",
         theme: "dark",
     },
@@ -152,18 +226,53 @@ pub const SCENARIOS: &[Scenario] = &[
         theme: "dark",
     },
     Scenario {
-        id: "account-profile",
-        destination: "account",
+        id: "inbox-no-key",
+        destination: "inbox",
         theme: "dark",
     },
     Scenario {
-        id: "account-scroll-end",
-        destination: "account",
+        id: "inbox-locked-refused",
+        destination: "inbox",
         theme: "dark",
     },
     Scenario {
-        id: "account-key-wizard",
-        destination: "account",
+        id: "inbox-selected",
+        destination: "inbox",
+        theme: "dark",
+    },
+    Scenario {
+        id: "inbox-download-started",
+        destination: "inbox",
+        theme: "dark",
+    },
+    Scenario {
+        id: "history-signed-out",
+        destination: "history",
+        theme: "dark",
+    },
+    Scenario {
+        id: "history-empty",
+        destination: "history",
+        theme: "dark",
+    },
+    Scenario {
+        id: "history-loading",
+        destination: "history",
+        theme: "dark",
+    },
+    Scenario {
+        id: "history-populated",
+        destination: "history",
+        theme: "dark",
+    },
+    Scenario {
+        id: "history-selected",
+        destination: "history",
+        theme: "dark",
+    },
+    Scenario {
+        id: "history-failed",
+        destination: "history",
         theme: "dark",
     },
     Scenario {
@@ -172,8 +281,83 @@ pub const SCENARIOS: &[Scenario] = &[
         theme: "dark",
     },
     Scenario {
+        id: "account-register",
+        destination: "account",
+        theme: "dark",
+    },
+    Scenario {
         id: "account-recovery",
         destination: "account",
+        theme: "dark",
+    },
+    Scenario {
+        id: "account-auth-refused",
+        destination: "account",
+        theme: "dark",
+    },
+    Scenario {
+        id: "account-report",
+        destination: "account",
+        theme: "dark",
+    },
+    Scenario {
+        id: "account-profile",
+        destination: "account",
+        theme: "dark",
+    },
+    Scenario {
+        id: "account-profile-unverified",
+        destination: "account",
+        theme: "dark",
+    },
+    Scenario {
+        id: "account-receiving",
+        destination: "account",
+        theme: "dark",
+    },
+    Scenario {
+        id: "account-key",
+        destination: "account",
+        theme: "dark",
+    },
+    Scenario {
+        id: "account-key-new",
+        destination: "account",
+        theme: "dark",
+    },
+    Scenario {
+        id: "account-key-backup",
+        destination: "account",
+        theme: "dark",
+    },
+    Scenario {
+        id: "account-key-locked",
+        destination: "account",
+        theme: "dark",
+    },
+    Scenario {
+        id: "account-contacts",
+        destination: "account",
+        theme: "dark",
+    },
+    Scenario {
+        id: "account-delete",
+        destination: "account",
+        theme: "dark",
+    },
+    Scenario {
+        id: "settings-general",
+        destination: "settings",
+        theme: "dark",
+    },
+    Scenario {
+        id: "settings-instance-refused",
+        destination: "settings",
+        theme: "dark",
+    },
+    Scenario {
+        id: "settings-appearance",
+        destination: "settings",
         theme: "dark",
     },
     Scenario {
@@ -187,7 +371,22 @@ pub const SCENARIOS: &[Scenario] = &[
         theme: "dark",
     },
     Scenario {
-        id: "settings-scroll-end",
+        id: "settings-network",
+        destination: "settings",
+        theme: "dark",
+    },
+    Scenario {
+        id: "settings-devices",
+        destination: "settings",
+        theme: "dark",
+    },
+    Scenario {
+        id: "settings-devices-pending",
+        destination: "settings",
+        theme: "dark",
+    },
+    Scenario {
+        id: "settings-about",
         destination: "settings",
         theme: "dark",
     },
@@ -202,7 +401,7 @@ pub const SCENARIOS: &[Scenario] = &[
         theme: "dark",
     },
     Scenario {
-        id: "narrow-sheets",
+        id: "receive-secret",
         destination: "receive",
         theme: "dark",
     },
@@ -217,7 +416,9 @@ pub fn snapshot(id: &str) -> Option<DesktopSnapshot> {
     let mut snapshot = base_snapshot();
     match scenario.id {
         "receive-key" => snapshot.pending_prompts.push(prompt(PromptKind::ShareKey)),
-        "receive-password" => snapshot.pending_prompts.push(prompt(PromptKind::Password)),
+        "receive-password" | "receive-secret" => {
+            snapshot.pending_prompts.push(prompt(PromptKind::Password))
+        }
         "receive-consent" => snapshot
             .pending_prompts
             .push(prompt(PromptKind::PeerConsent)),
@@ -245,81 +446,262 @@ pub fn snapshot(id: &str) -> Option<DesktopSnapshot> {
             snapshot.jobs.push(job);
             snapshot.verified_results.push(result);
         }
-        "receive-expired" | "error-toast" => snapshot.messages.push(ClientMessage {
+        "error-toast" => snapshot.messages.push(ClientMessage {
             id: 1,
-            operation: if scenario.id == "error-toast" {
-                "native account request".into()
-            } else {
-                "inspect receive".into()
-            },
-            error: error(
-                ClientErrorCode::Remote,
-                if scenario.id == "error-toast" {
-                    "The server returned 404."
-                } else {
-                    "This transfer has expired."
-                },
-            ),
+            operation: "refresh contacts".into(),
+            error: error(ClientErrorCode::Remote, "The server returned 503."),
         }),
-        "transfers-mixed" | "dialogs" => snapshot.jobs = mixed_jobs(),
-        "transfers-scroll-end" => snapshot.jobs = scroll_jobs(),
-        "inbox-locked" => {
-            snapshot.account.authenticated = true;
-            snapshot.account.key_custody = KeyCustody::Locked {
-                version: 2,
-                fingerprint: "ABCD 1234".into(),
-                custody_mode: "password".into(),
-            };
-            snapshot
-                .inbox
-                .push(inbox("in-3", 0, 1, "2026-09-18T00:00:00Z"));
+        "receive-preview" => snapshot.receive_previews.push(ReceivePreview {
+            attached_note: Some(filebeam_client_core::protocol::AttachedNote {
+                text: "Final cut for review. The archive holds the layered sources.".into(),
+                title: Some("Read first".into()),
+                language: "markdown".into(),
+            }),
+            operation_id: Some("receive-fixture-01".into()),
+            link: "https://studio.fixture.invalid/01JD8Q4XK7M2N9P3R5T6V8W0YZ".into(),
+            kind: ReceiveKind::File,
+            password_required: false,
+            burn_on_read: false,
+            items: [
+                ("Product walkthrough.mp4", 482_344_960_u64),
+                ("Launch assets.zip", 342_884_352),
+                ("Brand guidelines.pdf", 3_758_080),
+                ("release-notes.md", 1_946),
+            ]
+            .into_iter()
+            .enumerate()
+            .map(|(index, (name, size))| ReceiveItem {
+                id: format!("item-{index:02}"),
+                name: name.into(),
+                size,
+            })
+            .collect(),
+        }),
+        "receive-note" => snapshot.receive_previews.push(ReceivePreview {
+            attached_note: None,
+            operation_id: None,
+            link: "https://studio.fixture.invalid/01JD8Q4XK7M2N9P3R5T6V8W0YZ#k=v1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".into(),
+            kind: ReceiveKind::Note,
+            password_required: true,
+            burn_on_read: true,
+            items: Vec::new(),
+        }),
+        "receive-progress" => {
+            let mut running = receive_job("Product walkthrough.mp4", TransferState::Running);
+            running.progress.phase = "Downloading".into();
+            running.progress.completed_bytes = 204_472_320;
+            running.capabilities.can_pause = true;
+            snapshot.jobs.push(running);
         }
-        "inbox-populated" | "inbox-many-scroll-end" => {
+        "send-share-progress"
+        | "send-share-ready"
+        | "send-share-split"
+        | "send-share-live"
+        | "send-share-failed" => {
+            let mut share = job(
+                "j-share",
+                "Launch assets.zip",
+                TransferDirection::Send,
+                TransferState::Running,
+                830_988_288,
+                38,
+                "Uploading",
+            );
+            match scenario.id {
+                "send-share-progress" => share.capabilities.can_pause = true,
+                "send-share-failed" => {
+                    share.state = TransferState::Failed;
+                    share.error = Some(error(
+                        ClientErrorCode::Network,
+                        "error sending request for url",
+                    ));
+                }
+                other => {
+                    share.state = TransferState::Complete;
+                    share.progress.completed_bytes = 830_988_288;
+                    share.progress.phase = "Link ready".into();
+                    share.share_url = Some(
+                        "https://studio.fixture.invalid/01JD8Q4XK7M2N9P3R5T6V8W0YZ#k=v1.fixture-key-material".into(),
+                    );
+                    share.cli_command = Some(
+                        "beam down 'https://studio.fixture.invalid/01JD8Q4XK7M2N9P3R5T6V8W0YZ#k=v1.fixture-key-material'".into(),
+                    );
+                    if other == "send-share-split" {
+                        share.share_url = Some(
+                            "https://studio.fixture.invalid/01JD8Q4XK7M2N9P3R5T6V8W0YZ".into(),
+                        );
+                        share.separate_key = Some("v1.fixture-key-material".into());
+                        share.cli_command = None;
+                    }
+                    if other == "send-share-live" {
+                        share.state = TransferState::Running;
+                        share.progress.completed_bytes = 0;
+                        share.progress.phase = "Waiting for recipient".into();
+                        share.capabilities.can_end_live = true;
+                    }
+                }
+            }
+            snapshot.jobs.push(share);
+        }
+        "transfers-mixed" | "transfers-selected" | "transfers-receipt" | "transfers-failed"
+        | "dialogs" => {
+            snapshot.jobs = mixed_jobs();
+            snapshot.verified_results.push(VerifiedResult {
+                transfer_id: "receive-fixture-01".into(),
+                private_path: "/fixture/private/receive-fixture-01".into(),
+                verified_paths: vec![
+                    "/fixture/private/receive-fixture-01/Product walkthrough.mp4".into(),
+                ],
+                exported_paths: Vec::new(),
+                export_error: None,
+            });
+        }
+        "transfers-scroll-end" => snapshot.jobs = scroll_jobs(),
+        "inbox-locked" | "inbox-locked-refused" => {
             snapshot.account = account(
                 true,
-                KeyCustody::Configured {
+                KeyCustody::Locked {
                     version: 2,
                     fingerprint: "ABCD 1234".into(),
-                    custody_mode: "self".into(),
+                    custody_mode: "password".into(),
                 },
             );
+        }
+        "inbox-no-key" => snapshot.account = account(true, KeyCustody::Unknown),
+        "inbox-empty" => snapshot.account = account(true, configured_key()),
+        "inbox-populated"
+        | "inbox-selected"
+        | "inbox-download-started"
+        | "inbox-many-scroll-end" => {
+            snapshot.account = account(true, configured_key());
             snapshot.inbox = if scenario.id == "inbox-many-scroll-end" {
-                (1..=40)
+                (1..=30)
                     .map(|index| {
                         inbox(
-                            &format!("in-{index}"),
+                            &format!("01JD8Q4XK7M2N9P3R5T6V8{index:04}"),
                             index * 2_097_152,
                             (index % 3) + 1,
-                            &format!("2026-09-{index:02}T10:36:00Z"),
+                            -(index as i64) * 5,
                         )
                     })
                     .collect()
             } else {
+                let mut first = inbox("01JD8Q4XK7M2N9P3R5T6V8W0A1", 72_351_744, 3, -2);
+                first.item_ids = vec!["item-01".into(), "item-02".into(), "item-03".into()];
                 vec![
-                    inbox("in-1", 72_351_744, 2, "2026-09-18T10:24:00Z"),
-                    inbox("in-2", 2_936_012, 1, "2026-09-18T09:36:00Z"),
-                    inbox("in-3", 0, 1, "2026-09-18T00:00:00Z"),
-                    inbox("in-4", 2_164, 1, "2026-09-17T10:36:00Z"),
+                    first,
+                    inbox("01JD8Q4XK7M2N9P3R5T6V8W0B2", 2_936_012, 1, -5),
+                    inbox("01JD8Q4XK7M2N9P3R5T6V8W0C3", 418_204_160, 12, -26),
+                    inbox("01JD8Q4XK7M2N9P3R5T6V8W0D4", 2_164, 1, -75),
                 ]
             };
+            if scenario.id != "inbox-many-scroll-end" {
+                snapshot.staged_inbox = vec![
+                    filebeam_client_core::services::inbox_receiver::StagedInbox {
+                        id: "01JD8Q4XK7M2N9P3R5T6V8W0B2".into(),
+                        bytes: 2_936_012,
+                        state: "staged-locked".into(),
+                        key_bundle_id: 2,
+                    },
+                    filebeam_client_core::services::inbox_receiver::StagedInbox {
+                        id: "01JD8Q4XK7M2N9P3R5T6V8W0C3".into(),
+                        bytes: 418_204_160,
+                        state: "downloading".into(),
+                        key_bundle_id: 2,
+                    },
+                ];
+            }
         }
-        "account-profile" | "account-scroll-end" | "account-key-wizard" | "account-recovery" => {
+        "history-empty" | "history-loading" | "history-failed" => {
+            snapshot.account = account(true, configured_key());
+            snapshot.history.revision = 1;
+            if scenario.id == "history-failed" {
+                snapshot.history.error = Some("native account request returned 503".into());
+            }
+        }
+        "history-populated" | "history-selected" => {
+            snapshot.account = account(true, configured_key());
+            snapshot.history.revision = 1;
+            snapshot.history.page.next_cursor = Some("older".into());
+            snapshot.history.page.data = history_entries();
+        }
+        "account-profile"
+        | "account-receiving"
+        | "account-key"
+        | "account-contacts"
+        | "account-delete" => {
+            snapshot.account = account(true, configured_key());
+            snapshot.contacts = Some(contacts());
+            snapshot.auto_receiving = true;
+        }
+        "account-profile-unverified" | "account-key-new" => {
+            snapshot.account = account(true, KeyCustody::Unknown);
+            snapshot.account.email_verified = scenario.id == "account-key-new";
+        }
+        "account-key-backup" => {
             snapshot.account = account(
                 true,
-                KeyCustody::Configured {
-                    version: 2,
-                    fingerprint: "ABCD 1234".into(),
-                    custody_mode: "self".into(),
+                KeyCustody::PendingBackup {
+                    generation_id: "generation-fixture".into(),
+                    fingerprint: "ABCD 1234 EF56 7890".into(),
                 },
             );
         }
-        "settings-light" | "settings-dark" | "settings-scroll-end" => {
-            snapshot.settings = SettingsSnapshot {
-                memory_limit_mib: 512,
-                max_concurrency: Some(2),
-                relay_only: false,
-                auto_update: true,
-                restart_required: false,
+        "account-key-locked" => {
+            snapshot.account = account(
+                true,
+                KeyCustody::Locked {
+                    version: 2,
+                    fingerprint: "ABCD 1234 EF56 7890".into(),
+                    custody_mode: "password".into(),
+                },
+            );
+        }
+        "settings-devices" | "settings-devices-pending" => {
+            snapshot.account = account(true, configured_key());
+            let device = |id: &str, name: &str, platform: &str, trust: DeviceTrust, local: bool| {
+                DeviceSnapshot {
+                    id: id.into(),
+                    name: name.into(),
+                    platform: platform.into(),
+                    trust,
+                    availability: DeviceAvailability::NeedsOpen,
+                    detail: local.then(|| "This device".into()),
+                    fingerprint: "7C2A 91F0 3B6E D455".into(),
+                }
+            };
+            snapshot.device_directory.availability = DeviceDirectoryAvailability::Available;
+            if scenario.id == "settings-devices-pending" {
+                snapshot.device_directory.enrollment_payload = Some(
+                    "{\"instance_origin\":\"https://studio.fixture.invalid\",\"candidate_device_id\":\"01JD8Q4XK7M2N9P3R5T6V8D001\"}"
+                        .into(),
+                );
+                snapshot.device_directory.pending_fingerprint = Some("7C2A 91F0 3B6E D455".into());
+            } else {
+                snapshot.device_directory.devices = vec![
+                    device("d-studio", "Studio desktop", "linux", DeviceTrust::Verified, true),
+                    device("d-pixel", "Pixel 9", "android", DeviceTrust::Registered, false),
+                    device("d-macbook", "MacBook Air", "macos", DeviceTrust::Verified, false),
+                ];
+                snapshot.device_directory.daemon = DeviceDaemonSnapshot {
+                    connected: true,
+                    receive_enabled: true,
+                    destinations: vec![
+                        DeviceDestinationSnapshot {
+                            id: "g-1".into(),
+                            alias: "downloads".into(),
+                            approval: "ask".into(),
+                            enabled: true,
+                        },
+                        DeviceDestinationSnapshot {
+                            id: "g-2".into(),
+                            alias: "screenshots".into(),
+                            approval: "auto".into(),
+                            enabled: true,
+                        },
+                    ],
+                    ..DeviceDaemonSnapshot::default()
+                };
             }
         }
         _ => {}
@@ -374,6 +756,101 @@ fn account(authenticated: bool, key_custody: KeyCustody) -> AccountSnapshot {
         key_custody,
     }
 }
+fn configured_key() -> KeyCustody {
+    KeyCustody::Configured {
+        version: 2,
+        fingerprint: "ABCD 1234 EF56 7890".into(),
+        custody_mode: "password".into(),
+    }
+}
+
+fn contacts() -> filebeam_client_core::services::Contacts {
+    use filebeam_client_core::services::{
+        Contact, ContactIdentity, Contacts, ReceivingDefaults, contacts::EffectiveReceiving,
+    };
+    let contact =
+        |id: u64, username: &str, name: &str, status: &str, automatic: Option<bool>| Contact {
+            id,
+            username: username.into(),
+            name: name.into(),
+            status: status.into(),
+            can_send: None,
+            auto_download: automatic,
+            effective: EffectiveReceiving {
+                can_send: true,
+                auto_download: automatic.unwrap_or(true),
+            },
+        };
+    Contacts {
+        settings: ReceivingDefaults {
+            receiving_policy: "friends".into(),
+            auto_download_friends: true,
+            revision: 4,
+        },
+        contacts: vec![
+            contact(2, "ada", "Ada Okafor", "incoming", None),
+            contact(3, "edsger", "Edsger Lindqvist", "outgoing", None),
+            contact(4, "grace", "Grace Tanaka", "accepted", Some(false)),
+            contact(5, "linus", "Linus Moreau", "accepted", None),
+            contact(6, "margaret", "Margaret Adeyemi", "accepted", None),
+        ],
+        blocked: vec![ContactIdentity {
+            id: 7,
+            username: "mallory".into(),
+            name: "Mallory".into(),
+        }],
+    }
+}
+
+fn history_entries() -> Vec<filebeam_client_core::services::HistoryEntry> {
+    let entry = |index: u64, kind: &str, driver: &str, status: &str, items: u64, bytes: u64| {
+        let open = matches!(status, "available" | "live" | "pending");
+        // Open entries were shared within the last day; closed ones are older.
+        let created = if open {
+            -(index as i64) * 3
+        } else {
+            -(index as i64) * 30
+        };
+        filebeam_client_core::services::HistoryEntry {
+            id: format!("01JD8Q4XK7M2N9P3R5T6V8H{index:03}"),
+            kind: kind.into(),
+            driver: driver.into(),
+            delivery: if index.is_multiple_of(3) {
+                "inbox"
+            } else {
+                "link"
+            }
+            .into(),
+            status: status.into(),
+            item_count: items,
+            ciphertext_bytes: bytes,
+            declared_ciphertext_bytes: bytes,
+            created_at: at(created),
+            completed_at: Some(at(created)),
+            published_at: None,
+            expires_at: at(created + 24),
+            removed_at: (!open).then(|| at(created + 24)),
+            retention_hours: 24,
+            maximum_retention_hours: 168,
+            maximum_expires_at: Some(at(created + 168)),
+            burn_on_read: status == "burned",
+            can_delete: open,
+            can_extend: status == "available",
+        }
+    };
+    vec![
+        entry(1, "files", "http", "available", 3, 342_884_352),
+        entry(2, "note", "http", "available", 1, 1_946),
+        entry(3, "files", "webrtc", "live", 1, 858_993_459),
+        entry(4, "files", "http", "pending", 12, 96_468_992),
+        entry(5, "note", "http", "burned", 1, 812),
+        entry(6, "files", "http", "expired", 2, 3_758_080),
+        entry(7, "files", "webrtc", "ended", 1, 192_937_984),
+        entry(8, "files", "http", "deleting", 5, 26_214_400),
+        entry(9, "files", "http", "deleted", 1, 482_344_960),
+    ]
+}
+
 fn error(code: ClientErrorCode, detail: &str) -> ClientError {
     ClientError {
         code,
@@ -389,13 +866,14 @@ fn prompt(kind: PromptKind) -> PendingPrompt {
         directory: None,
     }
 }
-fn inbox(id: &str, ciphertext_bytes: u64, item_count: u64, completed_at: &str) -> InboxItem {
+/// A delivery received `received` hours from now (negative) and kept for a week.
+fn inbox(id: &str, ciphertext_bytes: u64, item_count: u64, received: i64) -> InboxItem {
     InboxItem {
         id: id.into(),
         ciphertext_bytes,
         item_count,
-        completed_at: completed_at.into(),
-        expires_at: "2026-09-25T10:36:00Z".into(),
+        completed_at: at(received),
+        expires_at: at(received + 168),
         item_ids: vec!["item-01".into()],
     }
 }
@@ -434,8 +912,13 @@ fn mixed_jobs() -> Vec<JobSnapshot> {
         0,
         "Waiting for recipient",
     );
-    running.direction = TransferDirection::Send;
-    running.capabilities.can_pause = true;
+    running.share_url =
+        Some("https://studio.fixture.invalid/01JD8Q4XK7M2N9P3R5T6V8W0YZ#k=v1.fixture".into());
+    running.cli_command = Some(
+        "beam receive 'https://studio.fixture.invalid/01JD8Q4XK7M2N9P3R5T6V8W0YZ#k=v1.fixture'"
+            .into(),
+    );
+    running.capabilities.can_end_live = true;
     let mut paused = job(
         "j-paused",
         "Research archive.zip",
@@ -446,7 +929,8 @@ fn mixed_jobs() -> Vec<JobSnapshot> {
         "Paused",
     );
     paused.capabilities.can_resume = true;
-    let complete = job(
+    paused.capabilities.can_discard = true;
+    let mut complete = job(
         "j-note",
         "Deployment notes",
         TransferDirection::Note,
@@ -455,7 +939,11 @@ fn mixed_jobs() -> Vec<JobSnapshot> {
         100,
         "Link ready",
     );
-    let saved = job(
+    complete.share_url = Some("https://studio.fixture.invalid/n/01JD8Q4XK7M2N9P3R5T6V8W0YZ".into());
+    complete.separate_key = Some("v1.fixture-key".into());
+    complete.capabilities.can_revoke = true;
+    complete.capabilities.can_discard = true;
+    let mut saved = job(
         "j-complete",
         "Brand guidelines.pdf",
         TransferDirection::Receive,
@@ -464,6 +952,7 @@ fn mixed_jobs() -> Vec<JobSnapshot> {
         100,
         "Saved to folder",
     );
+    saved.capabilities.can_discard = true;
     let mut failed = job(
         "j-failed",
         "Photography.zip",
@@ -477,14 +966,12 @@ fn mixed_jobs() -> Vec<JobSnapshot> {
         ClientErrorCode::Network,
         "Connection interrupted; retained work can be retried.",
     ));
-    vec![
-        running,
-        receive_job("Product walkthrough.mp4", TransferState::Complete),
-        paused,
-        complete,
-        saved,
-        failed,
-    ]
+    failed.capabilities.can_resume = true;
+    failed.capabilities.can_discard = true;
+    let mut verified = receive_job("Product walkthrough.mp4", TransferState::Complete);
+    verified.capabilities.can_export = true;
+    verified.capabilities.can_discard = true;
+    vec![running, verified, paused, complete, saved, failed]
 }
 
 fn scroll_jobs() -> Vec<JobSnapshot> {
@@ -514,6 +1001,10 @@ fn job(
 ) -> JobSnapshot {
     let mut job = receive_job(name, state);
     job.id = id.into();
+    job.checkpoint_id = Some(format!(
+        "01JD8Q4XK7M2N9P3{:0>10}",
+        id.replace('-', "").to_uppercase()
+    ));
     job.direction = direction;
     job.progress.phase = phase.into();
     job.progress.total_bytes = Some(bytes);

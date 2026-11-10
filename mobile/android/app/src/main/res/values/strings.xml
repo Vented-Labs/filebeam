@@ -62,10 +62,10 @@
     <!-- Send -->
     <string name="send_mode_files">Files</string>
     <string name="send_mode_notes">Notes</string>
-    <string name="transport_http">HTTP</string>
-    <string name="transport_http_caption">Download later</string>
-    <string name="transport_webrtc">WebRTC</string>
-    <string name="transport_webrtc_caption">Keep the app open</string>
+    <string name="transport_http">Server</string>
+    <string name="transport_http_caption">Send via Filebeam server</string>
+    <string name="transport_webrtc">P2P</string>
+    <string name="transport_webrtc_caption">Send via WebRTC</string>
     <string name="limit_per_transfer">%1$s per transfer</string>
     <string name="limit_per_note">%1$s per note</string>
     <string name="limit_unlimited">Unlimited transfer size</string>
@@ -123,7 +123,7 @@
     <string name="send_note">Send encrypted note</string>
     <string name="send_footer">Encrypted on this device before upload.</string>
     <string name="send_footer_turbo">Turbo shares the link while files are still uploading.</string>
-    <string name="send_use_webrtc">Use WebRTC</string>
+    <string name="send_use_webrtc">Use P2P</string>
     <string name="send_policy_unavailable">This instance could not be reached. Check the connection in Settings.</string>
     <string name="send_transport_disabled">This instance has turned off the selected transfer method.</string>
     <plurals name="send_too_many_files">

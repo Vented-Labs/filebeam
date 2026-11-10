@@ -38,6 +38,11 @@ impl NotificationService {
         Self { enabled, sender }
     }
 
+    /// Follows the setting as it changes, so a toggle needs no restart.
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+    }
+
     pub fn transfer_completed(&self) -> Option<std::sync::mpsc::Receiver<Result<(), String>>> {
         let notification = permitted(
             self.enabled,

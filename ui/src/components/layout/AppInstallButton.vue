@@ -8,7 +8,8 @@ defineOptions({ inheritAttrs: false });
 const DesktopInstallDialog = defineAsyncComponent(
     () => import('../desktop/DesktopInstallDialog.vue'),
 );
-const visible = ref(false);
+// Shown until the device is known, so a server-rendered header keeps its layout on hydration.
+const visible = ref(true);
 const open = ref(false);
 const loaded = ref(false);
 const trigger = ref<HTMLButtonElement>();
@@ -55,6 +56,13 @@ function restoreFocus(event: Event): void {
     color: var(--fb-text);
 }
 @media (max-width: 900px) {
+    .app-install-entry {
+        display: none;
+    }
+}
+/* Touch-first devices drop the entry once the page knows the device; this keeps it
+   from showing on them before then. */
+@media (hover: none) and (pointer: coarse) {
     .app-install-entry {
         display: none;
     }
