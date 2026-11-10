@@ -158,6 +158,8 @@ struct FloatingNavBar: View {
                 let isSelected = tab == selected
                 Button {
                     guard !isSelected else { return }
+                    // Editing ends before the switch so the keyboard, and the bar above it, settle at once.
+                    hideKeyboard()
                     Haptics.tick()
                     withMotion(Motion.spatial) { selected = tab }
                 } label: {

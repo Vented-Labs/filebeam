@@ -70,7 +70,7 @@ private struct CodeTextView: UIViewRepresentable {
         context.coordinator.reportHeight()
     }
 
-    final class Coordinator: NSObject, UITextViewDelegate {
+    @MainActor final class Coordinator: NSObject, UITextViewDelegate {
         var parent: CodeTextView
         weak var container: CodeContainerView?
         private var pending: Task<Void, Never>?
@@ -118,11 +118,13 @@ private struct CodeTextView: UIViewRepresentable {
                 apply(tokens: Highlighter.highlight(text, language: language))
             } else {
                 apply(tokens: [])
-                pending = Task.detached(priority: .userInitiated) { [weak self] in
+                // Only the text and language cross to the background task; the result returns to the main actor here.
+                pending = Task { [weak self] in
                     try? await Task.sleep(for: .milliseconds(120))
-                    let tokens = Highlighter.highlight(text, language: language)
                     guard !Task.isCancelled else { return }
-                    await MainActor.run { self?.apply(tokens: tokens, for: text) }
+                    let tokens = await Task.detached(priority: .userInitiated) { Highlighter.highlight(text, language: language) }.value
+                    guard !Task.isCancelled else { return }
+                    self?.apply(tokens: tokens, for: text)
                 }
             }
         }

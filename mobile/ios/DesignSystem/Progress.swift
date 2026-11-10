@@ -27,7 +27,7 @@ struct SmoothProgress: View {
                     Capsule()
                         .fill(LinearGradient(colors: [(fill ?? theme.progressFill).opacity(0), fill ?? theme.progressFill, (fill ?? theme.progressFill).opacity(0)], startPoint: .leading, endPoint: .trailing))
                         .frame(width: band)
-                        .offset(x: -band + (width + band) * sweep)
+                        .offset(x: -band + (width + band) * CGFloat(sweep))
                 } else {
                     // A sliver stays visible below 1% so a started transfer never looks empty.
                     let filled = max(width * shown, shown > 0 ? height : 0)

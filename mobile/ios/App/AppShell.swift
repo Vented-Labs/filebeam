@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import FilebeamDomain
 
 /// The root of the app: ambient backdrop, the navigation stack, the floating navigation bar,
@@ -128,10 +129,12 @@ private struct CommandSheetItem: Identifiable {
 private struct HomeView: View {
     @Bindable var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var keyboardLift: CGFloat = 0
 
     var body: some View {
-        ZStack(alignment: .bottom) {
+        ZStack {
             AmbientBackground(energy: model.transfers.contains { $0.lifecycle == .running } ? 0.6 : 0)
+                .ignoresSafeArea(.keyboard, edges: .bottom)
             ZStack {
                 switch model.selectedTab {
                 case .send: SendView().transition(tabTransition)
@@ -141,11 +144,31 @@ private struct HomeView: View {
                 }
             }
             .animation(reduceMotion ? nil : Motion.enterQuick, value: model.selectedTab)
+        }
+        .overlay(alignment: .bottom) {
             FloatingNavBar(selected: $model.selectedTab, inboxUnread: Int(model.inboxUnreadCount))
                 .padding(.horizontal, Space.gutter)
                 .padding(.bottom, 12)
+                .offset(y: -keyboardLift)
+                .ignoresSafeArea(.keyboard, edges: .bottom)
         }
-        .ignoresSafeArea(.keyboard, edges: .bottom)
+        // The bar rides above the keyboard so destinations stay reachable while typing, as on the web
+        // and Android. It follows the keyboard's own animation in and snaps back when the keyboard
+        // hides, so its hit area never lags behind where it is drawn.
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
+            guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first,
+                  let end = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue else { return }
+            let safeBottom = scene.keyWindow?.safeAreaInsets.bottom ?? 0
+            let lift = max(0, scene.screen.bounds.height - end.minY - safeBottom)
+            if lift > 0 {
+                let duration = note.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double ?? 0.25
+                withAnimation(.easeOut(duration: duration)) { keyboardLift = lift }
+            } else {
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) { keyboardLift = 0 }
+            }
+        }
     }
 
     private var tabTransition: AnyTransition {

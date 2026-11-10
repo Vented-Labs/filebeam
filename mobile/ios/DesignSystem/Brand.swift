@@ -59,7 +59,7 @@ struct FilebeamMark: View {
             let factor = size.height / MarkGeometry.height
             context.scaleBy(x: factor, y: factor)
             let seed = gradient[2], tip = gradient[4]
-            func lerp(_ a: Color, _ b: Color, _ t: Double) -> Color { a.mix(with: b, by: t) }
+            func lerp(_ a: Color, _ b: Color, _ t: Double) -> Color { a.blended(with: b, by: t) }
             context.fill(MarkGeometry.body, with: .color(seed))
             context.fill(MarkGeometry.fold, with: .linearGradient(Gradient(colors: [lerp(tip, .white, 0.12), lerp(tip, .white, 0.45)]), startPoint: CGPoint(x: 0, y: 91), endPoint: CGPoint(x: 81, y: 87)))
             context.fill(MarkGeometry.top, with: .linearGradient(Gradient(colors: [gradient[1], seed, tip]), startPoint: CGPoint(x: 8, y: 76), endPoint: CGPoint(x: 150, y: 5)))
@@ -99,14 +99,14 @@ struct Emblem: View {
                     .overlay(FilebeamMark(height: size * 0.26))
                     .frame(width: cardWidth * 1.08, height: cardHeight * 1.08)
                     .shadow(color: theme.shadow, radius: 18, y: 8)
-                    .offset(y: -lift * 7 - drift * 2.5)
+                    .offset(y: -lift * 7 - CGFloat(drift) * 2.5)
                 // The seal sits on the front card's lower corner.
                 FbIcon(.lock, size: size * 0.11, tint: sealed ? theme.onAction : theme.textMuted)
                     .frame(width: size * 0.2, height: size * 0.2)
                     .background(sealed ? theme.action : theme.raised, in: Circle())
                     .overlay(Circle().strokeBorder(sealed ? theme.actionBorder : theme.controlBorder, lineWidth: 1))
                     .scaleEffect(sealed ? 1.15 : 1)
-                    .offset(x: cardWidth * 0.5, y: cardHeight * 0.44 - lift * 7 - drift * 2.5)
+                    .offset(x: cardWidth * 0.5, y: cardHeight * 0.44 - lift * 7 - CGFloat(drift) * 2.5)
             }
         }
         .frame(width: size * 1.35, height: size)
@@ -123,7 +123,7 @@ struct Emblem: View {
             .overlay(FbIcon(icon, size: size * 0.2, tint: theme.textMuted.opacity(0.7)))
             .frame(width: width, height: height)
             .rotationEffect(.degrees(rotation * fan), anchor: .bottom)
-            .offset(x: shift * fan, y: 6 - lift * 5 + drift * phase * 2)
+            .offset(x: shift * fan, y: 6 - lift * 5 + CGFloat(drift * phase * 2))
     }
 }
 
@@ -162,7 +162,7 @@ struct AmbientBackground: View {
 
 extension Color {
     /// Blends two colours in sRGB; good enough for decorative gradients.
-    func mix(with other: Color, by amount: Double) -> Color {
+    func blended(with other: Color, by amount: Double) -> Color {
         let a = UIColor(self).resolvedComponents, b = UIColor(other).resolvedComponents
         let t = min(max(amount, 0), 1)
         return Color(.sRGB, red: a.0 + (b.0 - a.0) * t, green: a.1 + (b.1 - a.1) * t, blue: a.2 + (b.2 - a.2) * t, opacity: a.3 + (b.3 - a.3) * t)

@@ -23,7 +23,7 @@ struct ShareView: View {
         let hasLink = link != nil
         let consent = snapshot?.prompt?.kind == .peerConsent
         let fraction = snapshot?.fraction
-        let hours = note ? (send.note.options.retentionHours ?? model.policy?.noteDefaultRetentionHours ?? 720) : (send.files.options.retentionHours ?? model.policy?.fileDefaultRetentionHours ?? 24)
+        let hours: UInt64 = note ? (send.note.options.retentionHours ?? model.policy?.noteDefaultRetentionHours ?? 720) : (send.files.options.retentionHours ?? model.policy?.fileDefaultRetentionHours ?? 24)
 
         return AnyView(TabScreen {
             Panel {
@@ -81,7 +81,7 @@ struct ShareView: View {
                         .transition(.opacity.combined(with: .scale(scale: 0.96)))
                     }
                     if hasLink && kind != .inbox && !live {
-                        if complete, let completedAt { ExpiryChip(expiresAt: completedAt.addingTimeInterval(Double(hours) * 3600)) }
+                        if complete, let completedAt { ExpiryChip(expiresAt: completedAt.addingTimeInterval(TimeInterval(hours * 3600))) }
                         else if turbo { Text("Retention starts when uploading finishes.").fbText(.caption, color: theme.textSubtle) }
                     }
                     if note && send.note.options.burnOnRead && hasLink { StatusPill("Burns after the first read", tone: .warning, icon: .trash) }
