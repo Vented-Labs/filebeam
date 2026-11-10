@@ -1,6 +1,6 @@
 # Filebeam for Android
 
-Native Kotlin / Jetpack Compose / Material 3, Android 8 (API 26) and newer.
+Native Kotlin and Jetpack Compose, Android 8 (API 26) and newer.
 Encryption and HTTP/WebRTC transfers execute in the shared Rust engine through
 UniFFI. There is no WebView or JavaScript application runtime.
 
@@ -66,12 +66,11 @@ docker build --target emulator -t filebeam-android-emulator:api35-16k docker/and
 FILEBEAM_ANDROID_EMULATOR_IMAGE=filebeam-android-emulator:api35-16k FILEBEAM_ANDROID_REPORT_DIR="$PWD/test-results/android/api35-16k" bash scripts/android/device-test.sh 'io.filebeam.android.NativeCoreTest,io.filebeam.android.CheckpointSecretStoreTest,io.filebeam.android.DocumentProviderRecoveryTest,io.filebeam.android.DocumentStorageExportRecoveryTest'
 ```
 
-The required matrix builds the APKs once, then runs all 22 instrumentation tests on
-the API 35 `google_apis` x86_64 4 KiB image. It runs the nine-test ps16k native
+The required matrix builds the APKs once, then runs the instrumentation suite on
+the API 35 `google_apis` x86_64 4 KiB image. It runs the ps16k native
 compatibility suite (`NativeCoreTest`, `CheckpointSecretStoreTest`, provider recovery,
 and storage/export recovery) separately. This retains real Rust encryption, JNI,
-crypto, WebRTC UDP/ICE/DTLS/framing, checkpoint, and storage coverage without running
-UI navigation or wallpaper cycling on ps16k. The harness uses KVM when available,
+crypto, WebRTC UDP/ICE/DTLS/framing, checkpoint, and storage coverage on ps16k. The harness uses KVM when available,
 checks ps16k guest page size, and writes separate report roots under
 `test-results/android/`. A single fresh cold-boot retry is allowed only if the
 emulator process exits before APK installation; test failures are never retried.
@@ -88,23 +87,36 @@ pull-request coverage. Test signing does not establish production signing.
 `check.sh` also checks APK ZIP alignment and native ELF load/RELRO layout for
 all packaged 64-bit libraries, including transitive AndroidX and JNA libraries.
 
-## Current scaffold
+## Features
 
-- Native Send, Receive, Transfers, and Settings screens; responsive navigation,
-  system light/dark themes, and wallpaper colors on Android 12+.
-- Document picker, incoming share intents, link input, native share sheet, ZIP
-  preparation, and saving verified downloads through document providers.
-- HTTP and WebRTC file jobs, progress, secret/peer-consent prompts, pause, local
-  recovery catalog, resume, and local-state removal through the shared engine.
-- Turbo HTTP file uploads publish their encrypted early descriptor and share link
-  before chunk production; native receivers progressively consume those links.
-- User-initiated transfer jobs on Android 14+ for finite transfers; foreground
-  services for older versions and live senders. Export also runs in a foreground
-  service. Foreground-service timeouts pause work rather than keeping a hidden
-  sender alive indefinitely.
-- Incoming link fragments in pending Android requests are protected by Android
-  Keystore. Recovery data and source snapshots live in `noBackupFilesDir`; cloud
-  and device-transfer backups are disabled.
+- **Send**: files, folders and shared content over stored HTTP or live WebRTC, with
+  Turbo Transfer, optional password, retention, a separate decryption key, ZIP
+  packaging, an attached note, and delivery to a friend's encrypted inbox.
+- **Notes**: a syntax-highlighting editor for nine languages, with password,
+  retention, burn on read, and stored or live delivery.
+- **Receive**: unlock a link with its key and password, list the files before
+  downloading, download one file or all, read notes, and report a transfer.
+- **Transfers**: the running transfer, saved transfers with resume and removal,
+  account history with extend and delete, and storage usage.
+- **Account**: sign in, registration, recovery, email verification and invitations
+  through app links; secure inbox setup with either key custody mode; friends and
+  receiving preferences; registered devices; account deletion.
+- **Appearance**: system, light and dark themes. Wallpaper colors (Material You)
+  on Android 12 and newer, the Filebeam color presets, the instance color, or a
+  custom color everywhere.
+- **About**: a features tour, the instance's changelog, CLI install commands and
+  open-source licenses.
+
+Finite transfers run as user-initiated jobs on Android 14 and newer; older
+versions and live senders use a foreground service, as does export.
+Foreground-service timeouts pause work rather than keeping a hidden sender alive.
+Incoming link fragments in pending requests are protected by Android Keystore.
+Recovery data and source snapshots live in `noBackupFilesDir`; cloud and
+device-transfer backups are disabled. Screens that show keys, passwords or
+decrypted notes are excluded from screenshots and the recents preview.
+
+The app has no Google Play services dependency. New inbox deliveries are found by
+a periodic job rather than push.
 
 The native checkpoints remain in the existing filesystem-protected format;
 Keystore wrapping of all native checkpoint secrets is a remaining milestone.

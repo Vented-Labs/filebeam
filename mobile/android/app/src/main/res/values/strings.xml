@@ -329,8 +329,8 @@
 
     <!-- Account and auth -->
     <string name="retry">Retry</string>
-    <string name="state_on">On</string>
-    <string name="state_off">Off</string>
+    <string name="toggle_on">On</string>
+    <string name="toggle_off">Off</string>
     <string name="about_title">About</string>
     <string name="appearance_title">Appearance</string>
     <string name="contacts_title">Friends</string>
@@ -573,7 +573,10 @@
     <string name="contacts_already_outgoing">A request to this account is already pending.</string>
     <string name="contacts_tab_friends">Friends %1$d</string>
     <string name="contacts_tab_requests">Requests</string>
-    <string name="contacts_tab_requests_incoming">%1$d incoming</string>
+    <plurals name="contacts_tab_requests_incoming">
+        <item quantity="one">%1$d incoming</item>
+        <item quantity="other">%1$d incoming</item>
+    </plurals>
     <string name="contacts_tab_blocked">Blocked %1$d</string>
     <string name="contacts_search">Find a friend</string>
     <string name="contacts_empty_title">Add your first friend</string>

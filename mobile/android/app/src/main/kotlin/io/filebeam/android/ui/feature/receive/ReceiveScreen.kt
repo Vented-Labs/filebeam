@@ -30,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
@@ -84,6 +85,7 @@ fun ReceiveScreen(model: ReceiveViewModel = viewModel()) {
     val host = LocalHost.current
     val navigator = LocalNavigator.current
     val context = LocalContext.current
+    val resources = LocalResources.current
     val state by model.state.collectAsStateCompat()
     val transfer by model.transfer.collectAsStateCompat()
     val incoming by app.incoming.collectAsStateCompat()
@@ -111,7 +113,7 @@ fun ReceiveScreen(model: ReceiveViewModel = viewModel()) {
                     when (current) {
                         ReceiveStage.Idle -> LinkEntry(state.input, model::setInput, onOpen = { model.open() }) {
                             val clip = context.getSystemService(ClipboardManager::class.java).primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString()
-                            if (clip.isNullOrBlank()) app.toast(context.getString(R.string.receive_clipboard_empty)) else {
+                            if (clip.isNullOrBlank()) app.toast(resources.getString(R.string.receive_clipboard_empty)) else {
                                 model.setInput(clip)
                                 model.open(clip)
                             }
@@ -284,6 +286,7 @@ private fun ItemRow(name: String, detail: String, trailing: @Composable () -> Un
 @Composable
 private fun AttachedNoteCard(note: io.filebeam.rust.AttachedNote) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val app = LocalAppModel.current
     Panel(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(Space.lg), verticalArrangement = Arrangement.spacedBy(Space.md)) {
@@ -291,8 +294,8 @@ private fun AttachedNoteCard(note: io.filebeam.rust.AttachedNote) {
                 FbIcon(R.drawable.ic_approved_note, size = 20.dp)
                 FbText(note.title ?: stringResource(R.string.receive_attached_note), Modifier.weight(1f), style = Fb.type.bodyStrong, maxLines = 1)
                 IconAction(R.drawable.ic_approved_copy, stringResource(R.string.copy), {
-                    copySensitive(context, context.getString(R.string.receive_attached_note), note.text)
-                    app.toast(context.getString(R.string.copied), Tone.Success)
+                    copySensitive(context, resources.getString(R.string.receive_attached_note), note.text)
+                    app.toast(resources.getString(R.string.copied), Tone.Success)
                 })
             }
             CodeEditor(note.text, note.language, minHeight = 96.dp, maxHeight = 260.dp)
@@ -362,6 +365,7 @@ private fun SavedFiles(stage: ReceiveStage.Saved, note: io.filebeam.rust.Attache
 @Composable
 private fun NoteView(stage: ReceiveStage.Note, onRetryBurn: () -> Unit) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val app = LocalAppModel.current
     val host = LocalHost.current
     val note = stage.note
@@ -375,14 +379,14 @@ private fun NoteView(stage: ReceiveStage.Note, onRetryBurn: () -> Unit) {
     CodeEditor(note.text, note.language, maxHeight = 520.dp)
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.md)) {
         FbButton(stringResource(R.string.copy), {
-            copySensitive(context, context.getString(R.string.receive_note_default_title), note.text)
-            app.toast(context.getString(R.string.copied), Tone.Success)
+            copySensitive(context, resources.getString(R.string.receive_note_default_title), note.text)
+            app.toast(resources.getString(R.string.copied), Tone.Success)
         }, Modifier.weight(1f), icon = R.drawable.ic_approved_copy)
         FbButton(stringResource(R.string.receive_save), {
             host.createDocument("note.txt", "text/plain") { uri ->
                 if (uri != null) runCatching { context.contentResolver.openOutputStream(uri, "wt")?.use { it.write(note.text.toByteArray()) } }
-                    .onSuccess { app.toast(context.getString(R.string.saved_file), Tone.Success) }
-                    .onFailure { app.toast(it.message ?: context.getString(R.string.unknown_error), Tone.Danger) }
+                    .onSuccess { app.toast(resources.getString(R.string.saved_file), Tone.Success) }
+                    .onFailure { app.toast(it.message ?: resources.getString(R.string.unknown_error), Tone.Danger) }
             }
         }, Modifier.weight(1f), style = ButtonStyle.Secondary, icon = R.drawable.ic_approved_download)
     }

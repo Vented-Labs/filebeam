@@ -28,7 +28,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -78,6 +80,7 @@ fun ContactsScreen() {
     val app = LocalAppModel.current
     val navigator = LocalNavigator.current
     val context = LocalContext.current
+    val resources = LocalResources.current
     val view = LocalView.current
     val scope = rememberCoroutineScope()
     val account by app.account.collectAsStateCompat()
@@ -134,7 +137,7 @@ fun ContactsScreen() {
     val submit = {
         val name = username.trim().removePrefix("@").lowercase()
         addError = when {
-            !usernameRule.matches(name) -> context.getString(R.string.auth_username_rule)
+            !usernameRule.matches(name) -> resources.getString(R.string.auth_username_rule)
             friends.any { it.username == name } -> alreadyFriends
             incoming.any { it.username == name } -> alreadyIncoming
             outgoing.any { it.username == name } -> alreadyOutgoing
@@ -147,7 +150,7 @@ fun ContactsScreen() {
                     .onSuccess {
                         state = it
                         username = ""
-                        val message = context.getString(R.string.contacts_request_sent, name)
+                        val message = resources.getString(R.string.contacts_request_sent, name)
                         app.toast(message, Tone.Success)
                         view.announceForAccessibility(message)
                     }
@@ -180,7 +183,7 @@ fun ContactsScreen() {
             SegmentedRail(
                 listOf(
                     Segment(ContactsTab.Friends, stringResource(R.string.contacts_tab_friends, friends.size)),
-                    Segment(ContactsTab.Requests, if (incoming.isEmpty()) stringResource(R.string.contacts_tab_requests) else stringResource(R.string.contacts_tab_requests_incoming, incoming.size)),
+                    Segment(ContactsTab.Requests, if (incoming.isEmpty()) stringResource(R.string.contacts_tab_requests) else pluralStringResource(R.plurals.contacts_tab_requests_incoming, incoming.size, incoming.size)),
                     Segment(ContactsTab.Blocked, stringResource(R.string.contacts_tab_blocked, blocked.size)),
                 ),
                 tab, { tab = it },
@@ -210,7 +213,7 @@ fun ContactsScreen() {
                             modifier = Modifier.animateItem(fadeInSpec = Motion.enter(), placementSpec = Motion.spatial(), fadeOutSpec = Motion.exit()),
                             onCancel = { confirming = null },
                             onConfirm = { action ->
-                                act(friend.username, action, context.getString(if (action == "block") R.string.contacts_blocked_done else R.string.contacts_removed_done, friend.username))
+                                act(friend.username, action, resources.getString(if (action == "block") R.string.contacts_blocked_done else R.string.contacts_removed_done, friend.username))
                             },
                         ) {
                             FbButton(stringResource(R.string.contacts_send_files), {
@@ -219,8 +222,8 @@ fun ContactsScreen() {
                             }, Modifier.weight(1f), icon = R.drawable.ic_approved_upload, height = 44.dp)
                             IconAction(R.drawable.ic_approved_settings, stringResource(R.string.contacts_preferences), { preferences = friend }, bordered = true)
                             IconAction(R.drawable.ic_approved_link, stringResource(R.string.contacts_copy_profile), {
-                                copySensitive(context, context.getString(R.string.account_profile_link), "${current.instance}/u/${friend.username}")
-                                app.toast(context.getString(R.string.copied), Tone.Success)
+                                copySensitive(context, resources.getString(R.string.account_profile_link), "${current.instance}/u/${friend.username}")
+                                app.toast(resources.getString(R.string.copied), Tone.Success)
                             }, bordered = true)
                             IconAction(R.drawable.ic_approved_trash, stringResource(R.string.contacts_remove), { confirming = friend.username to "remove" }, bordered = true)
                             IconAction(R.drawable.ic_approved_slash, stringResource(R.string.contacts_block), { confirming = friend.username to "block" }, bordered = true, tint = Fb.palette.danger.ink)
@@ -237,10 +240,10 @@ fun ContactsScreen() {
                     ContactCard(
                         request.username, null, confirming?.takeIf { it.first == request.username }?.second, Modifier.animateItem(placementSpec = Motion.spatial()),
                         onCancel = { confirming = null },
-                        onConfirm = { act(request.username, "block", context.getString(R.string.contacts_blocked_done, request.username)) },
+                        onConfirm = { act(request.username, "block", resources.getString(R.string.contacts_blocked_done, request.username)) },
                     ) {
-                        FbButton(stringResource(R.string.contacts_accept), { act(request.username, "accept", context.getString(R.string.contacts_accepted_done, request.username)) }, Modifier.weight(1f), height = 44.dp)
-                        FbButton(stringResource(R.string.contacts_decline), { act(request.username, "decline", context.getString(R.string.contacts_declined_done, request.username)) }, style = ButtonStyle.Secondary, height = 44.dp)
+                        FbButton(stringResource(R.string.contacts_accept), { act(request.username, "accept", resources.getString(R.string.contacts_accepted_done, request.username)) }, Modifier.weight(1f), height = 44.dp)
+                        FbButton(stringResource(R.string.contacts_decline), { act(request.username, "decline", resources.getString(R.string.contacts_declined_done, request.username)) }, style = ButtonStyle.Secondary, height = 44.dp)
                         IconAction(R.drawable.ic_approved_slash, stringResource(R.string.contacts_block), { confirming = request.username to "block" }, bordered = true, tint = Fb.palette.danger.ink)
                     }
                 }
@@ -249,9 +252,9 @@ fun ContactsScreen() {
                     ContactCard(
                         request.username, stringResource(R.string.contacts_pending) to Tone.Neutral, confirming?.takeIf { it.first == request.username }?.second, Modifier.animateItem(placementSpec = Motion.spatial()),
                         onCancel = { confirming = null },
-                        onConfirm = { act(request.username, "block", context.getString(R.string.contacts_blocked_done, request.username)) },
+                        onConfirm = { act(request.username, "block", resources.getString(R.string.contacts_blocked_done, request.username)) },
                     ) {
-                        FbButton(stringResource(R.string.contacts_cancel_request), { act(request.username, "cancel", context.getString(R.string.contacts_cancelled_done, request.username)) }, Modifier.weight(1f), style = ButtonStyle.Secondary, height = 44.dp)
+                        FbButton(stringResource(R.string.contacts_cancel_request), { act(request.username, "cancel", resources.getString(R.string.contacts_cancelled_done, request.username)) }, Modifier.weight(1f), style = ButtonStyle.Secondary, height = 44.dp)
                         IconAction(R.drawable.ic_approved_slash, stringResource(R.string.contacts_block), { confirming = request.username to "block" }, bordered = true, tint = Fb.palette.danger.ink)
                     }
                 }
@@ -262,7 +265,7 @@ fun ContactsScreen() {
                     ContactCard(
                         name, stringResource(R.string.contacts_blocked_badge) to Tone.Danger, confirming?.takeIf { it.first == name }?.second, Modifier.animateItem(placementSpec = Motion.spatial()),
                         onCancel = { confirming = null },
-                        onConfirm = { act(name, "unblock", context.getString(R.string.contacts_unblocked_done, name)) },
+                        onConfirm = { act(name, "unblock", resources.getString(R.string.contacts_unblocked_done, name)) },
                     ) {
                         FbButton(stringResource(R.string.contacts_unblock), { confirming = name to "unblock" }, Modifier.weight(1f), style = ButtonStyle.Secondary, height = 44.dp)
                     }
@@ -301,10 +304,10 @@ fun ContactsScreen() {
             }
             FbText(stringResource(R.string.contacts_effective, stringResource(if (latest.effectiveSend) R.string.contacts_allow else R.string.contacts_disallow)), style = Fb.type.caption, color = Fb.palette.textMuted)
             FbText(stringResource(R.string.contacts_auto_download), style = Fb.type.bodyStrong)
-            listOf(null to R.string.contacts_use_default, true to R.string.state_on, false to R.string.state_off).forEach { (value, label) ->
+            listOf(null to R.string.contacts_use_default, true to R.string.toggle_on, false to R.string.toggle_off).forEach { (value, label) ->
                 ChoiceRow(stringResource(label), latest.autoDownload == value, { act(latest.username, "preferences", saved, latest.canSend, value) })
             }
-            FbText(stringResource(R.string.contacts_effective, stringResource(if (latest.effectiveDownload) R.string.state_on else R.string.state_off)), style = Fb.type.caption, color = Fb.palette.textMuted)
+            FbText(stringResource(R.string.contacts_effective, stringResource(if (latest.effectiveDownload) R.string.toggle_on else R.string.toggle_off)), style = Fb.type.caption, color = Fb.palette.textMuted)
             FbButton(stringResource(R.string.contacts_reset), { act(latest.username, "preferences", saved, null, null) }, Modifier.fillMaxWidth(), style = ButtonStyle.Quiet, enabled = latest.canSend != null || latest.autoDownload != null)
         }
     }

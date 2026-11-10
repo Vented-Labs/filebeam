@@ -29,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
@@ -195,6 +196,7 @@ fun ReleaseScreen(tag: String) {
     val app = LocalAppModel.current
     val navigator = LocalNavigator.current
     val context = LocalContext.current
+    val resources = LocalResources.current
     val settings by app.settings.collectAsStateCompat()
     var data by remember(tag) { mutableStateOf<JSONObject?>(null) }
     var failed by remember(tag) { mutableStateOf(false) }
@@ -212,7 +214,7 @@ fun ReleaseScreen(tag: String) {
             if (release != null) {
                 IconAction(R.drawable.ic_approved_link, stringResource(R.string.changelog_copy_link), {
                     copySensitive(context, tag, "${settings.instance}/changelog/$tag")
-                    app.toast(context.getString(R.string.copied), Tone.Success)
+                    app.toast(resources.getString(R.string.copied), Tone.Success)
                 })
             }
         },

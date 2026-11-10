@@ -78,7 +78,7 @@ private fun SwitchVisual(checked: Boolean, enabled: Boolean, pressed: Boolean, m
     ) {
         Box(
             Modifier
-                .offset(x = offset)
+                .offset { IntOffset(offset.roundToPx(), 0) }
                 .size(width = thumbWidth, height = 22.dp)
                 .shadow(2.dp, Shapes.pill)
                 .clip(Shapes.pill)

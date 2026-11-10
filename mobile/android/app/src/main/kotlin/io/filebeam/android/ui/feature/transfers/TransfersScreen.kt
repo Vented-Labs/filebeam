@@ -24,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
@@ -202,6 +203,7 @@ private fun SavedSheet(saved: SavedTransfer, onDismiss: () -> Unit) {
     val host = LocalHost.current
     val navigator = LocalNavigator.current
     val context = LocalContext.current
+    val resources = LocalResources.current
     val scope = rememberCoroutineScope()
     val coordinator = app.app.transfers
     var details by remember { mutableStateOf<SavedTransferPresentation?>(null) }
@@ -270,7 +272,7 @@ private fun SavedSheet(saved: SavedTransfer, onDismiss: () -> Unit) {
             coordinator.discard(saved.id)
             confirm = null
             onDismiss()
-            scope.launch { app.toast(context.getString(R.string.transfers_removed), Tone.Success) }
+            scope.launch { app.toast(resources.getString(R.string.transfers_removed), Tone.Success) }
         }, body = stringResource(R.string.transfers_remove_body), dismissLabel = stringResource(R.string.cancel), destructive = true)
     }
 }

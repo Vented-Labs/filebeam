@@ -22,6 +22,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
@@ -83,6 +84,7 @@ fun HistoryScreen() {
     val app = LocalAppModel.current
     val navigator = LocalNavigator.current
     val context = LocalContext.current
+    val resources = LocalResources.current
     val scope = rememberCoroutineScope()
     val account by app.account.collectAsStateCompat()
     var status by rememberSaveable { mutableStateOf<String?>(null) }
@@ -151,8 +153,8 @@ fun HistoryScreen() {
                     HistoryCard(
                         entry, Modifier.animateItem(fadeInSpec = Motion.enter(), placementSpec = Motion.spatial(), fadeOutSpec = Motion.exit()),
                         onCopy = {
-                            copySensitive(context, context.getString(R.string.history_transfer_id), entry.id)
-                            app.toast(context.getString(R.string.copied), Tone.Success)
+                            copySensitive(context, resources.getString(R.string.history_transfer_id), entry.id)
+                            app.toast(resources.getString(R.string.copied), Tone.Success)
                         },
                         onExtend = { extending = entry }, onDelete = { deleting = entry },
                     )
@@ -193,7 +195,7 @@ fun HistoryScreen() {
                 scope.launch {
                     runCatching { withContext(Dispatchers.IO) { service.accountHistoryExtend(entry.id, value!!) } }
                         .onSuccess {
-                            app.toast(context.getString(R.string.history_extended), Tone.Success)
+                            app.toast(resources.getString(R.string.history_extended), Tone.Success)
                             extending = null
                             revision++
                         }
@@ -220,7 +222,7 @@ fun HistoryScreen() {
                 busy = true
                 scope.launch {
                     runCatching { withContext(Dispatchers.IO) { service.accountHistoryDelete(entry.id) } }
-                        .onSuccess { app.toast(context.getString(R.string.share_deleted), Tone.Success) }
+                        .onSuccess { app.toast(resources.getString(R.string.share_deleted), Tone.Success) }
                         .onFailure { error = it.message ?: generic }
                     busy = false
                     deleting = null

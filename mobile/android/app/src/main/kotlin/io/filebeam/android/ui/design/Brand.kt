@@ -111,10 +111,10 @@ fun Emblem(modifier: Modifier = Modifier, engaged: Boolean = false, sealed: Bool
         fun BackCard(rotation: Float, shiftX: Dp, icon: Int, phase: Float) {
             Box(
                 Modifier
-                    .offset(x = shiftX * fan, y = 6.dp)
                     .graphicsLayer {
                         rotationZ = rotation * fan
-                        translationY = -lift * 5.dp.toPx() + drift * phase * 2.dp.toPx()
+                        translationX = shiftX.toPx() * fan
+                        translationY = 6.dp.toPx() - lift * 5.dp.toPx() + drift * phase * 2.dp.toPx()
                         transformOrigin = TransformOrigin(0.5f, 1f)
                     }
                     .size(cardWidth, cardHeight)

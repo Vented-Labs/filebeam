@@ -24,6 +24,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -64,6 +65,7 @@ fun AuthScreen(initialMode: String) {
     val app = LocalAppModel.current
     val navigator = LocalNavigator.current
     val context = LocalContext.current
+    val resources = LocalResources.current
     val scope = rememberCoroutineScope()
     val settings by app.settings.collectAsStateCompat()
     val profile by app.instance.collectAsStateCompat()
@@ -123,16 +125,16 @@ fun AuthScreen(initialMode: String) {
         }
         app.claim(Incoming.VerifyEmail::class.java)?.let { verify ->
             mode = "verify"
-            if (account != null) run({ app.toast(context.getString(R.string.auth_verified), Tone.Success); navigator.replace(Route.Account) }) {
+            if (account != null) run({ app.toast(resources.getString(R.string.auth_verified), Tone.Success); navigator.replace(Route.Account) }) {
                 accounts.verifyEmail(verify.link)
                 accounts.refresh()
-            } else notice = context.getString(R.string.auth_verify_sign_in_first)
+            } else notice = resources.getString(R.string.auth_verify_sign_in_first)
         }
     }
 
     val passwordsMatch = password == confirm
     val signedInDone = {
-        app.toast(context.getString(R.string.auth_signed_in), Tone.Success)
+        app.toast(resources.getString(R.string.auth_signed_in), Tone.Success)
         navigator.replace(Route.Account)
     }
 

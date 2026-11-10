@@ -17,6 +17,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
@@ -69,6 +70,7 @@ fun AccountScreen() {
     val app = LocalAppModel.current
     val navigator = LocalNavigator.current
     val context = LocalContext.current
+    val resources = LocalResources.current
     val scope = rememberCoroutineScope()
     val account by app.account.collectAsStateCompat()
     val profile by app.instance.collectAsStateCompat()
@@ -103,8 +105,8 @@ fun AccountScreen() {
                             Column(verticalArrangement = Arrangement.spacedBy(Space.sm)) {
                                 FbText(stringResource(R.string.account_profile_link), style = Fb.type.smallStrong)
                                 CopyField(R.drawable.ic_approved_link, url, stringResource(R.string.copy), primary = false) {
-                                    copySensitive(context, context.getString(R.string.account_profile_link), url)
-                                    app.toast(context.getString(R.string.copied), Tone.Success)
+                                    copySensitive(context, resources.getString(R.string.account_profile_link), url)
+                                    app.toast(resources.getString(R.string.copied), Tone.Success)
                                 }
                                 FbText(stringResource(R.string.account_profile_link_hint), style = Fb.type.caption, color = Fb.palette.textMuted)
                             }
@@ -117,7 +119,7 @@ fun AccountScreen() {
         item {
             Staggered(1) {
                 Panel(Modifier.fillMaxWidth()) {
-                    LinkRow(R.drawable.ic_approved_shield, stringResource(R.string.secure_inbox_title), { navigator.push(Route.SecureInbox) }, detail = stringResource(if (current.inboxEnabled) R.string.state_on else R.string.state_off))
+                    LinkRow(R.drawable.ic_approved_shield, stringResource(R.string.secure_inbox_title), { navigator.push(Route.SecureInbox) }, detail = stringResource(if (current.inboxEnabled) R.string.toggle_on else R.string.toggle_off))
                     Hairline()
                     LinkRow(R.drawable.ic_approved_users, stringResource(R.string.contacts_title), { navigator.push(Route.Contacts) })
                     Hairline()
@@ -144,7 +146,7 @@ fun AccountScreen() {
                 Column(verticalArrangement = Arrangement.spacedBy(Space.sm)) {
                     FbButton(stringResource(R.string.account_sign_out), {
                         scope.launch {
-                            runCatching { app.app.accounts.signOut() }.onFailure { app.toast(it.message ?: context.getString(R.string.unknown_error), Tone.Danger) }
+                            runCatching { app.app.accounts.signOut() }.onFailure { app.toast(it.message ?: resources.getString(R.string.unknown_error), Tone.Danger) }
                         }
                     }, Modifier.fillMaxWidth(), style = ButtonStyle.Secondary, icon = R.drawable.ic_approved_logout)
                     FbButton(stringResource(R.string.account_delete), { deleting = true }, Modifier.fillMaxWidth(), style = ButtonStyle.Danger)
@@ -167,9 +169,9 @@ fun AccountScreen() {
                     runCatching { app.app.accounts.deleteAccount(password) }
                         .onSuccess {
                             deleting = false
-                            app.toast(context.getString(R.string.account_deleted), Tone.Success)
+                            app.toast(resources.getString(R.string.account_deleted), Tone.Success)
                         }
-                        .onFailure { error = it.message ?: context.getString(R.string.unknown_error) }
+                        .onFailure { error = it.message ?: resources.getString(R.string.unknown_error) }
                     busy = false
                 }
             },

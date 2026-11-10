@@ -2,6 +2,7 @@ package io.filebeam.android.ui.design
 
 import android.content.Context
 import android.os.Build
+import androidx.annotation.RequiresApi
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.text.selection.LocalTextSelectionColors
@@ -81,7 +82,7 @@ fun resolvePalette(context: Context, appearance: Appearance, systemDark: Boolean
     }
     return when (val source = appearance.source) {
         ColorSource.MaterialYou ->
-            if (materialYouAvailable) dynamicPalette(context, dark)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) dynamicPalette(context, dark)
             else PaletteEngine.seeded(instanceColor ?: PaletteEngine.DEFAULT_PRIMARY, dark)
         ColorSource.Instance -> PaletteEngine.seeded(instanceColor ?: PaletteEngine.DEFAULT_PRIMARY, dark)
         is ColorSource.Preset -> PaletteEngine.preset(source.preset, dark)
@@ -90,8 +91,8 @@ fun resolvePalette(context: Context, appearance: Appearance, systemDark: Boolean
     }
 }
 
+@RequiresApi(Build.VERSION_CODES.S)
 private fun dynamicPalette(context: Context, dark: Boolean): FilebeamPalette {
-    check(Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
     val scheme = if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
     fun Color.rgb() = toArgb() and 0xFFFFFF
     return PaletteEngine.dynamic(

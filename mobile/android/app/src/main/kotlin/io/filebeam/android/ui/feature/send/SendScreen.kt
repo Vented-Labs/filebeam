@@ -41,6 +41,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -88,6 +89,7 @@ fun SendScreen(model: SendViewModel = viewModel()) {
     val host = LocalHost.current
     val navigator = LocalNavigator.current
     val context = LocalContext.current
+    val resources = LocalResources.current
     val state by model.state.collectAsStateCompat()
     val transfer by model.transfer.collectAsStateCompat()
     val profile by app.instance.collectAsStateCompat()
@@ -99,12 +101,12 @@ fun SendScreen(model: SendViewModel = viewModel()) {
     val fileDriver = state.files.driver ?: profile.defaultDriver
     val fileLimits = profile.limits(fileDriver)
 
-    val duplicateMessage: (Int) -> String = { context.resources.getQuantityString(R.plurals.send_duplicates_skipped, it, it) }
-    val limitMessage: (Int, Long) -> String = { room, maximum -> context.resources.getQuantityString(R.plurals.send_limit_reached, room, room, maximum) }
+    val duplicateMessage: (Int) -> String = { resources.getQuantityString(R.plurals.send_duplicates_skipped, it, it) }
+    val limitMessage: (Int, Long) -> String = { room, maximum -> resources.getQuantityString(R.plurals.send_limit_reached, room, room, maximum) }
     val addFiles = { host.pickFiles { uris -> model.addFiles(uris, emptyMap(), fileLimits.maximumFileCount, duplicateMessage, limitMessage) } }
     val addFolder = {
         host.pickFolder { tree ->
-            if (tree != null) model.addFolder(tree, fileLimits.maximumFileCount, duplicateMessage, limitMessage) { app.toast(it ?: context.getString(R.string.send_folder_failed), Tone.Danger) }
+            if (tree != null) model.addFolder(tree, fileLimits.maximumFileCount, duplicateMessage, limitMessage) { app.toast(it ?: resources.getString(R.string.send_folder_failed), Tone.Danger) }
         }
     }
 
@@ -287,6 +289,7 @@ private fun LazyListScope.filesComposer(
     item(key = "options") {
         Staggered(4) {
             val context = LocalContext.current
+            val resources = LocalResources.current
             Panel(Modifier.fillMaxWidth()) {
                 val friend = draft.recipient
                 OptionRow(

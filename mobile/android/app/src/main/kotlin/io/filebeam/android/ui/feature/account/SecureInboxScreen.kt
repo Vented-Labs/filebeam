@@ -22,6 +22,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import io.filebeam.android.R
 import io.filebeam.android.platform.services.AccountKeySituation
@@ -90,6 +91,7 @@ fun SecureInboxScreen() {
     val host = LocalHost.current
     val navigator = LocalNavigator.current
     val context = LocalContext.current
+    val resources = LocalResources.current
     val scope = rememberCoroutineScope()
     val account by app.account.collectAsStateCompat()
     val profile by app.instance.collectAsStateCompat()
@@ -138,7 +140,7 @@ fun SecureInboxScreen() {
                             if (key != null) FbText(stringResource(R.string.secure_inbox_key_version, key.version.toInt()), style = Fb.type.small, color = Fb.palette.textMuted)
                         }
                         StatusPill(
-                            stringResource(if (hasKey && current.inboxEnabled) R.string.state_on else R.string.state_off),
+                            stringResource(if (hasKey && current.inboxEnabled) R.string.toggle_on else R.string.toggle_off),
                             tone = if (hasKey && current.inboxEnabled) Tone.Success else Tone.Neutral,
                         )
                     }
@@ -158,7 +160,7 @@ fun SecureInboxScreen() {
                         Row(horizontalArrangement = Arrangement.spacedBy(Space.md)) {
                             FbButton(stringResource(R.string.secure_inbox_export), {
                                 host.createDocument("filebeam-account-key.fbsk1", "text/plain") { uri ->
-                                    if (uri != null) act { accounts.exportKeyTo(uri); app.toast(context.getString(R.string.secure_inbox_exported), Tone.Success) }
+                                    if (uri != null) act { accounts.exportKeyTo(uri); app.toast(resources.getString(R.string.secure_inbox_exported), Tone.Success) }
                                 }
                             }, Modifier.weight(1f), style = ButtonStyle.Quiet)
                             FbButton(stringResource(R.string.secure_inbox_import), {
@@ -166,7 +168,7 @@ fun SecureInboxScreen() {
                                     if (uri != null) act {
                                         val text = withContext(Dispatchers.IO) { context.contentResolver.openInputStream(uri)?.use { it.readBytes().take(16 * 1024).toByteArray().toString(Charsets.US_ASCII) } } ?: error(generic)
                                         accounts.importKey(text.trim())
-                                        app.toast(context.getString(R.string.secure_inbox_imported), Tone.Success)
+                                        app.toast(resources.getString(R.string.secure_inbox_imported), Tone.Success)
                                     }
                                 }
                             }, Modifier.weight(1f), style = ButtonStyle.Quiet)

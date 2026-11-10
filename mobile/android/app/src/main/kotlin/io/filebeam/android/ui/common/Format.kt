@@ -44,12 +44,12 @@ fun formatRelative(context: Context, instant: Instant, now: Instant = Instant.no
     val magnitude = abs(seconds)
     val resources = context.resources
     val amount = when {
-        magnitude < 60 -> return context.getString(if (future) R.string.relative_soon else R.string.relative_now)
+        magnitude < 60 -> return resources.getString(if (future) R.string.relative_soon else R.string.relative_now)
         magnitude < 3600 -> resources.getQuantityString(R.plurals.duration_minutes, (magnitude / 60).toInt(), (magnitude / 60).toInt())
         magnitude < 86_400 -> resources.getQuantityString(R.plurals.duration_hours, (magnitude / 3600).toInt(), (magnitude / 3600).toInt())
         else -> resources.getQuantityString(R.plurals.duration_days, (magnitude / 86_400).toInt(), (magnitude / 86_400).toInt())
     }
-    return context.getString(if (future) R.string.relative_future else R.string.relative_past, amount)
+    return resources.getString(if (future) R.string.relative_future else R.string.relative_past, amount)
 }
 
 /**
@@ -59,17 +59,18 @@ fun formatRelative(context: Context, instant: Instant, now: Instant = Instant.no
 fun Throwable.readable(context: Context): String = readableMessage(context, message)
 
 fun readableMessage(context: Context, raw: String?): String {
+    val resources = context.resources
     val text = raw.orEmpty().removePrefix("detail=").trim()
     val status = Regex("returned (\\d{3})").find(text)?.groupValues?.get(1)?.toIntOrNull()
     return when {
-        text.isEmpty() -> context.getString(R.string.unknown_error)
-        status == 401 || status == 419 -> context.getString(R.string.error_session)
-        status == 403 -> context.getString(R.string.error_forbidden)
-        status == 404 -> context.getString(R.string.error_not_found)
-        status == 422 -> context.getString(R.string.error_rejected)
-        status == 429 -> context.getString(R.string.error_rate_limited)
-        status != null && status >= 500 -> context.getString(R.string.error_server)
-        text.contains("error sending request", ignoreCase = true) || text.contains("dns", ignoreCase = true) || text.contains("connect", ignoreCase = true) -> context.getString(R.string.error_network)
+        text.isEmpty() -> resources.getString(R.string.unknown_error)
+        status == 401 || status == 419 -> resources.getString(R.string.error_session)
+        status == 403 -> resources.getString(R.string.error_forbidden)
+        status == 404 -> resources.getString(R.string.error_not_found)
+        status == 422 -> resources.getString(R.string.error_rejected)
+        status == 429 -> resources.getString(R.string.error_rate_limited)
+        status != null && status >= 500 -> resources.getString(R.string.error_server)
+        text.contains("error sending request", ignoreCase = true) || text.contains("dns", ignoreCase = true) || text.contains("connect", ignoreCase = true) -> resources.getString(R.string.error_network)
         else -> text.replaceFirstChar(Char::uppercase)
     }
 }

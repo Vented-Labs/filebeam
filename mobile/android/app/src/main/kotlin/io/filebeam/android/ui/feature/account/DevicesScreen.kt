@@ -22,6 +22,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -72,6 +73,7 @@ fun DevicesScreen() {
     val app = LocalAppModel.current
     val navigator = LocalNavigator.current
     val context = LocalContext.current
+    val resources = LocalResources.current
     val scope = rememberCoroutineScope()
     val account by app.account.collectAsStateCompat()
     var registry by remember { mutableStateOf<DeviceRegistry?>(null) }
@@ -134,7 +136,7 @@ fun DevicesScreen() {
                     busy = true
                     scope.launch {
                         runCatching { withContext(Dispatchers.IO) { service.accountDeviceRename(open.device.id, name.trim()) } }
-                            .onSuccess { app.toast(context.getString(R.string.devices_renamed), Tone.Success) }
+                            .onSuccess { app.toast(resources.getString(R.string.devices_renamed), Tone.Success) }
                             .onFailure { error = it.message ?: generic }
                         busy = false
                         dialog = null
@@ -165,7 +167,7 @@ fun DevicesScreen() {
                                 if (reset) service.accountDevicesReset(password) else service.accountDeviceRevoke((open as DeviceDialog.Revoke).device.id, password)
                             }
                         }.onSuccess {
-                            app.toast(context.getString(if (reset) R.string.devices_reset_done else R.string.devices_revoked), Tone.Success)
+                            app.toast(resources.getString(if (reset) R.string.devices_reset_done else R.string.devices_revoked), Tone.Success)
                             dialog = null
                             revision++
                         }.onFailure { failure = it.message ?: generic }

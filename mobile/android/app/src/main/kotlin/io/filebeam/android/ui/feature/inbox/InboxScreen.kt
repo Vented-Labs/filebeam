@@ -24,6 +24,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -78,6 +79,7 @@ fun InboxScreen() {
     val host = LocalHost.current
     val navigator = LocalNavigator.current
     val context = LocalContext.current
+    val resources = LocalResources.current
     val scope = rememberCoroutineScope()
     val account by app.account.collectAsStateCompat()
     var items by remember { mutableStateOf<List<InboxTransfer>?>(null) }
@@ -149,7 +151,7 @@ fun InboxScreen() {
                             runCatching { withContext(Dispatchers.IO) { app.app.accountSessions.service(current.instance).accountDeleteInboxItem(item.id) } }
                                 .onSuccess {
                                     items = items?.filterNot { it.id == item.id }
-                                    app.toast(context.getString(R.string.inbox_deleted), Tone.Success)
+                                    app.toast(resources.getString(R.string.inbox_deleted), Tone.Success)
                                 }
                                 .onFailure { error = it.message ?: generic }
                             confirming = null
@@ -223,6 +225,7 @@ fun InboxScreen() {
 private fun InboxRow(item: InboxTransfer, confirming: Boolean, modifier: Modifier, onOpen: () -> Unit, onAskDelete: () -> Unit, onCancelDelete: () -> Unit, onDelete: () -> Unit) {
     val palette = Fb.palette
     val context = LocalContext.current
+    val resources = LocalResources.current
     val uploading = item.completedAt.isBlank()
     Panel(modifier.fillMaxWidth(), shape = Shapes.card) {
         Column(Modifier.padding(Space.md), verticalArrangement = Arrangement.spacedBy(Space.md)) {

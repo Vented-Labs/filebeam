@@ -109,7 +109,7 @@ fun TourScreen() {
         HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth()) { page ->
             val chapter = chapters[page]
             // Pages ease in as they approach the centre, so art and copy arrive separately.
-            val offset = ((pager.currentPage - page) + pager.currentPageOffsetFraction).absoluteValue.coerceIn(0f, 1f)
+            val offset = { ((pager.currentPage - page) + pager.currentPageOffsetFraction).absoluteValue.coerceIn(0f, 1f) }
             Column(
                 Modifier.fillMaxSize().padding(horizontal = Space.xxl),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -117,8 +117,8 @@ fun TourScreen() {
             ) {
                 Box(
                     Modifier.fillMaxWidth().height(260.dp).graphicsLayer {
-                        alpha = 1f - offset
-                        val scale = 1f - 0.12f * offset
+                        alpha = 1f - offset()
+                        val scale = 1f - 0.12f * offset()
                         scaleX = scale
                         scaleY = scale
                     },
@@ -126,8 +126,8 @@ fun TourScreen() {
                 ) { Art(chapter.art) }
                 Column(
                     Modifier.widthIn(max = 420.dp).graphicsLayer {
-                        alpha = 1f - offset * 1.4f
-                        translationY = offset * 28.dp.toPx()
+                        alpha = (1f - offset() * 1.4f).coerceAtLeast(0f)
+                        translationY = offset() * 28.dp.toPx()
                     },
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(Space.md),

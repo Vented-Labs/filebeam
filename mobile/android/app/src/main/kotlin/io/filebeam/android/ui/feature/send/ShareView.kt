@@ -46,6 +46,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -127,6 +128,7 @@ internal fun ShareView(model: SendViewModel, state: SendUiState, transfer: Trans
     val stage = state.stage as? SendStage.Sharing ?: return
     val app = LocalAppModel.current
     val context = LocalContext.current
+    val resources = LocalResources.current
     val palette = Fb.palette
     val haptics = rememberHaptics()
     val note = stage.kind == ShareKind.Note || stage.kind == ShareKind.LiveNote
@@ -206,13 +208,13 @@ internal fun ShareView(model: SendViewModel, state: SendUiState, transfer: Trans
                         AnimatedVisibility(hasLink && stage.kind != ShareKind.Inbox, enter = expandVertically(Motion.spatialSlow()) + fadeIn(Motion.enter()) + scaleIn(Motion.spatialSlow(), initialScale = 0.96f), exit = fadeOut(Motion.exit())) {
                             Column(verticalArrangement = Arrangement.spacedBy(Space.md)) {
                                 CopyField(R.drawable.ic_approved_link, link.orEmpty(), stringResource(R.string.share_copy_link), primary = true) {
-                                    copySensitive(context, context.getString(R.string.share_link_label), link.orEmpty())
-                                    app.toast(context.getString(R.string.share_link_copied), Tone.Success)
+                                    copySensitive(context, resources.getString(R.string.share_link_label), link.orEmpty())
+                                    app.toast(resources.getString(R.string.share_link_copied), Tone.Success)
                                 }
                                 if (separateKey != null) {
                                     CopyField(R.drawable.ic_approved_key, separateKey, stringResource(R.string.share_copy_key), primary = false) {
-                                        copySensitive(context, context.getString(R.string.share_key_label), separateKey)
-                                        app.toast(context.getString(R.string.share_key_copied), Tone.Success)
+                                        copySensitive(context, resources.getString(R.string.share_key_label), separateKey)
+                                        app.toast(resources.getString(R.string.share_key_copied), Tone.Success)
                                     }
                                 }
                                 FbButton(stringResource(R.string.share_share), {
@@ -270,7 +272,7 @@ internal fun ShareView(model: SendViewModel, state: SendUiState, transfer: Trans
             { confirm = null }, stringResource(R.string.share_delete_title), stringResource(R.string.share_delete_now),
             {
                 snapshot?.checkpointId?.let(app.app.transfers::revoke)
-                app.toast(context.getString(R.string.share_deleted), Tone.Success)
+                app.toast(resources.getString(R.string.share_deleted), Tone.Success)
                 confirm = null
                 model.newTransfer()
             },
@@ -369,6 +371,7 @@ internal fun CopyField(icon: Int, value: String, action: String, primary: Boolea
 @Composable
 internal fun ExpiryChip(expiresAt: Instant) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     var now by remember { mutableStateOf(Instant.now()) }
     LaunchedEffect(expiresAt) {
         while (true) {
@@ -391,6 +394,7 @@ internal fun ExpiryChip(expiresAt: Instant) {
 internal fun CliCard(link: String, available: Boolean, reason: Int) {
     val palette = Fb.palette
     val context = LocalContext.current
+    val resources = LocalResources.current
     val app = LocalAppModel.current
     val command = remember(link, available) { if (available) runCatching { formatDownloadWithCli(link) }.getOrNull() else null }
     Panel(Modifier.fillMaxWidth()) {
@@ -406,8 +410,8 @@ internal fun CliCard(link: String, available: Boolean, reason: Int) {
             }
             if (command != null) {
                 CopyField(R.drawable.ic_approved_code, command, stringResource(R.string.copy), primary = false) {
-                    copySensitive(context, context.getString(R.string.cli_title), command)
-                    app.toast(context.getString(R.string.cli_copied), Tone.Success)
+                    copySensitive(context, resources.getString(R.string.cli_title), command)
+                    app.toast(resources.getString(R.string.cli_copied), Tone.Success)
                 }
             } else {
                 FbText(stringResource(if (available) R.string.cli_unavailable else reason), style = Fb.type.small, color = palette.textMuted)
