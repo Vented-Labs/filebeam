@@ -236,6 +236,25 @@ test('loading failures retain a selectable textarea and large drafts avoid parsi
     await expect(page.locator('[class*="fb-syn-"]')).toHaveCount(0);
 });
 
+test('the loaded editor keeps focus and selection from the fallback textarea', async ({ page }) => {
+    let release!: () => void;
+    const loaded = new Promise<void>((resolve) => (release = resolve));
+    await page.route('**/ui/src/lib/editor-theme.ts*', async (route) => {
+        await loaded;
+        await route.continue();
+    });
+    await page.goto('/?theme');
+    const fallback = page.getByRole('textbox', { name: 'Secure note editor' });
+    await expect(fallback).toHaveJSProperty('tagName', 'TEXTAREA');
+    await fallback.fill('fallback draft');
+    await fallback.press('Control+A');
+    release();
+    const editor = page.locator('.cm-content');
+    await expect(editor).toBeFocused();
+    await page.keyboard.insertText('loaded draft');
+    await expect(editor).toHaveText('loaded draft');
+});
+
 test('search and keyboard selections remain visible above the translucent active line', async ({
     page,
 }) => {

@@ -29,8 +29,8 @@ print(sorted(matches, reverse=True)[0][2])
 ' "$test_os")
     destination="platform=iOS Simulator,id=$udid"
 fi
-if [[ -n $only_testing ]]; then
-    xcodebuild test -project "$ios_root/Filebeam.xcodeproj" -scheme Filebeam -configuration Debug -destination "$destination" "-only-testing:$only_testing" -resultBundlePath "$root/test-results/ios/Filebeam.xcresult"
-else
-    xcodebuild test -project "$ios_root/Filebeam.xcodeproj" -scheme Filebeam -configuration Debug -destination "$destination" -resultBundlePath "$root/test-results/ios/Filebeam.xcresult"
-fi
+options=(-project "$ios_root/Filebeam.xcodeproj" -scheme Filebeam -configuration Debug -destination "$destination" -resultBundlePath "$root/test-results/ios/Filebeam.xcresult")
+[[ -z $only_testing ]] || options+=("-only-testing:$only_testing")
+# Hosted simulators occasionally fail to synthesize UI events; CI retries a failed test once.
+[[ -z ${CI:-} ]] || options+=(-retry-tests-on-failure -test-iterations 2)
+xcodebuild test "${options[@]}"

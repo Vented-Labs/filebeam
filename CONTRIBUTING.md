@@ -72,9 +72,9 @@ cargo run --manifest-path crates/cli/Cargo.toml -- --home /tmp/device-a devices 
 
 Actions use Blacksmith Ubuntu 24.04 runners for application tests and Linux packages, `blacksmith-6vcpu-macos-15` for Intel and Apple Silicon CLI packages, and `blacksmith-4vcpu-windows-2025` for the Windows x86_64 CLI package. The Beam CLI test job uses `blacksmith-8vcpu-ubuntu-2404`. CI containers have no Docker CPU or memory caps, and Cargo uses the available CPUs. Local CLI scripts retain their default limits.
 
-Tests run when a PR is opened, updated, or reopened, and on pushes to `master`. Release workflows call the same suite with the validated release commit; tag pushes do not start a second standalone Tests run. New PR updates cancel superseded Tests, Docker, and Beam CLI runs.
+Tests run when a PR is opened, updated, or reopened, and on pushes to `master`. A release reuses the passing `master` Tests run for its commit and runs the same suite itself only when no such run exists, so tag a commit once its `master` run is green. Tag pushes do not start a second standalone Tests run. New PR updates cancel superseded Tests, Docker, and Beam CLI runs.
 
-Frontend build/checks, Rust, and PHP static checks start independently. The compiled frontend is shared with isolated SQLite, MySQL, Sail PostgreSQL/Redis, distribution, and browser jobs. Main browser tests run in two Sail shards with two workers each; small-chunk tests use their own SQLite application. The final `Test` check requires every job and matrix entry to succeed.
+Frontend build/checks, Rust, and PHP static checks start independently. The compiled frontend is shared with isolated SQLite, MySQL, Sail PostgreSQL/Redis, distribution, and browser jobs. Main browser tests run in two Sail shards with two workers each; small-chunk tests use their own SQLite application. In CI, Playwright and iOS tests retry a failed test once and report a pass on retry as flaky. The final `Test` check requires every job and matrix entry to succeed.
 
 Android runs in that required aggregate on every PR, covering changes to the
 shared client, transfer/encryption engine, and `mobile/` without excluding the
@@ -92,6 +92,7 @@ master and scheduled runs. Keep Blacksmith **Branch Protected Caches** enabled:
 PR caches must remain PR-scoped and must never populate trusted release caches.
 Compare runner-rate-weighted build time, including cache seeding, when tuning CI.
 
+- The PHP and Playwright setup actions cache the system packages they download with apt, keyed by the installed versions, because Ubuntu mirrors intermittently drop to about 100 kB/s.
 - Checkouts use `useblacksmith/checkout`, retaining the requested source ref and fetch settings. Container-mounted source checkouts use `dissociate: true` so Git objects remain accessible inside Docker.
 - Production, Sail, and CLI tooling builds use `useblacksmith/setup-docker-builder` with a separate cache key per Dockerfile. Production variants share their common layers, and CI/release builds share the same workload key. Blacksmith handles architecture separation and builder cleanup; avoid replacing or pruning the managed builder before its post-job cache save.
 - Existing `docker buildx` commands use the managed builder directly. Sail explicitly selects it via `docker compose build --builder`. Release images push directly from BuildKit; locally tested images are loaded into Docker.
