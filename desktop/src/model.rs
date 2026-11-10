@@ -215,6 +215,15 @@ pub struct JobSnapshot {
     pub peer_warning: Option<String>,
     pub capabilities: TransferCapabilities,
 }
+
+impl JobSnapshot {
+    /// Whether a person started this as a transfer. Internal work, such as preparing
+    /// a manifest or revoking a link, is tracked as a job too but is not one.
+    pub fn is_transfer(&self) -> bool {
+        self.direction != TransferDirection::Service
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TransferDirection {
     Send,

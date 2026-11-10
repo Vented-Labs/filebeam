@@ -137,12 +137,52 @@ pub const SCENARIOS: &[Scenario] = &[
         theme: "dark",
     },
     Scenario {
+        id: "receive-preview",
+        destination: "receive",
+        theme: "dark",
+    },
+    Scenario {
+        id: "receive-note",
+        destination: "receive",
+        theme: "dark",
+    },
+    Scenario {
+        id: "receive-note-opened",
+        destination: "receive",
+        theme: "dark",
+    },
+    Scenario {
+        id: "receive-progress",
+        destination: "receive",
+        theme: "dark",
+    },
+    Scenario {
         id: "transfers-mixed",
         destination: "transfers",
         theme: "dark",
     },
     Scenario {
         id: "transfers-scroll-end",
+        destination: "transfers",
+        theme: "dark",
+    },
+    Scenario {
+        id: "transfers-selected",
+        destination: "transfers",
+        theme: "dark",
+    },
+    Scenario {
+        id: "transfers-receipt",
+        destination: "transfers",
+        theme: "dark",
+    },
+    Scenario {
+        id: "transfers-failed",
+        destination: "transfers",
+        theme: "dark",
+    },
+    Scenario {
+        id: "transfers-empty",
         destination: "transfers",
         theme: "dark",
     },
@@ -222,7 +262,7 @@ pub const SCENARIOS: &[Scenario] = &[
         theme: "dark",
     },
     Scenario {
-        id: "narrow-sheets",
+        id: "receive-secret",
         destination: "receive",
         theme: "dark",
     },
@@ -237,7 +277,9 @@ pub fn snapshot(id: &str) -> Option<DesktopSnapshot> {
     let mut snapshot = base_snapshot();
     match scenario.id {
         "receive-key" => snapshot.pending_prompts.push(prompt(PromptKind::ShareKey)),
-        "receive-password" => snapshot.pending_prompts.push(prompt(PromptKind::Password)),
+        "receive-password" | "receive-secret" => {
+            snapshot.pending_prompts.push(prompt(PromptKind::Password))
+        }
         "receive-consent" => snapshot
             .pending_prompts
             .push(prompt(PromptKind::PeerConsent)),
@@ -265,22 +307,53 @@ pub fn snapshot(id: &str) -> Option<DesktopSnapshot> {
             snapshot.jobs.push(job);
             snapshot.verified_results.push(result);
         }
-        "receive-expired" | "error-toast" => snapshot.messages.push(ClientMessage {
+        "error-toast" => snapshot.messages.push(ClientMessage {
             id: 1,
-            operation: if scenario.id == "error-toast" {
-                "native account request".into()
-            } else {
-                "inspect receive".into()
-            },
-            error: error(
-                ClientErrorCode::Remote,
-                if scenario.id == "error-toast" {
-                    "The server returned 404."
-                } else {
-                    "This transfer has expired."
-                },
-            ),
+            operation: "refresh contacts".into(),
+            error: error(ClientErrorCode::Remote, "The server returned 503."),
         }),
+        "receive-preview" => snapshot.receive_previews.push(ReceivePreview {
+            attached_note: Some(filebeam_client_core::protocol::AttachedNote {
+                text: "Final cut for review. The archive holds the layered sources.".into(),
+                title: Some("Read first".into()),
+                language: "markdown".into(),
+            }),
+            operation_id: Some("receive-fixture-01".into()),
+            link: "https://studio.fixture.invalid/01JD8Q4XK7M2N9P3R5T6V8W0YZ".into(),
+            kind: ReceiveKind::File,
+            password_required: false,
+            burn_on_read: false,
+            items: [
+                ("Product walkthrough.mp4", 482_344_960_u64),
+                ("Launch assets.zip", 342_884_352),
+                ("Brand guidelines.pdf", 3_758_080),
+                ("release-notes.md", 1_946),
+            ]
+            .into_iter()
+            .enumerate()
+            .map(|(index, (name, size))| ReceiveItem {
+                id: format!("item-{index:02}"),
+                name: name.into(),
+                size,
+            })
+            .collect(),
+        }),
+        "receive-note" => snapshot.receive_previews.push(ReceivePreview {
+            attached_note: None,
+            operation_id: None,
+            link: "https://studio.fixture.invalid/01JD8Q4XK7M2N9P3R5T6V8W0YZ#k=v1.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".into(),
+            kind: ReceiveKind::Note,
+            password_required: true,
+            burn_on_read: true,
+            items: Vec::new(),
+        }),
+        "receive-progress" => {
+            let mut running = receive_job("Product walkthrough.mp4", TransferState::Running);
+            running.progress.phase = "Downloading".into();
+            running.progress.completed_bytes = 204_472_320;
+            running.capabilities.can_pause = true;
+            snapshot.jobs.push(running);
+        }
         "send-share-progress"
         | "send-share-ready"
         | "send-share-split"
@@ -331,7 +404,19 @@ pub fn snapshot(id: &str) -> Option<DesktopSnapshot> {
             }
             snapshot.jobs.push(share);
         }
-        "transfers-mixed" | "dialogs" => snapshot.jobs = mixed_jobs(),
+        "transfers-mixed" | "transfers-selected" | "transfers-receipt" | "transfers-failed"
+        | "dialogs" => {
+            snapshot.jobs = mixed_jobs();
+            snapshot.verified_results.push(VerifiedResult {
+                transfer_id: "receive-fixture-01".into(),
+                private_path: "/fixture/private/receive-fixture-01".into(),
+                verified_paths: vec![
+                    "/fixture/private/receive-fixture-01/Product walkthrough.mp4".into(),
+                ],
+                exported_paths: Vec::new(),
+                export_error: None,
+            });
+        }
         "transfers-scroll-end" => snapshot.jobs = scroll_jobs(),
         "inbox-locked" => {
             snapshot.account.authenticated = true;
@@ -504,8 +589,13 @@ fn mixed_jobs() -> Vec<JobSnapshot> {
         0,
         "Waiting for recipient",
     );
-    running.direction = TransferDirection::Send;
-    running.capabilities.can_pause = true;
+    running.share_url =
+        Some("https://studio.fixture.invalid/01JD8Q4XK7M2N9P3R5T6V8W0YZ#k=v1.fixture".into());
+    running.cli_command = Some(
+        "beam receive 'https://studio.fixture.invalid/01JD8Q4XK7M2N9P3R5T6V8W0YZ#k=v1.fixture'"
+            .into(),
+    );
+    running.capabilities.can_end_live = true;
     let mut paused = job(
         "j-paused",
         "Research archive.zip",
@@ -516,7 +606,8 @@ fn mixed_jobs() -> Vec<JobSnapshot> {
         "Paused",
     );
     paused.capabilities.can_resume = true;
-    let complete = job(
+    paused.capabilities.can_discard = true;
+    let mut complete = job(
         "j-note",
         "Deployment notes",
         TransferDirection::Note,
@@ -525,7 +616,11 @@ fn mixed_jobs() -> Vec<JobSnapshot> {
         100,
         "Link ready",
     );
-    let saved = job(
+    complete.share_url = Some("https://studio.fixture.invalid/n/01JD8Q4XK7M2N9P3R5T6V8W0YZ".into());
+    complete.separate_key = Some("v1.fixture-key".into());
+    complete.capabilities.can_revoke = true;
+    complete.capabilities.can_discard = true;
+    let mut saved = job(
         "j-complete",
         "Brand guidelines.pdf",
         TransferDirection::Receive,
@@ -534,6 +629,7 @@ fn mixed_jobs() -> Vec<JobSnapshot> {
         100,
         "Saved to folder",
     );
+    saved.capabilities.can_discard = true;
     let mut failed = job(
         "j-failed",
         "Photography.zip",
@@ -547,14 +643,12 @@ fn mixed_jobs() -> Vec<JobSnapshot> {
         ClientErrorCode::Network,
         "Connection interrupted; retained work can be retried.",
     ));
-    vec![
-        running,
-        receive_job("Product walkthrough.mp4", TransferState::Complete),
-        paused,
-        complete,
-        saved,
-        failed,
-    ]
+    failed.capabilities.can_resume = true;
+    failed.capabilities.can_discard = true;
+    let mut verified = receive_job("Product walkthrough.mp4", TransferState::Complete);
+    verified.capabilities.can_export = true;
+    verified.capabilities.can_discard = true;
+    vec![running, verified, paused, complete, saved, failed]
 }
 
 fn scroll_jobs() -> Vec<JobSnapshot> {
@@ -584,6 +678,10 @@ fn job(
 ) -> JobSnapshot {
     let mut job = receive_job(name, state);
     job.id = id.into();
+    job.checkpoint_id = Some(format!(
+        "01JD8Q4XK7M2N9P3{:0>10}",
+        id.replace('-', "").to_uppercase()
+    ));
     job.direction = direction;
     job.progress.phase = phase.into();
     job.progress.total_bytes = Some(bytes);

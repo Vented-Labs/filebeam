@@ -4,9 +4,11 @@
 use std::rc::Rc;
 
 use gpui::{
-    App, ClickEvent, Div, ElementId, Entity, FontWeight, IntoElement, ParentElement, RenderOnce,
-    SharedString, Styled, Window, div, prelude::FluentBuilder, px,
+    App, Bounds, ClickEvent, Div, ElementId, Entity, FontWeight, InteractiveElement, IntoElement,
+    ParentElement, PathBuilder, Pixels, RenderOnce, SharedString, Styled, Window, canvas, div,
+    point, prelude::FluentBuilder, px,
 };
+use gpui_base::{Checkbox as BaseCheckbox, CheckboxState};
 use gpui_component::{
     Sizable, Size,
     input::{Input, InputState},
@@ -22,6 +24,7 @@ use crate::{
     ui::{
         button,
         feedback::Tone,
+        motion,
         text::{self, TextExt},
     },
 };
@@ -205,5 +208,105 @@ impl RenderOnce for CopyField {
                     .text_color(p.text_muted),
             )
             .child(action)
+    }
+}
+
+type CheckHandler = Rc<dyn Fn(bool, &mut Window, &mut App)>;
+
+/// A checkbox with a drawn tick. The approved "check" icon is a circled tick, which
+/// reads as a ring at this size, so the mark is painted directly.
+#[derive(IntoElement)]
+pub struct Check {
+    id: ElementId,
+    label: SharedString,
+    checked: bool,
+    disabled: bool,
+    on_change: Option<CheckHandler>,
+}
+
+/// `label` is the accessible name; it is not drawn.
+pub fn check(id: impl Into<ElementId>, label: impl Into<SharedString>, checked: bool) -> Check {
+    Check {
+        id: id.into(),
+        label: label.into(),
+        checked,
+        disabled: false,
+        on_change: None,
+    }
+}
+
+impl Check {
+    pub fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
+        self
+    }
+
+    pub fn on_change(mut self, handler: impl Fn(bool, &mut Window, &mut App) + 'static) -> Self {
+        self.on_change = Some(Rc::new(handler));
+        self
+    }
+}
+
+impl RenderOnce for Check {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        const SIZE: f32 = 18.;
+        let p = theme::palette(cx);
+        let mark = motion::eased(
+            (self.id.clone(), "mark"),
+            if self.checked { 1. } else { 0. },
+            motion::fade(),
+            window,
+            cx,
+        );
+        let ink = p.on_action.opacity(mark);
+        let handler = self.on_change;
+        BaseCheckbox::new(self.id)
+            .accessibility_label(self.label)
+            .checked(self.checked)
+            .disabled(self.disabled)
+            .size(px(SIZE))
+            .flex_none()
+            .rounded(px(5.))
+            .border_1()
+            .when(self.checked, |this| {
+                this.bg(p.action).border_color(p.action_border)
+            })
+            .when(!self.checked, |this| {
+                this.bg(p.sunken)
+                    .border_color(p.control_border)
+                    .hover(move |style| style.border_color(p.control_border_hover))
+            })
+            .when(self.disabled, |this| this.opacity(0.5))
+            .when(!self.disabled, |this| this.cursor_pointer())
+            .focus_visible(move |style| style.border_color(p.choice_border))
+            .child(
+                canvas(
+                    |_, _, _| {},
+                    move |bounds: Bounds<Pixels>, (), window, _| {
+                        if mark <= 0. {
+                            return;
+                        }
+                        let at = |x: f32, y: f32| {
+                            point(bounds.origin.x + px(x), bounds.origin.y + px(y))
+                        };
+                        let mut tick = PathBuilder::stroke(px(1.8));
+                        tick.move_to(at(4.2, 9.2));
+                        tick.line_to(at(7.4, 12.2));
+                        tick.line_to(at(12.8, 5.6));
+                        if let Ok(path) = tick.build() {
+                            window.paint_path(path, ink);
+                        }
+                    },
+                )
+                .absolute()
+                .top(px(-1.))
+                .left(px(-1.))
+                .size(px(SIZE)),
+            )
+            .when_some(handler, |this, handler| {
+                this.on_change(move |state, _, window, cx| {
+                    handler(state == CheckboxState::Checked, window, cx)
+                })
+            })
     }
 }

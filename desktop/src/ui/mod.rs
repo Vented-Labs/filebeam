@@ -3,6 +3,7 @@
 
 pub mod brand;
 pub mod button;
+pub mod dialog;
 pub mod feedback;
 pub mod field;
 pub mod format;

@@ -32,7 +32,7 @@ use crate::{
         tokens::{geometry, radius, text as size},
     },
     ui::{
-        self, MotionExt, TextExt, brand, button, feedback, format, motion, progress::progress, text,
+        self, MotionExt, TextExt, brand, dialog, feedback, format, motion, progress::progress, text,
     },
     views::{
         account::{AccountPanel, InboxPanel},
@@ -266,8 +266,8 @@ impl DesktopShell {
         let notifications = NotificationService::new(notifications_enabled);
         let live = cx.new(|cx| Live::new(client.clone(), cx));
         let send = cx.new(|cx| SendPanel::new(live.clone(), window, cx));
-        let receive = cx.new(|cx| ReceivePanel::new(client.clone(), home.clone(), window, cx));
-        let transfers = cx.new(|cx| TransfersPanel::new(client.clone(), home.clone(), window, cx));
+        let receive = cx.new(|cx| ReceivePanel::new(live.clone(), home.clone(), window, cx));
+        let transfers = cx.new(|cx| TransfersPanel::new(live.clone(), window, cx));
         let inbox = cx.new(|cx| InboxPanel::new(client.clone(), window, cx));
         let history = cx.new(|cx| HistoryPanel::new(client.clone(), window, cx));
         let account = cx.new(|cx| AccountPanel::new(client.clone(), window, cx));
@@ -395,7 +395,8 @@ impl DesktopShell {
         let completed: HashSet<_> = snapshot
             .jobs
             .iter()
-            .filter(|job| matches!(job.state, TransferState::Complete))
+            // Internal service jobs finish too; only a transfer earns a notification.
+            .filter(|job| job.is_transfer() && job.state == TransferState::Complete)
             .map(|job| job.id.clone())
             .collect();
         if self.completion_baselined {
@@ -446,57 +447,34 @@ impl DesktopShell {
 
     fn queue_receive_link(&mut self, link: String, window: &mut Window, cx: &mut Context<Self>) {
         self.pending_receive_link = Some(link);
-        let shell = cx.entity().downgrade();
-        window.open_dialog(cx, move |dialog, _, cx| {
-            let p = theme::palette(cx);
-            let accept = shell.clone();
-            let keep = shell.clone();
-            dialog.title("Open this transfer?").child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(18.))
-                    .child(
-                        text::body(
-                            "Filebeam was asked to open a transfer link. Opening it replaces \
-                             what is currently entered on Receive.",
-                        )
-                        .text_color(p.text_muted),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .justify_end()
-                            .gap(px(8.))
-                            .child(
-                                button::quiet("keep-receive-draft")
-                                    .label("Keep current entry")
-                                    .on_click(move |_, window, cx| {
-                                        let _ = keep.update(cx, |shell, _| {
-                                            shell.pending_receive_link = None
-                                        });
-                                        window.close_dialog(cx);
-                                    }),
-                            )
-                            .child(
-                                button::primary("open-queued-receive")
-                                    .label("Open transfer")
-                                    .on_click(move |_, window, cx| {
-                                        let _ = accept.update(cx, |shell, cx| {
-                                            if let Some(link) = shell.pending_receive_link.take() {
-                                                shell.receive.update(cx, |receive, cx| {
-                                                    receive.set_link(link, window, cx)
-                                                });
-                                                shell.destination = Destination::Receive;
-                                                cx.notify();
-                                            }
-                                        });
-                                        window.close_dialog(cx);
-                                    }),
-                            ),
-                    ),
+        let (accept, keep) = (cx.entity().downgrade(), cx.entity().downgrade());
+        dialog::prompt("Open this transfer?")
+            .body(
+                "Filebeam was asked to open a transfer link. Opening it replaces what is \
+                 currently entered on Receive.",
             )
-        });
+            .confirm("Open transfer")
+            .cancel("Keep current entry")
+            .open_with(
+                window,
+                cx,
+                |_, _, _| None,
+                move |window, cx| {
+                    let _ = accept.update(cx, |shell, cx| {
+                        if let Some(link) = shell.pending_receive_link.take() {
+                            shell
+                                .receive
+                                .update(cx, |receive, cx| receive.set_link(link, window, cx));
+                            shell.destination = Destination::Receive;
+                            cx.notify();
+                        }
+                    });
+                    true
+                },
+                move |_, cx| {
+                    let _ = keep.update(cx, |shell, _| shell.pending_receive_link = None);
+                },
+            );
     }
 
     pub fn select(&mut self, destination: Destination, cx: &mut Context<Self>) {
@@ -516,6 +494,11 @@ impl DesktopShell {
         cx.notify();
     }
 
+    #[cfg(feature = "visual-test")]
+    pub fn open_palette_for_capture(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_palette(&OpenCommandPalette, window, cx);
+    }
+
     fn open_palette(
         &mut self,
         _: &OpenCommandPalette,
@@ -524,34 +507,41 @@ impl DesktopShell {
     ) {
         let shell = cx.entity().downgrade();
         let palette = self.command_palette.clone();
-        window.open_dialog(cx, move |dialog, _, _cx| {
+        window.open_dialog(cx, move |dialog, _, cx| {
+            let p = theme::palette(cx);
             let on_confirm = shell.clone();
-            dialog.title("Go to").child(
-                Command::new(&palette)
-                    .placeholder("Search pages…")
-                    .group(
-                        CommandGroup::new()
-                            .label("Pages")
-                            .items(Destination::ALL.iter().map(|destination| {
+            dialog
+                .w(px(520.))
+                .p(px(8.))
+                .bg(p.raised)
+                .border_color(p.border)
+                .rounded(px(radius::PANEL))
+                .close_button(false)
+                .child(
+                    Command::new(&palette)
+                        .bordered(false)
+                        .placeholder("Go to a page…")
+                        .group(CommandGroup::new().label("Pages").items(
+                            Destination::ALL.iter().map(|destination| {
                                 CommandItem::new()
                                     .label(destination.label())
                                     .icon(icon(destination.icon()))
-                            })),
-                    )
-                    .empty(|_, _, cx| {
-                        let p = theme::palette(cx);
-                        div()
-                            .p(px(16.))
-                            .child(text::small("Nothing matches that.").text_color(p.text_muted))
-                    })
-                    .on_confirm(move |index, window, cx| {
-                        if let Some(destination) = Destination::ALL.get(index.row) {
-                            let _ =
-                                on_confirm.update(cx, |shell, cx| shell.select(*destination, cx));
-                        }
-                        window.close_dialog(cx);
-                    }),
-            )
+                            }),
+                        ))
+                        .empty(|_, _, cx| {
+                            let p = theme::palette(cx);
+                            div().p(px(16.)).child(
+                                text::small("Nothing matches that.").text_color(p.text_muted),
+                            )
+                        })
+                        .on_confirm(move |index, window, cx| {
+                            if let Some(destination) = Destination::ALL.get(index.row) {
+                                let _ = on_confirm
+                                    .update(cx, |shell, cx| shell.select(*destination, cx));
+                            }
+                            window.close_dialog(cx);
+                        }),
+                )
         });
         self.command_palette
             .update(cx, |palette, cx| palette.focus(window, cx));
@@ -641,11 +631,10 @@ impl DesktopShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
-        let transfer_count = snapshot
-            .jobs
-            .iter()
-            .filter(|job| is_active(job.state) || matches!(job.state, TransferState::Paused))
-            .count();
+        let in_flight = |job: &&crate::model::JobSnapshot| {
+            job.is_transfer() && (is_active(job.state) || job.state == TransferState::Paused)
+        };
+        let transfer_count = snapshot.jobs.iter().filter(in_flight).count();
         let inbox_count = snapshot.inbox.len();
         let selected_index = Destination::PRIMARY
             .iter()
@@ -662,26 +651,20 @@ impl DesktopShell {
             cx,
         );
 
-        let active_job = snapshot
-            .jobs
-            .iter()
-            .find(|job| is_active(job.state) || matches!(job.state, TransferState::Paused))
-            .map(|job| {
-                let fraction = job
-                    .progress
-                    .total_bytes
-                    .filter(|total| *total > 0)
-                    .map(|total| {
-                        (job.progress.completed_bytes as f32 / total as f32).clamp(0., 1.)
-                    });
-                let state = match job.state {
-                    TransferState::PauseRequested => "Pausing".to_owned(),
-                    TransferState::Paused => "Paused".to_owned(),
-                    _ if job.progress.phase.is_empty() => "In progress".to_owned(),
-                    _ => job.progress.phase.clone(),
-                };
-                (job.progress.name.clone(), state, fraction, job.state)
-            });
+        let active_job = snapshot.jobs.iter().find(in_flight).map(|job| {
+            let fraction = job
+                .progress
+                .total_bytes
+                .filter(|total| *total > 0)
+                .map(|total| (job.progress.completed_bytes as f32 / total as f32).clamp(0., 1.));
+            let state = match job.state {
+                TransferState::PauseRequested => "Pausing".to_owned(),
+                TransferState::Paused => "Paused".to_owned(),
+                _ if job.progress.phase.is_empty() => "In progress".to_owned(),
+                _ => job.progress.phase.clone(),
+            };
+            (job.progress.name.clone(), state, fraction, job.state)
+        });
 
         let signed_in = snapshot.account.authenticated;
         let account_name = snapshot

@@ -322,6 +322,66 @@ fn run_with_instance_at(
                             eprintln!("visual interaction=transfers-scroll native-wheel=dispatched");
                         });
                     }),
+                    Ok("transfers-selected") | Ok("transfers-receipt") | Ok("transfers-failed")
+                    | Ok("dialogs") => {
+                        let scenario = std::env::var("FILEBEAM_VISUAL_SCENARIO").unwrap_or_default();
+                        shell.update(cx, |shell, cx| {
+                            shell.transfers.update(cx, |transfers, cx| {
+                                transfers.select_job(
+                                    match scenario.as_str() {
+                                        "transfers-selected" => "j-live",
+                                        "transfers-failed" => "j-failed",
+                                        _ => "j-note",
+                                    }
+                                    .into(),
+                                    cx,
+                                );
+                            });
+                        });
+                        if scenario == "dialogs" {
+                            // Dialogs attach to the window root, which exists from the
+                            // first frame.
+                            let transfers = shell.read(cx).transfers.clone();
+                            window.on_next_frame(move |window, cx| {
+                                transfers.update(cx, |transfers, cx| {
+                                    transfers.confirm_revoke_for_capture(window, cx);
+                                });
+                            });
+                        }
+                    }
+                    Ok("palette") => {
+                        let shell = shell.clone();
+                        window.on_next_frame(move |window, cx| {
+                            shell.update(cx, |shell, cx| shell.open_palette_for_capture(window, cx));
+                        });
+                    }
+                    Ok("receive-secret") => {
+                        let receive = shell.read(cx).receive.clone();
+                        window.on_next_frame(move |window, cx| {
+                            receive.update(cx, |receive, cx| {
+                                receive.ask_secret_for_capture(window, cx);
+                            });
+                        });
+                    }
+                    Ok("receive-expired") => shell.update(cx, |shell, cx| {
+                        shell.receive.update(cx, |receive, cx| {
+                            receive.seed_for_capture(
+                                "https://studio.fixture.invalid/01JD8Q4XK7M2N9P3R5T6V8W0YZ#k=v1.fixture",
+                                Some("That could not be found. It may have expired or been removed."),
+                                window,
+                                cx,
+                            );
+                        });
+                    }),
+                    Ok("receive-note-opened") => shell.update(cx, |shell, cx| {
+                        shell.receive.update(cx, |receive, cx| {
+                            receive.seed_note_for_capture(
+                                "note-fixture",
+                                "Staging database\nhost: db.staging.internal\nuser: deploy\n\nRotate after the release window.",
+                                cx,
+                            );
+                        });
+                    }),
                     Ok("receive-scroll-end") => window.on_next_frame(|window, cx| {
                         scroll_visual_target(window, "receive-page-scroll", cx);
                     }),

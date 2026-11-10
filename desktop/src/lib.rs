@@ -12,6 +12,8 @@ pub mod model;
 pub mod platform;
 #[cfg(not(feature = "headless-acceptance"))]
 pub mod shell;
+#[cfg(all(test, not(feature = "headless-acceptance")))]
+mod testing;
 #[cfg(not(feature = "headless-acceptance"))]
 pub mod theme;
 #[cfg(not(feature = "headless-acceptance"))]

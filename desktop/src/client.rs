@@ -130,6 +130,8 @@ struct Worker {
     prepared_receives: Arc<Mutex<HashMap<String, PreparedReceive>>>,
     journal: DesktopJournal,
     next_message_id: u64,
+    /// Failed link-management jobs already reported as a message.
+    reported_management_failures: std::collections::HashSet<JobId>,
     inbox_receiver: Option<(Control, thread::JoinHandle<()>)>,
     account_id: std::cell::Cell<u64>,
     next_device_daemon_poll: Instant,
@@ -229,6 +231,7 @@ impl Worker {
             prepared_receives: Arc::new(Mutex::new(HashMap::new())),
             journal,
             next_message_id: 0,
+            reported_management_failures: std::collections::HashSet::new(),
             inbox_receiver: None,
             account_id: std::cell::Cell::new(0),
             next_device_daemon_poll: Instant::now(),
@@ -2172,7 +2175,25 @@ impl Worker {
         let mut jobs = Vec::new();
         let mut prompts = Vec::new();
         let mut results = Vec::new();
+        let mut management_failures = Vec::new();
+        self.reported_management_failures
+            .retain(|id| active_job_ids.contains(id));
         for mut entry in snapshots {
+            // Revoking a link or ending a live session runs as its own job, which
+            // no transfer row represents. Its failure is reported once instead.
+            if let Some(operation) = management_operation(entry.kind)
+                && entry.job.state == filebeam_client_core::JobState::Failed
+                && self.reported_management_failures.insert(entry.id)
+            {
+                management_failures.push((
+                    operation,
+                    entry
+                        .job
+                        .error
+                        .clone()
+                        .unwrap_or_else(|| "the request did not complete".into()),
+                ));
+            }
             // A preparation and its download can share a checkpoint. Actions and
             // retained selections address the process-owned job, not that record.
             let id = entry.id.0.to_string();
@@ -2230,7 +2251,12 @@ impl Worker {
                 .prepared_receive_titles
                 .get(&entry.id)
                 .map(String::as_str);
+            // An inbox download runs as a service job but is a received transfer.
+            let received = self.receive_roots.contains_key(&entry.id);
             let mut job = map_job(id, entry, title);
+            if received && job.direction == TransferDirection::Service {
+                job.direction = TransferDirection::Receive;
+            }
             job.separate_key = separate_key;
             job.cli_command = job.share_url.as_deref().and_then(|link| {
                 filebeam_client_core::link_presentation::format_download_with_cli(link).ok()
@@ -2244,6 +2270,14 @@ impl Worker {
             jobs.push(job);
         }
         let mut snapshot = lock(&self.snapshot);
+        for (operation, detail) in management_failures {
+            record_message(
+                &mut snapshot,
+                &mut self.next_message_id,
+                operation,
+                anyhow::anyhow!(detail),
+            );
+        }
         jobs.extend(
             snapshot
                 .device_directory
@@ -2314,6 +2348,15 @@ impl Worker {
                 detail: "completed".into(),
             });
         }
+    }
+}
+
+/// The operation name a failed link-management job is reported under.
+fn management_operation(kind: JobKind) -> Option<&'static str> {
+    match kind {
+        JobKind::Revoke => Some("revoke link"),
+        JobKind::EndLive => Some("end live session"),
+        _ => None,
     }
 }
 
@@ -2806,6 +2849,25 @@ mod tests {
             sanitize(&anyhow::anyhow!("password abc")),
             "operation failed; sensitive detail was withheld"
         );
+    }
+    #[test]
+    fn only_link_management_jobs_report_their_own_failure() {
+        assert_eq!(management_operation(JobKind::Revoke), Some("revoke link"));
+        assert_eq!(
+            management_operation(JobKind::EndLive),
+            Some("end live session")
+        );
+        for kind in [
+            JobKind::Upload,
+            JobKind::Download,
+            JobKind::Resume,
+            JobKind::Service,
+            JobKind::Note,
+            JobKind::LiveNote,
+            JobKind::Device,
+        ] {
+            assert_eq!(management_operation(kind), None);
+        }
     }
     #[test]
     fn message_events_are_monotonic_and_history_is_bounded() {

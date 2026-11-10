@@ -1,7 +1,8 @@
 //! The app's buttons. Primary fills with the action gradient and glows; Secondary is
 //! outlined; Tonal is a tinted fill for supporting actions; Quiet is text-only;
-//! Danger is a quiet destructive action. While `loading` the icon gives way to a
-//! spinner and presses are ignored.
+//! Danger is a quiet destructive action and Destructive its filled form, for the
+//! confirming step. While `loading` the icon gives way to a spinner and presses are
+//! ignored.
 
 use std::rc::Rc;
 
@@ -30,6 +31,7 @@ pub enum Kind {
     /// A neutral quiet control, for icon buttons and low-emphasis actions.
     Ghost,
     Danger,
+    Destructive,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -193,6 +195,10 @@ pub fn danger(id: impl Into<ElementId>) -> Action {
     Action::new(id, Kind::Danger)
 }
 
+pub fn destructive(id: impl Into<ElementId>) -> Action {
+    Action::new(id, Kind::Destructive)
+}
+
 struct Look {
     ink: Hsla,
     border: Hsla,
@@ -246,6 +252,13 @@ fn look(kind: Kind, p: Palette) -> Look {
             hover_border: p.danger.border.opacity(0.5),
             press_fill: p.danger.surface,
         },
+        Kind::Destructive => Look {
+            ink: p.danger.ink,
+            border: p.danger.border,
+            hover_fill: p.danger.surface,
+            hover_border: p.danger.ink,
+            press_fill: p.danger.surface,
+        },
     }
 }
 
@@ -282,7 +295,7 @@ impl RenderOnce for Action {
             .when(self.fill, |this| this.w_full().flex_1());
 
         button = match (self.kind, self.disabled) {
-            (Kind::Primary | Kind::Secondary | Kind::Tonal, true) => button
+            (Kind::Primary | Kind::Secondary | Kind::Tonal | Kind::Destructive, true) => button
                 .bg(p.disabled_surface)
                 .border_color(p.disabled_border),
             (Kind::Quiet | Kind::Ghost | Kind::Danger, true) => {
@@ -294,6 +307,7 @@ impl RenderOnce for Action {
                 .shadow(surface::shadow_action(p)),
             (Kind::Secondary, false) => button.bg(p.surface).border_color(look.border),
             (Kind::Tonal, false) => button.bg(p.accent_surface).border_color(look.border),
+            (Kind::Destructive, false) => button.bg(p.danger.surface).border_color(look.border),
             (Kind::Quiet | Kind::Ghost | Kind::Danger, false) => button.border_color(look.border),
         };
         if !inert {

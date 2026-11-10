@@ -227,6 +227,8 @@ pub fn failure_title(operation: &str) -> String {
         "share" => "Could not share".into(),
         "note" => "Could not create the note".into(),
         "receive" | "inspect receive" => "Could not open the transfer".into(),
+        "revoke link" => "Could not revoke the link".into(),
+        "end live session" => "Could not end the live session".into(),
         "command" => "That did not work".into(),
         other => {
             let mut characters = other.chars();
@@ -236,6 +238,17 @@ pub fn failure_title(operation: &str) -> String {
             format!("{name} failed")
         }
     }
+}
+
+/// A long identifier reduced to its ends, for places that only need to tell two apart.
+pub fn abbreviated(value: &str, head: usize, tail: usize) -> String {
+    let characters: Vec<char> = value.chars().collect();
+    if characters.len() <= head + tail + 1 {
+        return value.to_owned();
+    }
+    let start: String = characters[..head].iter().collect();
+    let end: String = characters[characters.len() - tail..].iter().collect();
+    format!("{start}\u{2026}{end}")
 }
 
 /// The host of an instance URL, or the URL itself when it has none.
@@ -360,6 +373,12 @@ mod tests {
         );
         assert_eq!(readable_error("  "), "Something went wrong. Try again.");
         assert_eq!(failure_title("login"), "Could not sign in");
+        assert_eq!(failure_title("revoke link"), "Could not revoke the link");
+        assert_eq!(
+            abbreviated("01JD8Q4XK7M2N9P3R5T6V8W0YZ", 8, 4),
+            "01JD8Q4X\u{2026}W0YZ"
+        );
+        assert_eq!(abbreviated("short-id", 8, 4), "short-id");
         assert_eq!(failure_title("refresh devices"), "Refresh devices failed");
     }
 
