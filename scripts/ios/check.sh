@@ -19,8 +19,10 @@ swift test --package-path "$ios_root/Packages/FilebeamTheme"
 # Compiler and test failures are repeated as workflow annotations so a failed check is
 # readable from the pull request without opening the full log.
 annotate_failures() {
+    set +e
     grep -E "^/.+:[0-9]+:[0-9]+: error: " "$1" | sort -u | head -20 | sed -E "s|^$root/||; s|^([^:]+):([0-9]+):[0-9]+: error: (.*)$|::error file=\\1,line=\\2::\\3|"
-    grep -E "error: |\\*\\* (BUILD|TEST) FAILED|Test Case .* failed" "$1" | grep -vE "^/.+:[0-9]+:[0-9]+: error: " | sort -u | head -10 | sed "s/^/::error ::/"
+    grep -E "error: |\\*\\* (BUILD|TEST) FAILED|Test Case .* failed|^ios: " "$1" | grep -vE "^/.+:[0-9]+:[0-9]+: error: " | sort -u | head -15 | sed "s/^/::error ::/"
+    set -e
 }
 checked() {
     local log status
