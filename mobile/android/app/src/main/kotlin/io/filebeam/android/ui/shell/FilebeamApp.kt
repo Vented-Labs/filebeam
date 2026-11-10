@@ -107,6 +107,7 @@ private fun Home() {
             holder.SaveableStateProvider(tab.key) {
                 when (tab) {
                     Tab.Send -> SendScreen()
+                    Tab.Receive -> io.filebeam.android.ui.feature.receive.ReceiveScreen()
                     else -> PlaceholderTab(tab)
                 }
             }

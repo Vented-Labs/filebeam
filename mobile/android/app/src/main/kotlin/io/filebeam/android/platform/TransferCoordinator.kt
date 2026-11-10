@@ -71,6 +71,9 @@ data class TransferUiState(
 
 data class SharePresentation(val link: String, val separateKey: String? = null)
 
+/** A link whose manifest is being or has been authenticated ahead of downloading. */
+class PreparedDownload(val id: String, val instance: String, val job: TransferJob)
+
 data class TransferReceipt(val id: String, val state: ReceiptState, val result: String? = null, val message: String? = null) {
     val disposition: String get() = when (state) {
         ReceiptState.VERIFIED_PRIVATE -> "private-verified"
@@ -97,6 +100,8 @@ data class UploadRequest(
     val includeKeyInLink: Boolean = true,
     val driver: String,
     val attachedNote: io.filebeam.rust.AttachedNote? = null,
+    /** Display names by URI. Provider URIs end in opaque document IDs, which must not become file names. */
+    val names: Map<String, String> = emptyMap(),
 )
 
 /** Process-scoped owner. Activities collect state; Android jobs/services execute work. */
@@ -158,7 +163,7 @@ class TransferCoordinator(
         }
         val durableUris: List<Uri> = request.uris.takeIf { uris -> uris.all(storage::hasPersistedReadGrant) } ?: emptyList()
         val providers = runCatching { JSONArray(durableUris.map { uri ->
-            val input = storage.providerInput(uri, uri.lastPathSegment ?: "file")
+            val input = storage.providerInput(uri, request.names[uri.toString()] ?: uri.lastPathSegment ?: "file")
             JSONObject().put("identity", input.identity).put("name", input.displayName)
                 .put("offset", input.offset).put("length", input.length).put("mutation", input.mutationToken)
         }) }.getOrNull()
@@ -655,6 +660,33 @@ class TransferCoordinator(
     fun savedDetails(id: String, complete: (Result<SavedTransferPresentation>) -> Unit) = scope.launch {
         complete(runCatching { withContext(Dispatchers.IO) { platformClient().savedTransferDetails(id).presentation() } })
     }
+
+    /**
+     * Unlocks a link and authenticates its manifest without fetching any payload, so the files
+     * can be listed and chosen first. The returned job raises the usual key, password and
+     * consent prompts; its single result is the checkpoint to list and then [startPrepared].
+     */
+    suspend fun prepareDownload(link: String): PreparedDownload = withContext(Dispatchers.IO) {
+        val config = settings.values.first()
+        val id = UUID.randomUUID().toString()
+        PreparedDownload(id, config.instance, platformClient().backgroundTransfer().prepareDownload(config.instance, link, storage.outputDirectory(id)))
+    }
+
+    suspend fun downloadItems(checkpointId: String): List<io.filebeam.rust.DownloadItem> = withContext(Dispatchers.IO) {
+        platformClient().backgroundTransfer().downloadItems(checkpointId)
+    }
+
+    /** Fixes the selection and continues the prepared download as an ordinary foreground job. */
+    suspend fun startPrepared(prepared: PreparedDownload, checkpointId: String, itemIds: List<String>?) {
+        withContext(Dispatchers.IO) {
+            if (itemIds != null) platformClient().backgroundTransfer().selectDownloadItems(checkpointId, itemIds)
+            association(checkpointId).save(JSONObject().put("id", prepared.id).put("kind", "download").put("live", false).put("instance", prepared.instance))
+        }
+        resume(checkpointId)
+    }
+
+    /** Verified files of a finished download, for saving or opening. */
+    suspend fun outputs(id: String): List<File> = withContext(Dispatchers.IO) { runCatching { storage.verifiedOutputs(id) }.getOrDefault(emptyList()) }
 
     /** Receiver sessions for a sent transfer; empty when the checkpoint has none or cannot be read. */
     suspend fun activity(checkpointId: String): List<io.filebeam.rust.TransferActivityRecord> = withContext(Dispatchers.IO) {

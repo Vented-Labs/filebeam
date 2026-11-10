@@ -249,6 +249,7 @@ class SendViewModel(application: Application) : AndroidViewModel(application) {
                 recipient = recipient,
                 includeKeyInLink = draft.includeKey || recipient != null,
                 driver = driver,
+                names = draft.sources.associate { it.identity to it.name },
                 attachedNote = draft.attachedNote?.takeIf { it.body.isNotEmpty() }?.let { AttachedNote(it.body, it.title.takeIf(String::isNotEmpty), it.language.key) },
             ),
         )
