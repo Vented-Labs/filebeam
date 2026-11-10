@@ -16,8 +16,7 @@ final class NavigationUITests: XCTestCase {
         app.tabBars.buttons["Receive"].tap()
         let field = app.descendants(matching: .any).matching(identifier: "receive-input").firstMatch
         XCTAssertTrue(field.waitForExistence(timeout: 5))
-        field.tap()
-        field.typeText("example-transfer-id")
+        field.typeWhenFocused("example-transfer-id")
         app.buttons["receive-input-done"].tap()
         app.tabBars.buttons["Settings"].tap()
         app.tabBars.buttons["Receive"].tap()

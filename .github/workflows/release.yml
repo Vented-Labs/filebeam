@@ -44,8 +44,8 @@ permissions:
 
 jobs:
   cli:
-    if: github.event_name != 'schedule' && !(github.event_name == 'workflow_dispatch' && inputs.metadata_only) && needs.validate-ref.result == 'success'
-    needs: [test, validate-ref]
+    if: ${{ !cancelled() && needs.tested.result == 'success' && github.event_name != 'schedule' && !(github.event_name == 'workflow_dispatch' && inputs.metadata_only) && needs.validate-ref.result == 'success' }}
+    needs: [tested, validate-ref]
     permissions:
       contents: write
     uses: ./.github/workflows/beam.yml
@@ -54,8 +54,8 @@ jobs:
       publish: ${{ github.event_name == 'push' || inputs.publish }}
     secrets: inherit
   desktop:
-    if: github.event_name != 'schedule' && !(github.event_name == 'workflow_dispatch' && inputs.metadata_only) && needs.validate-ref.result == 'success'
-    needs: [test, validate-ref]
+    if: ${{ !cancelled() && needs.tested.result == 'success' && github.event_name != 'schedule' && !(github.event_name == 'workflow_dispatch' && inputs.metadata_only) && needs.validate-ref.result == 'success' }}
+    needs: [tested, validate-ref]
     uses: ./.github/workflows/desktop.yml
     with:
       tag: ${{ needs.validate-ref.outputs.tag }}
@@ -63,18 +63,41 @@ jobs:
       publish: ${{ github.event_name == 'push' || inputs.publish }}
     secrets: inherit
   test:
-    if: github.event_name != 'schedule' && needs.validate-ref.result == 'success'
+    # A release reuses the master Tests run that already passed for this commit.
+    if: github.event_name != 'schedule' && needs.validate-ref.result == 'success' && needs.validate-ref.outputs.tested-by == ''
     needs: validate-ref
     uses: ./.github/workflows/tests.yml
     with:
       ref: ${{ needs.validate-ref.outputs.commit }}
+  tested:
+    name: Tested commit
+    # Jobs downstream of a skipped test call need explicit status checks.
+    if: ${{ !cancelled() && github.event_name != 'schedule' && needs.validate-ref.result == 'success' }}
+    needs: [validate-ref, test]
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 5
+    steps:
+      - name: Require a passing Tests run for the release commit
+        env:
+          TESTED_BY: ${{ needs.validate-ref.outputs.tested-by }}
+          TEST_RESULT: ${{ needs.test.result }}
+        run: |
+          if [[ -n $TESTED_BY ]]; then
+            printf '::notice::Reusing the passing master Tests run %s\n' "$TESTED_BY"
+          else
+            [[ $TEST_RESULT == success ]]
+          fi
 
   validate-ref:
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master')
     runs-on: blacksmith-4vcpu-ubuntu-2404
+    permissions:
+      contents: read
+      actions: read
     outputs:
       tag: ${{ steps.verify.outputs.tag }}
       commit: ${{ steps.verify.outputs.commit }}
+      tested-by: ${{ steps.tested.outputs.tested-by }}
     steps:
       - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
@@ -89,10 +112,15 @@ jobs:
           chmod +x scripts/release/validate-ref.sh
           commit=$(scripts/release/validate-ref.sh "$RELEASE_TAG")
           printf 'tag=%s\ncommit=%s\n' "$RELEASE_TAG" "$commit" >> "$GITHUB_OUTPUT"
+      - id: tested
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_COMMIT: ${{ steps.verify.outputs.commit }}
+        run: bash scripts/release/tested-commit.sh "$RELEASE_COMMIT" >> "$GITHUB_OUTPUT"
 
   package:
-    if: github.event_name != 'schedule' && !(github.event_name == 'workflow_dispatch' && inputs.metadata_only) && needs.validate-ref.result == 'success'
-    needs: [test, validate-ref]
+    if: ${{ !cancelled() && needs.tested.result == 'success' && github.event_name != 'schedule' && !(github.event_name == 'workflow_dispatch' && inputs.metadata_only) && needs.validate-ref.result == 'success' }}
+    needs: [tested, validate-ref]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 35
     env:
@@ -140,7 +168,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.publish && !inputs.metadata_only)) && needs.validate-ref.result == 'success'
+    if: ${{ !cancelled() && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.publish && !inputs.metadata_only)) && needs.validate-ref.result == 'success' && needs.package.result == 'success' && needs.cli.result == 'success' && needs.desktop.result == 'success' }}
     needs: [package, validate-ref, cli, desktop]
     runs-on: blacksmith-4vcpu-ubuntu-2404
     environment: release
@@ -274,8 +302,8 @@ jobs:
           fi
 
   docker-build:
-    if: needs.docker-plan.result == 'success' && needs.test.result == 'success'
-    needs: [test, validate-ref, docker-plan]
+    if: ${{ !cancelled() && needs.docker-plan.result == 'success' && needs.tested.result == 'success' }}
+    needs: [tested, validate-ref, docker-plan]
     permissions:
       contents: read
       packages: write
@@ -364,7 +392,7 @@ jobs:
         run: cosign sign --yes "$IMAGE@${{ steps.digest.outputs.digest }}"
 
   docker-publish:
-    if: needs.docker-build.result == 'success'
+    if: ${{ !cancelled() && needs.docker-build.result == 'success' && needs.cli.result == 'success' && needs.desktop.result == 'success' }}
     needs: [validate-ref, docker-plan, docker-build, cli, desktop]
     permissions:
       contents: read
@@ -438,7 +466,7 @@ jobs:
           done
 
   github-release:
-    if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.publish && !inputs.metadata_only)) && needs.package.result == 'success' && needs.publish.result == 'success' && needs.docker-publish.result == 'success' && needs.cli.result == 'success' && needs.desktop.result == 'success' && needs.validate-ref.result == 'success'
+    if: ${{ !cancelled() && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/master' && inputs.publish && !inputs.metadata_only)) && needs.package.result == 'success' && needs.publish.result == 'success' && needs.docker-publish.result == 'success' && needs.cli.result == 'success' && needs.desktop.result == 'success' && needs.validate-ref.result == 'success' }}
     needs: [package, publish, docker-publish, cli, desktop, validate-ref]
     permissions:
       contents: write

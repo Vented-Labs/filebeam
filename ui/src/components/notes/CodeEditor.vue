@@ -22,14 +22,11 @@ const editorHost = ref<HTMLElement>();
 const fallback = ref(props.modelValue);
 const ready = ref(false);
 const fallbackInput = ref<HTMLTextAreaElement>();
-let focusPending = false;
 function focusEnd(): void {
     if (view) {
         view.dispatch({ selection: { anchor: view.state.doc.length }, scrollIntoView: true });
         view.focus();
-        focusPending = false;
     } else {
-        focusPending = true;
         fallbackInput.value?.focus();
         fallbackInput.value?.setSelectionRange(props.modelValue.length, props.modelValue.length);
     }
@@ -155,11 +152,25 @@ async function mountEditor(): Promise<void> {
         ];
         const state: EditorState = EditorState.create({ doc: initialModel, extensions });
         view = new EditorView({ state, parent: editorHost.value });
-        const transferFocus = focusPending && document.activeElement === fallbackInput.value;
+        // Removing a focused fallback would otherwise drop focus and any keystrokes in flight.
+        const fallbackElement = fallbackInput.value;
+        const selection =
+            fallbackElement && document.activeElement === fallbackElement
+                ? { anchor: fallbackElement.selectionStart, head: fallbackElement.selectionEnd }
+                : undefined;
         ready.value = true;
         await nextTick();
-        if (transferFocus && !destroyed) focusEnd();
-        else focusPending = false;
+        if (selection && view && !destroyed) {
+            const length = view.state.doc.length;
+            view.dispatch({
+                selection: {
+                    anchor: Math.min(selection.anchor, length),
+                    head: Math.min(selection.head, length),
+                },
+                scrollIntoView: true,
+            });
+            view.focus();
+        }
     } catch {
         // The textarea remains functional when dynamic imports or browser APIs are unavailable.
         ready.value = false;

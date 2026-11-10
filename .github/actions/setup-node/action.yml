@@ -13,10 +13,33 @@ runs:
         cache: npm
     - shell: bash
       run: npm ci
+    # Ubuntu mirrors intermittently serve Chromium's system packages at ~100 kB/s.
+    - name: Restore Chromium system packages
+      id: browser-packages
+      if: inputs.browser == 'true' && runner.os == 'Linux'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/filebeam-apt/chromium/*.deb
+        key: apt-chromium-${{ runner.os }}-${{ runner.arch }}-
+        restore-keys: apt-chromium-${{ runner.os }}-${{ runner.arch }}-
     - name: Install Playwright Chromium
       if: inputs.browser == 'true'
       shell: bash
       run: |
         # Avoid unrelated Chrome repository index races during Ubuntu dependency installation.
         sudo rm -f /etc/apt/sources.list.d/google-chrome.list /etc/apt/sources.list.d/google-chrome.sources
+        if [[ $RUNNER_OS == Linux ]]; then
+          bash "$GITHUB_ACTION_PATH/../apt-archives.sh" use ~/.cache/filebeam-apt/chromium
+        fi
         npx playwright install --with-deps chromium
+    - name: Collect Chromium system packages
+      id: browser-packages-key
+      if: inputs.browser == 'true' && runner.os == 'Linux'
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/../apt-archives.sh" finish ~/.cache/filebeam-apt/chromium 'apt-chromium-${{ runner.os }}-${{ runner.arch }}-' >> "$GITHUB_OUTPUT"
+    - name: Save Chromium system packages
+      if: inputs.browser == 'true' && runner.os == 'Linux' && steps.browser-packages-key.outputs.key != steps.browser-packages.outputs.cache-matched-key
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/filebeam-apt/chromium/*.deb
+        key: ${{ steps.browser-packages-key.outputs.key }}

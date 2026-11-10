@@ -274,7 +274,7 @@ jobs:
   php-static:
     name: PHP static checks
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
@@ -470,7 +470,7 @@ jobs:
     name: Small-chunk browser
     needs: frontend
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
         with:
@@ -558,7 +558,9 @@ jobs:
       - name: Test updater harness
         run: php tests/updater/run.php
       - name: Test release reference validation
-        run: bash scripts/release/validate-ref.test.sh
+        run: |
+          bash scripts/release/validate-ref.test.sh
+          bash scripts/release/tested-commit.test.sh
       - name: Test release publishing safeguards
         run: |
           bash scripts/release/publish.test.sh
@@ -586,7 +588,7 @@ jobs:
     name: Themes (GD ${{ matrix.gd }})
     needs: frontend
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    timeout-minutes: 10
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
