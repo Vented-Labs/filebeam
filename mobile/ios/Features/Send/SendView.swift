@@ -104,6 +104,7 @@ struct TransportRail: View {
 }
 
 private struct FilesComposer: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(AppModel.self) private var model
     @Environment(\.theme) private var theme
     let open: (SendSheet) -> Void
@@ -121,7 +122,8 @@ private struct FilesComposer: View {
         if draft.sources.isEmpty {
             FilesHero(onFiles: { open(.pickFiles) }, onFolder: { open(.pickFolder) }).staggered(2)
         } else {
-            HStack(alignment: .center) {
+            let heading = dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: Space.md)) : AnyLayout(HStackLayout(alignment: .center))
+            heading {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Your files").fbText(.title)
                     let known = draft.sources.allSatisfy { $0.sizeBytes != nil }

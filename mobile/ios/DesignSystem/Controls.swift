@@ -65,10 +65,11 @@ struct SegmentedRail<Value: Hashable>: View {
     let segments: [Segment<Value>]
     @Binding var selection: Value
     var enabled = true
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Namespace private var namespace
 
     var body: some View {
-        let tall = segments.contains { $0.caption != nil }
+        let tall = dynamicTypeSize <= .xLarge && segments.contains { $0.caption != nil }
         let height: CGFloat = tall ? 64 : 48
         HStack(spacing: 0) {
             ForEach(segments) { segment in
@@ -85,7 +86,7 @@ struct SegmentedRail<Value: Hashable>: View {
                         if let custom = segment.customIcon { CustomIcon(icon: custom, size: tall ? 24 : 20).foregroundStyle(selected && available ? theme.accentText : ink) }
                         VStack(alignment: .leading, spacing: 1) {
                             Text(segment.label).fbText(tall ? .smallStrong : .label, color: ink).lineLimit(1)
-                            if let caption = segment.caption { Text(caption).fbText(.caption, color: available ? theme.textMuted : theme.disabledText).lineLimit(1) }
+                            if tall, let caption = segment.caption { Text(caption).fbText(.caption, color: available ? theme.textMuted : theme.disabledText).lineLimit(1) }
                         }
                     }
                     .padding(.horizontal, Space.md)
@@ -109,6 +110,8 @@ struct SegmentedRail<Value: Hashable>: View {
         .background(theme.sunken, in: Shapes.card)
         .overlay(Shapes.card.strokeBorder(theme.border, lineWidth: 1))
         .accessibilityElement(children: .contain)
+        // Bar-style controls cap text growth like the system tab bar; VoiceOver still reads the full labels.
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
     }
 }
 

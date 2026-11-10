@@ -196,6 +196,7 @@ struct FloatingNavBar: View {
         .padding(6)
         .frame(maxWidth: 440)
         .frame(height: 68)
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .background(theme.raised, in: Capsule())
         .overlay(Capsule().strokeBorder(theme.border, lineWidth: 1))
         .shadow(color: theme.shadow, radius: 20, y: 8)
