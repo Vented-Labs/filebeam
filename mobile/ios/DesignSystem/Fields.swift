@@ -20,11 +20,13 @@ struct FbTextField<Trailing: View>: View {
     var autocapitalization: TextInputAutocapitalization = .never
     var submitLabel: SubmitLabel = .done
     var onSubmit: (() -> Void)?
+    /// Applied to the editable element itself, so UI tests can type into it and read its value.
+    var identifier: String?
     @ViewBuilder var trailing: () -> Trailing
     @FocusState private var focused: Bool
 
-    init(_ text: Binding<String>, label: String? = nil, placeholder: String? = nil, supporting: String? = nil, error: String? = nil, icon: Icon? = nil, secure: Bool = false, multiline: Bool = false, minLines: Int = 1, monospaced: Bool = false, enabled: Bool = true, keyboard: UIKeyboardType = .default, contentType: UITextContentType? = nil, autocapitalization: TextInputAutocapitalization = .never, submitLabel: SubmitLabel = .done, onSubmit: (() -> Void)? = nil, @ViewBuilder trailing: @escaping () -> Trailing) {
-        _text = text; self.label = label; self.placeholder = placeholder; self.supporting = supporting; self.error = error; self.icon = icon; self.secure = secure; self.multiline = multiline; self.minLines = minLines; self.monospaced = monospaced; self.enabled = enabled; self.keyboard = keyboard; self.contentType = contentType; self.autocapitalization = autocapitalization; self.submitLabel = submitLabel; self.onSubmit = onSubmit; self.trailing = trailing
+    init(_ text: Binding<String>, label: String? = nil, placeholder: String? = nil, supporting: String? = nil, error: String? = nil, icon: Icon? = nil, secure: Bool = false, multiline: Bool = false, minLines: Int = 1, monospaced: Bool = false, enabled: Bool = true, keyboard: UIKeyboardType = .default, contentType: UITextContentType? = nil, autocapitalization: TextInputAutocapitalization = .never, submitLabel: SubmitLabel = .done, onSubmit: (() -> Void)? = nil, identifier: String? = nil, @ViewBuilder trailing: @escaping () -> Trailing) {
+        _text = text; self.label = label; self.placeholder = placeholder; self.supporting = supporting; self.error = error; self.icon = icon; self.secure = secure; self.multiline = multiline; self.minLines = minLines; self.monospaced = monospaced; self.enabled = enabled; self.keyboard = keyboard; self.contentType = contentType; self.autocapitalization = autocapitalization; self.submitLabel = submitLabel; self.onSubmit = onSubmit; self.identifier = identifier; self.trailing = trailing
     }
 
     var body: some View {
@@ -44,6 +46,7 @@ struct FbTextField<Trailing: View>: View {
                     .submitLabel(submitLabel)
                     .onSubmit { onSubmit?() }
                     .disabled(!enabled)
+                    .accessibilityIdentifier(identifier ?? "")
                 trailing()
             }
             .padding(.leading, Space.lg)
@@ -75,8 +78,8 @@ struct FbTextField<Trailing: View>: View {
 }
 
 extension FbTextField where Trailing == EmptyView {
-    init(_ text: Binding<String>, label: String? = nil, placeholder: String? = nil, supporting: String? = nil, error: String? = nil, icon: Icon? = nil, secure: Bool = false, multiline: Bool = false, minLines: Int = 1, monospaced: Bool = false, enabled: Bool = true, keyboard: UIKeyboardType = .default, contentType: UITextContentType? = nil, autocapitalization: TextInputAutocapitalization = .never, submitLabel: SubmitLabel = .done, onSubmit: (() -> Void)? = nil) {
-        self.init(text, label: label, placeholder: placeholder, supporting: supporting, error: error, icon: icon, secure: secure, multiline: multiline, minLines: minLines, monospaced: monospaced, enabled: enabled, keyboard: keyboard, contentType: contentType, autocapitalization: autocapitalization, submitLabel: submitLabel, onSubmit: onSubmit) { EmptyView() }
+    init(_ text: Binding<String>, label: String? = nil, placeholder: String? = nil, supporting: String? = nil, error: String? = nil, icon: Icon? = nil, secure: Bool = false, multiline: Bool = false, minLines: Int = 1, monospaced: Bool = false, enabled: Bool = true, keyboard: UIKeyboardType = .default, contentType: UITextContentType? = nil, autocapitalization: TextInputAutocapitalization = .never, submitLabel: SubmitLabel = .done, onSubmit: (() -> Void)? = nil, identifier: String? = nil) {
+        self.init(text, label: label, placeholder: placeholder, supporting: supporting, error: error, icon: icon, secure: secure, multiline: multiline, minLines: minLines, monospaced: monospaced, enabled: enabled, keyboard: keyboard, contentType: contentType, autocapitalization: autocapitalization, submitLabel: submitLabel, onSubmit: onSubmit, identifier: identifier) { EmptyView() }
     }
 }
 

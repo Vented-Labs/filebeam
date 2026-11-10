@@ -93,17 +93,14 @@ private extension ReceiveStage {
 private struct LinkEntry: View {
     @Environment(AppModel.self) private var model
     @Environment(\.theme) private var theme
-    @FocusState private var focused: Bool
 
     var body: some View {
         @Bindable var receive = model.receive
         ScreenHeader("Receive a transfer", subtitle: "Paste a Filebeam link or ID. Files are decrypted on this device.").staggered(0)
         Panel {
             VStack(spacing: Space.lg) {
-                FbTextField($receive.input, label: "Transfer link or ID", placeholder: "https://…", icon: .link, keyboard: .URL, contentType: .URL, submitLabel: .go, onSubmit: { receive.open() })
-                    .focused($focused)
-                    .accessibilityIdentifier("receive-input")
-                FbButton("Open transfer", icon: .unlock, enabled: !receive.input.isBlank) { focused = false; receive.open() }
+                FbTextField($receive.input, label: "Transfer link or ID", placeholder: "https://…", icon: .link, keyboard: .URL, contentType: .URL, submitLabel: .go, onSubmit: { receive.open() }, identifier: "receive-input")
+                FbButton("Open transfer", icon: .unlock, enabled: !receive.input.isBlank) { hideKeyboard(); receive.open() }
                 FbButton("Paste from clipboard", kind: .secondary, icon: .paste) {
                     if let clip = Clipboard.paste(), !clip.isBlank { receive.input = clip; receive.open(clip) } else { model.toast("The clipboard is empty.") }
                 }
