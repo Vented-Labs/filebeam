@@ -36,10 +36,10 @@ jobs:
       FILEBEAM_ANDROID_CACHE: ${{ github.workspace }}/.android-cache
       FILEBEAM_ANDROID_EMULATOR_IMAGE: filebeam-android-emulator:acceptance
     steps:
-      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
+      - uses: useblacksmith/checkout@2b9fe87d796feea153b455ec2f3125b471a7b0e7 # v1
         with:
           persist-credentials: false
-      - uses: useblacksmith/setup-docker-builder@19215110ab936351210feebdfa5b440b4493e184 # v2
+      - uses: useblacksmith/setup-docker-builder@06dd9c83a5d541274d2e3ac67625560979275267 # v2
         with:
           cache-key: docker/android/Dockerfile
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
