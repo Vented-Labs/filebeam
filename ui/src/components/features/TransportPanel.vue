@@ -8,16 +8,16 @@ const props = defineProps<{ enabledDrivers: TransferDriver[]; cliDocsUrl: string
 
 const transports = {
     http: {
-        label: 'HTTP',
-        hint: 'Download later',
+        label: 'Server',
+        hint: 'Send via Filebeam server',
         icon: 'http-server',
         caption: 'Encrypted storage',
         description: 'Upload once. Share a link. The recipient can download before it expires.',
         detail: 'The server stores ciphertext, not file contents.',
     },
     webrtc: {
-        label: 'WebRTC',
-        hint: 'Send live',
+        label: 'P2P',
+        hint: 'Send via WebRTC',
         icon: 'webrtc-p2p',
         caption: 'Live connection',
         description: 'Connect live over WebRTC. Keep the sender open while the files transfer.',

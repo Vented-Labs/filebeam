@@ -17,7 +17,7 @@ test('live file attachment unlocks without contacting a peer', async ({
     await page
         .getByRole('textbox', { name: 'Secure note editor', exact: true })
         .fill('Live encrypted attachment 🦀\n');
-    await page.getByRole('radio', { name: 'WebRTC (live)' }).click();
+    await page.getByRole('radio', { name: 'P2P (send via WebRTC)' }).click();
     const creation = page.waitForResponse(
         (response) =>
             response.request().method() === 'POST' &&

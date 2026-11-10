@@ -718,7 +718,7 @@ onBeforeUnmount(() => {
                                             variant="secondary"
                                             @click="driver = 'webrtc'"
                                         >
-                                            Use WebRTC
+                                            Use P2P
                                         </Button>
                                     </template>
                                 </div>

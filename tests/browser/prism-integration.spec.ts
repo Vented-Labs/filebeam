@@ -17,8 +17,9 @@ let pageErrors: string[] = [];
 let expectedCreationAttempts = 0;
 let holdCreation = false;
 let releaseCreation: (() => void) | undefined;
-const http = (page: Page) => page.getByRole('radio', { name: 'HTTP (stored)', exact: true });
-const rtc = (page: Page) => page.getByRole('radio', { name: 'WebRTC (live)', exact: true });
+const http = (page: Page) =>
+    page.getByRole('radio', { name: 'Server (send via Filebeam server)', exact: true });
+const rtc = (page: Page) => page.getByRole('radio', { name: 'P2P (send via WebRTC)', exact: true });
 const filesTab = (page: Page) => page.getByRole('tab', { name: 'Files', exact: true });
 const notesTab = (page: Page) => page.getByRole('tab', { name: 'Notes', exact: true });
 const editor = (page: Page) =>
@@ -337,7 +338,7 @@ test.describe('Prism production integration contract', () => {
         await expect(
             page.getByRole('button', { name: 'Send encrypted', exact: true }),
         ).toBeDisabled();
-        await page.getByRole('button', { name: 'Use WebRTC', exact: true }).click();
+        await page.getByRole('button', { name: 'Use P2P', exact: true }).click();
         await expect(rtc(page)).toBeChecked();
         await expect(page.getByTestId('prism-file-row')).toHaveCount(1);
         await expect(page.getByRole('dialog', { name: 'WebRTC privacy' })).toHaveCount(0);
@@ -453,10 +454,10 @@ test.describe('Prism production integration contract', () => {
             buffer: Buffer.alloc(49),
         });
         await expect(page.getByTestId('prism-policy-error')).toBeVisible();
-        await expect(page.getByRole('button', { name: 'Use WebRTC' })).toHaveCount(0);
+        await expect(page.getByRole('button', { name: 'Use P2P' })).toHaveCount(0);
         await rtc(page).click();
         await expect(page.getByTestId('prism-policy-error')).toBeVisible();
-        await expect(page.getByRole('button', { name: 'Use WebRTC' })).toHaveCount(0);
+        await expect(page.getByRole('button', { name: 'Use P2P' })).toHaveCount(0);
     });
 
     test('HTTP-only policy renders one full-width real radio and indicator', async ({ page }) => {

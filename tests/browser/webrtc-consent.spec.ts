@@ -11,7 +11,7 @@ test.describe('WebRTC consent', () => {
     );
 
     async function selectWebRtc(page: Page): Promise<void> {
-        await page.getByRole('radio', { name: 'WebRTC (live)' }).click();
+        await page.getByRole('radio', { name: 'P2P (send via WebRTC)' }).click();
     }
 
     test('selection changes limits without opening consent, and submit requests it before peers', async ({
@@ -38,7 +38,7 @@ test.describe('WebRTC consent', () => {
                 () => (window as Window & { __filebeamPeerCount: number }).__filebeamPeerCount,
             ),
         ).toBe(0);
-        await page.getByRole('radio', { name: 'HTTP (stored)' }).click();
+        await page.getByRole('radio', { name: 'Server (send via Filebeam server)' }).click();
         await expect(page.getByText('2.0 MiB per transfer')).toBeVisible();
         await selectWebRtc(page);
         await page.locator('#filebeam-picker').setInputFiles({
@@ -124,8 +124,8 @@ test.describe('WebRTC consent', () => {
     }) => {
         await page.setViewportSize({ width: 390, height: 844 });
         await page.goto('/');
-        const http = page.getByRole('radio', { name: 'HTTP (stored)' });
-        const rtc = page.getByRole('radio', { name: 'WebRTC (live)' });
+        const http = page.getByRole('radio', { name: 'Server (send via Filebeam server)' });
+        const rtc = page.getByRole('radio', { name: 'P2P (send via WebRTC)' });
         const [httpBox, rtcBox] = await Promise.all([http.boundingBox(), rtc.boundingBox()]);
         expect(httpBox?.y).toBe(rtcBox?.y);
         expect(

@@ -57,7 +57,12 @@ test.describe('WebRTC live transfers', () => {
 
     async function chooseDriver(page: Page, driver: 'http' | 'webrtc'): Promise<void> {
         await page
-            .getByRole('radio', { name: driver === 'http' ? 'HTTP (stored)' : 'WebRTC (live)' })
+            .getByRole('radio', {
+                name:
+                    driver === 'http'
+                        ? 'Server (send via Filebeam server)'
+                        : 'P2P (send via WebRTC)',
+            })
             .click();
     }
 
@@ -168,7 +173,9 @@ test.describe('WebRTC live transfers', () => {
             });
         });
         await page.goto('/');
-        await expect(page.getByRole('radio', { name: 'HTTP (stored)' })).toBeChecked();
+        await expect(
+            page.getByRole('radio', { name: 'Server (send via Filebeam server)' }),
+        ).toBeChecked();
         expect(await page.evaluate(() => (window as any).__filebeamPeerCount)).toBe(0);
 
         const live = await createLiveTransfer(page, [
@@ -420,9 +427,13 @@ test.describe('WebRTC live transfers', () => {
             });
         });
         await unsupported.goto('/');
-        await expect(unsupported.getByRole('radio', { name: 'WebRTC (live)' })).toBeDisabled();
         await expect(
-            unsupported.getByText('WebRTC is not supported by this browser. Choose HTTP to share.'),
+            unsupported.getByRole('radio', { name: 'P2P (send via WebRTC)' }),
+        ).toBeDisabled();
+        await expect(
+            unsupported.getByText(
+                'WebRTC is not supported by this browser. Choose Server to share.',
+            ),
         ).toBeVisible();
         await unsupported.setViewportSize({ width: 768, height: 1024 });
         expect(

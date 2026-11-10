@@ -36,17 +36,24 @@ test('transport and feature icons render the approved custom artwork', async ({ 
     );
     await page.goto('/');
     const icons = [
-        ['http-server', page.getByRole('radio', { name: 'HTTP (stored)', exact: true })],
-        ['webrtc-p2p', page.getByRole('radio', { name: 'WebRTC (live)', exact: true })],
+        [
+            'http-server',
+            page.getByRole('radio', { name: 'Server (send via Filebeam server)', exact: true }),
+        ],
+        ['webrtc-p2p', page.getByRole('radio', { name: 'P2P (send via WebRTC)', exact: true })],
     ] as const;
     for (const [name, container] of icons)
         await expectCustomIcon(container.locator('svg.fb-icon'), name);
     await page.getByRole('tab', { name: 'Notes', exact: true }).click();
     await expect(
-        page.getByRole('radio', { name: 'HTTP (stored)', exact: true }).locator('svg.fb-icon'),
+        page
+            .getByRole('radio', { name: 'Server (send via Filebeam server)', exact: true })
+            .locator('svg.fb-icon'),
     ).toBeVisible();
     await expect(
-        page.getByRole('radio', { name: 'WebRTC (live)', exact: true }).locator('svg.fb-icon'),
+        page
+            .getByRole('radio', { name: 'P2P (send via WebRTC)', exact: true })
+            .locator('svg.fb-icon'),
     ).toBeVisible();
 
     await page.goto('/features');

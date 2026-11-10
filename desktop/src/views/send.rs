@@ -1020,7 +1020,7 @@ fn build_command_for_policy(
                 return Err("Recipient delivery requires an authenticated account.".into());
             }
             if recipient.is_some() && preferences.transport != Transport::Http {
-                return Err("Recipient delivery is available with HTTP only; choose HTTP or clear the recipient before sharing.".into());
+                return Err("Recipient delivery is only available via Server; choose Server or clear the recipient before sharing.".into());
             }
             if recipient.is_some() && password.is_some() {
                 return Err("Recipient delivery cannot be combined with a transfer password; clear one before sharing.".into());
@@ -1236,7 +1236,7 @@ impl Render for SendPanel {
                                 .gap(px(8.))
                                 .children([
                                     BaseRadio::new(0usize)
-                                        .accessibility_label("HTTP")
+                                        .accessibility_label("Server")
                                         .disabled(!policy.http.enabled)
                                         .checked(http_selected)
                                         .set_position(1, 2)
@@ -1302,12 +1302,12 @@ impl Render for SendPanel {
                                                         .flex()
                                                         .flex_col()
                                                         .gap(px(2.))
-                                                        .child("HTTP")
+                                                        .child("Server")
                                                         .child(
                                                             div()
                                                                 .text_size(px(10.))
                                                                 .text_color(p.muted)
-                                                                .child("Download later."),
+                                                                .child("Send via Filebeam server."),
                                                         ),
                                                 ),
                                         )
@@ -1323,7 +1323,7 @@ impl Render for SendPanel {
                                             }
                                         }),
                                     BaseRadio::new(1usize)
-                                        .accessibility_label("WebRTC")
+                                        .accessibility_label("P2P")
                                         .disabled(!policy.webrtc.enabled)
                                         .checked(live_selected)
                                         .set_position(2, 2)
@@ -1389,12 +1389,12 @@ impl Render for SendPanel {
                                                         .flex()
                                                         .flex_col()
                                                         .gap(px(2.))
-                                                        .child("WebRTC")
+                                                        .child("P2P")
                                                         .child(
                                                             div()
                                                                 .text_size(px(10.))
                                                                 .text_color(p.muted)
-                                                                .child("Keep Filebeam open."),
+                                                                .child("Send via WebRTC."),
                                                         ),
                                                 ),
                                         )
