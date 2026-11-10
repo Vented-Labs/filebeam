@@ -10,6 +10,32 @@ pub const IPC_VERSION: u32 = 1;
 /// only when it matches the schema the requesting client expects.
 pub const STORAGE_SCHEMA: u32 = 1;
 
+/// Reply error for requests that need this profile's device registration.
+pub const PROVISIONING_REQUIRED: &str = "device provisioning is required";
+
+/// The profile's daemon endpoint does not exist or refuses connections.
+/// Clients match it with [`is_not_running`] to offer setup guidance.
+#[derive(Debug)]
+pub struct DaemonNotRunning {
+    pub endpoint: PathBuf,
+}
+
+impl std::fmt::Display for DaemonNotRunning {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "the Filebeam daemon is not running (no endpoint at {})",
+            self.endpoint.display()
+        )
+    }
+}
+
+impl std::error::Error for DaemonNotRunning {}
+
+pub fn is_not_running(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| cause.is::<DaemonNotRunning>())
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ApprovalMode {

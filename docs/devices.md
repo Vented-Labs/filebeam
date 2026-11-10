@@ -22,12 +22,15 @@ manage the same daemon.
 ```sh
 beam account login you@example.com
 beam service enable
-beam devices add --name Laptop
+beam devices add Laptop
 ```
 
 `beam service enable` installs the signed daemon component and starts it as a
-per-user service (a systemd user unit on Linux, a LaunchAgent on macOS). In the
-desktop app, use **Settings > Install device service**.
+per-user service (a systemd user unit on Linux, a LaunchAgent on macOS). Run it
+as yourself, not with sudo. In the desktop app, use **Settings > Install device
+service**. At an interactive terminal, commands that need the service offer to
+set it up. `beam devices add` names the device after the computer unless you
+give a name.
 
 The first device on an account is active immediately. Each later device prints
 its fingerprint and an approval payload. On a device that is already active,

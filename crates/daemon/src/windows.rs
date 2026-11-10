@@ -132,7 +132,15 @@ impl Pipe {
 
     pub(crate) fn connect_client(name: &[u16]) -> Result<Self> {
         if unsafe { WaitNamedPipeW(name.as_ptr(), 5_000) } == 0 {
-            return Err(io::Error::last_os_error()).context("wait for Filebeam daemon");
+            let error = io::Error::last_os_error();
+            if error.kind() == io::ErrorKind::NotFound {
+                return Err(crate::DaemonNotRunning {
+                    endpoint: String::from_utf16_lossy(name.strip_suffix(&[0]).unwrap_or(name))
+                        .into(),
+                }
+                .into());
+            }
+            return Err(error).context("wait for Filebeam daemon");
         }
         let handle = unsafe {
             CreateFileW(
