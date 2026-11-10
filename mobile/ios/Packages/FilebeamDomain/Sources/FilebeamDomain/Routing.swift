@@ -34,11 +34,16 @@ public enum InputRouter {
         guard scheme == "https", let instance = FilebeamInstance(origin: "https://\(host)\(components.port.map { ":\($0)" } ?? "")") else {
             return .invalid("Use an HTTPS Filebeam link.")
         }
-        let path = components.path.lowercased()
-        if path.contains("verify") { return .verifyEmail(url: trimmed) }
-        if path.contains("reset") { return .resetPassword(url: trimmed) }
-        if path.contains("invite") { return .invite(url: trimmed) }
-        if path.contains("profile") || path.hasPrefix("/u/") { return .profile(url: trimmed) }
+        // Account links are recognised by their first path segment, matching the server routes, so
+        // a transfer ID that happens to contain one of these words is still treated as a transfer.
+        let segments = components.path.split(separator: "/").map { $0.lowercased() }
+        switch segments.first {
+        case "verify-email": return .verifyEmail(url: trimmed)
+        case "reset-password": return .resetPassword(url: trimmed)
+        case "invitations", "invite": return .invite(url: trimmed)
+        case "u", "profile": return .profile(url: trimmed)
+        default: break
+        }
         let id = components.path.split(separator: "/").last.map(String.init) ?? ""
         return id.isEmpty ? .invalid("The link does not identify a transfer.") : .transfer(transferID: TransferID(id), instance: instance, input: trimmed)
     }

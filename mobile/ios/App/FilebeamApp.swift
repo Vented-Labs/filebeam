@@ -30,14 +30,13 @@ struct FilebeamApp: App {
 
 private struct FilebeamAppContainer: View {
     @State private var model: AppModel?
-    @State private var importSources: (([URL]) async -> [FileSource])?
     @State private var startupError: String?
 
     var body: some View {
         Group {
-            if let model, let importSources { FilebeamRootView(model: model, importSources: importSources) }
-            else if let startupError { ContentUnavailableView("Filebeam could not start", systemImage: "exclamationmark.triangle", description: Text(startupError)) }
-            else { ProgressView("Starting Filebeam") }
+            if let model { AppShell(model: model) }
+            else if let startupError { StartupFailure(message: startupError) }
+            else { StartupSplash() }
         }
         .task {
             guard model == nil, startupError == nil else { return }
@@ -55,9 +54,29 @@ private struct FilebeamAppContainer: View {
                 service.configureBackgroundExecutor(executor)
                 let documents = DocumentStore(root: paths.sources)
                 let draftStore = DraftStore(directory: paths.drafts, keychain: secrets)
-                model = AppModel(service: service, instance: instance, outputDirectory: documents.outputDirectory, loadDrafts: draftStore.load, saveDrafts: draftStore.save, settings: settings, saveSettings: { try settingsStore.save($0) })
-                importSources = { urls in await documents.importSources(urls) }
+                model = AppModel(service: service, instance: instance, outputDirectory: documents.outputDirectory, paths: paths, appearance: AppearanceStore(), secrets: secrets, importer: { urls in await documents.importSources(urls) }, loadDrafts: draftStore.load, saveDrafts: draftStore.save, settings: settings, saveSettings: { try settingsStore.save($0) })
             } catch { startupError = error.localizedDescription }
+        }
+    }
+}
+
+private struct StartupSplash: View {
+    @Environment(\.theme) private var theme
+    var body: some View {
+        ZStack {
+            AmbientBackground()
+            FilebeamMark(height: 72)
+        }
+    }
+}
+
+private struct StartupFailure: View {
+    @Environment(\.theme) private var theme
+    let message: String
+    var body: some View {
+        ZStack {
+            AmbientBackground()
+            EmptyState(.alert, "Filebeam could not start", body: message, tone: .danger)
         }
     }
 }

@@ -77,6 +77,15 @@ final class FilebeamDomainTests: XCTestCase {
         XCTAssertTrue(SendPolicy.validate(draft, policy: policy, isAuthenticated: true).contains(.unknown("The driver's byte limit is unavailable.")))
     }
 
+    func testAccountLinksRouteByFirstPathSegment() {
+        XCTAssertEqual(InputRouter.route("https://filebeam.io/invitations/token123", selectedInstance: instance), .invite(url: "https://filebeam.io/invitations/token123"))
+        XCTAssertEqual(InputRouter.route("https://filebeam.io/verify-email/7/abc?signature=s", selectedInstance: instance), .verifyEmail(url: "https://filebeam.io/verify-email/7/abc?signature=s"))
+        XCTAssertEqual(InputRouter.route("https://filebeam.io/reset-password/tok?email=a%40b.c", selectedInstance: instance), .resetPassword(url: "https://filebeam.io/reset-password/tok?email=a%40b.c"))
+        XCTAssertEqual(InputRouter.route("https://filebeam.io/u/mason", selectedInstance: instance), .profile(url: "https://filebeam.io/u/mason"))
+        guard case let .transfer(id, _, _) = InputRouter.route("https://filebeam.io/01ARZRESETINVITE0VERIFY0AB", selectedInstance: instance) else { return XCTFail("Expected transfer") }
+        XCTAssertEqual(id, "01ARZRESETINVITE0VERIFY0AB")
+    }
+
     func testTransferRoutePreservesFullFragmentAndUsesLinkInstance() {
         let input = "https://other.example/t/transfer-7#decryption-key"
         guard case let .transfer(id, routedInstance, original) = InputRouter.route(input, selectedInstance: instance) else { return XCTFail("Expected transfer") }

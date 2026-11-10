@@ -4,6 +4,16 @@ import Security
 
 public enum IOSKeychainStoreError: Error { case unavailable(OSStatus), invalidData, checkpointKeyMissing }
 
+extension IOSKeychainStoreError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case let .unavailable(status): "The keychain is unavailable (status \(status))."
+        case .invalidData: "Saved keychain data could not be read."
+        case .checkpointKeyMissing: "The recovery key for saved transfers is missing."
+        }
+    }
+}
+
 /// Device-only custody for native state. Catalog and draft keys are available after first
 /// unlock for background recovery; cookies require an unlocked device and never synchronize.
 public final class IOSKeychainStore: NativeSecretStorageRemoving, @unchecked Sendable {
@@ -38,6 +48,14 @@ public final class IOSKeychainStore: NativeSecretStorageRemoving, @unchecked Sen
         lock.lock(); defer { lock.unlock() }
         if let cookie { try upsert(Data(cookie.utf8), name: name, accessibility: kSecAttrAccessibleWhenUnlockedThisDeviceOnly) }
         else { try delete(name: name) }
+    }
+
+    /// A small device-only secret such as a remembered inbox private key. Requires an unlocked device.
+    public func loadSecret(_ name: String) throws -> Data? { try read(name: "secret.\(name)") }
+    public func saveSecret(_ name: String, _ data: Data?) throws {
+        lock.lock(); defer { lock.unlock() }
+        if let data { try upsert(data, name: "secret.\(name)", accessibility: kSecAttrAccessibleWhenUnlockedThisDeviceOnly) }
+        else { try delete(name: "secret.\(name)") }
     }
 
     /// Generic local-data custody key, used for encrypted drafts and sensitive local records.

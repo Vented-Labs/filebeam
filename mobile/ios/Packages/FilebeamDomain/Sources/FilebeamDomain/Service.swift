@@ -95,6 +95,19 @@ public protocol FilebeamService: Sendable {
     func acceptInvite(_ request: InviteAcceptanceRequest) async throws -> AccountSession
     func report(_ request: ReportRequest) async throws -> ReportReceipt
     func requestAccountDeletion(_ request: AccountDeletionRequest) async throws -> AccountDeletionResult
+    func accountHistory(instance: FilebeamInstance, filter: HistoryFilter, cursor: String?, limit: UInt32) async throws -> HistoryPage
+    func deleteHistory(instance: FilebeamInstance, transferID: TransferID) async throws
+    /// Returns the new expiry.
+    func extendHistory(instance: FilebeamInstance, transferID: TransferID, retentionHours: UInt64) async throws -> Date?
+    func changelog(instance: FilebeamInstance, page: Int, term: String?, prereleases: Bool) async throws -> ChangelogListing
+    func changelogRelease(instance: FilebeamInstance, tag: String) async throws -> ReleaseDetail
+    func devices(instance: FilebeamInstance) async throws -> DeviceRegistry
+    func renameDevice(instance: FilebeamInstance, deviceID: String, name: String) async throws
+    func revokeDevice(instance: FilebeamInstance, deviceID: String, currentPassword: String) async throws
+    func resetDevices(instance: FilebeamInstance, currentPassword: String) async throws
+    func deviceFingerprint(publicKey: String) async throws -> String
+    /// Joins a link that lacks its key with a separately shared key, in the canonical presentation.
+    func combineKey(instance: FilebeamInstance, link: String, key: String) async throws -> String
 }
 
 public extension FilebeamService {
@@ -111,4 +124,15 @@ public extension FilebeamService {
     func inspectPayload(instance: FilebeamInstance, input: String) async throws -> TransferInspection { throw FilebeamDomainError.unavailable("Transfer inspection is not available in this build.") }
     func downloadCommand(link: String) async throws -> String { throw FilebeamDomainError.unavailable("CLI download formatting is not available in this build.") }
     func transferActivity(checkpointID: String) async throws -> TransferActivity { throw FilebeamDomainError.unavailable("Transfer activity is not available in this build.") }
+    func accountHistory(instance: FilebeamInstance, filter: HistoryFilter, cursor: String?, limit: UInt32) async throws -> HistoryPage { throw FilebeamDomainError.unavailable("Transfer history is unavailable.") }
+    func deleteHistory(instance: FilebeamInstance, transferID: TransferID) async throws { throw FilebeamDomainError.unavailable("Transfer history is unavailable.") }
+    func extendHistory(instance: FilebeamInstance, transferID: TransferID, retentionHours: UInt64) async throws -> Date? { throw FilebeamDomainError.unavailable("Transfer history is unavailable.") }
+    func changelog(instance: FilebeamInstance, page: Int, term: String?, prereleases: Bool) async throws -> ChangelogListing { throw FilebeamDomainError.unavailable("Release notes are unavailable.") }
+    func changelogRelease(instance: FilebeamInstance, tag: String) async throws -> ReleaseDetail { throw FilebeamDomainError.unavailable("Release notes are unavailable.") }
+    func devices(instance: FilebeamInstance) async throws -> DeviceRegistry { throw FilebeamDomainError.unavailable("Devices are unavailable.") }
+    func renameDevice(instance: FilebeamInstance, deviceID: String, name: String) async throws { throw FilebeamDomainError.unavailable("Devices are unavailable.") }
+    func revokeDevice(instance: FilebeamInstance, deviceID: String, currentPassword: String) async throws { throw FilebeamDomainError.unavailable("Devices are unavailable.") }
+    func resetDevices(instance: FilebeamInstance, currentPassword: String) async throws { throw FilebeamDomainError.unavailable("Devices are unavailable.") }
+    func deviceFingerprint(publicKey: String) async throws -> String { publicKey }
+    func combineKey(instance: FilebeamInstance, link: String, key: String) async throws -> String { throw FilebeamDomainError.unavailable("Key entry is not available in this build.") }
 }

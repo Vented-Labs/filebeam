@@ -274,7 +274,10 @@ public final class NativeFilebeamService: FilebeamService, @unchecked Sendable {
                 }
                 return try self.client.backgroundTransfer().downloadItems(checkpointId: checkpointID).map { TransferSelectionItem(id: $0.id, name: $0.name, size: $0.size) }
             }
-            if items.count <= 1 {
+            // Inbox deliveries start at once; link downloads always list their files first so a
+            // single file can be reviewed and chosen like any other.
+            let direction = lock.withLock { jobs[jobID]?.direction }
+            if items.isEmpty || (items.count == 1 && direction == .inboxDownload) {
                 if let item = items.first { try await ffi { try self.client.backgroundTransfer().selectDownloadItems(checkpointId: checkpointID, itemIds: [item.id]) } }
                 await activateBackground(jobID: jobID, checkpointID: checkpointID)
                 return
@@ -359,7 +362,7 @@ public final class NativeFilebeamService: FilebeamService, @unchecked Sendable {
     private func adopt(note: ManagedNoteReceive, transferID: TransferID? = nil) -> TransferJobID {
         let id = UUID(); lock.lock(); jobs[id] = Job(handle: .note(note), transferID: transferID, password: nil, direction: .download, kind: .note, transport: nil, verifiedNote: nil); lock.unlock(); return id
     }
-    private func ffi<T: Sendable>(_ body: @escaping @Sendable () throws -> T) async throws -> T {
+    func ffi<T: Sendable>(_ body: @escaping @Sendable () throws -> T) async throws -> T {
         try await withCheckedThrowingContinuation { continuation in
             queue.async { do { continuation.resume(returning: try body()) } catch { continuation.resume(throwing: Self.error(error)) } }
         }
@@ -374,7 +377,7 @@ public final class NativeFilebeamService: FilebeamService, @unchecked Sendable {
         }
         return .remote(error.localizedDescription)
     }
-    private func services(_ instance: FilebeamInstance) throws -> NativeServices {
+    func services(_ instance: FilebeamInstance) throws -> NativeServices {
         lock.lock(); defer { lock.unlock() }
         if let service = servicesByOrigin[instance.origin] { return service }
         let service: NativeServices

@@ -17,7 +17,7 @@ cp -R "$ios_root/Config" "$fixture_ios/Config"
 for directory in App Features Platform ShareExtension/Shared DesignSystem PreviewSupport Resources Tests UITests; do
     mkdir -p "$fixture_ios/$directory"
 done
-for package in FilebeamCore FilebeamDomain; do
+for package in FilebeamCore FilebeamDomain FilebeamTheme; do
     mkdir -p "$fixture_ios/Packages/$package"
     cp "$ios_root/Packages/$package/Package.swift" "$fixture_ios/Packages/$package/"
 done

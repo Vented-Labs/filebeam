@@ -15,6 +15,26 @@ for crate in client-core client-ffi; do
     cargo "+$IOS_RUST_VERSION" test --manifest-path "$root/crates/$crate/Cargo.toml" --locked
 done
 swift test --package-path "$ios_root/Packages/FilebeamDomain"
-bash "$root/scripts/ios/build.sh" Debug simulator
-bash "$root/scripts/ios/test.sh"
-bash "$root/scripts/ios/build.sh" Release device
+swift test --package-path "$ios_root/Packages/FilebeamTheme"
+# Compiler and test failures are repeated as workflow annotations so a failed check is
+# readable from the pull request without opening the full log.
+annotate_failures() {
+    set +e
+    grep -E "^/.+:[0-9]+:[0-9]+: error: " "$1" | sort -u | head -20 | sed -E "s|^$root/||; s|^([^:]+):([0-9]+):[0-9]+: error: (.*)$|::error file=\\1,line=\\2::\\3|"
+    grep -E "error: |\\*\\* (BUILD|TEST) FAILED|Test Case .* failed|^ios: " "$1" | grep -vE "^/.+:[0-9]+:[0-9]+: error: " | sort -u | head -15 | sed "s/^/::error ::/"
+    set -e
+}
+checked() {
+    local log status
+    log=$(mktemp)
+    set +e
+    "$@" 2>&1 | tee "$log"
+    status=${PIPESTATUS[0]}
+    set -e
+    [[ $status -eq 0 ]] || annotate_failures "$log"
+    rm -f "$log"
+    return "$status"
+}
+checked bash "$root/scripts/ios/build.sh" Debug simulator
+checked bash "$root/scripts/ios/test.sh"
+checked bash "$root/scripts/ios/build.sh" Release device

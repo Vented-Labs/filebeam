@@ -44,6 +44,26 @@ public enum NativePolicyDecoder {
             )
         }
 
+        let links = (response.branding?.communityLinks ?? []).compactMap { link -> CommunityLink? in
+            guard let url = link.url, !url.isEmpty else { return nil }
+            let name = (link.type?.isEmpty == false ? link.type : link.name?.isEmpty == false ? link.name : "website") ?? "website"
+            return CommunityLink(name: name.prefix(1).uppercased() + name.dropFirst(), url: url)
+        }
+        let primary = response.branding?.primaryColor.flatMap { value -> Int? in
+            guard value.count == 7, value.hasPrefix("#") else { return nil }
+            return Int(value.dropFirst(), radix: 16)
+        }
+        let branding = InstanceBranding(
+            name: response.instance?.name?.isEmpty == false ? response.instance!.name! : "Filebeam",
+            primaryColor: primary,
+            version: response.instance?.version?.nilIfBlank,
+            copyright: response.branding?.copyright?.nilIfBlank,
+            githubURL: response.branding?.githubUrl?.nilIfBlank,
+            communityLinks: links,
+            changelogEnabled: response.instance?.changelogEnabled ?? false,
+            deviceRendezvousEnabled: response.account.deviceRendezvousEnabled ?? false
+        )
+
         return InstancePolicy(
             instance: instance,
             anonymousUploads: response.transfer.anonymousUploadsEnabled,
@@ -56,7 +76,8 @@ public enum NativePolicyDecoder {
             usernameRoutingEnabled: response.account.usernameRoutingEnabled,
             noteRetentionOptionsHours: Set(response.transfer.retention.notes.options),
             fileDefaultRetentionHours: response.transfer.retention.files.defaultHours,
-            noteDefaultRetentionHours: response.transfer.retention.notes.defaultHours
+            noteDefaultRetentionHours: response.transfer.retention.notes.defaultHours,
+            branding: branding
         )
     }
 
@@ -67,11 +88,33 @@ public enum NativePolicyDecoder {
     private struct Response: Decodable {
         let account: Account
         let transfer: Transfer
+        let instance: Instance?
+        let branding: Branding?
     }
 
     private struct Account: Decodable {
         let registrationEnabled: Bool?
         let usernameRoutingEnabled: Bool?
+        let deviceRendezvousEnabled: Bool?
+    }
+
+    private struct Instance: Decodable {
+        let name: String?
+        let version: String?
+        let changelogEnabled: Bool?
+    }
+
+    private struct Branding: Decodable {
+        let primaryColor: String?
+        let copyright: String?
+        let githubUrl: String?
+        let communityLinks: [Link]?
+    }
+
+    private struct Link: Decodable {
+        let type: String?
+        let name: String?
+        let url: String?
     }
 
     private struct Transfer: Decodable {
@@ -142,4 +185,8 @@ public enum NativePolicyDecoder {
             }
         }
     }
+}
+
+private extension String {
+    var nilIfBlank: String? { trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : self }
 }

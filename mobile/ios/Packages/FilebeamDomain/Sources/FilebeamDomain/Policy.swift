@@ -8,6 +8,28 @@ public struct DriverPolicy: Codable, Hashable, Sendable {
     public init(name: String, maximumTransferBytes: Limit, maximumFileCount: Limit, maximumNoteBytes: Limit) { self.name = name; self.maximumTransferBytes = maximumTransferBytes; self.maximumFileCount = maximumFileCount; self.maximumNoteBytes = maximumNoteBytes }
 }
 
+public struct CommunityLink: Codable, Hashable, Sendable {
+    public let name: String
+    public let url: String
+    public init(name: String, url: String) { self.name = name; self.url = url }
+}
+
+/// How the instance presents itself: name, brand colour, version and links from its policy document.
+public struct InstanceBranding: Codable, Hashable, Sendable {
+    public var name: String
+    /// Brand colour as 0xRRGGBB, or nil when the instance uses the default.
+    public var primaryColor: Int?
+    public var version: String?
+    public var copyright: String?
+    public var githubURL: String?
+    public var communityLinks: [CommunityLink]
+    public var changelogEnabled: Bool
+    public var deviceRendezvousEnabled: Bool
+    public init(name: String = "Filebeam", primaryColor: Int? = nil, version: String? = nil, copyright: String? = nil, githubURL: String? = nil, communityLinks: [CommunityLink] = [], changelogEnabled: Bool = false, deviceRendezvousEnabled: Bool = false) {
+        self.name = name; self.primaryColor = primaryColor; self.version = version; self.copyright = copyright; self.githubURL = githubURL; self.communityLinks = communityLinks; self.changelogEnabled = changelogEnabled; self.deviceRendezvousEnabled = deviceRendezvousEnabled
+    }
+}
+
 public struct InstancePolicy: Codable, Hashable, Sendable {
     public let instance: FilebeamInstance
     public let anonymousUploads: Bool
@@ -21,12 +43,21 @@ public struct InstancePolicy: Codable, Hashable, Sendable {
     public let fileDefaultRetentionHours: UInt64?
     public let noteDefaultRetentionHours: UInt64?
     public let drivers: [String: DriverPolicy]
-    public init(instance: FilebeamInstance, anonymousUploads: Bool, enabledTransports: Set<Transport>, defaultDriver: String, chunkBytes: UInt64, retentionOptionsHours: Set<UInt64>, drivers: [String: DriverPolicy], registrationEnabled: Bool? = nil, usernameRoutingEnabled: Bool? = nil, noteRetentionOptionsHours: Set<UInt64>? = nil, fileDefaultRetentionHours: UInt64? = nil, noteDefaultRetentionHours: UInt64? = nil) {
+    public let branding: InstanceBranding
+    public init(instance: FilebeamInstance, anonymousUploads: Bool, enabledTransports: Set<Transport>, defaultDriver: String, chunkBytes: UInt64, retentionOptionsHours: Set<UInt64>, drivers: [String: DriverPolicy], registrationEnabled: Bool? = nil, usernameRoutingEnabled: Bool? = nil, noteRetentionOptionsHours: Set<UInt64>? = nil, fileDefaultRetentionHours: UInt64? = nil, noteDefaultRetentionHours: UInt64? = nil, branding: InstanceBranding = InstanceBranding()) {
         self.instance = instance; self.anonymousUploads = anonymousUploads; self.enabledTransports = enabledTransports; self.defaultDriver = defaultDriver; self.chunkBytes = chunkBytes; self.retentionOptionsHours = retentionOptionsHours; self.drivers = drivers
         self.registrationEnabled = registrationEnabled; self.usernameRoutingEnabled = usernameRoutingEnabled
         self.noteRetentionOptionsHours = noteRetentionOptionsHours ?? retentionOptionsHours
         self.fileDefaultRetentionHours = fileDefaultRetentionHours; self.noteDefaultRetentionHours = noteDefaultRetentionHours
+        self.branding = branding
     }
+
+    /// The driver name a transport maps to on the wire.
+    public static func driverName(_ transport: Transport) -> String { transport == .http ? "http" : "webrtc" }
+    public func driver(for transport: Transport) -> DriverPolicy? { drivers[Self.driverName(transport)] }
+    /// Retention choices in ascending order, always including the default.
+    public func fileRetentionChoices() -> [UInt64] { Array(retentionOptionsHours.union(fileDefaultRetentionHours.map { [$0] } ?? [])).sorted() }
+    public func noteRetentionChoices() -> [UInt64] { Array(noteRetentionOptionsHours.union(noteDefaultRetentionHours.map { [$0] } ?? [])).sorted() }
 }
 
 public enum SendPolicy {

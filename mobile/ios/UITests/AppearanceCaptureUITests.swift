@@ -9,10 +9,10 @@ final class AppearanceCaptureUITests: XCTestCase {
 
     @MainActor private func capture(name: String, arguments: [String]) {
         let app = XCUIApplication()
-        app.launchArguments = arguments
+        app.launchArguments = ["-tour.seen", "YES"] + arguments
         app.launch()
-        XCTAssertTrue(app.tabBars.buttons["Transfers"].waitForExistence(timeout: 5))
-        app.tabBars.buttons["Transfers"].tap()
+        XCTAssertTrue(app.buttons["Transfers"].waitForExistence(timeout: 5))
+        app.buttons["Transfers"].tap()
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = "transfers-\(name)"
         attachment.lifetime = .keepAlways
