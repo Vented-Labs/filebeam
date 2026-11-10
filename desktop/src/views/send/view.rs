@@ -232,7 +232,12 @@ impl SendPanel {
                         .flex_none()
                         .text_color(p.danger.ink),
                 )
-                .child(text::small(status.clone()).text_color(p.danger.ink)),
+                .child(
+                    text::small(status.clone())
+                        .flex_1()
+                        .min_w_0()
+                        .text_color(p.danger.ink),
+                ),
             (None, Some(reason)) => div()
                 .flex()
                 .items_center()
@@ -243,7 +248,12 @@ impl SendPanel {
                         .flex_none()
                         .text_color(p.warning.ink),
                 )
-                .child(text::small(format::readable_error(reason)).text_color(p.warning.ink)),
+                .child(
+                    text::small(format::readable_error(reason))
+                        .flex_1()
+                        .min_w_0()
+                        .text_color(p.warning.ink),
+                ),
             (None, None) => div()
                 .flex()
                 .items_center()
