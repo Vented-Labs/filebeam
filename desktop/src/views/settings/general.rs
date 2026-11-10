@@ -639,10 +639,15 @@ mod tests {
         assert!(update_result("v1.4.0").starts_with("v1.4.0 is downloaded"));
         assert!(update_failure("this build has no embedded release key").contains("release"));
         assert_eq!(config_path(&PathBuf::new()), "~/.filebeam/config.toml");
+        // Paths are shown with the platform's own separators.
+        let home = Path::new("/home/ada/.filebeam");
         assert_eq!(
-            config_path(Path::new("/home/ada/.filebeam")),
-            "/home/ada/.filebeam/config.toml"
+            config_path(home),
+            home.join("config.toml").display().to_string()
         );
-        assert_eq!(data_path(Path::new("/x")), "/x/transfers");
+        assert_eq!(
+            data_path(home),
+            home.join("transfers").display().to_string()
+        );
     }
 }

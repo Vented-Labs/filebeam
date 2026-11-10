@@ -175,14 +175,12 @@ impl InboxPanel {
         cx.subscribe_in(
             &key_password,
             window,
-            |this, _, event: &InputEvent, window, cx| match event {
-                InputEvent::Change => {
-                    if this.unlock_error.take().is_some() {
-                        cx.notify();
-                    }
+            // The refusal stays until the next attempt, so the field does not move
+            // while it is being typed in.
+            |this, _, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::PressEnter { .. }) {
+                    this.unlock(window, cx);
                 }
-                InputEvent::PressEnter { .. } => this.unlock(window, cx),
-                _ => {}
             },
         )
         .detach();

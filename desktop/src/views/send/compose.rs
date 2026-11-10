@@ -184,10 +184,10 @@ pub(super) fn build_command_for_policy(
 ) -> Result<ClientCommand, String> {
     let retention_hours = retention_hours(&preferences.lifetime)?;
     if policy.availability == PolicyAvailability::Unavailable {
-        return Err(policy
-            .reason
-            .clone()
-            .unwrap_or_else(|| "Instance policy is unavailable; refresh before sharing.".into()));
+        return Err(policy.reason.as_deref().map_or_else(
+            || "The instance has not responded yet, so nothing can be shared.".into(),
+            crate::ui::format::readable_error,
+        ));
     }
     let driver = if preferences.transport == Transport::Http {
         &policy.http

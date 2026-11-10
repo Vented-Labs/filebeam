@@ -6,9 +6,9 @@ use std::{collections::HashSet, path::PathBuf, sync::Arc, time::Duration};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use filebeam_client_config::Config;
 use gpui::{
-    App, AppContext, Context, Entity, FontWeight, InteractiveElement, IntoElement, ParentElement,
-    Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Task, Window, actions,
-    div, prelude::FluentBuilder, px, relative,
+    App, AppContext, Context, Entity, FocusHandle, FontWeight, InteractiveElement, IntoElement,
+    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Task,
+    Window, actions, div, prelude::FluentBuilder, px, relative,
 };
 use gpui_base::Button as BaseButton;
 use gpui_component::{
@@ -175,6 +175,7 @@ impl Destination {
                     | "confirm receiving-key backup"
                     | "refresh contacts"
                     | "update contact"
+                    | "refresh"
             ),
             Self::Settings => matches!(
                 operation,
@@ -293,6 +294,9 @@ pub struct DesktopShell {
     client: Arc<DesktopClient>,
     live: Entity<Live>,
     home: PathBuf,
+    /// Holds keyboard focus whenever nothing inside the window does, so shortcuts
+    /// always reach the shell's handlers.
+    focus_handle: FocusHandle,
     destination: Destination,
     pub(crate) send: Entity<SendPanel>,
     pub(crate) receive: Entity<ReceivePanel>,
@@ -359,6 +363,11 @@ impl DesktopShell {
             }),
             // "Follow system" tracks the operating system while the app runs.
             cx.observe_window_appearance(window, |_, _, cx| theme::follow_system(cx)),
+            // A focused control can disappear with its page or dialog. Focus returns to
+            // the shell rather than to nothing, where shortcuts would not be heard.
+            cx.on_focus_lost(window, |shell, window, cx| {
+                window.focus(&shell.focus_handle, cx);
+            }),
             // The shell owns the services these two settings configure, so a change
             // takes effect at once instead of at the next launch.
             cx.subscribe(
@@ -421,10 +430,13 @@ impl DesktopShell {
             }
         });
 
+        let focus_handle = cx.focus_handle();
+        window.focus(&focus_handle, cx);
         let mut shell = Self {
             client,
             live,
             home,
+            focus_handle,
             destination: initial_destination,
             send,
             receive,
@@ -1021,6 +1033,7 @@ impl Render for DesktopShell {
 
         div()
             .key_context("Filebeam")
+            .track_focus(&self.focus_handle)
             .size_full()
             .flex()
             .flex_col()
@@ -1165,5 +1178,120 @@ mod tests {
                 .iter()
                 .all(|d| Destination::ALL.contains(d))
         );
+    }
+
+    #[test]
+    fn a_failure_is_left_to_the_page_that_shows_it() {
+        assert!(Destination::Send.presents("share"));
+        assert!(Destination::Receive.presents("inspect receive"));
+        assert!(Destination::Inbox.presents("unlock receiving key"));
+        assert!(Destination::History.presents("load history"));
+        assert!(Destination::Account.presents("login"));
+        assert!(Destination::Account.presents("refresh"));
+        assert!(Destination::Settings.presents("change instance"));
+        // Elsewhere the same failure still has to be announced.
+        assert!(!Destination::Transfers.presents("share"));
+        assert!(!Destination::Send.presents("login"));
+        assert!(!Destination::Settings.presents("revoke link"));
+    }
+
+    /// The tray adapter talks to the session bus on Linux, which is simply absent
+    /// in a test run; elsewhere it needs the platform's real application object.
+    #[cfg(target_os = "linux")]
+    mod window {
+        use std::{cell::RefCell, rc::Rc};
+
+        use gpui::{TestAppContext, WindowHandle, size, test::TestWindowExt as _};
+
+        use super::super::*;
+        use crate::model::{
+            JobSnapshot, TransferCapabilities, TransferDirection, TransferProgress,
+        };
+
+        fn shell(
+            cx: &mut TestAppContext,
+            snapshot: DesktopSnapshot,
+        ) -> (WindowHandle<Root>, Entity<DesktopShell>, tempfile::TempDir) {
+            crate::testing::init(cx);
+            cx.update(bind_keys);
+            let home = tempfile::tempdir().unwrap();
+            let path = home.path().to_path_buf();
+            let (client, _commands) = DesktopClient::test_client(snapshot);
+            let slot = Rc::new(RefCell::new(None));
+            let built = slot.clone();
+            let window = cx.open_window(size(px(1280.), px(820.)), move |window, cx| {
+                let shell = cx.new(|cx| {
+                    DesktopShell::new(
+                        Arc::new(client),
+                        path,
+                        Vec::new(),
+                        None,
+                        Destination::Send,
+                        window,
+                        cx,
+                    )
+                });
+                *built.borrow_mut() = Some(shell.clone());
+                Root::new(shell, window, cx)
+            });
+            let shell = slot.borrow_mut().take().unwrap();
+            cx.update_window(window.into(), |_, window, cx| window.render_frame(cx))
+                .unwrap();
+            (window, shell, home)
+        }
+
+        fn key(suffix: &str) -> String {
+            format!("{}-{suffix}", modifier())
+        }
+
+        #[gpui::test]
+        fn shortcuts_work_before_anything_has_been_clicked(cx: &mut TestAppContext) {
+            let (window, shell, _home) = shell(cx, DesktopSnapshot::default());
+            cx.simulate_keystrokes(window.into(), &key(","));
+            shell.read_with(cx, |shell, _| {
+                assert_eq!(shell.destination, Destination::Settings)
+            });
+            cx.simulate_keystrokes(window.into(), &key("3"));
+            shell.read_with(cx, |shell, _| {
+                assert_eq!(shell.destination, Destination::Transfers)
+            });
+            cx.simulate_keystrokes(window.into(), &key("k"));
+            cx.update_window(window.into(), |_, window, cx| {
+                assert!(window.has_active_dialog(cx), "the palette opens");
+            })
+            .unwrap();
+        }
+
+        #[gpui::test]
+        fn closing_while_a_transfer_runs_asks_before_pausing_it(cx: &mut TestAppContext) {
+            let running = JobSnapshot {
+                id: "1".into(),
+                direction: TransferDirection::Send,
+                state: TransferState::Running,
+                progress: TransferProgress::default(),
+                share_url: None,
+                separate_key: None,
+                cli_command: None,
+                checkpoint_id: None,
+                origin: None,
+                error: None,
+                peer_warning: None,
+                capabilities: TransferCapabilities::default(),
+            };
+            let (window, shell, _home) = shell(
+                cx,
+                DesktopSnapshot {
+                    jobs: vec![running],
+                    ..DesktopSnapshot::default()
+                },
+            );
+            cx.update_window(window.into(), |_, window, cx| {
+                // No tray exists here, so the transfer cannot continue unattended.
+                let closes = shell.update(cx, |shell, cx| shell.should_close(window, cx));
+                assert!(!closes);
+                assert!(window.has_active_dialog(cx));
+            })
+            .unwrap();
+        }
     }
 }

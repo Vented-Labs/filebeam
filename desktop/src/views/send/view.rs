@@ -197,12 +197,20 @@ impl SendPanel {
         } else {
             &policy.webrtc
         };
+        let unavailable = policy.availability == PolicyAvailability::Unavailable;
         let limits = div()
             .flex()
             .items_center()
             .gap(px(7.))
             .child(icon("storage").size(px(14.)).text_color(p.text_subtle))
-            .child(text::caption(driver_policy_label(driver)).text_color(p.text_muted));
+            .child(
+                text::caption(if unavailable {
+                    "Limits appear once the instance responds.".to_owned()
+                } else {
+                    driver_policy_label(driver)
+                })
+                .text_color(p.text_muted),
+            );
 
         let content = if self.mode == ComposerMode::Files {
             self.files_view(snapshot, p, window, cx)
@@ -210,7 +218,6 @@ impl SendPanel {
             self.note_view(p, cx)
         };
 
-        let unavailable = policy.availability == PolicyAvailability::Unavailable;
         let status = match (&self.status, &policy.reason) {
             (Some(status), _) => div()
                 .flex()
@@ -233,7 +240,7 @@ impl SendPanel {
                         .flex_none()
                         .text_color(p.warning.ink),
                 )
-                .child(text::small(reason.clone()).text_color(p.warning.ink)),
+                .child(text::small(format::readable_error(reason)).text_color(p.warning.ink)),
             (None, None) => div()
                 .flex()
                 .items_center()

@@ -230,6 +230,14 @@ pub fn readable_error(raw: &str) -> String {
         Some(500..) => return "The server had a problem. Try again shortly.".into(),
         _ => {}
     }
+    if lowered.contains("share key must decode") || lowered.contains("invalid base64url") {
+        return "The key in that link is incomplete. Copy the whole link and try again.".into();
+    }
+    if lowered.contains("transfer link is invalid")
+        || lowered.contains("transfer link has an invalid path")
+    {
+        return "That is not a Filebeam link or transfer ID.".into();
+    }
     // The service withholds any failure that could quote a secret.
     if lowered.contains("sensitive detail was withheld") {
         return "That did not work. Check what you entered and try again.".into();
@@ -402,6 +410,18 @@ mod tests {
             "This transfer has expired."
         );
         assert_eq!(readable_error("  "), "Something went wrong. Try again.");
+        assert_eq!(
+            readable_error("share key must decode to 32 bytes"),
+            "The key in that link is incomplete. Copy the whole link and try again."
+        );
+        assert_eq!(
+            readable_error("transfer link has an invalid path"),
+            "That is not a Filebeam link or transfer ID."
+        );
+        assert_eq!(
+            readable_error("could not connect to the instance"),
+            "The instance could not be reached. Check your connection."
+        );
         assert_eq!(failure_title("login"), "Could not sign in");
         assert_eq!(
             status_code("native login returned 422 Unprocessable"),

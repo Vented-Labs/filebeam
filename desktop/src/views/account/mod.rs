@@ -249,36 +249,33 @@ impl AccountPanel {
         let confirm_password = field("Current password", true, window, cx);
         let confirm_phrase = field("DELETE", false, window, cx);
 
-        // Enter submits the form a field belongs to; typing clears its stale error.
+        // Enter submits the form a field belongs to. A notice stays until the next
+        // attempt: clearing it mid-typing would move the fields under the pointer.
         for input in [&email, &username, &name, &password] {
-            cx.subscribe_in(
-                input,
-                window,
-                |this, _, event: &InputEvent, window, cx| match event {
-                    InputEvent::Change => this.clear_notice(Area::Auth, cx),
-                    InputEvent::PressEnter { .. } => this.submit_auth(window, cx),
-                    _ => {}
-                },
-            )
+            cx.subscribe_in(input, window, |this, _, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::PressEnter { .. }) {
+                    this.submit_auth(window, cx);
+                }
+            })
             .detach();
         }
         cx.subscribe_in(
             &contact,
             window,
-            |this, _, event: &InputEvent, window, cx| match event {
-                InputEvent::Change => this.clear_notice(Area::Contacts, cx),
-                InputEvent::PressEnter { .. } => this.request_contact(window, cx),
-                _ => {}
+            |this, _, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::PressEnter { .. }) {
+                    this.request_contact(window, cx);
+                }
             },
         )
         .detach();
         cx.subscribe_in(
             &key_password,
             window,
-            |this, _, event: &InputEvent, _, cx| match event {
-                InputEvent::Change => this.clear_notice(Area::Key, cx),
-                InputEvent::PressEnter { .. } => this.submit_key_password(cx),
-                _ => {}
+            |this, _, event: &InputEvent, _, cx| {
+                if matches!(event, InputEvent::PressEnter { .. }) {
+                    this.submit_key_password(cx);
+                }
             },
         )
         .detach();
@@ -322,8 +319,9 @@ impl AccountPanel {
     /// Reloads the session, key state and contacts. The shell calls this when the
     /// page opens.
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
-        let _ = self.client.dispatch(ClientCommand::Refresh);
-        cx.notify();
+        if !self.waiting("refresh") {
+            self.send(ClientCommand::Refresh, cx);
+        }
     }
 
     /// Opens the key section, for pages that need the receiving key set up.
@@ -451,10 +449,13 @@ impl AccountPanel {
             self.intended
                 .retain(|intended| intended.operation != operation);
             // Reports and deletions are confirmed in a dialog that has closed by
-            // now, so their outcome is shown on the page behind it.
+            // now, and a refresh belongs to no section, so their outcome is shown on
+            // whichever side of sign-in is on screen.
             let shown = match area(operation) {
-                Area::Report | Area::Delete if snapshot.account.authenticated => Area::Profile,
-                Area::Report | Area::Delete => Area::Auth,
+                Area::Report | Area::Delete | Area::Profile if !snapshot.account.authenticated => {
+                    Area::Auth
+                }
+                Area::Report | Area::Delete => Area::Profile,
                 other => other,
             };
             match outcome {

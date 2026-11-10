@@ -244,7 +244,7 @@ impl SettingsPanel {
             ColorSource::Custom(seed) => theme::color::format(seed),
             ColorSource::Preset(_) => String::new(),
         };
-        let custom_color = field("#8b35ff", custom, false, window, cx);
+        let custom_color = field("#rrggbb", custom, false, window, cx);
         let device_name = field("This desktop", String::new(), false, window, cx);
         let approval_payload = field(
             "Paste the request from the new device",

@@ -2415,13 +2415,23 @@ fn record_message(
     error: anyhow::Error,
 ) {
     *next_message_id += 1;
+    // A request that never reached the instance says so, whatever its outermost
+    // context happens to be called.
+    let error = if is_transport_failure(&error) {
+        ClientError {
+            code: ClientErrorCode::Network,
+            detail: UNREACHABLE.into(),
+        }
+    } else {
+        ClientError {
+            code: classify(&error),
+            detail: sanitize(&error),
+        }
+    };
     snapshot.messages.push(ClientMessage {
         id: *next_message_id,
         operation: operation.into(),
-        error: ClientError {
-            code: classify(&error),
-            detail: sanitize(&error),
-        },
+        error,
     });
     if snapshot.messages.len() > MESSAGE_HISTORY_CAPACITY {
         snapshot.messages.remove(0);
@@ -2723,6 +2733,17 @@ fn export_verified(paths: &[String], private_root: &Path, destination: &Path) ->
     let _ = fs::remove_dir_all(&staging);
     result
 }
+/// What a failed request reports when it could not be sent at all.
+const UNREACHABLE: &str = "could not connect to the instance";
+
+/// Whether any cause is the HTTP client failing to send, as opposed to the
+/// instance answering with an error.
+fn is_transport_failure(error: &anyhow::Error) -> bool {
+    error
+        .chain()
+        .any(|cause| cause.to_string().contains("error sending request"))
+}
+
 fn classify(error: &anyhow::Error) -> ClientErrorCode {
     let text = error.to_string().to_ascii_lowercase();
     if text.contains("queue") || text.contains("scheduler") || text.contains("busy") {
@@ -2896,6 +2917,26 @@ mod tests {
         assert_eq!(
             sanitize(&anyhow::anyhow!("password abc")),
             "operation failed; sensitive detail was withheld"
+        );
+    }
+    #[test]
+    fn a_request_that_was_never_sent_is_reported_as_unreachable() {
+        let mut snapshot = DesktopSnapshot::default();
+        let mut next_id = 0;
+        let unsent = anyhow::anyhow!("error sending request for url (https://example.test/x)")
+            .context("native account request");
+        record_message(&mut snapshot, &mut next_id, "refresh", unsent);
+        record_message(
+            &mut snapshot,
+            &mut next_id,
+            "refresh",
+            anyhow::anyhow!("native account request returned 503"),
+        );
+        assert!(snapshot.messages[0].error.code == ClientErrorCode::Network);
+        assert_eq!(snapshot.messages[0].error.detail, UNREACHABLE);
+        assert_eq!(
+            snapshot.messages[1].error.detail,
+            "native account request returned 503"
         );
     }
     #[test]
