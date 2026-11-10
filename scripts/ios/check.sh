@@ -15,6 +15,7 @@ for crate in client-core client-ffi; do
     cargo "+$IOS_RUST_VERSION" test --manifest-path "$root/crates/$crate/Cargo.toml" --locked
 done
 swift test --package-path "$ios_root/Packages/FilebeamDomain"
+swift test --package-path "$ios_root/Packages/FilebeamTheme"
 bash "$root/scripts/ios/build.sh" Debug simulator
 bash "$root/scripts/ios/test.sh"
 bash "$root/scripts/ios/build.sh" Release device
