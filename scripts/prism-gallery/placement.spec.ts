@@ -5,7 +5,10 @@ for (const width of [320, 390, 768, 900, 901, 1023, 1024, 1440]) {
         await page.setViewportSize({ width, height: 900 });
         await page.goto('/?placement');
         const app = page.locator('header [data-app-install-entry]');
-        await expect(app).toHaveCount(0);
+        if (width > 900) {
+            await expect(app).toBeVisible();
+            await expect(app).toHaveAccessibleName('Install Desktop App');
+        } else await expect(app).toBeHidden();
         const logo = (await page.locator('.fb-footer__identity .fb-brand').boundingBox())!;
         const version = (await page.locator('.fb-footer__version').boundingBox())!;
         expect(Math.abs(logo.y + logo.height / 2 - (version.y + version.height / 2))).toBeLessThan(

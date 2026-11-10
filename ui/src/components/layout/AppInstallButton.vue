@@ -8,7 +8,8 @@ defineOptions({ inheritAttrs: false });
 const DesktopInstallDialog = defineAsyncComponent(
     () => import('../desktop/DesktopInstallDialog.vue'),
 );
-const visible = ref(false);
+// Shown until the device is known, so a server-rendered header keeps its layout on hydration.
+const visible = ref(true);
 const open = ref(false);
 const loaded = ref(false);
 const trigger = ref<HTMLButtonElement>();
