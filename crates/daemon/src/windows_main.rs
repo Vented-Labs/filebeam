@@ -385,16 +385,9 @@ impl WindowsDaemon {
 }
 
 fn ipc_key(home: &Path) -> Result<[u8; 32]> {
-    use filebeam_transfer_native::checkpoint::Store;
-
-    let root = home.join("runtime");
-    let store = match Store::open(&root, "daemon-ipc-v1") {
-        Ok(store) => store,
-        Err(error) if error.to_string().contains("does not exist") => {
-            Store::create(&root, "daemon-ipc-v1")?
-        }
-        Err(error) => return Err(error).context("open daemon IPC checkpoint"),
-    };
+    // The runtime root also holds the installed daemon component.
+    let store = crate::control::open_store(&home.join("runtime"), "daemon-ipc-v1")
+        .context("open daemon IPC checkpoint")?;
     match store.load_secret("ipc-authentication-key-v1")? {
         Some(key) => key
             .try_into()

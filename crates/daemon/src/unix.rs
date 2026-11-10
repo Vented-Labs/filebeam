@@ -18,8 +18,8 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use crate::ActiveJob;
 use crate::lan_runtime;
+use crate::{ActiveJob, daemon_store};
 use anyhow::{Context, Result, bail};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use ed25519_dalek::SigningKey;
@@ -1457,19 +1457,6 @@ fn secure_home(home: &Path) -> Result<PathBuf> {
     Ok(home)
 }
 
-pub(crate) fn daemon_store(home: &Path) -> Result<filebeam_transfer_native::checkpoint::Store> {
-    use filebeam_transfer_native::checkpoint::Store;
-
-    let root = home.join("transfers");
-    match Store::open(&root, "daemon-private-v1") {
-        Ok(store) => Ok(store),
-        Err(error) if error.to_string().contains("does not exist") => {
-            Store::create(&root, "daemon-private-v1")
-        }
-        Err(error) => Err(error).context("open daemon private checkpoint"),
-    }
-}
-
 fn ipc_key(home: &Path) -> Result<[u8; 32]> {
     let store = ipc_store(home)?;
     match store.load_secret("ipc-authentication-key-v1")? {
@@ -1485,16 +1472,8 @@ fn ipc_key(home: &Path) -> Result<[u8; 32]> {
 }
 
 fn ipc_store(home: &Path) -> Result<filebeam_transfer_native::checkpoint::Store> {
-    use filebeam_transfer_native::checkpoint::Store;
-
-    let root = home.join("ipc");
-    match Store::open(&root, "ipc-authentication-v1") {
-        Ok(store) => Ok(store),
-        Err(error) if error.to_string().contains("does not exist") => {
-            Store::create(&root, "ipc-authentication-v1")
-        }
-        Err(error) => Err(error).context("open IPC authentication checkpoint"),
-    }
+    crate::control::open_store(&home.join("ipc"), "ipc-authentication-v1")
+        .context("open IPC authentication checkpoint")
 }
 
 fn random_nonce() -> Result<[u8; 32]> {
