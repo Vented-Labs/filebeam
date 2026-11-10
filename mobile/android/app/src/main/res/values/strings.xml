@@ -644,4 +644,72 @@
     <string name="appearance_saved_on_device">Saved on this device.</string>
     <string name="appearance_preview_title">Preview</string>
     <string name="appearance_preview_body">How buttons, switches and progress look.</string>
+
+    <!-- About -->
+    <string name="about_tagline">End-to-end encrypted files and notes.</string>
+    <string name="about_app_version">App version %1$s</string>
+    <string name="about_server_version">Server version %1$s</string>
+    <string name="about_learn">Learn</string>
+    <string name="about_privacy">Privacy</string>
+    <string name="about_help">Help</string>
+    <string name="about_cli">Get the Beam CLI</string>
+    <string name="about_instance">Connected instance</string>
+    <string name="about_source">Source code</string>
+    <string name="about_licenses">Open-source licenses</string>
+    <string name="about_no_browser">No app can open this link.</string>
+    <string name="about_about_body">Share end-to-end encrypted files and notes with temporary links.</string>
+    <string name="about_privacy_body">Files are encrypted on this device. The decryption key remains with the people you choose to share it with.</string>
+    <string name="about_help_body">Choose files or write a note, then share the generated link with its intended recipient.</string>
+    <string name="about_cli_body">Send and receive from a terminal on Linux, macOS or Windows.</string>
+    <string name="about_cli_unix">Linux and macOS</string>
+    <string name="about_cli_windows">Windows</string>
+    <string name="about_cli_usage">After installing:</string>
+
+    <!-- Changelog -->
+    <string name="changelog_title">Changelog</string>
+    <string name="changelog_search">Search release notes</string>
+    <string name="changelog_prereleases">Include pre-releases</string>
+    <string name="changelog_jump">Jump to version</string>
+    <string name="changelog_stale">These notes may be out of date. The instance could not refresh them recently.</string>
+    <string name="changelog_unavailable_title">Release notes are unavailable</string>
+    <string name="changelog_unavailable_body">This instance has not mirrored its release notes yet.</string>
+    <string name="changelog_empty">No releases yet</string>
+    <string name="changelog_no_match">No releases match that search</string>
+    <string name="changelog_latest">Latest</string>
+    <string name="changelog_prerelease">Pre-release</string>
+    <string name="changelog_newer">Newer</string>
+    <string name="changelog_older">Older</string>
+    <string name="changelog_copy_link">Copy link</string>
+    <string name="changelog_contents">In this release</string>
+    <string name="changelog_view_source">View on GitHub</string>
+
+    <!-- Tour -->
+    <string name="tour_title">What Filebeam can do</string>
+    <string name="tour_skip">Skip</string>
+    <string name="tour_next">Next</string>
+    <string name="tour_start">Get started</string>
+    <string name="tour_hero_eyebrow">Welcome</string>
+    <string name="tour_hero_title">End-to-end encrypted.</string>
+    <string name="tour_hero_body">Files and notes are encrypted on your device. Share a link, or send straight to a friend.</string>
+    <string name="tour_sharing_eyebrow">Sharing</string>
+    <string name="tour_sharing_title">Fast and simple.</string>
+    <string name="tour_sharing_body">Store a transfer to download later, send it live between devices, or use Turbo to share the link while it is still uploading.</string>
+    <string name="tour_notes_eyebrow">Notes</string>
+    <string name="tour_notes_title">Send the context, too.</string>
+    <string name="tour_notes_body">Attach an encrypted note to your files or share one on its own. Notes can burn after the first read.</string>
+    <string name="tour_friends_eyebrow">Friends</string>
+    <string name="tour_friends_title">Send to a friend.</string>
+    <string name="tour_friends_body">Add a contact once and deliver to their encrypted inbox. You decide who can send to you.</string>
+    <string name="tour_privacy_eyebrow">Privacy</string>
+    <string name="tour_privacy_title">Private by design.</string>
+    <string name="tour_privacy_body">Keep the key in the link or share it separately. The server only ever stores ciphertext.</string>
+    <string name="tour_privacy_server_sees">Server sees: sizes, timing, expiry</string>
+    <string name="tour_privacy_server_never">Never: names, contents, keys</string>
+    <string name="tour_devices_eyebrow">Devices</string>
+    <string name="tour_devices_title">Your computers, by name.</string>
+    <string name="tour_devices_body">Pair computers with the Beam CLI and review or revoke them from My devices.</string>
+    <string name="tour_devices_body_disabled">Device pairing is done with the Beam CLI. It is not enabled on this instance yet.</string>
+    <string name="tour_open_eyebrow">Open source</string>
+    <string name="tour_open_title">Yours to inspect.</string>
+    <string name="tour_open_body">Filebeam is MIT licensed. Read the source, or host your own instance and point this app at it.</string>
 </resources>

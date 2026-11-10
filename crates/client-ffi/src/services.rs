@@ -1046,6 +1046,26 @@ impl NativeServices {
             .and_then(|value| serde_json::to_string(&value).map_err(Into::into))
             .map_err(operation)
     }
+    /// The instance's release notes as its JSON document; hosts render the node tree natively.
+    pub fn changelog_json(
+        &self,
+        page: u32,
+        term: Option<String>,
+        prereleases: bool,
+    ) -> Result<String> {
+        self.inner
+            .account()
+            .changelog(page, term.as_deref(), prereleases)
+            .and_then(|value| serde_json::to_string(&value).map_err(Into::into))
+            .map_err(operation)
+    }
+    pub fn changelog_release_json(&self, tag: String) -> Result<String> {
+        self.inner
+            .account()
+            .changelog_release(&tag)
+            .and_then(|value| serde_json::to_string(&value).map_err(Into::into))
+            .map_err(operation)
+    }
     pub fn account_inspect_invitation(&self, token: String) -> Result<NativeInvitation> {
         self.inner
             .account()

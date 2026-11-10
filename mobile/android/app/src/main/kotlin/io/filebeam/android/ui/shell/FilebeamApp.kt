@@ -2,6 +2,7 @@ package io.filebeam.android.ui.shell
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.ContentTransform
+import kotlinx.coroutines.flow.first
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
@@ -72,6 +73,10 @@ fun FilebeamApp(model: AppModel, host: HostActions) {
     FilebeamTheme(appearance, instance.primaryColor) {
         val navigator = rememberSaveable(saver = Navigator.Saver) { Navigator() }
         val request by model.navigation.collectAsStateCompat()
+        // The tour introduces the app once; afterwards it lives under About.
+        LaunchedEffect(Unit) {
+            if (!model.app.appearance.hasSeenTour.first()) navigator.push(Route.Tour)
+        }
         LaunchedEffect(request) {
             val pending = request ?: return@LaunchedEffect
             pending.tab?.let(navigator::select)
@@ -141,6 +146,10 @@ private fun RouteContent(route: Route) {
         Route.Account -> io.filebeam.android.ui.feature.account.AccountScreen()
         Route.SecureInbox -> io.filebeam.android.ui.feature.account.SecureInboxScreen()
         Route.Devices -> io.filebeam.android.ui.feature.account.DevicesScreen()
+        Route.About -> io.filebeam.android.ui.feature.about.AboutScreen()
+        Route.Tour -> io.filebeam.android.ui.feature.about.TourScreen()
+        Route.Changelog -> io.filebeam.android.ui.feature.about.ChangelogScreen()
+        is Route.Release -> io.filebeam.android.ui.feature.about.ReleaseScreen(route.tag)
         Route.Appearance -> io.filebeam.android.ui.feature.settings.AppearanceScreen()
         Route.Contacts -> io.filebeam.android.ui.feature.contacts.ContactsScreen()
         is Route.Recipient -> io.filebeam.android.ui.feature.contacts.RecipientScreen(route.username)
