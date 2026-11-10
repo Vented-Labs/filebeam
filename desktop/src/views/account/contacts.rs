@@ -27,6 +27,9 @@ fn summary(contact: &Contact) -> String {
     }
 }
 
+/// Turns a chosen override into the pair the service stores for a contact.
+type Apply = fn(Option<bool>, &Contact) -> (Option<bool>, Option<bool>);
+
 /// A three-way override as a segment index: follow the default, force on, force off.
 fn override_index(value: Option<bool>) -> usize {
     match value {
@@ -393,43 +396,42 @@ impl AccountPanel {
                 cx.notify();
             }));
 
-        let choice =
-            |id: &'static str,
-             title: &'static str,
-             labels: [&'static str; 3],
-             selected: Option<bool>,
-             apply: fn(Option<bool>, &Contact) -> (Option<bool>, Option<bool>)| {
-                let panel = cx.entity().downgrade();
-                let subject = contact.clone();
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap(px(12.))
-                    .child(text::small(title).text_color(p.text_muted))
-                    .child(
-                        rail(
-                            SharedString::from(format!("{id}-{}", contact.username)),
-                            title,
-                            override_index(selected),
-                        )
-                        .segment_width(86.)
-                        .segments(labels.into_iter().map(Segment::new))
-                        .on_select(move |index, _, cx| {
-                            let (can_send, auto_download) = apply(override_value(index), &subject);
-                            let username = subject.username.clone();
-                            let _ = panel.update(cx, |this, cx| {
-                                this.contact_action(
-                                    username,
-                                    "preferences",
-                                    can_send,
-                                    auto_download,
-                                    cx,
-                                )
-                            });
-                        }),
+        let choice = |id: &'static str,
+                      title: &'static str,
+                      labels: [&'static str; 3],
+                      selected: Option<bool>,
+                      apply: Apply| {
+            let panel = cx.entity().downgrade();
+            let subject = contact.clone();
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(px(12.))
+                .child(text::small(title).text_color(p.text_muted))
+                .child(
+                    rail(
+                        SharedString::from(format!("{id}-{}", contact.username)),
+                        title,
+                        override_index(selected),
                     )
-            };
+                    .segment_width(86.)
+                    .segments(labels.into_iter().map(Segment::new))
+                    .on_select(move |index, _, cx| {
+                        let (can_send, auto_download) = apply(override_value(index), &subject);
+                        let username = subject.username.clone();
+                        let _ = panel.update(cx, |this, cx| {
+                            this.contact_action(
+                                username,
+                                "preferences",
+                                can_send,
+                                auto_download,
+                                cx,
+                            )
+                        });
+                    }),
+                )
+        };
         let (remove, block) = (contact.username.clone(), contact.username.clone());
         div()
             .w_full()

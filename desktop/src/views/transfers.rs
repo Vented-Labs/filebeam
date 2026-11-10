@@ -551,16 +551,7 @@ impl Render for TransfersPanel {
                 .flex()
                 .items_center()
                 .justify_center()
-                .child(feedback::empty_state(
-                    p,
-                    "transfers",
-                    title,
-                    body,
-                    Tone::Accent,
-                    reset,
-                    window,
-                    cx,
-                ))
+                .child(feedback::empty_state("transfers", title, body).action(reset))
                 .into_any_element()
         } else {
             let sizes = Rc::new(vec![size(px(1.), px(ROW_HEIGHT)); self.rows.len()]);
@@ -826,16 +817,14 @@ impl TransfersPanel {
                 .flex()
                 .items_center()
                 .justify_center()
-                .child(feedback::empty_state(
-                    p,
-                    "info",
-                    "Select a transfer",
-                    "Its link, progress and actions appear here.",
-                    Tone::Neutral,
-                    None,
-                    window,
-                    cx,
-                ))
+                .child(
+                    feedback::empty_state(
+                        "info",
+                        "Select a transfer",
+                        "Its link, progress and actions appear here.",
+                    )
+                    .tone(Tone::Neutral),
+                )
                 .into_any_element();
         };
         let entrance = motion::entrance_with(
@@ -1305,15 +1294,19 @@ mod tests {
     #[gpui::test]
     fn rows_and_the_detail_pane_render_for_every_state(cx: &mut TestAppContext) {
         let mut jobs = mixed();
+        // Both could be paused, but only the transfer is listed with its action.
         jobs[1].capabilities.can_pause = true;
+        jobs[2].capabilities.can_pause = true;
         jobs[0].share_url = Some("https://files.example/1#k=v1.key".into());
         jobs[0].capabilities.can_revoke = true;
         let (window, panel, _commands) = panel(cx, jobs);
         testing::in_window(cx, window, |window, cx| {
             window.render_frame(cx);
+            window.render_frame(cx);
             assert!(window.try_find("transfer-search").is_some());
             assert!(window.try_find("sort-transfers").is_some());
-            assert!(window.try_find("transfer-3").is_none());
+            assert!(window.try_find("row-action-2").is_some());
+            assert!(window.try_find("row-action-3").is_none());
         });
         panel.update(cx, |panel, cx| panel.select_job("1".into(), cx));
         testing::in_window(cx, window, |window, cx| {

@@ -114,13 +114,18 @@ impl AccountPanel {
                         }),
                     )
             }
-            None => div()
-                .flex()
-                .items_center()
-                .gap(px(10.))
-                .py(px(6.))
-                .child(feedback::spinner(p.text_muted, 14.))
-                .child(text::small("Loading who can send to you…").text_color(p.text_muted)),
+            // These preferences travel with the contact list; if that could not be
+            // loaded, say so here instead of waiting on it.
+            None => match self.notice(Area::Contacts, p) {
+                Some(problem) => div().child(problem),
+                None => div()
+                    .flex()
+                    .items_center()
+                    .gap(px(10.))
+                    .py(px(6.))
+                    .child(feedback::spinner(p.text_muted, 14.))
+                    .child(text::small("Loading who can send to you…").text_color(p.text_muted)),
+            },
         };
 
         let (inbox, device, notify) = (

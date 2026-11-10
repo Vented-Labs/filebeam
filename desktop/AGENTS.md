@@ -6,6 +6,11 @@
   Confirm APIs against the pinned crates.
 - Retain UI state and workers outside render. Rendering must not perform I/O,
   dispatch work, persist settings, or recreate retained entities.
+- Build screens from the kit in `src/ui/` and the palette roles in `src/theme/`.
+  Read service state through `Live`, and follow a command to its outcome with
+  `request::Request` so a failure is shown where it happened.
+- Confirm with `ui::dialog::prompt`. Host a view under test with
+  `testing::rooted`, which provides the window root dialogs need.
 - Use the existing theme, semantic colors, Filebeam mark, and approved Iconsax
   assets with their opacity and license notices. Respect OS accessibility and
   reduced-motion preferences.

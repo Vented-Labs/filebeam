@@ -235,6 +235,12 @@ pub fn color_source(cx: &App) -> ColorSource {
         .map_or_else(ColorSource::default, |chosen| chosen.0)
 }
 
+/// The palette `source` produces in one mode, for previews of a look that is not
+/// the active one.
+pub fn preview(source: ColorSource, dark: bool) -> Palette {
+    Palette::from(&source.tokens(dark))
+}
+
 /// Records the device's colour choice. Call [`apply`] afterwards to repaint.
 pub fn set_color_source(source: ColorSource, cx: &mut App) {
     cx.set_global(ChosenSource(source));

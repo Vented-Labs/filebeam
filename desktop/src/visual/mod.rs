@@ -346,6 +346,21 @@ pub const SCENARIOS: &[Scenario] = &[
         theme: "dark",
     },
     Scenario {
+        id: "settings-general",
+        destination: "settings",
+        theme: "dark",
+    },
+    Scenario {
+        id: "settings-instance-refused",
+        destination: "settings",
+        theme: "dark",
+    },
+    Scenario {
+        id: "settings-appearance",
+        destination: "settings",
+        theme: "dark",
+    },
+    Scenario {
         id: "settings-light",
         destination: "settings",
         theme: "light",
@@ -356,7 +371,22 @@ pub const SCENARIOS: &[Scenario] = &[
         theme: "dark",
     },
     Scenario {
-        id: "settings-scroll-end",
+        id: "settings-network",
+        destination: "settings",
+        theme: "dark",
+    },
+    Scenario {
+        id: "settings-devices",
+        destination: "settings",
+        theme: "dark",
+    },
+    Scenario {
+        id: "settings-devices-pending",
+        destination: "settings",
+        theme: "dark",
+    },
+    Scenario {
+        id: "settings-about",
         destination: "settings",
         theme: "dark",
     },
@@ -627,13 +657,51 @@ pub fn snapshot(id: &str) -> Option<DesktopSnapshot> {
                 },
             );
         }
-        "settings-light" | "settings-dark" | "settings-scroll-end" => {
-            snapshot.settings = SettingsSnapshot {
-                memory_limit_mib: 512,
-                max_concurrency: Some(2),
-                relay_only: false,
-                auto_update: true,
-                restart_required: false,
+        "settings-devices" | "settings-devices-pending" => {
+            snapshot.account = account(true, configured_key());
+            let device = |id: &str, name: &str, platform: &str, trust: DeviceTrust, local: bool| {
+                DeviceSnapshot {
+                    id: id.into(),
+                    name: name.into(),
+                    platform: platform.into(),
+                    trust,
+                    availability: DeviceAvailability::NeedsOpen,
+                    detail: local.then(|| "This device".into()),
+                    fingerprint: "7C2A 91F0 3B6E D455".into(),
+                }
+            };
+            snapshot.device_directory.availability = DeviceDirectoryAvailability::Available;
+            if scenario.id == "settings-devices-pending" {
+                snapshot.device_directory.enrollment_payload = Some(
+                    "{\"instance_origin\":\"https://studio.fixture.invalid\",\"candidate_device_id\":\"01JD8Q4XK7M2N9P3R5T6V8D001\"}"
+                        .into(),
+                );
+                snapshot.device_directory.pending_fingerprint = Some("7C2A 91F0 3B6E D455".into());
+            } else {
+                snapshot.device_directory.devices = vec![
+                    device("d-studio", "Studio desktop", "linux", DeviceTrust::Verified, true),
+                    device("d-pixel", "Pixel 9", "android", DeviceTrust::Registered, false),
+                    device("d-macbook", "MacBook Air", "macos", DeviceTrust::Verified, false),
+                ];
+                snapshot.device_directory.daemon = DeviceDaemonSnapshot {
+                    connected: true,
+                    receive_enabled: true,
+                    destinations: vec![
+                        DeviceDestinationSnapshot {
+                            id: "g-1".into(),
+                            alias: "downloads".into(),
+                            approval: "ask".into(),
+                            enabled: true,
+                        },
+                        DeviceDestinationSnapshot {
+                            id: "g-2".into(),
+                            alias: "screenshots".into(),
+                            approval: "auto".into(),
+                            enabled: true,
+                        },
+                    ],
+                    ..DeviceDaemonSnapshot::default()
+                };
             }
         }
         _ => {}
@@ -747,7 +815,12 @@ fn history_entries() -> Vec<filebeam_client_core::services::HistoryEntry> {
             id: format!("01JD8Q4XK7M2N9P3R5T6V8H{index:03}"),
             kind: kind.into(),
             driver: driver.into(),
-            delivery: if index % 3 == 0 { "inbox" } else { "link" }.into(),
+            delivery: if index.is_multiple_of(3) {
+                "inbox"
+            } else {
+                "link"
+            }
+            .into(),
             status: status.into(),
             item_count: items,
             ciphertext_bytes: bytes,

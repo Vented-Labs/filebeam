@@ -443,8 +443,8 @@ impl Render for InboxPanel {
         let header = page::header_with(p, "Inbox", detail, div().children(refresh), window, cx);
         let body = match gate {
             Gate::Open => self.open(&snapshot, p, window, cx),
-            Gate::Locked => self.locked(p, window, cx),
-            closed => self.closed(closed, p, window, cx),
+            Gate::Locked => self.locked(p, cx),
+            closed => self.closed(closed, p),
         };
         let entrance = motion::entrance(
             SharedString::from(format!("inbox-body-{gate:?}")),
@@ -469,13 +469,7 @@ impl Render for InboxPanel {
 
 impl InboxPanel {
     /// A full-page statement with one way forward.
-    fn closed(
-        &mut self,
-        gate: Gate,
-        p: Palette,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    fn closed(&mut self, gate: Gate, p: Palette) -> AnyElement {
         let (icon, title, body, action) = match gate {
             Gate::SignedOut => (
                 "archive",
@@ -511,20 +505,11 @@ impl InboxPanel {
             .flex()
             .items_center()
             .justify_center()
-            .child(feedback::empty_state(
-                p,
-                icon,
-                title,
-                body,
-                Tone::Accent,
-                Some(action),
-                window,
-                cx,
-            ))
+            .child(feedback::empty_state(icon, title, body).action(Some(action)))
             .into_any_element()
     }
 
-    fn locked(&mut self, p: Palette, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn locked(&mut self, p: Palette, cx: &mut Context<Self>) -> AnyElement {
         let unlocking = self.waiting("unlock receiving key");
         surface::panel(p)
             .size_full()
@@ -539,15 +524,10 @@ impl InboxPanel {
                     .flex_col()
                     .items_center()
                     .child(feedback::empty_state(
-                        p,
                         "lock",
                         "Your inbox is locked",
                         "Enter your key password to see what was sent to you. It never leaves \
                          this device.",
-                        Tone::Accent,
-                        None,
-                        window,
-                        cx,
                     ))
                     .child(
                         div()
@@ -608,16 +588,14 @@ impl InboxPanel {
                     self.flash_notice(p, cx)
                         .map(|notice| div().w_full().max_w(px(460.)).px(px(24.)).child(notice)),
                 )
-                .child(feedback::empty_state(
-                    p,
-                    "archive",
-                    "Nothing here yet",
-                    "Files and notes people send to your username appear here.",
-                    Tone::Accent,
-                    action,
-                    window,
-                    cx,
-                ))
+                .child(
+                    feedback::empty_state(
+                        "archive",
+                        "Nothing here yet",
+                        "Files and notes people send to your username appear here.",
+                    )
+                    .action(action),
+                )
                 .into_any_element();
         }
 
@@ -817,16 +795,14 @@ impl InboxPanel {
                 .flex()
                 .items_center()
                 .justify_center()
-                .child(feedback::empty_state(
-                    p,
-                    "info",
-                    "Select a delivery",
-                    "Choose what to download. Names stay encrypted until you do.",
-                    Tone::Neutral,
-                    None,
-                    window,
-                    cx,
-                ))
+                .child(
+                    feedback::empty_state(
+                        "info",
+                        "Select a delivery",
+                        "Choose what to download. Names stay encrypted until you do.",
+                    )
+                    .tone(Tone::Neutral),
+                )
                 .into_any_element();
         };
         let entrance = motion::entrance_with(

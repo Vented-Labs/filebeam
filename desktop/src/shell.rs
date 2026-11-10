@@ -35,8 +35,13 @@ use crate::{
         self, MotionExt, TextExt, brand, dialog, feedback, format, motion, progress::progress, text,
     },
     views::{
-        account::AccountPanel, history::HistoryPanel, inbox::InboxPanel, receive::ReceivePanel,
-        send::SendPanel, settings::SettingsPanel, transfers::TransfersPanel,
+        account::AccountPanel,
+        history::HistoryPanel,
+        inbox::InboxPanel,
+        receive::ReceivePanel,
+        send::SendPanel,
+        settings::{SettingsEvent, SettingsPanel},
+        transfers::TransfersPanel,
     },
 };
 
@@ -150,7 +155,43 @@ impl Destination {
                 operation,
                 "load history" | "delete history transfer" | "extend history transfer"
             ),
-            Self::Transfers | Self::Settings | Self::Account => false,
+            Self::Account => matches!(
+                operation,
+                "login"
+                    | "register"
+                    | "request password reset"
+                    | "resend verification"
+                    | "logout"
+                    | "delete account"
+                    | "report transfer"
+                    | "set inbox enabled"
+                    | "set notification channel"
+                    | "receiving defaults"
+                    | "automatic receiving"
+                    | "generate receiving key"
+                    | "import receiving key"
+                    | "unlock receiving key"
+                    | "export receiving key"
+                    | "confirm receiving-key backup"
+                    | "refresh contacts"
+                    | "update contact"
+            ),
+            Self::Settings => matches!(
+                operation,
+                "change instance"
+                    | "reload settings"
+                    | "refresh devices"
+                    | "enroll device"
+                    | "approve device enrollment"
+                    | "complete device enrollment"
+                    | "add device dropzone"
+                    | "set device receiving"
+                    | "install device service"
+                    | "confirm device verification"
+                    | "rename device"
+                    | "revoke device"
+            ),
+            Self::Transfers => false,
         }
     }
 
@@ -175,7 +216,7 @@ pub fn modifier() -> &'static str {
     }
 }
 
-fn modifier_label() -> &'static str {
+pub(crate) fn modifier_label() -> &'static str {
     if cfg!(target_os = "macos") {
         "⌘"
     } else {
@@ -251,6 +292,7 @@ fn is_active(state: TransferState) -> bool {
 pub struct DesktopShell {
     client: Arc<DesktopClient>,
     live: Entity<Live>,
+    home: PathBuf,
     destination: Destination,
     pub(crate) send: Entity<SendPanel>,
     pub(crate) receive: Entity<ReceivePanel>,
@@ -263,6 +305,8 @@ pub struct DesktopShell {
     pending_receive_link: Option<String>,
     presence: Option<NativePresence>,
     notifications: NotificationService,
+    /// Whether closing the window may leave transfers running in the tray.
+    background_transfers: bool,
     notification_acknowledgements: Vec<std::sync::mpsc::Receiver<Result<(), String>>>,
     seen_message_ids: HashSet<u64>,
     completed_jobs: HashSet<String>,
@@ -283,10 +327,10 @@ impl DesktopShell {
         cx: &mut Context<Self>,
     ) -> Self {
         let presence = NativePresence::new().ok();
-        let notifications_enabled = Config::load(Some(home.clone()))
-            .map(|config| config.desktop.notifications)
-            .unwrap_or(false);
-        let notifications = NotificationService::new(notifications_enabled);
+        let desktop = Config::load(Some(home.clone()))
+            .map(|config| config.desktop)
+            .unwrap_or_default();
+        let notifications = NotificationService::new(desktop.notifications);
         let live = cx.new(|cx| Live::new(client.clone(), cx));
         let send = cx.new(|cx| SendPanel::new(live.clone(), window, cx));
         let receive = cx.new(|cx| ReceivePanel::new(live.clone(), home.clone(), window, cx));
@@ -294,7 +338,7 @@ impl DesktopShell {
         let inbox = cx.new(|cx| InboxPanel::new(live.clone(), window, cx));
         let history = cx.new(|cx| HistoryPanel::new(live.clone(), window, cx));
         let account = cx.new(|cx| AccountPanel::new(live.clone(), window, cx));
-        let settings = cx.new(|cx| SettingsPanel::new(client.clone(), home, window, cx));
+        let settings = cx.new(|cx| SettingsPanel::new(live.clone(), home.clone(), window, cx));
         // The tray and notification adapters exist before the settings page asks
         // whether they can be offered.
         if let Some(availability) = presence
@@ -315,6 +359,19 @@ impl DesktopShell {
             }),
             // "Follow system" tracks the operating system while the app runs.
             cx.observe_window_appearance(window, |_, _, cx| theme::follow_system(cx)),
+            // The shell owns the services these two settings configure, so a change
+            // takes effect at once instead of at the next launch.
+            cx.subscribe(
+                &settings,
+                |shell, _, event: &SettingsEvent, _| match event {
+                    SettingsEvent::Notifications(enabled) => {
+                        shell.notifications.set_enabled(*enabled);
+                    }
+                    SettingsEvent::BackgroundTransfers(enabled) => {
+                        shell.background_transfers = *enabled;
+                    }
+                },
+            ),
         ];
 
         // Native presence and single-instance activations arrive on channels rather
@@ -340,7 +397,7 @@ impl DesktopShell {
                                     window.activate_window();
                                     cx.activate(true);
                                 }
-                                PresenceEvent::Quit => cx.quit(),
+                                PresenceEvent::Quit => shell.quit(window, cx),
                             }
                         }
                         for inputs in activations {
@@ -367,6 +424,7 @@ impl DesktopShell {
         let mut shell = Self {
             client,
             live,
+            home,
             destination: initial_destination,
             send,
             receive,
@@ -379,6 +437,7 @@ impl DesktopShell {
             pending_receive_link: None,
             presence,
             notifications,
+            background_transfers: desktop.background_transfers,
             notification_acknowledgements: Vec::new(),
             seen_message_ids: HashSet::new(),
             completed_jobs: HashSet::new(),
@@ -501,6 +560,55 @@ impl DesktopShell {
                     let _ = keep.update(cx, |shell, _| shell.pending_receive_link = None);
                 },
             );
+    }
+
+    /// Remembers where the window was, then quits. Running transfers are paused and
+    /// saved by the application's quit hook, whichever way quitting was asked for.
+    pub fn quit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let bounds = window.bounds();
+        // A few hundred bytes, written once as the app leaves.
+        let mut state = crate::platform::preferences::load(&self.home);
+        state.window = Some(crate::ui_state::WindowGeometry {
+            x: bounds.origin.x.as_f32(),
+            y: bounds.origin.y.as_f32(),
+            width: bounds.size.width.as_f32(),
+            height: bounds.size.height.as_f32(),
+            maximized: window.is_maximized(),
+        });
+        let _ = crate::platform::preferences::save(&self.home, &state);
+        cx.quit();
+    }
+
+    /// Decides what closing the window does. With transfers running it either keeps
+    /// them going from the tray, when that is enabled and possible, or asks first.
+    pub fn should_close(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let running = self
+            .client
+            .snapshot()
+            .jobs
+            .iter()
+            .any(|job| is_active(job.state));
+        if !running {
+            self.quit(window, cx);
+            return true;
+        }
+        let tray = self
+            .presence
+            .as_ref()
+            .is_some_and(|presence| presence.availability().available);
+        if self.background_transfers && tray {
+            window.minimize_window();
+            return false;
+        }
+        let shell = cx.entity().downgrade();
+        dialog::prompt("Quit while transfers are running?")
+            .body("They are paused and saved, and can be resumed the next time Filebeam opens.")
+            .confirm("Quit Filebeam")
+            .cancel("Keep open")
+            .open(window, cx, move |window, cx| {
+                let _ = shell.update(cx, |shell, cx| shell.quit(window, cx));
+            });
+        false
     }
 
     /// Opens a page. Pages that list account data load it again as they open, and
@@ -1037,6 +1145,8 @@ impl Render for DesktopShell {
             .on_action(
                 cx.listener(|this, _: &OpenAccount, _, cx| this.select(Destination::Account, cx)),
             )
+            // Quitting from the window remembers where it was before the app leaves.
+            .on_action(cx.listener(|this, _: &Quit, window, cx| this.quit(window, cx)))
     }
 }
 

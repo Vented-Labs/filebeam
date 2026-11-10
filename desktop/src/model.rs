@@ -169,14 +169,9 @@ pub enum DeviceAvailability {
 }
 #[derive(Clone, Default)]
 pub enum KeyCustody {
+    /// No receiving key is set up, or its state has not been read yet.
     #[default]
     Unknown,
-    /// Retained for existing view consumers; new snapshots use `Configured`.
-    Local,
-    /// Retained for existing view consumers; new snapshots use `Locked` or `Configured`.
-    PasswordWrapped,
-    /// Retained for existing view consumers; new snapshots use `Locked`.
-    ServerWrapped,
     PendingBackup {
         generation_id: String,
         fingerprint: String,
@@ -601,6 +596,7 @@ impl ClientCommand {
     pub fn operation(&self) -> &'static str {
         match self {
             Self::ReloadSettings => "reload settings",
+            Self::Refresh => "refresh",
             Self::RefreshDevices => "refresh devices",
             Self::EnrollDevice { .. } => "enroll device",
             Self::ApproveDeviceEnrollment { .. } => "approve device enrollment",

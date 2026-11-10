@@ -1,8 +1,8 @@
 //! Status and feedback: tones, pills, inline notices, empty states and the spinner.
 
 use gpui::{
-    AnyElement, App, Div, FontWeight, Hsla, IntoElement, ParentElement, SharedString, Styled,
-    Window, div, px, relative,
+    AnyElement, App, Div, FontWeight, Hsla, IntoElement, ParentElement, RenderOnce, SharedString,
+    Styled, Window, div, px, relative,
 };
 use gpui_component::{Sizable, Size, spinner::Spinner};
 
@@ -177,54 +177,84 @@ pub fn notice(p: Palette, message: impl Into<SharedString>, tone: Tone) -> Div {
 }
 
 /// A centred illustration tile, statement and optional action for empty and error states.
-pub fn empty_state(
-    p: Palette,
-    name: &'static str,
-    title: impl Into<SharedString>,
-    body: impl Into<SharedString>,
+#[derive(IntoElement)]
+pub struct EmptyState {
+    icon: &'static str,
+    title: SharedString,
+    body: SharedString,
     tone: Tone,
     action: Option<AnyElement>,
-    window: &mut Window,
-    cx: &mut App,
-) -> Div {
-    let colors = tone.colors(p);
-    let title: SharedString = title.into();
-    let entrance = motion::entrance_with(
-        ("empty-state", title.clone()),
-        0,
-        16.0,
-        motion::reveal(),
-        window,
-        cx,
-    );
-    div()
-        .w_full()
-        .flex()
-        .flex_col()
-        .items_center()
-        .gap(px(10.))
-        .px(px(24.))
-        .py(px(40.))
-        .entering(entrance)
-        .child(
-            div()
-                .size(px(64.))
-                .mb(px(6.))
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(px(radius::CARD))
-                .bg(surface::angled(135., colors.surface, p.surface))
-                .border_1()
-                .border_color(colors.border.opacity(0.5))
-                .child(icon(name).size(px(28.)).text_color(colors.ink)),
-        )
-        .child(text::title(title).text_color(p.text).text_center())
-        .child(
-            text::small(body)
-                .max_w(px(380.))
-                .text_center()
-                .text_color(p.text_muted),
-        )
-        .children(action.map(|action| div().mt(px(8.)).child(action)))
+}
+
+pub fn empty_state(
+    icon: &'static str,
+    title: impl Into<SharedString>,
+    body: impl Into<SharedString>,
+) -> EmptyState {
+    EmptyState {
+        icon,
+        title: title.into(),
+        body: body.into(),
+        tone: Tone::Accent,
+        action: None,
+    }
+}
+
+impl EmptyState {
+    pub fn tone(mut self, tone: Tone) -> Self {
+        self.tone = tone;
+        self
+    }
+
+    /// The one way forward from here, when there is one.
+    pub fn action(mut self, action: Option<AnyElement>) -> Self {
+        self.action = action;
+        self
+    }
+}
+
+impl RenderOnce for EmptyState {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let p = crate::theme::palette(cx);
+        let (name, title, body, action) = (self.icon, self.title, self.body, self.action);
+        let colors = self.tone.colors(p);
+        let entrance = motion::entrance_with(
+            ("empty-state", title.clone()),
+            0,
+            16.0,
+            motion::reveal(),
+            window,
+            cx,
+        );
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap(px(10.))
+            .px(px(24.))
+            .py(px(40.))
+            .entering(entrance)
+            .child(
+                div()
+                    .size(px(64.))
+                    .mb(px(6.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(radius::CARD))
+                    .bg(surface::angled(135., colors.surface, p.surface))
+                    .border_1()
+                    .border_color(colors.border.opacity(0.5))
+                    .child(icon(name).size(px(28.)).text_color(colors.ink)),
+            )
+            .child(text::title(title).text_color(p.text).text_center())
+            .child(
+                text::small(body)
+                    .max_w(px(380.))
+                    .text_center()
+                    .text_color(p.text_muted),
+            )
+            .children(action.map(|action| div().mt(px(8.)).child(action)))
+    }
 }

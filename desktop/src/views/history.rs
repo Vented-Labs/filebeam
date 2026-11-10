@@ -410,7 +410,7 @@ impl Render for HistoryPanel {
 
         let body: AnyElement = if signed_in {
             let filters = self.filters(p, compact, cx);
-            let list = self.list(p, window, cx);
+            let list = self.list(p, cx);
             let selected = self
                 .selected
                 .as_ref()
@@ -474,17 +474,15 @@ impl Render for HistoryPanel {
                 .flex()
                 .items_center()
                 .justify_center()
-                .child(feedback::empty_state(
-                    p,
-                    "clock",
-                    "Your sharing history",
-                    "Sign in to see what you have shared, keep it longer or delete it for \
+                .child(
+                    feedback::empty_state(
+                        "clock",
+                        "Your sharing history",
+                        "Sign in to see what you have shared, keep it longer or delete it for \
                      everyone.",
-                    Tone::Accent,
-                    Some(action),
-                    window,
-                    cx,
-                ))
+                    )
+                    .action(Some(action)),
+                )
                 .into_any_element()
         };
 
@@ -563,7 +561,7 @@ impl HistoryPanel {
             )
     }
 
-    fn list(&mut self, p: Palette, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn list(&mut self, p: Palette, cx: &mut Context<Self>) -> AnyElement {
         if self.entries.is_empty() {
             if self.loading.is_some() {
                 return div()
@@ -612,16 +610,7 @@ impl HistoryPanel {
                 .flex()
                 .items_center()
                 .justify_center()
-                .child(feedback::empty_state(
-                    p,
-                    "clock",
-                    title,
-                    body,
-                    Tone::Accent,
-                    reset,
-                    window,
-                    cx,
-                ))
+                .child(feedback::empty_state("clock", title, body).action(reset))
                 .into_any_element();
         }
         let loading_older = self.loading == Some(Loading::Older);
@@ -746,16 +735,14 @@ impl HistoryPanel {
                 .flex()
                 .items_center()
                 .justify_center()
-                .child(feedback::empty_state(
-                    p,
-                    "info",
-                    "Select a transfer",
-                    "Keep it longer, or delete it for everyone.",
-                    Tone::Neutral,
-                    None,
-                    window,
-                    cx,
-                ))
+                .child(
+                    feedback::empty_state(
+                        "info",
+                        "Select a transfer",
+                        "Keep it longer, or delete it for everyone.",
+                    )
+                    .tone(Tone::Neutral),
+                )
                 .into_any_element();
         };
         let entrance = motion::entrance_with(

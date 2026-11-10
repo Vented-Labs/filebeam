@@ -146,10 +146,7 @@ pub fn fingerprint(snapshot: &DesktopSnapshot) -> u64 {
             fingerprint.hash(h);
             custody_mode.hash(h);
         }
-        KeyCustody::Unknown
-        | KeyCustody::Local
-        | KeyCustody::PasswordWrapped
-        | KeyCustody::ServerWrapped => {}
+        KeyCustody::Unknown => {}
     }
 
     snapshot.jobs.len().hash(h);
@@ -384,7 +381,8 @@ mod tests {
     #[test]
     fn every_presented_job_field_is_observed_without_a_byte_change() {
         let base = with_job(|_| {});
-        let changes: [(&str, fn(&mut JobSnapshot)); 8] = [
+        type Change = (&'static str, fn(&mut JobSnapshot));
+        let changes: [Change; 8] = [
             ("phase", |job| {
                 job.progress.phase = "Waiting for recipient".into()
             }),

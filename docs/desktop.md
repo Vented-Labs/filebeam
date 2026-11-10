@@ -58,7 +58,23 @@ node scripts/desktop/generate-assets.mjs
 ```
 
 Platform icons are written to `desktop/packaging/icons/`. The native asset registry
-uses `icons/approved.json`; its palette is checked against `desktop/assets/colors.json`.
+is generated from `icons/approved.json`; `node scripts/desktop/generate-assets.mjs --check`
+verifies that the committed registry is current.
+
+The Inter and JetBrains Mono files in `desktop/assets/fonts/` are static instances
+of the variable fonts shipped with the Android client. Regenerating them requires
+Python with fontTools:
+
+```sh
+python3 scripts/desktop/generate-fonts.py
+python3 scripts/desktop/generate-fonts.py --check
+```
+
+Colours are computed rather than stored. `desktop/src/theme/engine.rs` is the desktop
+port of the shared palette engine, tested against the same reference fixture as the
+Android client (`mobile/android/app/src/test/fixtures/palette-golden.json`). The
+chosen colour is a per-device preference and is not written to the shared
+configuration.
 
 To install a per-user Linux development launcher:
 
@@ -72,7 +88,8 @@ The installer refuses to overwrite a non-development launcher.
 ## UI fixtures
 
 The `visual-test` feature enables synthetic UI scenarios without starting transfer
-workers or reading user settings:
+workers or reading user settings. Scenario names are declared in
+`desktop/src/visual/mod.rs`:
 
 ```sh
 bash scripts/desktop/run.sh cargo run --manifest-path desktop/Cargo.toml --example visual_studio --features visual-test -- transfers-mixed

@@ -40,11 +40,11 @@ pub fn count(count: u64, singular: &str, plural: &str) -> String {
 
 /// "1 hour", "3 days", "1 week": retention reads as a duration, never as raw hours.
 pub fn retention(hours: u64) -> String {
-    if hours > 0 && hours % 8760 == 0 {
+    if hours > 0 && hours.is_multiple_of(8760) {
         plural(hours / 8760, "year")
-    } else if hours > 0 && hours % (24 * 7) == 0 {
+    } else if hours > 0 && hours.is_multiple_of(24 * 7) {
         plural(hours / (24 * 7), "week")
-    } else if hours > 0 && hours % 24 == 0 {
+    } else if hours > 0 && hours.is_multiple_of(24) {
         plural(hours / 24, "day")
     } else {
         plural(hours, "hour")
@@ -257,6 +257,7 @@ pub fn failure_title(operation: &str) -> String {
         "note" => "Could not create the note".into(),
         "receive" | "inspect receive" => "Could not open the transfer".into(),
         "revoke link" => "Could not revoke the link".into(),
+        "refresh" => "Could not refresh".into(),
         "end live session" => "Could not end the live session".into(),
         "command" => "That did not work".into(),
         other => {

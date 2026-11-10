@@ -182,42 +182,14 @@ fn run_with_instance_at(
                         window.scale_factor(),
                     );
                 }
-                let closing_client = client.clone();
-                let geometry_home = home.clone();
-                window.on_window_should_close(cx, move |window, cx| {
-                    let active = closing_client.snapshot().jobs.iter().any(|job| {
-                        matches!(
-                            job.state,
-                            TransferState::Running | TransferState::PauseRequested
-                        )
-                    });
-                    if active {
-                        window.minimize_window();
-                        false
-                    } else {
-                        let bounds = window.bounds();
-                        let mut state = crate::platform::preferences::load(&geometry_home);
-                        state.window = Some(crate::ui_state::WindowGeometry {
-                            x: bounds.origin.x.as_f32(),
-                            y: bounds.origin.y.as_f32(),
-                            width: bounds.size.width.as_f32(),
-                            height: bounds.size.height.as_f32(),
-                            maximized: window.is_maximized(),
-                        });
-                        let home = geometry_home.clone();
-                        cx.background_executor()
-                            .spawn(async move {
-                                let _ = crate::platform::preferences::save(&home, &state);
-                            })
-                            .detach();
-                        cx.quit();
-                        true
-                    }
-                });
                 #[cfg(feature = "visual-test")]
                 let visual_home = home.clone();
                 let shell = cx.new(|cx| {
                     DesktopShell::new(client, home, inputs, owner, initial_destination, window, cx)
+                });
+                let closing = shell.clone();
+                window.on_window_should_close(cx, move |window, cx| {
+                    closing.update(cx, |shell, cx| shell.should_close(window, cx))
                 });
                 // Ensure the requested visual fixture route is applied after all retained
                 // panels have been initialized. Normal launches start at Send as before.
@@ -385,9 +357,13 @@ fn run_with_instance_at(
                     Ok("receive-scroll-end") => window.on_next_frame(|window, cx| {
                         scroll_visual_target(window, "receive-page-scroll", cx);
                     }),
-                    Ok("settings-scroll-end") => window.on_next_frame(|window, cx| {
-                        scroll_visual_target(window, "settings-scroll", cx);
-                    }),
+                    Ok(scenario) if scenario.starts_with("settings-") => {
+                        shell.update(cx, |shell, cx| {
+                            shell.settings.update(cx, |settings, cx| {
+                                settings.prepare_for_capture(scenario, window, cx);
+                            });
+                        });
+                    }
                     Ok(scenario) if scenario.starts_with("account-") => {
                         let account = shell.read(cx).account.clone();
                         account.update(cx, |account, cx| {
