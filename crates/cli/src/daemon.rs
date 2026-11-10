@@ -575,6 +575,8 @@ mod tests {
         assert!(!job_line(&job).contains('\x1b'));
     }
 
+    // Windows validates the profile directory before looking for the pipe.
+    #[cfg(unix)]
     #[test]
     fn stopped_daemons_and_unregistered_profiles_name_the_fixing_command() {
         let home = tempfile::tempdir().unwrap();
