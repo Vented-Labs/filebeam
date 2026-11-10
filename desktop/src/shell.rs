@@ -364,9 +364,13 @@ impl DesktopShell {
             // "Follow system" tracks the operating system while the app runs.
             cx.observe_window_appearance(window, |_, _, cx| theme::follow_system(cx)),
             // A focused control can disappear with its page or dialog. Focus returns to
+            // what contained it, such as a dialog that is still open, and otherwise to
             // the shell rather than to nothing, where shortcuts would not be heard.
             cx.on_focus_lost(window, |shell, window, cx| {
-                window.focus(&shell.focus_handle, cx);
+                let target = window
+                    .focus_lost_restore_target(cx)
+                    .unwrap_or_else(|| shell.focus_handle.clone());
+                window.focus(&target, cx);
             }),
             // The shell owns the services these two settings configure, so a change
             // takes effect at once instead of at the next launch.
