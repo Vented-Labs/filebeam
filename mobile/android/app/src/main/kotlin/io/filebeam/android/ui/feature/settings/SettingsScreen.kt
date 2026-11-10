@@ -75,7 +75,17 @@ fun SettingsScreen() {
         }
     }
 
+    val navigator = io.filebeam.android.ui.shell.LocalNavigator.current
     SubScreen(stringResource(R.string.settings_title)) {
+        item {
+            Panel(Modifier.fillMaxWidth()) {
+                io.filebeam.android.ui.feature.account.LinkRow(R.drawable.ic_approved_brush, stringResource(R.string.appearance_title), { navigator.push(io.filebeam.android.ui.shell.Route.Appearance) })
+                Hairline()
+                io.filebeam.android.ui.feature.account.LinkRow(R.drawable.ic_approved_storage, stringResource(R.string.storage_title), { navigator.push(io.filebeam.android.ui.shell.Route.Storage) })
+                Hairline()
+                io.filebeam.android.ui.feature.account.LinkRow(R.drawable.ic_approved_info, stringResource(R.string.about_title), { navigator.push(io.filebeam.android.ui.shell.Route.About) })
+            }
+        }
         item { SectionLabel(stringResource(R.string.settings_connection)) }
         item {
             Panel(Modifier.fillMaxWidth()) {

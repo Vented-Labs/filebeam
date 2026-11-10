@@ -3,6 +3,7 @@ package io.filebeam.android.ui.shell
 import android.app.Application
 import android.net.Uri
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.geometry.Offset
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.filebeam.android.FilebeamApplication
@@ -14,7 +15,9 @@ import io.filebeam.android.ui.design.ToastMessage
 import io.filebeam.android.ui.design.Tone
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -26,6 +29,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
 /** Something that arrived from outside the app and still needs a screen to claim it. */
+/** An appearance change with the screen position it should spread from. */
+data class ThemeChange(val appearance: Appearance, val origin: Offset)
+
 /** A navigation asked for from outside composition, such as an intent. */
 data class NavRequest(val tab: Tab? = null, val route: Route? = null, val id: Long = System.nanoTime())
 
@@ -101,7 +107,20 @@ class AppModel(application: Application) : AndroidViewModel(application) {
         toastState.update { if (it?.id == message.id) null else it }
     }
 
-    fun setAppearance(value: Appearance) {
+    private val themeChanges = MutableSharedFlow<ThemeChange>(extraBufferCapacity = 1)
+
+    /** Appearance changes that asked for a reveal animation from a point on screen. */
+    val themeChange = themeChanges.asSharedFlow()
+
+    /**
+     * Saves a new appearance. With an [origin] the root plays a circular reveal from that point
+     * and applies the change itself through [applyAppearance]; without one it applies at once.
+     */
+    fun setAppearance(value: Appearance, origin: Offset? = null) {
+        if (origin == null || !themeChanges.tryEmit(ThemeChange(value, origin))) applyAppearance(value)
+    }
+
+    fun applyAppearance(value: Appearance) {
         viewModelScope.launch { app.appearance.save(value) }
     }
 

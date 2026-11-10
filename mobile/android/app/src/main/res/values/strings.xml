@@ -624,4 +624,24 @@
     <string name="recipient_unavailable_title">This inbox is not available</string>
     <string name="recipient_unavailable_body">The account may not accept files from you, or the link is wrong.</string>
     <string name="recipient_stored_unavailable">Stored transfers are unavailable on this instance.</string>
+
+    <!-- Appearance -->
+    <string name="appearance_theme">Theme</string>
+    <string name="appearance_system">System</string>
+    <string name="appearance_light">Light</string>
+    <string name="appearance_dark">Dark</string>
+    <string name="appearance_color">Color</string>
+    <string name="appearance_material_you">Material You</string>
+    <string name="appearance_material_you_description">Colors from your wallpaper.</string>
+    <string name="appearance_no_material_you">This system does not provide wallpaper colors, so Filebeam uses its own palettes.</string>
+    <string name="appearance_filebeam_colors">Filebeam colors</string>
+    <string name="appearance_instance">Instance color</string>
+    <string name="appearance_custom">Custom color</string>
+    <string name="appearance_hue">Hue</string>
+    <string name="appearance_vividness">Vividness</string>
+    <string name="appearance_hex">Hex color</string>
+    <string name="appearance_reset">Reset</string>
+    <string name="appearance_saved_on_device">Saved on this device.</string>
+    <string name="appearance_preview_title">Preview</string>
+    <string name="appearance_preview_body">How buttons, switches and progress look.</string>
 </resources>

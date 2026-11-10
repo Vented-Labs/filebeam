@@ -2,6 +2,24 @@ package io.filebeam.android.ui.shell
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.ClipOp
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
+import io.filebeam.android.ui.motion.LocalReduceMotion
+import kotlin.math.hypot
+import kotlin.math.max
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.fadeIn
@@ -60,21 +78,55 @@ fun FilebeamApp(model: AppModel, host: HostActions) {
             pending.route?.let(navigator::push)
             model.navigationHandled(pending)
         }
-        CompositionLocalProvider(LocalNavigator provides navigator, LocalHost provides host, LocalAppModel provides model) {
-            AmbientBackground {
-                SharedTransitionLayout {
-                    NavDisplay(
-                        backStack = navigator.backStack,
-                        onBack = { navigator.back() },
-                        entryDecorators = listOf(rememberSaveableStateHolderNavEntryDecorator(), rememberViewModelStoreNavEntryDecorator()),
-                        sharedTransitionScope = this,
-                        transitionSpec = { forward },
-                        popTransitionSpec = { backward },
-                        predictivePopTransitionSpec = { backward },
-                        entryProvider = { route -> NavEntry(route) { RouteContent(route) } },
-                    )
+        // The whole UI is drawn through a layer so a theme change can freeze the old look and
+        // wipe it away in a growing circle from where the user tapped.
+        val layer = rememberGraphicsLayer()
+        var frozen by remember { mutableStateOf<ImageBitmap?>(null) }
+        var origin by remember { mutableStateOf(Offset.Zero) }
+        val reveal = remember { Animatable(0f) }
+        val reduceMotion = LocalReduceMotion.current
+        LaunchedEffect(Unit) {
+            model.themeChange.collect { change ->
+                if (reduceMotion) {
+                    model.applyAppearance(change.appearance)
+                    return@collect
                 }
-                ToastHost(toast, model::toastDismissed, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = if (navigator.atRoot) NavBarClearance else Space.xxl))
+                origin = change.origin
+                frozen = runCatching { layer.toImageBitmap() }.getOrNull()
+                reveal.snapTo(0f)
+                model.applyAppearance(change.appearance)
+                reveal.animateTo(1f, tween(620, easing = Motion.ease))
+                frozen = null
+            }
+        }
+        CompositionLocalProvider(LocalNavigator provides navigator, LocalHost provides host, LocalAppModel provides model) {
+            Box(
+                Modifier.fillMaxSize().drawWithContent {
+                    layer.record { this@drawWithContent.drawContent() }
+                    drawLayer(layer)
+                },
+            ) {
+                AmbientBackground {
+                    SharedTransitionLayout {
+                        NavDisplay(
+                            backStack = navigator.backStack,
+                            onBack = { navigator.back() },
+                            entryDecorators = listOf(rememberSaveableStateHolderNavEntryDecorator(), rememberViewModelStoreNavEntryDecorator()),
+                            sharedTransitionScope = this,
+                            transitionSpec = { forward },
+                            popTransitionSpec = { backward },
+                            predictivePopTransitionSpec = { backward },
+                            entryProvider = { route -> NavEntry(route) { RouteContent(route) } },
+                        )
+                    }
+                    ToastHost(toast, model::toastDismissed, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = if (navigator.atRoot) NavBarClearance else Space.xxl))
+                }
+            }
+            frozen?.let { image ->
+                Canvas(Modifier.fillMaxSize()) {
+                    val radius = hypot(max(origin.x, size.width - origin.x), max(origin.y, size.height - origin.y)) * reveal.value
+                    clipPath(Path().apply { addOval(Rect(origin, radius)) }, ClipOp.Difference) { drawImage(image) }
+                }
             }
         }
     }
@@ -89,6 +141,7 @@ private fun RouteContent(route: Route) {
         Route.Account -> io.filebeam.android.ui.feature.account.AccountScreen()
         Route.SecureInbox -> io.filebeam.android.ui.feature.account.SecureInboxScreen()
         Route.Devices -> io.filebeam.android.ui.feature.account.DevicesScreen()
+        Route.Appearance -> io.filebeam.android.ui.feature.settings.AppearanceScreen()
         Route.Contacts -> io.filebeam.android.ui.feature.contacts.ContactsScreen()
         is Route.Recipient -> io.filebeam.android.ui.feature.contacts.RecipientScreen(route.username)
         Route.History -> io.filebeam.android.ui.feature.transfers.HistoryScreen()
