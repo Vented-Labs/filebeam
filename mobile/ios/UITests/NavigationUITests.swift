@@ -22,7 +22,7 @@ final class NavigationUITests: XCTestCase {
         field.typeWhenFocused("example-transfer-id")
         app.buttons["Transfers"].tap()
         app.buttons["Receive"].tap()
-        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        XCTAssertTrue(field.waitForExistence(timeout: 5), app.visibleSummary)
         XCTAssertEqual(field.value as? String, "example-transfer-id")
     }
 }

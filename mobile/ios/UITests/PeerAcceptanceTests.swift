@@ -29,7 +29,7 @@ final class PeerAcceptanceTests: XCTestCase {
         XCTAssertTrue(field.waitForExistence(timeout: 10))
         field.typeWhenFocused("draft-retention-check")
         app.buttons["Transfers"].tap(); app.buttons["Receive"].tap()
-        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        XCTAssertTrue(field.waitForExistence(timeout: 5), app.visibleSummary)
         XCTAssertEqual(field.value as? String, "draft-retention-check")
     }
 }

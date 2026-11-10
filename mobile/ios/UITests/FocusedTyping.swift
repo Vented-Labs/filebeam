@@ -11,3 +11,12 @@ extension XCUIElement {
         typeText(text)
     }
 }
+
+extension XCUIApplication {
+    /// The visible buttons and headings, for assertion messages that explain which screen was showing.
+    @MainActor var visibleSummary: String {
+        let buttons = buttons.allElementsBoundByIndex.prefix(12).map(\.label).filter { !$0.isEmpty }
+        let texts = staticTexts.allElementsBoundByIndex.prefix(6).map(\.label).filter { !$0.isEmpty }
+        return "buttons: \(buttons.joined(separator: " | ")); texts: \(texts.joined(separator: " | "))"
+    }
+}
