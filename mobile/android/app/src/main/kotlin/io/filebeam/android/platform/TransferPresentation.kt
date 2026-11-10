@@ -14,3 +14,22 @@ internal fun SavedTransferDetails.presentation() = SavedTransferPresentation(thi
     TransferActions(resume = canResume, retrySafExport = canRetrySave, endLive = canEndLive, revokeRemote = canRevokeRemote, removeLocal = canRemoveLocal),
     // This is a native/app-private checkpoint publication, not a SAF destination write.
     when { verifiedPrivately -> ReceiptState.VERIFIED_PRIVATE; exported -> ReceiptState.APP_PRIVATE_PUBLISHED; else -> null })
+
+/** An instance-scoped recipient key returned by account discovery, never free-form input. */
+data class ValidatedRecipient(
+    val username: String,
+    val origin: String,
+    val id: ULong,
+    val accountKeyBundleId: ULong,
+    val publicKey: String,
+    val revision: Long,
+)
+
+data class JobCapabilities(
+    val canPause: Boolean = false,
+    val canResume: Boolean = false,
+    val canRetryExport: Boolean = false,
+    val canEndLive: Boolean = false,
+    val canRevoke: Boolean = false,
+    val canRemoveLocal: Boolean = false,
+)

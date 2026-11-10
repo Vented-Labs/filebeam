@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Filebeam</string>
+    <string name="connected_instance">Connected to %1$s</string>
+    <string name="notification_channel">File transfers</string>
+    <string name="notification_input">Open Filebeam to continue</string>
+    <string name="pause">Pause</string>
+    <string name="saved_file">File saved</string>
+    <string name="unknown_error">The transfer could not be completed.</string>
+    <string name="insufficient_space">There is not enough free space to prepare this transfer.</string>
+    <string name="source_unavailable">The document provider no longer grants access. Select the source files again.</string>
+    <string name="work_already_running">A transfer is already running.</string>
+    <string name="background_unavailable">Android could not start this transfer. Keep Filebeam open and try again.</string>
+    <string name="network_unavailable">Network unavailable. Waiting to reconnect.</string>
+</resources>

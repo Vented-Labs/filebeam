@@ -12,9 +12,7 @@ import io.filebeam.android.platform.storage.DocumentStorage
 import io.filebeam.android.platform.services.AccountSessionRegistry
 import io.filebeam.android.platform.services.AccountService
 import io.filebeam.android.platform.services.NoteContent
-import io.filebeam.android.ui.JobCapabilities
 import io.filebeam.android.platform.services.AccountSessionRegistry.Companion.normalizeOrigin
-import io.filebeam.android.ui.ValidatedRecipient
 import io.filebeam.rust.ClientConfig
 import io.filebeam.rust.ClientException
 import io.filebeam.rust.DirectoryChoice

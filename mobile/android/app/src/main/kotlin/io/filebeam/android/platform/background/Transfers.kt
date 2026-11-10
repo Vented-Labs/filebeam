@@ -64,7 +64,7 @@ object TransferScheduler {
         val pause = PendingIntent.getBroadcast(context, 0, Intent(context, TransferActionReceiver::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val snapshot = state.snapshot
         val builder = NotificationCompat.Builder(context, CHANNEL)
-            .setSmallIcon(R.drawable.ic_filebeam)
+            .setSmallIcon(R.drawable.ic_filebeam_mark)
             .setContentTitle(context.getString(R.string.app_name))
             .setContentText(if (snapshot?.prompt != null) context.getString(R.string.notification_input) else state.phase)
             .setContentIntent(open).setOnlyAlertOnce(true).setOngoing(state.busy)
