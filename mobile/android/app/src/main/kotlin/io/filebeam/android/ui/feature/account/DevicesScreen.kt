@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import io.filebeam.android.R
 import io.filebeam.android.ui.common.formatAbsolute
 import io.filebeam.android.ui.common.parseInstant
+import io.filebeam.android.ui.common.readableMessage
 import io.filebeam.android.ui.design.ButtonStyle
 import io.filebeam.android.ui.design.EmptyState
 import io.filebeam.android.ui.design.Fb
@@ -95,7 +96,7 @@ fun DevicesScreen() {
         val loaded = registry
         when {
             error != null && loaded == null -> item {
-                EmptyState(R.drawable.ic_approved_alert, stringResource(R.string.devices_error_title), body = error, tone = Tone.Danger) {
+                EmptyState(R.drawable.ic_approved_alert, stringResource(R.string.devices_error_title), body = error?.let { readableMessage(context, it) }, tone = Tone.Danger) {
                     FbButton(stringResource(R.string.retry), { revision++ }, style = ButtonStyle.Secondary)
                 }
             }

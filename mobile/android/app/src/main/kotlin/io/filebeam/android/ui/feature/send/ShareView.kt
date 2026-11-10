@@ -20,6 +20,11 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import io.filebeam.android.ui.design.pressScale
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -52,6 +57,7 @@ import io.filebeam.android.R
 import io.filebeam.android.platform.TransferUiState
 import io.filebeam.android.ui.common.formatAbsolute
 import io.filebeam.android.ui.common.formatRelative
+import io.filebeam.android.ui.common.readableMessage
 import io.filebeam.android.ui.design.ButtonStyle
 import io.filebeam.android.ui.design.Fb
 import io.filebeam.android.ui.design.FbButton
@@ -172,7 +178,7 @@ internal fun ShareView(model: SendViewModel, state: SendUiState, transfer: Trans
                             FbText(title, Modifier.fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite }, style = Fb.type.headline, textAlign = TextAlign.Center)
                         }
                         val subtitle = when {
-                            failed -> snapshot?.error ?: stringResource(R.string.share_failed_body)
+                            failed -> snapshot?.error?.let { readableMessage(context, it) } ?: stringResource(R.string.share_failed_body)
                             paused -> stringResource(R.string.share_paused_body)
                             stage.kind == ShareKind.Inbox -> stringResource(R.string.share_inbox_body, state.files.recipient?.username.orEmpty())
                             live && hasLink -> stringResource(R.string.share_live_body)
@@ -325,18 +331,37 @@ private fun ShareBadge(running: Boolean, done: Boolean, failed: Boolean) {
     }
 }
 
-/** A read-only value with its copy action. */
+/**
+ * A read-only value with an icon-only copy action, so the value itself gets the width.
+ * [action] is the control's accessible label; the primary variant fills with the action colour.
+ */
 @Composable
 internal fun CopyField(icon: Int, value: String, action: String, primary: Boolean, onCopy: () -> Unit) {
     val palette = Fb.palette
+    val haptics = rememberHaptics()
+    val interaction = remember { MutableInteractionSource() }
     Row(
-        Modifier.fillMaxWidth().clip(Shapes.control).background(palette.sunken).border(1.dp, palette.border, Shapes.control).padding(start = Space.md, top = Space.sm, bottom = Space.sm, end = Space.sm),
+        Modifier.fillMaxWidth().clip(Shapes.control).background(palette.sunken).border(1.dp, palette.border, Shapes.control).padding(start = Space.md, top = Space.xs, bottom = Space.xs, end = Space.xs),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(Space.md),
     ) {
         FbIcon(icon, size = 18.dp)
         FbText(value, Modifier.weight(1f), style = Fb.type.codeSmall, color = palette.textMuted, maxLines = 1)
-        FbButton(action, onCopy, style = if (primary) ButtonStyle.Primary else ButtonStyle.Secondary, icon = R.drawable.ic_approved_copy, height = 40.dp)
+        Box(
+            Modifier
+                .pressScale(interaction, 0.9f)
+                .size(44.dp)
+                .clip(Shapes.control)
+                .then(if (primary) Modifier.background(Brush.verticalGradient(palette.actionGradient)).border(1.dp, palette.actionBorder, Shapes.control) else Modifier.background(palette.surface).border(1.dp, palette.controlBorder, Shapes.control))
+                .clickable(interaction, indication = null, role = Role.Button) {
+                    haptics.tap()
+                    onCopy()
+                }
+                .semantics { contentDescription = action },
+            contentAlignment = Alignment.Center,
+        ) {
+            FbIcon(R.drawable.ic_approved_copy, tint = if (primary) palette.onAction else palette.text, size = 20.dp)
+        }
     }
 }
 

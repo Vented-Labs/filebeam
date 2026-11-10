@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.filebeam.android.R
 import io.filebeam.android.ui.common.formatBytes
+import io.filebeam.android.ui.common.readableMessage
 import io.filebeam.android.ui.design.ButtonStyle
 import io.filebeam.android.ui.design.Emblem
 import io.filebeam.android.ui.design.Fb
@@ -134,7 +135,7 @@ fun ReceiveScreen(model: ReceiveViewModel = viewModel()) {
                     }
                     if (current is ReceiveStage.Files || current is ReceiveStage.Saved || current is ReceiveStage.Note || current is ReceiveStage.NoteLocked) {
                         if (current is ReceiveStage.Files) {
-                            CliCard(state.input, available = !state.live && state.input.contains('#'), reason = R.string.cli_unavailable_live)
+                            CliCard(state.input, available = !state.live && state.input.contains('#'), reason = if (state.live) R.string.cli_unavailable_live else R.string.cli_unavailable)
                         }
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Space.md)) {
                             FbButton(stringResource(R.string.receive_another), { model.reset() }, Modifier.weight(1f), style = ButtonStyle.Secondary, icon = R.drawable.ic_approved_link)
@@ -396,7 +397,7 @@ private fun Unavailable(message: String?, onStartNew: () -> Unit) {
                 FbIcon(R.drawable.ic_approved_alert, tint = palette.danger.ink, size = 30.dp)
             }
             FbText(stringResource(R.string.receive_unavailable_title), style = Fb.type.headline, textAlign = TextAlign.Center)
-            FbText(message ?: stringResource(R.string.receive_unavailable_body), style = Fb.type.small, color = palette.textMuted, textAlign = TextAlign.Center)
+            FbText(message?.let { readableMessage(LocalContext.current, it) } ?: stringResource(R.string.receive_unavailable_body), style = Fb.type.small, color = palette.textMuted, textAlign = TextAlign.Center)
             FbButton(stringResource(R.string.receive_start_new), onStartNew, Modifier.fillMaxWidth(), icon = R.drawable.ic_approved_upload)
         }
     }

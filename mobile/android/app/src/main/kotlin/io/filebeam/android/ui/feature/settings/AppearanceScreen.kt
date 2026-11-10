@@ -191,7 +191,7 @@ private fun PreviewCard() {
             SmoothProgress(if (on) 0.68f else 0.24f)
             Row(horizontalArrangement = Arrangement.spacedBy(Space.md)) {
                 FbButton(stringResource(R.string.send_encrypted), {}, Modifier.weight(1f), icon = R.drawable.ic_approved_lock, height = 44.dp)
-                FbButton(stringResource(R.string.copy), {}, style = ButtonStyle.Secondary, icon = R.drawable.ic_approved_copy, height = 44.dp)
+                FbButton(stringResource(R.string.share_share), {}, style = ButtonStyle.Secondary, icon = R.drawable.ic_approved_arrow_up_right, height = 44.dp)
             }
         }
     }

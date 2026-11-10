@@ -88,7 +88,8 @@ fun FloatingNavBar(selected: Tab, onSelect: (Tab) -> Unit, inboxUnread: Int, mod
     val density = LocalDensity.current
     var width by remember { mutableIntStateOf(0) }
     val count = Tab.entries.size
-    val slot = if (count == 0) 0f else (width - with(density) { 12.dp.toPx() }) / count
+    // Measured inside the bar's padding, so each destination owns exactly one slot.
+    val slot = if (count == 0) 0f else width.toFloat() / count
     val x by animateFloatAsState(slot * selected.ordinal, motionOr(Motion.spatial()), label = "indicator")
     Box(
         modifier

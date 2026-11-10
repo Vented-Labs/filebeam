@@ -15,7 +15,7 @@ class ServiceFacadesTest {
     @Test fun inboxStartsLoadingUntilTheNativeNetworkCallIsRequested() {
         val service = NativeInboxService(AccountSessionRegistry(false, NativeRuntime(NoHandle)), object : AccountService {
             override val state = kotlinx.coroutines.flow.MutableStateFlow<ServiceState<AccountSummary>>(ServiceState.Loading)
-            override suspend fun signIn(instance: String, username: String, password: String) = Unit
+            override suspend fun signIn(instance: String, username: String, password: String, remember: Boolean) = Unit
             override suspend fun signUp(instance: String, username: String, name: String?, email: String, password: String) = Unit
             override suspend fun resume(instance: String) = Unit
             override suspend fun signOut() = Unit

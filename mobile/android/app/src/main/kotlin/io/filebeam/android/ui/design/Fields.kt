@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -30,6 +31,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
+import io.filebeam.android.ui.common.readableMessage
 import androidx.compose.ui.semantics.error
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
@@ -103,7 +106,8 @@ fun FbTextField(
                         .clip(Shapes.control)
                         .background(if (enabled) palette.sunken else palette.disabledSurface)
                         .border(if (focused || error != null) 1.5.dp else 1.dp, border, Shapes.control)
-                        .padding(horizontal = Space.lg, vertical = Space.md),
+                        // Single-line fields are always exactly one control tall, with or without trailing actions.
+                        .then(if (singleLine) Modifier.height(Space.control).padding(start = Space.lg, end = if (trailing != null) Space.xs else Space.lg) else Modifier.padding(horizontal = Space.lg, vertical = Space.md)),
                     verticalAlignment = if (singleLine) Alignment.CenterVertically else Alignment.Top,
                     horizontalArrangement = Arrangement.spacedBy(Space.md),
                 ) {
@@ -117,7 +121,7 @@ fun FbTextField(
             },
         )
         AnimatedVisibility(error != null || supporting != null, enter = fadeIn(Motion.fade()) + expandVertically(Motion.spatialFast()), exit = fadeOut(Motion.exit()) + shrinkVertically(Motion.spatialFast())) {
-            FbText(error ?: supporting.orEmpty(), style = Fb.type.small, color = if (error != null) palette.danger.ink else palette.textMuted)
+            FbText(error?.let { readableMessage(LocalContext.current, it) } ?: supporting.orEmpty(), style = Fb.type.small, color = if (error != null) palette.danger.ink else palette.textMuted)
         }
     }
 }

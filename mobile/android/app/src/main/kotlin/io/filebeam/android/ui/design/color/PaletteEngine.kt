@@ -394,6 +394,15 @@ internal object PaletteEngine {
 
     private fun assemble(primary: Int, gradientSeed: Int, endpoint: Int, dark: Boolean, roles: Roles, default: Boolean): FilebeamPalette {
         val fixed = Fixed(dark)
+        // Text and disabled tints are authored for purple. For any other colour they keep their
+        // lightness and take the hue of that palette's own neutrals, so no purple cast remains.
+        val text = if (default) fixed.text else {
+            val neutral = ColorMath.oklch(roles.background)
+            fixed.text.map { color ->
+                val source = ColorMath.oklch(color)
+                ColorMath.rgb(source.l, if (neutral.c < 0.002) 0.0 else source.c, neutral.h)
+            }
+        }
         val effects = effects(primary, dark, roles)
         val ink = if (dark) 0xffffff else 0x242033
         fun status(offset: Int) = StatusColors(opaque(fixed.status[offset]), opaque(fixed.status[offset + 1]), opaque(fixed.status[offset + 2]))
@@ -409,12 +418,12 @@ internal object PaletteEngine {
             controlBorderHover = opaque(roles.controlBorderHover),
             hover = opaque(roles.hover),
             active = opaque(roles.active),
-            text = opaque(fixed.text[0]),
-            textMuted = opaque(fixed.text[1]),
-            textSubtle = opaque(fixed.text[2]),
-            disabledBorder = opaque(fixed.text[3]),
-            disabledSurface = opaque(fixed.text[4]),
-            disabledText = opaque(fixed.text[5]),
+            text = opaque(text[0]),
+            textMuted = opaque(text[1]),
+            textSubtle = opaque(text[2]),
+            disabledBorder = opaque(text[3]),
+            disabledSurface = opaque(text[4]),
+            disabledText = opaque(text[5]),
             accentText = opaque(roles.accentText),
             accentSurface = opaque(roles.accentSurface),
             selectedSurface = opaque(roles.selectedSurface),

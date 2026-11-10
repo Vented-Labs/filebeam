@@ -13,6 +13,7 @@ import io.filebeam.android.platform.services.ServiceState
 import io.filebeam.android.ui.design.Appearance
 import io.filebeam.android.ui.design.ToastMessage
 import io.filebeam.android.ui.design.Tone
+import io.filebeam.android.ui.common.readableMessage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -92,7 +93,7 @@ class AppModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             app.transfers.state.collect { state ->
                 state.message?.let {
-                    toast(it, Tone.Neutral)
+                    toast(readableMessage(app, it), Tone.Neutral)
                     app.transfers.message(null)
                 }
             }
@@ -100,7 +101,7 @@ class AppModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun toast(text: String, tone: Tone = Tone.Neutral) {
-        toastState.value = ToastMessage(text, tone)
+        toastState.value = ToastMessage(if (tone == Tone.Danger) readableMessage(app, text) else text, tone)
     }
 
     fun toastDismissed(message: ToastMessage) {

@@ -712,4 +712,13 @@
     <string name="tour_open_eyebrow">Open source</string>
     <string name="tour_open_title">Yours to inspect.</string>
     <string name="tour_open_body">Filebeam is MIT licensed. Read the source, or host your own instance and point this app at it.</string>
+
+    <!-- Errors -->
+    <string name="error_session">Your session ended. Sign in again.</string>
+    <string name="error_forbidden">This account is not allowed to do that.</string>
+    <string name="error_not_found">That could not be found. It may have expired or been removed.</string>
+    <string name="error_rejected">The server did not accept that. Check what you entered and try again.</string>
+    <string name="error_rate_limited">Too many attempts. Wait a moment and try again.</string>
+    <string name="error_server">The server had a problem. Try again shortly.</string>
+    <string name="error_network">The instance could not be reached. Check your connection.</string>
 </resources>

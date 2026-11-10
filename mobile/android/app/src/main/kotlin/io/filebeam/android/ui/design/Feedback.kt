@@ -30,6 +30,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
+import io.filebeam.android.ui.common.readableMessage
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -74,6 +76,8 @@ fun StatusPill(text: String, modifier: Modifier = Modifier, tone: Tone = Tone.Ne
 @Composable
 fun Notice(text: String, modifier: Modifier = Modifier, tone: Tone = Tone.Info, @DrawableRes icon: Int? = null, action: (@Composable () -> Unit)? = null) {
     val colors = tone.colors()
+    // Failures from the transfer core are rewritten into plain sentences before they are shown.
+    val shown = if (tone == Tone.Danger) readableMessage(LocalContext.current, text) else text
     val defaultIcon = when (tone) {
         Tone.Danger, Tone.Warning -> R.drawable.ic_approved_alert
         Tone.Success -> R.drawable.ic_approved_check
@@ -91,7 +95,7 @@ fun Notice(text: String, modifier: Modifier = Modifier, tone: Tone = Tone.Info, 
         horizontalArrangement = Arrangement.spacedBy(Space.md),
     ) {
         FbIcon(icon ?: defaultIcon, tint = colors.ink, size = 20.dp)
-        FbText(text, Modifier.weight(1f), style = Fb.type.small, color = colors.ink)
+        FbText(shown, Modifier.weight(1f), style = Fb.type.small, color = colors.ink)
         action?.invoke()
     }
 }
