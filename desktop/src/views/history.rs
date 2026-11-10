@@ -22,12 +22,9 @@ use crate::{
     model::{ClientCommand, DesktopSnapshot},
     request::{Outcome, Request},
     shell::OpenAccount,
-    theme::{
-        self, Palette,
-        tokens::{geometry, radius},
-    },
+    theme::{self, Palette, tokens::geometry},
     ui::{
-        MotionExt, TextExt, Tone, button, dialog, feedback, field, format, motion, page,
+        Hugged, MotionExt, TextExt, Tone, button, dialog, feedback, field, format, motion, page,
         rail::{Segment, rail},
         row, surface, text,
     },
@@ -639,7 +636,7 @@ impl HistoryPanel {
             .min_h_0()
             .overflow_y_scroll()
             .track_scroll(&self.list_scroll)
-            .p(px(6.))
+            .hugged()
             .flex()
             .flex_col()
             .children(rows)
@@ -656,38 +653,18 @@ impl HistoryPanel {
         let selected = self.selected.as_deref() == Some(entry.id.as_str());
         let id = entry.id.clone();
         let live = matches!(entry.status.as_str(), "available" | "live" | "pending");
-        div()
+        row::slot()
             .id(SharedString::from(format!("history-entry-{}", entry.id)))
-            .w_full()
-            .flex_none()
-            .py(px(2.))
             .child(
-                div()
-                    .w_full()
-                    .h(px(64.))
-                    .flex()
-                    .items_center()
-                    .gap(px(12.))
-                    .px(px(12.))
-                    .rounded(px(radius::CONTROL + 2.))
-                    .border_1()
-                    .cursor_pointer()
-                    .when(selected, |this| {
-                        this.bg(p.selected_surface)
-                            .border_color(p.choice_border.opacity(0.55))
-                    })
-                    .when(!selected, |this| {
-                        this.border_color(gpui::transparent_black())
-                            .hover(move |style| style.bg(p.hover))
-                    })
-                    .child(row::icon_tile(
+                row::hugging(p, row::Fit::PANEL, selected)
+                    .child(row::lead_tile(
                         p,
+                        row::Fit::PANEL,
                         if entry.kind == "note" {
                             "note"
                         } else {
                             "folder"
                         },
-                        40.,
                         live,
                     ))
                     .child(

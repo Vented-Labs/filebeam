@@ -19,13 +19,10 @@ use crate::{
     model::{AccountSnapshot, ClientCommand, DesktopSnapshot, KeyCustody},
     request::{Outcome, Request},
     shell::{OpenAccount, OpenTransfers},
-    theme::{
-        self, Palette,
-        tokens::{geometry, radius},
-    },
+    theme::{self, Palette, tokens::geometry},
     ui::{
-        MotionExt, TextExt, Tone, button, dialog, feedback, field, format, motion, page, row,
-        surface, text,
+        Hugged, MotionExt, TextExt, Tone, button, dialog, feedback, field, format, motion, page,
+        row, surface, text,
     },
 };
 
@@ -631,7 +628,7 @@ impl InboxPanel {
                     .min_h_0()
                     .overflow_y_scroll()
                     .track_scroll(&self.list_scroll)
-                    .p(px(6.))
+                    .hugged()
                     .flex()
                     .flex_col()
                     .children(rows.into_iter().map(|delivery| self.row(delivery, p, cx))),
@@ -722,34 +719,14 @@ impl InboxPanel {
             .as_deref()
             .map(format::relative)
             .unwrap_or_else(|| "No longer on the server".into());
-        div()
+        row::slot()
             .id(SharedString::from(format!(
                 "inbox-delivery-{}",
                 delivery.id
             )))
-            .w_full()
-            .flex_none()
-            .py(px(2.))
             .child(
-                div()
-                    .w_full()
-                    .h(px(64.))
-                    .flex()
-                    .items_center()
-                    .gap(px(12.))
-                    .px(px(12.))
-                    .rounded(px(radius::CONTROL + 2.))
-                    .border_1()
-                    .cursor_pointer()
-                    .when(selected, |this| {
-                        this.bg(p.selected_surface)
-                            .border_color(p.choice_border.opacity(0.55))
-                    })
-                    .when(!selected, |this| {
-                        this.border_color(gpui::transparent_black())
-                            .hover(move |style| style.bg(p.hover))
-                    })
-                    .child(row::icon_tile(p, "archive", 40., true))
+                row::hugging(p, row::Fit::PANEL, selected)
+                    .child(row::lead_tile(p, row::Fit::PANEL, "archive", true))
                     .child(
                         div()
                             .flex_1()

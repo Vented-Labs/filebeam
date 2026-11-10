@@ -9,9 +9,9 @@ use gpui_component::input::Textarea;
 use super::{AccountPanel, Area, Copied, REPORT_CATEGORIES};
 use crate::{
     model::{ClientCommand, DesktopSnapshot},
-    theme::{Palette, tokens::radius},
+    theme::Palette,
     ui::{
-        TextExt, Tone, brand, button, dialog, feedback,
+        Hugged, TextExt, Tone, brand, button, dialog, feedback,
         field::{self, copy_field},
         format, row, surface, text,
     },
@@ -139,7 +139,7 @@ impl AccountPanel {
             )
             .child(
                 surface::panel(p)
-                    .p(px(8.))
+                    .hugged()
                     .flex()
                     .flex_col()
                     .child(
@@ -149,15 +149,18 @@ impl AccountPanel {
                                 cx.listener(|this, _, window, cx| this.open_report(window, cx)),
                             ),
                     )
-                    .child(div().px(px(12.)).child(surface::hairline(p)))
+                    .child(
+                        div()
+                            .px(px(row::HUGGED_CONTENT_INSET))
+                            .child(surface::hairline(p)),
+                    )
                     .child(
                         div()
                             .flex()
                             .items_center()
                             .gap(px(12.))
-                            .px(px(12.))
+                            .px(px(row::HUGGED_CONTENT_INSET))
                             .py(px(10.))
-                            .rounded(px(radius::CONTROL))
                             .child(
                                 div()
                                     .flex_1()

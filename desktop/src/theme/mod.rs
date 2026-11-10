@@ -273,7 +273,12 @@ pub fn apply(appearance: &Appearance, cx: &mut App) {
     // both projections in step avoids falling back to transparent/black defaults.
     theme.tokens = ThemeTokens::from(&theme.colors);
     apply_editor_colors(theme, &tokens.editor);
-    theme.radius = px(tokens::radius::CONTROL);
+    // The component library draws menu rows at `SMALL`, `INSET` inside the menu, and
+    // rounds the menu itself by this value; this is the radius that keeps them concentric.
+    theme.radius = px(tokens::radius::around(
+        tokens::radius::SMALL,
+        tokens::space::INSET,
+    ));
     theme.radius_lg = px(tokens::radius::CARD);
     // Operational errors remain scannable rather than obscuring the workspace.
     theme.notification.max_items = 3;

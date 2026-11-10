@@ -27,7 +27,7 @@ use crate::{
         tokens::{geometry, radius},
     },
     ui::{
-        MotionExt, TextExt, Tone,
+        Hugged, MotionExt, TextExt, Tone,
         brand::emblem,
         button,
         feedback::{self, spinner},
@@ -42,6 +42,9 @@ use crate::{
 
 /// Below this content width the options move under the composer.
 const STACK_BELOW: f32 = 940.;
+/// Between the note editor's outer edge and the language select in its header.
+const NOTE_HEADER_GAP: f32 = 10.;
+const NOTE_SELECT_HEIGHT: f32 = 30.;
 
 impl Render for SendPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -366,46 +369,42 @@ impl SendPanel {
                         .map_or_else(|| "Size unavailable".to_owned(), format::bytes),
                     None => "Reading…".to_owned(),
                 };
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(12.))
-                    .px(px(10.))
-                    .py(px(8.))
-                    .rounded(px(radius::CONTROL))
-                    .hover(move |style| style.bg(p.hover))
-                    .child(row::icon_tile(
-                        p,
-                        if directory {
-                            "folder"
-                        } else {
-                            format::file_icon(&name)
-                        },
-                        36.,
-                        true,
-                    ))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .gap(px(1.))
-                            .child(
-                                text::body_strong(name.clone())
-                                    .single_line()
-                                    .text_color(p.text),
-                            )
-                            .child(text::caption(caption).text_color(p.text_muted)),
-                    )
-                    .child(
-                        button::icon_button(("remove-path", index), "x", "Remove")
-                            .small()
-                            .accessibility_label(format!("Remove {name}"))
-                            .on_click(
-                                cx.listener(move |this, _, _, cx| this.remove_path(index, cx)),
-                            ),
-                    )
+                row::slot().child(
+                    row::hugging_frame(row::Fit::CARD)
+                        .hover(move |style| style.bg(p.hover))
+                        .child(row::lead_tile(
+                            p,
+                            row::Fit::CARD,
+                            if directory {
+                                "folder"
+                            } else {
+                                format::file_icon(&name)
+                            },
+                            true,
+                        ))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .flex()
+                                .flex_col()
+                                .gap(px(1.))
+                                .child(
+                                    text::body_strong(name.clone())
+                                        .single_line()
+                                        .text_color(p.text),
+                                )
+                                .child(text::caption(caption).text_color(p.text_muted)),
+                        )
+                        .child(
+                            button::icon_button(("remove-path", index), "x", "Remove")
+                                .small()
+                                .accessibility_label(format!("Remove {name}"))
+                                .on_click(
+                                    cx.listener(move |this, _, _, cx| this.remove_path(index, cx)),
+                                ),
+                        ),
+                )
             });
             zone.bg(p.sunken)
                 .border_color(p.border)
@@ -459,8 +458,7 @@ impl SendPanel {
                         .id("send-file-list")
                         .max_h(px(248.))
                         .overflow_y_scrollbar()
-                        .px(px(6.))
-                        .pb(px(8.))
+                        .hugged()
                         .flex()
                         .flex_col()
                         .children(rows),
@@ -677,20 +675,22 @@ impl SendPanel {
 
     fn note_view(&mut self, p: Palette, cx: &mut Context<Self>) -> AnyElement {
         let characters = self.note_editor.read(cx).value().chars().count();
+        // The language select sits `NOTE_HEADER_GAP` inside the editor's top corner.
         surface::well(p)
+            .rounded(px(radius::CARD))
             .h(px(388.))
             .flex()
             .flex_col()
             .overflow_hidden()
             .child(
                 div()
-                    .h(px(50.))
+                    .h(px(NOTE_SELECT_HEIGHT + 2. * (NOTE_HEADER_GAP - 1.)))
                     .flex_none()
                     .flex()
                     .items_center()
                     .gap(px(8.))
                     .pl(px(14.))
-                    .pr(px(8.))
+                    .pr(px(NOTE_HEADER_GAP - 1.))
                     .bg(p.surface)
                     .border_b_1()
                     .border_color(p.line_soft)
@@ -710,13 +710,18 @@ impl SendPanel {
                         ),
                     )
                     .child(
-                        div().w(px(140.)).h(px(30.)).flex_none().child(
-                            Select::new(&self.language)
-                                .id("note-language")
-                                .with_size(Size::Medium)
-                                .h(px(30.))
-                                .bg(p.sunken),
-                        ),
+                        div()
+                            .w(px(140.))
+                            .h(px(NOTE_SELECT_HEIGHT))
+                            .flex_none()
+                            .child(
+                                Select::new(&self.language)
+                                    .id("note-language")
+                                    .with_size(Size::Medium)
+                                    .h(px(NOTE_SELECT_HEIGHT))
+                                    .rounded(px(radius::nested(radius::CARD, NOTE_HEADER_GAP)))
+                                    .bg(p.sunken),
+                            ),
                     ),
             )
             .child(

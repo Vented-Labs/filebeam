@@ -12,9 +12,9 @@ use crate::{
     model::{ClientCommand, DesktopSnapshot},
     theme::{Palette, tokens::radius},
     ui::{
-        TextExt, Tone, brand, button, dialog, feedback, field,
+        Hugged, TextExt, Tone, brand, button, dialog, feedback, field,
         rail::{Segment, rail},
-        surface, text,
+        row, surface, text,
     },
 };
 
@@ -224,10 +224,10 @@ impl AccountPanel {
                         .gap(px(8.))
                         .child(section("Requests", requests.len()))
                         .child(
-                            surface::panel(p).p(px(6.)).flex().flex_col().children(
-                                requests
-                                    .into_iter()
-                                    .map(|contact| self.request_row(contact, p, cx)),
+                            surface::panel(p).hugged().flex().flex_col().children(
+                                requests.into_iter().map(|contact| {
+                                    row::slot().child(self.request_row(contact, p, cx))
+                                }),
                             ),
                         ),
                 )
@@ -240,7 +240,7 @@ impl AccountPanel {
                         .gap(px(8.))
                         .child(section("Friends", friends.len()))
                         .child(
-                            surface::panel(p).p(px(6.)).flex().flex_col().children(
+                            surface::panel(p).hugged().flex().flex_col().children(
                                 friends
                                     .into_iter()
                                     .map(|contact| self.friend_row(contact, p, cx)),
@@ -255,25 +255,29 @@ impl AccountPanel {
                         .flex_col()
                         .gap(px(8.))
                         .child(section("Blocked", blocked.len()))
-                        .child(surface::panel(p).p(px(6.)).flex().flex_col().children(
+                        .child(surface::panel(p).hugged().flex().flex_col().children(
                             blocked.into_iter().map(|person| {
                                 let username = person.username.clone();
-                                self.person(p, &person.name, &person.username, None).child(
-                                    button::secondary(SharedString::from(format!(
-                                        "contact-unblock-{}",
-                                        person.username
-                                    )))
-                                    .small()
-                                    .label("Unblock")
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.contact_action(
-                                            username.clone(),
-                                            "unblock",
-                                            None,
-                                            None,
-                                            cx,
-                                        )
-                                    })),
+                                row::slot().child(
+                                    self.person(p, &person.name, &person.username, None).child(
+                                        button::secondary(SharedString::from(format!(
+                                            "contact-unblock-{}",
+                                            person.username
+                                        )))
+                                        .small()
+                                        .label("Unblock")
+                                        .on_click(
+                                            cx.listener(move |this, _, _, cx| {
+                                                this.contact_action(
+                                                    username.clone(),
+                                                    "unblock",
+                                                    None,
+                                                    None,
+                                                    cx,
+                                                )
+                                            }),
+                                        ),
+                                    ),
                                 )
                             }),
                         )),
@@ -311,14 +315,8 @@ impl AccountPanel {
             Some(caption) => format!("@{username} · {caption}"),
             None => format!("@{username}"),
         };
-        div()
-            .w_full()
-            .flex()
-            .items_center()
-            .gap(px(12.))
-            .px(px(12.))
-            .py(px(10.))
-            .child(brand::avatar(p, &display, 36.))
+        row::hugging_frame(row::Fit::PANEL)
+            .child(brand::avatar(p, &display, row::Fit::PANEL.lead()))
             .child(
                 div()
                     .flex_1()
@@ -381,7 +379,6 @@ impl AccountPanel {
         let header = self
             .person(p, &contact.name, &contact.username, Some(summary(&contact)))
             .id(SharedString::from(format!("contact-{}", contact.username)))
-            .rounded(px(radius::CONTROL))
             .cursor_pointer()
             .hover(move |style| style.bg(p.hover))
             .child(
@@ -437,63 +434,73 @@ impl AccountPanel {
             .w_full()
             .flex()
             .flex_col()
-            .child(header)
+            .child(row::slot().child(header))
             .when(open, |this| {
                 this.child(
-                    div()
-                        .mx(px(12.))
-                        .mb(px(10.))
-                        .p(px(14.))
-                        .flex()
-                        .flex_col()
-                        .gap(px(12.))
-                        .rounded(px(radius::CONTROL))
-                        .bg(p.sunken)
-                        .border_1()
-                        .border_color(p.border)
-                        .child(choice(
-                            "contact-can-send",
-                            "Can send to me",
-                            ["Default", "Allow", "Deny"],
-                            contact.can_send,
-                            |value, contact| (value, contact.auto_download),
-                        ))
-                        .child(choice(
-                            "contact-auto",
-                            "Fetch automatically",
-                            ["Default", "On", "Off"],
-                            contact.auto_download,
-                            |value, contact| (contact.can_send, value),
-                        ))
-                        .child(surface::hairline(p))
-                        .child(
-                            div()
-                                .flex()
-                                .gap(px(4.))
-                                .child(
-                                    button::danger(SharedString::from(format!(
-                                        "contact-remove-{}",
-                                        contact.username
-                                    )))
-                                    .small()
-                                    .label("Remove friend")
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.confirm_contact(remove.clone(), "remove", window, cx)
-                                    })),
-                                )
-                                .child(
-                                    button::danger(SharedString::from(format!(
-                                        "contact-block-{}",
-                                        contact.username
-                                    )))
-                                    .small()
-                                    .icon("slash")
-                                    .label("Block")
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.confirm_contact(block.clone(), "block", window, cx)
-                                    })),
-                                ),
-                        ),
+                    row::slot().child(
+                        surface::hugging_well(p, radius::PANEL)
+                            .p(px(14.))
+                            .flex()
+                            .flex_col()
+                            .gap(px(12.))
+                            .child(choice(
+                                "contact-can-send",
+                                "Can send to me",
+                                ["Default", "Allow", "Deny"],
+                                contact.can_send,
+                                |value, contact| (value, contact.auto_download),
+                            ))
+                            .child(choice(
+                                "contact-auto",
+                                "Fetch automatically",
+                                ["Default", "On", "Off"],
+                                contact.auto_download,
+                                |value, contact| (contact.can_send, value),
+                            ))
+                            .child(surface::hairline(p))
+                            .child(
+                                div()
+                                    .flex()
+                                    .gap(px(4.))
+                                    .child(
+                                        button::danger(SharedString::from(format!(
+                                            "contact-remove-{}",
+                                            contact.username
+                                        )))
+                                        .small()
+                                        .label("Remove friend")
+                                        .on_click(
+                                            cx.listener(move |this, _, window, cx| {
+                                                this.confirm_contact(
+                                                    remove.clone(),
+                                                    "remove",
+                                                    window,
+                                                    cx,
+                                                )
+                                            }),
+                                        ),
+                                    )
+                                    .child(
+                                        button::danger(SharedString::from(format!(
+                                            "contact-block-{}",
+                                            contact.username
+                                        )))
+                                        .small()
+                                        .icon("slash")
+                                        .label("Block")
+                                        .on_click(
+                                            cx.listener(move |this, _, window, cx| {
+                                                this.confirm_contact(
+                                                    block.clone(),
+                                                    "block",
+                                                    window,
+                                                    cx,
+                                                )
+                                            }),
+                                        ),
+                                    ),
+                            ),
+                    ),
                 )
             })
     }

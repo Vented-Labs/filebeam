@@ -14,7 +14,7 @@ use crate::{
     assets::icon,
     theme::{
         self,
-        tokens::{radius, text as size},
+        tokens::{radius, space, text as size},
     },
     ui::motion,
 };
@@ -110,7 +110,7 @@ impl Rail {
 
 impl RenderOnce for Rail {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        const INSET: f32 = 4.;
+        const INSET: f32 = space::INSET;
         let p = theme::palette(cx);
         let count = self.segments.len().max(1);
         let tall = self
@@ -219,7 +219,7 @@ impl RenderOnce for Rail {
             .relative()
             .h(px(height))
             .flex_none()
-            .rounded(px(radius::CONTROL + INSET))
+            .rounded(px(radius::around(radius::CONTROL, INSET)))
             .bg(p.sunken)
             .border_1()
             .border_color(p.border)

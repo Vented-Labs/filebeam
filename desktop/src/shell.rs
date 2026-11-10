@@ -12,7 +12,7 @@ use gpui::{
 };
 use gpui_base::Button as BaseButton;
 use gpui_component::{
-    Root, TitleBar, WindowExt,
+    ActiveTheme as _, Root, TitleBar, WindowExt,
     command::{Command, CommandGroup, CommandItem, CommandState},
     tooltip::Tooltip,
 };
@@ -29,7 +29,7 @@ use crate::{
     },
     theme::{
         self, Palette,
-        tokens::{geometry, radius, text as size},
+        tokens::{geometry, radius, space, text as size},
     },
     ui::{
         self, MotionExt, TextExt, brand, dialog, feedback, format, motion, progress::progress, text,
@@ -656,9 +656,12 @@ impl DesktopShell {
         window.open_dialog(cx, move |dialog, _, cx| {
             let p = theme::palette(cx);
             let on_confirm = shell.clone();
+            // The component library rounds each result by the theme radius and sets it
+            // `INSET` inside the list; this padding puts that row concentric with the panel.
+            let row_radius = f32::from(cx.theme().radius);
             dialog
                 .w(px(520.))
-                .p(px(8.))
+                .p(px(radius::PANEL - row_radius - space::INSET - 1.))
                 .bg(p.raised)
                 .border_color(p.border)
                 .rounded(px(radius::PANEL))
@@ -996,6 +999,7 @@ impl DesktopShell {
 }
 
 const NAV_HEIGHT: f32 = 40.;
+const SEARCH_HEIGHT: f32 = 30.;
 const NAV_GAP: f32 = 4.;
 
 impl Render for DesktopShell {
@@ -1079,12 +1083,13 @@ impl Render for DesktopShell {
                                 .id("commands")
                                 .aria_label("Search pages")
                                 .w(px(if compact { 190. } else { 260. }))
-                                .h(px(30.))
+                                .h(px(SEARCH_HEIGHT))
                                 .mr(px(12.))
                                 .flex()
                                 .items_center()
                                 .gap(px(8.))
-                                .px(px(10.))
+                                .pl(px(10.))
+                                .pr(px(space::INSET - 1.))
                                 .rounded(px(radius::SMALL))
                                 .bg(p.sunken)
                                 .border_1()
@@ -1100,9 +1105,11 @@ impl Render for DesktopShell {
                                 )
                                 .child(
                                     div()
+                                        .h(px(SEARCH_HEIGHT - 2. * space::INSET))
+                                        .flex()
+                                        .items_center()
                                         .px(px(6.))
-                                        .py(px(2.))
-                                        .rounded(px(5.))
+                                        .rounded(px(radius::nested(radius::SMALL, space::INSET)))
                                         .bg(p.hover)
                                         .child(
                                             text::caption(format!("{} K", modifier_label()))

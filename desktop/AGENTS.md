@@ -9,6 +9,10 @@
 - Build screens from the kit in `src/ui/` and the palette roles in `src/theme/`.
   Read service state through `Live`, and follow a command to its outcome with
   `request::Request` so a failure is shown where it happened.
+- Keep nested corners concentric: a shape that hugs a rounded container takes
+  the container's radius less the gap between their edges. Derive it with
+  `radius::nested` or `radius::around`, and build list rows with `row::hugging`
+  inside a `Hugged` container, rather than pairing two radii by eye.
 - Confirm with `ui::dialog::prompt`. Host a view under test with
   `testing::rooted`, which provides the window root dialogs need.
 - Use the existing theme, semantic colors, Filebeam mark, and approved Iconsax

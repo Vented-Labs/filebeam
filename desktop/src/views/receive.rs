@@ -32,13 +32,16 @@ use crate::{
         tokens::{geometry, radius},
     },
     ui::{
-        MotionExt, TextExt, Tone, button, dialog,
+        Hugged, MotionExt, TextExt, Tone, button, dialog,
         feedback::{self, spinner},
         field, format, motion, page,
         progress::{percent_label, progress},
         row, surface, text,
     },
 };
+
+/// Between a note block's outer edge and the buttons in its header.
+const NOTE_HEADER_GAP: f32 = 8.;
 
 /// The request to open a link, until the service answers it.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -762,46 +765,42 @@ impl ReceivePanel {
             .map(|item| {
                 let checked = selection.contains(&item.id);
                 let (operation, item_id) = (operation.clone(), item.id.clone());
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(12.))
-                    .px(px(10.))
-                    .py(px(8.))
-                    .rounded(px(radius::CONTROL))
-                    .hover(move |style| style.bg(p.hover))
-                    .child(
-                        field::check(
-                            SharedString::from(format!("receive-item-{operation}-{}", item.id)),
-                            format!("Download {}", item.name),
-                            checked,
+                row::slot().child(
+                    row::hugging_frame(row::Fit::PANEL_DENSE)
+                        .hover(move |style| style.bg(p.hover))
+                        .child(
+                            field::check(
+                                SharedString::from(format!("receive-item-{operation}-{}", item.id)),
+                                format!("Download {}", item.name),
+                                checked,
+                            )
+                            .on_change({
+                                let panel = cx.entity().downgrade();
+                                move |checked, _, cx| {
+                                    let _ = panel.update(cx, |panel, cx| {
+                                        panel.toggle_item(&operation, &item_id, checked, cx);
+                                    });
+                                }
+                            }),
                         )
-                        .on_change({
-                            let panel = cx.entity().downgrade();
-                            move |checked, _, cx| {
-                                let _ = panel.update(cx, |panel, cx| {
-                                    panel.toggle_item(&operation, &item_id, checked, cx);
-                                });
-                            }
-                        }),
-                    )
-                    .child(row::icon_tile(
-                        p,
-                        format::file_icon(&item.name),
-                        32.,
-                        checked,
-                    ))
-                    .child(
-                        text::body_strong(item.name.clone())
-                            .flex_1()
-                            .single_line()
-                            .text_color(if checked { p.text } else { p.text_muted }),
-                    )
-                    .child(
-                        text::small(format::bytes(item.size))
-                            .flex_none()
-                            .text_color(p.text_muted),
-                    )
+                        .child(row::lead_tile(
+                            p,
+                            row::Fit::PANEL_DENSE,
+                            format::file_icon(&item.name),
+                            checked,
+                        ))
+                        .child(
+                            text::body_strong(item.name.clone())
+                                .flex_1()
+                                .single_line()
+                                .text_color(if checked { p.text } else { p.text_muted }),
+                        )
+                        .child(
+                            text::small(format::bytes(item.size))
+                                .flex_none()
+                                .text_color(p.text_muted),
+                        ),
+                )
             })
             .collect::<Vec<_>>();
 
@@ -869,7 +868,7 @@ impl ReceivePanel {
                     .id(SharedString::from(format!("receive-items-{operation}")))
                     .max_h(px(280.))
                     .overflow_y_scrollbar()
-                    .px(px(10.))
+                    .hugged()
                     .flex()
                     .flex_col()
                     .children(rows),
@@ -984,7 +983,9 @@ impl ReceivePanel {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let (copy, save) = (body.clone(), body.clone());
+        // The header's buttons sit `NOTE_HEADER_GAP` inside the block's top corner.
         surface::well(p)
+            .rounded(px(radius::around(radius::CONTROL, NOTE_HEADER_GAP)))
             .flex()
             .flex_col()
             .child(
@@ -993,8 +994,8 @@ impl ReceivePanel {
                     .items_center()
                     .gap(px(8.))
                     .pl(px(14.))
-                    .pr(px(6.))
-                    .py(px(6.))
+                    .pr(px(NOTE_HEADER_GAP - 1.))
+                    .py(px(NOTE_HEADER_GAP - 1.))
                     .border_b_1()
                     .border_color(p.line_soft)
                     .child(

@@ -15,7 +15,7 @@ use crate::{
     shell::OpenAccount,
     theme::{Palette, tokens::radius},
     ui::{
-        TextExt, Tone, button, dialog, feedback,
+        Hugged, TextExt, Tone, button, dialog, feedback,
         field::{self, copy_field},
         row, surface, text,
     },
@@ -461,7 +461,7 @@ impl SettingsPanel {
                             ),
                         )
                         .child(
-                            surface::panel(p).p(px(6.)).flex().flex_col().children(
+                            surface::panel(p).hugged().flex().flex_col().children(
                                 others
                                     .into_iter()
                                     .map(|device| self.device_row(device, p, cx)),
@@ -649,21 +649,12 @@ impl SettingsPanel {
         let open = self.expanded.as_deref() == Some(device.id.as_str());
         let (label, tone) = trust(device.trust);
         let toggle = device.id.clone();
-        let header = div()
+        let header = row::hugging(p, row::Fit::PANEL, false)
             .id(SharedString::from(format!("device-{}", device.id)))
-            .w_full()
-            .flex()
-            .items_center()
-            .gap(px(12.))
-            .px(px(12.))
-            .py(px(10.))
-            .rounded(px(radius::CONTROL))
-            .cursor_pointer()
-            .hover(move |style| style.bg(p.hover))
-            .child(row::icon_tile(
+            .child(row::lead_tile(
                 p,
+                row::Fit::PANEL,
                 platform_icon(&device.platform),
-                36.,
                 false,
             ))
             .child(
@@ -712,27 +703,62 @@ impl SettingsPanel {
             .w_full()
             .flex()
             .flex_col()
-            .child(header)
+            .child(row::slot().child(header))
             .when(open, |this| {
                 this.child(
-                    div()
-                        .mx(px(12.))
-                        .mb(px(10.))
-                        .p(px(14.))
-                        .flex()
-                        .flex_col()
-                        .gap(px(12.))
-                        .rounded(px(radius::CONTROL))
-                        .bg(p.sunken)
-                        .border_1()
-                        .border_color(p.border)
-                        .when(device.trust == DeviceTrust::Registered, |this| {
-                            this.child(
+                    row::slot().child(
+                        surface::hugging_well(p, radius::PANEL)
+                            .p(px(14.))
+                            .flex()
+                            .flex_col()
+                            .gap(px(12.))
+                            .when(device.trust == DeviceTrust::Registered, |this| {
+                                this.child(
+                                    div()
+                                        .flex()
+                                        .flex_col()
+                                        .gap(px(8.))
+                                        .child(field::label(p, "Verify this device", false))
+                                        .child(
+                                            div()
+                                                .flex()
+                                                .items_center()
+                                                .gap(px(8.))
+                                                .child(
+                                                    div().flex_1().min_w_0().child(
+                                                        field::input(p, &self.verify_fingerprint)
+                                                            .id("verify-fingerprint"),
+                                                    ),
+                                                )
+                                                .child(
+                                                    button::primary("confirm-device-peer")
+                                                        .small()
+                                                        .label("Verify")
+                                                        .loading(verifying)
+                                                        .on_click(cx.listener(
+                                                            move |this, _, _, cx| {
+                                                                this.verify_device(
+                                                                    verify_id.clone(),
+                                                                    cx,
+                                                                )
+                                                            },
+                                                        )),
+                                                ),
+                                        )
+                                        .child(field::hint(
+                                            p,
+                                            "Read the fingerprint from that device's own screen. \
+                                         Until it matches, nothing is sent to it.",
+                                            Tone::Neutral,
+                                        )),
+                                )
+                            })
+                            .child(
                                 div()
                                     .flex()
                                     .flex_col()
                                     .gap(px(8.))
-                                    .child(field::label(p, "Verify this device", false))
+                                    .child(field::label(p, "Rename", false))
                                     .child(
                                         div()
                                             .flex()
@@ -740,74 +766,40 @@ impl SettingsPanel {
                                             .gap(px(8.))
                                             .child(
                                                 div().flex_1().min_w_0().child(
-                                                    field::input(p, &self.verify_fingerprint)
-                                                        .id("verify-fingerprint"),
+                                                    field::input(p, &self.rename_name)
+                                                        .id("rename-device-name"),
                                                 ),
                                             )
                                             .child(
-                                                button::primary("confirm-device-peer")
+                                                button::secondary("rename-device")
                                                     .small()
-                                                    .label("Verify")
-                                                    .loading(verifying)
+                                                    .label("Rename")
+                                                    .loading(renaming)
                                                     .on_click(cx.listener(
                                                         move |this, _, _, cx| {
-                                                            this.verify_device(
-                                                                verify_id.clone(),
+                                                            this.rename_device(
+                                                                rename_id.clone(),
                                                                 cx,
                                                             )
                                                         },
                                                     )),
                                             ),
-                                    )
-                                    .child(field::hint(
-                                        p,
-                                        "Read the fingerprint from that device's own screen. \
-                                         Until it matches, nothing is sent to it.",
-                                        Tone::Neutral,
-                                    )),
+                                    ),
                             )
-                        })
-                        .child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .gap(px(8.))
-                                .child(field::label(p, "Rename", false))
-                                .child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .gap(px(8.))
-                                        .child(
-                                            div().flex_1().min_w_0().child(
-                                                field::input(p, &self.rename_name)
-                                                    .id("rename-device-name"),
-                                            ),
-                                        )
-                                        .child(
-                                            button::secondary("rename-device")
-                                                .small()
-                                                .label("Rename")
-                                                .loading(renaming)
-                                                .on_click(cx.listener(move |this, _, _, cx| {
-                                                    this.rename_device(rename_id.clone(), cx)
-                                                })),
-                                        ),
-                                ),
-                        )
-                        .when(device.trust != DeviceTrust::Revoked, |this| {
-                            this.child(surface::hairline(p)).child(
-                                div().flex().child(
-                                    button::danger("revoke-device")
-                                        .small()
-                                        .icon("slash")
-                                        .label("Revoke this device…")
-                                        .on_click(cx.listener(move |this, _, window, cx| {
-                                            this.confirm_revoke(revoked.clone(), window, cx)
-                                        })),
-                                ),
-                            )
-                        }),
+                            .when(device.trust != DeviceTrust::Revoked, |this| {
+                                this.child(surface::hairline(p)).child(
+                                    div().flex().child(
+                                        button::danger("revoke-device")
+                                            .small()
+                                            .icon("slash")
+                                            .label("Revoke this device…")
+                                            .on_click(cx.listener(move |this, _, window, cx| {
+                                                this.confirm_revoke(revoked.clone(), window, cx)
+                                            })),
+                                    ),
+                                )
+                            }),
+                    ),
                 )
             })
     }

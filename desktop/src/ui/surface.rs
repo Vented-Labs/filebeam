@@ -4,7 +4,10 @@ use gpui::{
     Background, BoxShadow, Div, Hsla, Styled, div, linear_color_stop, linear_gradient, point, px,
 };
 
-use crate::theme::{Palette, tokens::radius};
+use crate::theme::{
+    Palette,
+    tokens::{radius, space},
+};
 
 fn drop(color: Hsla, y: f32, blur: f32, spread: f32) -> BoxShadow {
     BoxShadow {
@@ -117,6 +120,15 @@ pub fn well(p: Palette) -> Div {
         .border_1()
         .border_color(p.border)
         .rounded(px(radius::CONTROL))
+}
+
+/// A recessed well that hugs a container of radius `outer`, for what a row opens into.
+pub fn hugging_well(p: Palette, outer: f32) -> Div {
+    div()
+        .bg(p.sunken)
+        .border_1()
+        .border_color(p.border)
+        .rounded(px(radius::nested(outer, space::HUG)))
 }
 
 /// A one-pixel separator in the palette's soft line colour.

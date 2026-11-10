@@ -17,4 +17,5 @@ pub mod text;
 
 pub use feedback::Tone;
 pub use motion::MotionExt;
+pub use row::Hugged;
 pub use text::TextExt;

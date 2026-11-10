@@ -17,7 +17,7 @@ use gpui_component::tooltip::Tooltip;
 use crate::{
     theme::{
         self, Palette,
-        tokens::{geometry, radius, text},
+        tokens::{geometry, radius, space, text},
     },
     ui::{feedback::spinner, surface},
 };
@@ -84,6 +84,8 @@ pub struct Action {
     trailing_icon: Option<&'static str>,
     kind: Kind,
     scale: Scale,
+    height: Option<f32>,
+    radius: f32,
     disabled: bool,
     loading: bool,
     fill: bool,
@@ -101,6 +103,8 @@ impl Action {
             trailing_icon: None,
             kind,
             scale: Scale::Medium,
+            height: None,
+            radius: radius::CONTROL,
             disabled: false,
             loading: false,
             fill: false,
@@ -133,6 +137,15 @@ impl Action {
 
     pub fn large(mut self) -> Self {
         self.scale = Scale::Large;
+        self
+    }
+
+    /// Fits the button inside a control of the given height and radius, `space::INSET`
+    /// from its edge, so the two share a corner centre.
+    pub fn inset(mut self, outer_height: f32, outer_radius: f32) -> Self {
+        self.scale = Scale::Small;
+        self.height = Some(outer_height - 2. * space::INSET);
+        self.radius = radius::nested(outer_radius, space::INSET);
         self
     }
 
@@ -279,18 +292,19 @@ impl RenderOnce for Action {
             .or_else(|| self.label.clone())
             .or_else(|| self.tooltip.clone());
 
+        let height = self.height.unwrap_or_else(|| self.scale.height());
         let mut button = BaseButton::new(self.id)
             .disabled(inert)
-            .h(px(self.scale.height()))
+            .h(px(height))
             .flex_none()
             .gap(px(8.))
-            .rounded(px(radius::CONTROL))
+            .rounded(px(self.radius))
             .border_1()
             .text_size(px(self.scale.text()))
             .font_weight(FontWeight::SEMIBOLD)
             .line_height(relative(1.))
             .text_color(ink)
-            .when(icon_only, |this| this.w(px(self.scale.height())))
+            .when(icon_only, |this| this.w(px(height)))
             .when(!icon_only, |this| this.px(px(self.scale.padding())))
             .when(self.fill, |this| this.w_full().flex_1());
 
@@ -304,7 +318,10 @@ impl RenderOnce for Action {
             (Kind::Primary, false) => button
                 .bg(surface::action_fill(p))
                 .border_color(look.border)
-                .shadow(surface::shadow_action(p)),
+                // Set inside another control, the glow would spill over its edge.
+                .when(self.height.is_none(), |this| {
+                    this.shadow(surface::shadow_action(p))
+                }),
             (Kind::Secondary, false) => button.bg(p.surface).border_color(look.border),
             (Kind::Tonal, false) => button.bg(p.accent_surface).border_color(look.border),
             (Kind::Destructive, false) => button.bg(p.danger.surface).border_color(look.border),

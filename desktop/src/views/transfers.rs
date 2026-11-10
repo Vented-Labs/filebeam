@@ -24,12 +24,9 @@ use crate::{
         ClientCommand, DesktopSnapshot, JobSnapshot, TransferDirection, TransferState,
         VerifiedResult,
     },
-    theme::{
-        self, Palette,
-        tokens::{geometry, radius},
-    },
+    theme::{self, Palette, tokens::geometry},
     ui::{
-        MotionExt, TextExt, Tone, button, dialog, feedback,
+        Hugged, MotionExt, TextExt, Tone, button, dialog, feedback,
         field::{self, copy_field},
         format, motion, page,
         progress::{percent_label, progress},
@@ -37,7 +34,7 @@ use crate::{
     },
 };
 
-const ROW_HEIGHT: f32 = 68.;
+const ROW_HEIGHT: f32 = row::Fit::PANEL.slot_height();
 const DETAIL_WIDTH: f32 = 372.;
 const DETAIL_WIDTH_COMPACT: f32 = 316.;
 
@@ -572,7 +569,7 @@ impl Render for TransfersPanel {
                         },
                     )
                     .size_full()
-                    .p(px(6.))
+                    .hugged()
                     .track_scroll(&self.scroll_handle),
                 )
                 .vertical_scrollbar(&self.scroll_handle)
@@ -682,33 +679,15 @@ impl TransfersPanel {
         let menu_id = job.id.clone();
         let meta = format!("{} · {}", direction_label(&job), transferred(&job));
 
-        div()
+        row::slot()
             .id(SharedString::from(format!("transfer-{}", job.id)))
-            .w_full()
             .h(px(ROW_HEIGHT))
-            .py(px(2.))
             .child(
-                div()
-                    .size_full()
-                    .flex()
-                    .items_center()
-                    .gap(px(12.))
-                    .px(px(12.))
-                    .rounded(px(radius::CONTROL + 2.))
-                    .border_1()
-                    .cursor_pointer()
-                    .when(selected, |this| {
-                        this.bg(p.selected_surface)
-                            .border_color(p.choice_border.opacity(0.55))
-                    })
-                    .when(!selected, |this| {
-                        this.border_color(gpui::transparent_black())
-                            .hover(move |style| style.bg(p.hover))
-                    })
-                    .child(row::icon_tile(
+                row::hugging(p, row::Fit::PANEL, selected)
+                    .child(row::lead_tile(
                         p,
+                        row::Fit::PANEL,
                         tile_icon(&job),
-                        40.,
                         job.state != TransferState::Failed,
                     ))
                     .child(

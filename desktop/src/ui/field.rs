@@ -19,7 +19,7 @@ use crate::{
     assets::icon,
     theme::{
         self, Palette,
-        tokens::{geometry, radius, text as size},
+        tokens::{geometry, radius, space, text as size},
     },
     ui::{
         button,
@@ -34,6 +34,7 @@ pub fn input(p: Palette, state: &Entity<InputState>) -> Input {
     Input::new(state)
         .with_size(Size::Large)
         .h(px(geometry::CONTROL_HEIGHT))
+        .rounded(px(radius::CONTROL))
         .bg(p.sunken)
 }
 
@@ -51,6 +52,7 @@ where
     Select::new(state)
         .with_size(Size::Large)
         .h(px(geometry::CONTROL_HEIGHT))
+        .rounded(px(radius::CONTROL))
         .bg(p.sunken)
 }
 
@@ -176,7 +178,7 @@ impl RenderOnce for CopyField {
         } else {
             button::secondary(self.id)
         }
-        .small()
+        .inset(geometry::CONTROL_HEIGHT_LARGE, radius::CONTROL)
         .icon(if self.copied { "check" } else { "copy" })
         .label(label)
         .when_some(handler, |this, handler| {
@@ -190,7 +192,8 @@ impl RenderOnce for CopyField {
             .items_center()
             .gap(px(10.))
             .pl(px(12.))
-            .pr(px(6.))
+            // The border is the first pixel of the inset the button is sized for.
+            .pr(px(space::INSET - 1.))
             .rounded(px(radius::CONTROL))
             .bg(p.sunken)
             .border_1()

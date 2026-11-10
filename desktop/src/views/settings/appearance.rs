@@ -11,7 +11,11 @@ use gpui_component::tooltip::Tooltip;
 use super::{Area, SettingsPanel};
 use crate::{
     assets::icon,
-    theme::{self, ColorSource, Palette, color, engine::Preset, tokens::radius},
+    theme::{
+        self, ColorSource, Palette, color,
+        engine::Preset,
+        tokens::{radius, space},
+    },
     ui::{Tone, button, field, row, surface, text},
 };
 
@@ -24,6 +28,10 @@ const THEMES: [(ConfigTheme, &str, &str); 3] = [
 fn swatch(rgb: color::Rgb) -> Hsla {
     gpui::rgb(rgb).into()
 }
+
+/// A theme card hugs its panel, and its preview sits this far inside the card.
+const THEME_CARD: f32 = radius::nested(radius::PANEL, space::HUG);
+const THEME_CARD_PAD: f32 = 9.;
 
 /// A miniature window in one mode, drawn from the palette it would really use.
 fn miniature(q: Palette) -> gpui::Div {
@@ -157,7 +165,7 @@ impl SettingsPanel {
         let frame = div()
             .h(px(86.))
             .flex()
-            .rounded(px(8.))
+            .rounded(px(radius::nested(THEME_CARD, THEME_CARD_PAD + 1.)))
             .overflow_hidden()
             .border_1()
             .border_color(p.border);
@@ -172,11 +180,11 @@ impl SettingsPanel {
             .id(SharedString::from(format!("appearance-{id}")))
             .flex_1()
             .min_w(px(150.))
-            .p(px(10.))
+            .p(px(THEME_CARD_PAD))
             .flex()
             .flex_col()
             .gap(px(10.))
-            .rounded(px(radius::CARD))
+            .rounded(px(THEME_CARD))
             .border_1()
             .cursor_pointer()
             .when(selected, |this| {
@@ -283,12 +291,24 @@ impl SettingsPanel {
             .children(self.notice(Area::Appearance, p))
             .child(
                 surface::panel(p)
-                    .p(px(22.))
                     .flex()
                     .flex_col()
-                    .gap(px(14.))
-                    .child(text::eyebrow("Theme").text_color(p.text_subtle))
-                    .child(div().flex().flex_wrap().gap(px(12.)).children(themes)),
+                    .child(
+                        div()
+                            .px(px(22.))
+                            .pt(px(22.))
+                            .pb(px(14.))
+                            .child(text::eyebrow("Theme").text_color(p.text_subtle)),
+                    )
+                    // The cards hug the panel, the border being the first pixel of the gap.
+                    .child(
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .gap(px(space::HUG))
+                            .p(px(space::HUG - 1.))
+                            .children(themes),
+                    ),
             )
             .child(
                 surface::panel(p)
