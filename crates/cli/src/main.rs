@@ -2,6 +2,7 @@ mod app;
 mod clipboard;
 mod config;
 mod daemon;
+mod guidance;
 mod inline;
 mod input;
 mod output;
@@ -111,7 +112,7 @@ enum Command {
         #[command(subcommand)]
         command: ReceiveCommand,
     },
-    /// Inspect or stop the local Filebeam daemon.
+    /// Set up, inspect, or stop the Filebeam background service.
     Service {
         #[command(subcommand)]
         command: ServiceCommand,
@@ -259,10 +260,11 @@ enum ReceiveCommand {
 
 #[derive(Subcommand)]
 enum ServiceCommand {
+    /// Show whether the service is running. Exits with status 3 when it is not.
     Status,
-    /// Install a daemon only from this build's signed release catalog.
+    /// Install, start, or repair the service for your user account; no sudo needed.
     Enable,
-    /// Stop the daemon after it has persisted its local control state.
+    /// Stop the service after it has saved its local state.
     Stop,
 }
 
@@ -295,11 +297,17 @@ enum DeviceJobsCommand {
 #[derive(Subcommand)]
 enum DevicesCommand {
     List,
-    /// Register this CLI profile as a device and provision the local daemon after approval.
+    /// Register this computer as one of your devices.
     Add {
-        /// Device name. Required when standard input is not a terminal.
-        #[arg(long)]
+        /// Name shown on your other devices. Defaults to this computer's name.
         name: Option<String>,
+        #[arg(
+            long = "name",
+            value_name = "NAME",
+            conflicts_with = "name",
+            hide = true
+        )]
+        name_option: Option<String>,
     },
     /// Approve a pending device from its `devices add` payload, read from standard input.
     Approve {
@@ -529,21 +537,49 @@ fn resolve_device(config: &config::Config, target: &str) -> Result<daemon::Devic
 
 fn resolve_device_from(devices: Vec<daemon::Device>, target: &str) -> Result<daemon::Device> {
     let matches = devices
-        .into_iter()
+        .iter()
         .filter(|device| device.id == target || device.display_name == target)
         .collect::<Vec<_>>();
-    match matches.as_slice() {
-        [device] if device.status == "active" => Ok(daemon::Device {
-            id: device.id.clone(),
-            display_name: device.display_name.clone(),
-            key_version: device.key_version,
-            status: device.status.clone(),
-            fingerprint: device.fingerprint.clone(),
-        }),
-        [_] => anyhow::bail!("device is not active"),
-        [] => anyhow::bail!("registered device was not found"),
-        _ => anyhow::bail!("device display name is ambiguous; use its immutable device ID"),
-    }
+    let name = presentation::clean(target);
+    let guidance = match matches.as_slice() {
+        [device] if device.status == "active" => return Ok((*device).clone()),
+        [device] if device.status == "pending" => {
+            guidance::Guidance::new(format!("\"{name}\" is waiting for approval.")).action(
+                "On one of your active devices, run",
+                "beam devices approve --fingerprint FINGERPRINT",
+            )
+        }
+        [device] if device.status == "revoked" => {
+            guidance::Guidance::new(format!("\"{name}\" was revoked.")).action(
+                "To register it again, on that computer run",
+                "beam devices add",
+            )
+        }
+        [device] => guidance::Guidance::new(format!(
+            "\"{name}\" is {} and can't receive files.",
+            presentation::clean(&device.status)
+        )),
+        [] => {
+            let active = devices
+                .iter()
+                .filter(|device| device.status == "active")
+                .map(|device| presentation::clean(&device.display_name))
+                .collect::<Vec<_>>();
+            if active.is_empty() {
+                guidance::Guidance::new("You don't have any active devices yet.")
+                    .action("On each computer you want to use, run", "beam devices add")
+            } else {
+                guidance::Guidance::new(format!("You don't have a device named \"{name}\"."))
+                    .note(format!("Your devices: {}", active.join(", ")))
+                    .action("To see them with their IDs, run", "beam devices list")
+            }
+        }
+        _ => guidance::Guidance::new(format!("More than one device is named \"{name}\".")).action(
+            "Use the device ID instead. To see IDs, run",
+            "beam devices list",
+        ),
+    };
+    Err(guidance.into())
 }
 
 fn normalize_fingerprint(value: &str) -> Result<String> {
@@ -591,21 +627,45 @@ fn confirm_fingerprint(fingerprint: &str) -> Result<()> {
     Ok(())
 }
 
+/// This computer's network name, used when `devices add` is given no name.
+fn default_device_name() -> Option<String> {
+    let name = gethostname::gethostname().into_string().ok()?;
+    let name = name.trim();
+    let name = name.strip_suffix(".local").unwrap_or(name);
+    let name = presentation::clean(name).trim().to_owned();
+    (!name.is_empty() && name.chars().count() <= 80).then_some(name)
+}
+
 fn device_name(value: Option<String>) -> Result<String> {
     if let Some(value) = value {
-        anyhow::ensure!(!value.trim().is_empty(), "device name must not be empty");
-        return Ok(value);
+        let value = value.trim();
+        anyhow::ensure!(!value.is_empty(), "device name must not be empty");
+        return Ok(value.into());
     }
+    let default = default_device_name();
     if !std::io::stdin().is_terminal() {
-        anyhow::bail!("devices add requires --name when standard input is not a terminal");
+        return default.ok_or_else(|| {
+            guidance::Guidance::new("This computer has no name to use for the device.")
+                .action("Choose one and run", "beam devices add NAME")
+                .into()
+        });
     }
-    eprint!("Device name: ");
-    std::io::stderr().flush()?;
-    let mut value = String::new();
-    std::io::stdin().read_line(&mut value)?;
-    let value = value.trim();
-    anyhow::ensure!(!value.is_empty(), "device name must not be empty");
-    Ok(value.into())
+    loop {
+        match &default {
+            Some(default) => eprint!("Device name [{default}]: "),
+            None => eprint!("Device name: "),
+        }
+        std::io::stderr().flush()?;
+        let mut value = String::new();
+        if std::io::stdin().read_line(&mut value)? == 0 {
+            anyhow::bail!("device name entry cancelled");
+        }
+        match (value.trim(), &default) {
+            ("", Some(default)) => return Ok(default.clone()),
+            ("", None) => eprintln!("Enter a name, such as Laptop."),
+            (value, _) => return Ok(value.into()),
+        }
+    }
 }
 
 fn job_by_id(config: &config::Config, id: &str) -> Result<daemon::Job> {
@@ -704,7 +764,17 @@ impl Transport {
     }
 }
 
-fn main() -> Result<()> {
+fn main() -> std::process::ExitCode {
+    match run() {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(error) => {
+            guidance::report(&error);
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+fn run() -> Result<()> {
     if update::apply_staged_update()? {
         return Ok(());
     }
@@ -724,6 +794,7 @@ fn main() -> Result<()> {
         config.memory_limit_mib = value;
     }
     config.validate_transfer_limits()?;
+    guidance::set_style(&config, cli.plain);
     let instance = match cli.instance.as_deref() {
         Some(value) => filebeam_client_config::normalize_server_url(value)?,
         None => config.server_url.clone(),
@@ -779,6 +850,7 @@ fn main() -> Result<()> {
                 if zip || individual {
                     anyhow::bail!("--zip and --individual apply only to @account delivery");
                 }
+                daemon::ensure_running(&config, cli.plain)?;
                 let device = resolve_device(&config, &recipient)?;
                 let grant_id = into.unwrap_or_else(|| "dropzone".into());
                 let job = daemon::enqueue_job(&config, &device.id, &grant_id, files)?;
@@ -818,25 +890,21 @@ fn main() -> Result<()> {
             let state = match command {
                 ReceiveCommand::Status => daemon::status(&config)?,
                 ReceiveCommand::Pause => daemon::set_receive_enabled(&config, false)?,
-                ReceiveCommand::Enable => daemon::set_receive_enabled(&config, true)?,
+                ReceiveCommand::Enable => {
+                    daemon::ensure_running(&config, cli.plain)?;
+                    daemon::set_receive_enabled(&config, true)?
+                }
             };
             output::result(daemon::status_line(&state), cli.plain)?;
         }
         Some(Command::Service { command }) => match command {
             ServiceCommand::Status => {
-                output::result(daemon::status_line(&daemon::status(&config)?), cli.plain)?
+                if !daemon::print_status(&config, cli.plain)? {
+                    std::process::exit(3);
+                }
             }
-            ServiceCommand::Stop => {
-                daemon::shutdown(&config)?;
-                output::result("Daemon stopped.", cli.plain)?;
-            }
-            ServiceCommand::Enable => {
-                let launcher = update::install_daemon_component(&config)?;
-                output::result(
-                    &format!("Verified daemon component installed and started at {launcher}."),
-                    cli.plain,
-                )?;
-            }
+            ServiceCommand::Stop => daemon::stop(&config, cli.plain)?,
+            ServiceCommand::Enable => daemon::enable(&config, cli.plain)?,
         },
         Some(Command::Destinations { command }) => {
             let grants = match command {
@@ -845,7 +913,10 @@ fn main() -> Result<()> {
                     alias,
                     path,
                     auto_approve,
-                } => daemon::add_destination(&config, &alias, &path, auto_approve)?,
+                } => {
+                    daemon::ensure_running(&config, cli.plain)?;
+                    daemon::add_destination(&config, &alias, &path, auto_approve)?
+                }
                 DestinationCommand::Revoke { alias_or_id } => {
                     daemon::revoke_destination(&config, &alias_or_id)?
                 }
@@ -883,12 +954,13 @@ fn main() -> Result<()> {
                     output::result(&daemon::device_line(&device), cli.plain)?;
                 }
             }
-            DevicesCommand::Add { name } => {
-                let name = device_name(name)?;
-                daemon::status(&config).context(
-                    "start the local Filebeam daemon before adding a device; provisioning never writes device keys to an unverified service",
-                )?;
-                match services::begin_or_resume_device_add(&config, &instance, &name)? {
+            DevicesCommand::Add { name, name_option } => {
+                // Provisioning never writes device keys to an unverified service.
+                daemon::ensure_running(&config, cli.plain)?;
+                let name = name.or(name_option);
+                match services::begin_or_resume_device_add(&config, &instance, || {
+                    device_name(name)
+                })? {
                     services::DeviceAdd::Pending {
                         id,
                         fingerprint,
@@ -925,6 +997,7 @@ fn main() -> Result<()> {
                 }
             }
             DevicesCommand::Approve { fingerprint } => {
+                daemon::ensure_running(&config, cli.plain)?;
                 let fingerprint = normalize_fingerprint(&fingerprint)?;
                 let approval = read_device_approval()?;
                 if services::device_fingerprint(&approval.candidate_public_key)? != fingerprint {
@@ -946,6 +1019,7 @@ fn main() -> Result<()> {
                 target,
                 fingerprint,
             } => {
+                daemon::ensure_running(&config, cli.plain)?;
                 let device = resolve_device(&config, &target)?;
                 let fingerprint = normalize_fingerprint(&fingerprint)?;
                 if device.fingerprint != fingerprint {
@@ -1567,14 +1641,22 @@ mod tests {
     }
 
     #[test]
-    fn device_add_requires_an_explicit_name_for_noninteractive_use() {
+    fn device_add_takes_a_positional_name_and_keeps_the_option() {
+        let cli = Cli::try_parse_from(["beam", "devices", "add", "Office PC"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Command::Devices {
+                command: DevicesCommand::Add { name: Some(name), name_option: None }
+            }) if name == "Office PC"
+        ));
         let cli = Cli::try_parse_from(["beam", "devices", "add", "--name", "Office PC"]).unwrap();
         assert!(matches!(
             cli.command,
             Some(Command::Devices {
-                command: DevicesCommand::Add { name: Some(name) }
+                command: DevicesCommand::Add { name: None, name_option: Some(name) }
             }) if name == "Office PC"
         ));
+        assert!(Cli::try_parse_from(["beam", "devices", "add", "A", "--name", "B"]).is_err());
     }
 
     #[test]
@@ -1659,14 +1741,26 @@ mod tests {
             )
             .unwrap_err()
             .to_string()
-            .contains("ambiguous")
+            .contains("More than one device")
         );
         assert!(
             resolve_device_from(vec![device("device-a", "Laptop", "revoked")], "device-a")
                 .unwrap_err()
                 .to_string()
-                .contains("not active")
+                .contains("was revoked")
         );
+        let missing = resolve_device_from(
+            vec![
+                device("device-a", "Laptop", "active"),
+                device("device-b", "NAS", "active"),
+                device("device-c", "Old", "revoked"),
+            ],
+            "desktop",
+        )
+        .unwrap_err();
+        let missing = crate::guidance::find(&missing).unwrap();
+        assert!(missing.message().contains("named \"desktop\""));
+        assert!(format!("{missing:?}").contains("Your devices: Laptop, NAS"));
     }
 
     #[test]

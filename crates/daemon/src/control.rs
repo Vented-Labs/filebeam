@@ -59,7 +59,7 @@ impl ControlPlane {
     pub(crate) fn list_devices(&self) -> Result<Vec<DaemonDevice>> {
         let provision = daemon_store(&self.home)?
             .load_named::<DeviceProvision>("device-provision-v1.json")?
-            .context("device provisioning is required")?;
+            .context(crate::PROVISIONING_REQUIRED)?;
         service_client(&provision.instance, self.certificate.clone())?
             .devices()
             .device_sync(&provision.credential)?
@@ -141,7 +141,7 @@ impl ControlPlane {
         }
         let provision = daemon_store(&self.home)?
             .load_named::<DeviceProvision>("device-provision-v1.json")?
-            .context("device provisioning is required")?;
+            .context(crate::PROVISIONING_REQUIRED)?;
         self.pin_peer(&provision, device_id, key_version, fingerprint)
     }
 

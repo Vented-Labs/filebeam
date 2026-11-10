@@ -312,16 +312,18 @@ pub fn clear_session(config: &Config, instance: &str) -> Result<()> {
     Ok(())
 }
 
+/// Starts or resumes enrollment after confirming the account session. The name
+/// is requested only for a new enrollment; a pending one keeps its name.
 pub fn begin_or_resume_device_add(
     config: &Config,
     instance: &str,
-    display_name: &str,
+    display_name: impl FnOnce() -> Result<String>,
 ) -> Result<DeviceAdd> {
     let client = client(config, instance)?;
     client
         .account()
         .session()
-        .context("sign in with `beam account login` before adding a device")?;
+        .map_err(|error| session_error(config, instance, error))?;
     let store = session_store(config, instance, true)?.expect("create requested a store");
     let existing = store.load_named::<PendingDeviceEnrollment>("pending-device-enrollment")?;
     if let Some(pending) = existing.as_ref() {
@@ -371,7 +373,7 @@ pub fn begin_or_resume_device_add(
             let mut seed = [0_u8; 32];
             seed[..16].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
             seed[16..].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
-            (ulid::Ulid::new().to_string(), seed, display_name.to_owned())
+            (ulid::Ulid::new().to_string(), seed, display_name()?)
         }
     };
     let key = ed25519_dalek::SigningKey::from_bytes(&seed);
@@ -423,6 +425,36 @@ pub fn begin_or_resume_device_add(
         )),
         None => pending.awaiting(),
     }
+}
+
+/// Explains a failed session check: signed out, or the instance is unreachable.
+fn session_error(config: &Config, instance: &str, error: anyhow::Error) -> anyhow::Error {
+    use crate::guidance::{Guidance, sentence};
+
+    if error
+        .chain()
+        .any(|cause| cause.is::<reqwest::Error>() || cause.is::<std::io::Error>())
+    {
+        return Guidance::new(format!("Couldn't reach {instance}."))
+            .note(sentence(&error.root_cause().to_string()))
+            .into();
+    }
+    let message = error.to_string();
+    if !(message.ends_with("returned 401 Unauthorized") || message.contains("returned 419")) {
+        return error;
+    }
+    let login = if instance == config.server_url {
+        crate::daemon::command(config, "account login YOUR_EMAIL")
+    } else {
+        crate::daemon::command(
+            config,
+            &format!("--instance {instance} account login YOUR_EMAIL"),
+        )
+    };
+    Guidance::new(format!("You're not signed in to {instance}."))
+        .note("Devices are registered to your account.")
+        .action("To sign in, run", login)
+        .into()
 }
 
 pub fn finish_device_add(config: &Config, instance: &str) -> Result<()> {

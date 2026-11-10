@@ -123,15 +123,31 @@ pub fn request(home: &Path, request: Request) -> Result<Reply> {
     use std::os::unix::net::UnixStream;
 
     let path = socket_path(home);
-    let metadata = fs::symlink_metadata(&path)
-        .with_context(|| format!("inspect daemon endpoint {}", path.display()))?;
+    let not_running = |error: &std::io::Error| {
+        matches!(
+            error.kind(),
+            std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+        )
+    };
+    let metadata = match fs::symlink_metadata(&path) {
+        Err(error) if not_running(&error) => {
+            return Err(DaemonNotRunning { endpoint: path }.into());
+        }
+        result => result.with_context(|| format!("inspect daemon endpoint {}", path.display()))?,
+    };
     if !metadata.file_type().is_socket()
         || metadata.uid() != unsafe { libc::geteuid() }
         || metadata.mode() & 0o077 != 0
     {
         bail!("daemon endpoint is not an owner-only socket");
     }
-    let mut stream = UnixStream::connect(&path).context("connect to Filebeam daemon")?;
+    // A socket left by a stopped daemon refuses connections.
+    let mut stream = match UnixStream::connect(&path) {
+        Err(error) if not_running(&error) => {
+            return Err(DaemonNotRunning { endpoint: path }.into());
+        }
+        result => result.context("connect to Filebeam daemon")?,
+    };
     stream.set_read_timeout(Some(std::time::Duration::from_secs(5)))?;
     stream.set_write_timeout(Some(std::time::Duration::from_secs(5)))?;
     let key = ipc_key(home)?;
@@ -1648,6 +1664,29 @@ mod tests {
         assert!(root.create_new(Path::new("../outside")).is_err());
         root.create_new(Path::new("new-file")).unwrap();
         assert!(root.create_new(Path::new("new-file")).is_err());
+    }
+
+    #[test]
+    fn missing_or_stale_endpoints_report_a_stopped_daemon() {
+        let status = || Request::Status {
+            version: IPC_VERSION,
+        };
+        let home = tempfile::tempdir().unwrap();
+        let error = request(home.path(), status()).unwrap_err();
+        assert!(is_not_running(&error), "{error:?}");
+
+        let endpoint = socket_path(home.path());
+        fs::create_dir_all(endpoint.parent().unwrap()).unwrap();
+        drop(std::os::unix::net::UnixListener::bind(&endpoint).unwrap());
+        fs::set_permissions(&endpoint, fs::Permissions::from_mode(0o600)).unwrap();
+        let error = request(home.path(), status()).unwrap_err();
+        assert!(is_not_running(&error), "{error:?}");
+
+        fs::remove_file(&endpoint).unwrap();
+        fs::write(&endpoint, b"").unwrap();
+        fs::set_permissions(&endpoint, fs::Permissions::from_mode(0o600)).unwrap();
+        let error = request(home.path(), status()).unwrap_err();
+        assert!(!is_not_running(&error), "{error:?}");
     }
 
     #[test]
