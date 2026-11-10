@@ -223,6 +223,7 @@ fn registry_sync_failure(
 
 pub(crate) fn daemon_store(home: &Path) -> Result<filebeam_transfer_native::checkpoint::Store> {
     open_store(&home.join("transfers"), "daemon-private-v1")
+        .context("open daemon private checkpoint")
 }
 pub(crate) fn registry_store(home: &Path) -> Result<filebeam_transfer_native::checkpoint::Store> {
     open_store(&home.join("registry"), "device-registry-v1")
@@ -230,15 +231,32 @@ pub(crate) fn registry_store(home: &Path) -> Result<filebeam_transfer_native::ch
 /// Opens a private store, creating it on first use. Daemon threads share these
 /// stores through an exclusive lock, so a short wait covers another thread's
 /// read or write instead of failing that thread's whole pass.
-fn open_store(root: &Path, id: &str) -> Result<filebeam_transfer_native::checkpoint::Store> {
+pub(crate) fn open_store(
+    root: &Path,
+    id: &str,
+) -> Result<filebeam_transfer_native::checkpoint::Store> {
     use filebeam_transfer_native::checkpoint::Store;
     let deadline = std::time::Instant::now() + Duration::from_secs(2);
     loop {
-        match Store::open(root, id) {
+        // The root may already hold other stores, such as the CLI's transfer
+        // checkpoints, so only a missing store directory means first use.
+        let missing = matches!(
+            std::fs::symlink_metadata(root.join(id)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound
+        );
+        let opened = if missing {
+            Store::create(root, id)
+        } else {
+            Store::open(root, id)
+        };
+        match opened {
             Ok(store) => return Ok(store),
-            Err(error) if error.to_string().contains("does not exist") => {
-                return Store::create(root, id);
-            }
+            // Another thread created the store first.
+            Err(error)
+                if missing
+                    && io_error(&error, |cause| {
+                        cause.kind() == std::io::ErrorKind::AlreadyExists
+                    }) => {}
             Err(error) if lock_contended(&error) && std::time::Instant::now() < deadline => {
                 std::thread::sleep(Duration::from_millis(20));
             }
@@ -248,10 +266,13 @@ fn open_store(root: &Path, id: &str) -> Result<filebeam_transfer_native::checkpo
 }
 fn lock_contended(error: &anyhow::Error) -> bool {
     let contended = fs2::lock_contended_error().raw_os_error();
+    io_error(error, |cause| cause.raw_os_error() == contended)
+}
+fn io_error(error: &anyhow::Error, matches: impl Fn(&std::io::Error) -> bool) -> bool {
     error
         .chain()
         .filter_map(|cause| cause.downcast_ref::<std::io::Error>())
-        .any(|cause| cause.raw_os_error() == contended)
+        .any(matches)
 }
 pub(crate) fn write_state(path: &Path, state: &DaemonState) -> Result<()> {
     write_json(path, state)
@@ -406,4 +427,29 @@ fn refresh_registry(
         },
         now(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn private_stores_open_beside_existing_beam_checkpoints() {
+        let home = tempfile::tempdir().unwrap();
+        // Beam keeps resumable transfer checkpoints in the same root.
+        filebeam_transfer_native::checkpoint::Store::create(
+            &home.path().join("transfers"),
+            "f3a1c2d4-0000-4000-8000-000000000000",
+        )
+        .unwrap();
+
+        daemon_store(home.path())
+            .unwrap()
+            .save_named("probe.json", &1)
+            .unwrap();
+        let reopened = daemon_store(home.path()).unwrap();
+        assert_eq!(reopened.load_named::<i32>("probe.json").unwrap(), Some(1));
+        drop(reopened);
+        registry_store(home.path()).unwrap();
+    }
 }
