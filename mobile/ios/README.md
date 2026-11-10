@@ -61,6 +61,14 @@ The Rust build packages device and simulator libraries into an XCFramework and g
 
 Set `IOS_TEST_OS=17` to select the minimum supported simulator runtime, or use `IOS_TEST_DESTINATION` for an explicit simulator/device. CI runners need both the iOS 17 and current-iOS runtimes installed.
 
+Debug builds accept launch arguments for reviewing screens without an account or a backend:
+`-filebeam.screen <name>` opens a screen directly (`send`, `notes`, `receive`, `transfers`, `inbox`,
+`auth`, `register`, `account`, `settings`, `appearance`, `about`, `tour`, `changelog`, `contacts`,
+`devices`, `history`, `storage`, `secure-inbox` or `recipient:<username>`), `-filebeam.fixture queue`
+or `code` seeds the composer, `-filebeam.tourPage <n>` opens a tour chapter, `-tour.seen YES`
+skips the first-run tour, and `-appearance.source preset:<name>`, `custom:<rrggbb>` or `instance`
+selects a palette.
+
 ## Signing and distribution
 
 PR builds are unsigned. For archive/export, keep signing data external:
