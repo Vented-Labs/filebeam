@@ -132,6 +132,7 @@ private struct HomeView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             AmbientBackground(energy: model.transfers.contains { $0.lifecycle == .running } ? 0.6 : 0)
+                .ignoresSafeArea(.keyboard, edges: .bottom)
             ZStack {
                 switch model.selectedTab {
                 case .send: SendView().transition(tabTransition)
@@ -145,7 +146,7 @@ private struct HomeView: View {
                 .padding(.horizontal, Space.gutter)
                 .padding(.bottom, 12)
         }
-        .ignoresSafeArea(.keyboard, edges: .bottom)
+        // The bar rides above the keyboard, as on the web and Android, so destinations stay reachable while typing.
     }
 
     private var tabTransition: AnyTransition {

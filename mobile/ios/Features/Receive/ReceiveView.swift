@@ -99,7 +99,7 @@ private struct LinkEntry: View {
         ScreenHeader("Receive a transfer", subtitle: "Paste a Filebeam link or ID. Files are decrypted on this device.").staggered(0)
         Panel {
             VStack(spacing: Space.lg) {
-                FbTextField($receive.input, label: "Transfer link or ID", placeholder: "https://…", icon: .link, keyboard: .URL, contentType: .URL, submitLabel: .go, onSubmit: { receive.open() }, identifier: "receive-input")
+                FbTextField($receive.input, label: "Transfer link or ID", placeholder: "https://…", icon: .link, keyboard: .URL, submitLabel: .go, onSubmit: { receive.open() }, identifier: "receive-input")
                 FbButton("Open transfer", icon: .unlock, enabled: !receive.input.isBlank) { hideKeyboard(); receive.open() }
                 FbButton("Paste from clipboard", kind: .secondary, icon: .paste) {
                     if let clip = Clipboard.paste(), !clip.isBlank { receive.input = clip; receive.open(clip) } else { model.toast("The clipboard is empty.") }
