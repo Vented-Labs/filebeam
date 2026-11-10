@@ -104,7 +104,7 @@ defaults, per-contact overrides, and private automatic receiving with
 
 ```sh
 beam service enable
-beam devices add --name Workstation
+beam devices add Workstation
 beam devices approve --fingerprint FINGERPRINT
 beam devices pair Laptop --fingerprint FINGERPRINT
 beam destinations add dropzone ~/Filebeam/Dropzone --auto-approve

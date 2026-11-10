@@ -65,7 +65,7 @@ To try the commands by hand, serve the local instance over HTTPS (for example be
 ```sh
 export FILEBEAM_INSTANCE_CA=$PWD/dev-ca.pem
 cargo run --manifest-path crates/daemon/Cargo.toml -- --home /tmp/device-a &
-cargo run --manifest-path crates/cli/Cargo.toml -- --home /tmp/device-a devices add --name A
+cargo run --manifest-path crates/cli/Cargo.toml -- --home /tmp/device-a devices add A
 ```
 
 ## Continuous Integration

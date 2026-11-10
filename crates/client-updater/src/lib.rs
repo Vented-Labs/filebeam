@@ -21,6 +21,9 @@ use tar::Archive;
 use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use uuid::Uuid;
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub mod user_service;
+
 const ORIGIN: &str = "https://releases.filebeam.io/";
 const MAX_CATALOG_BYTES: u64 = 1024 * 1024;
 const MAX_ARCHIVE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
@@ -330,16 +333,25 @@ impl Updater {
             .start(&launcher)
             .and_then(|_| service.health(&candidate_binary))
         {
-            if let Some(previous) = previous_launcher {
+            let (rollback, outcome) = if let Some(previous) = previous_launcher {
                 atomic_write(&launcher, &previous, Product::Cli)?;
-                let _ = service.rollback(Some(&launcher));
+                (
+                    service.rollback(Some(&launcher)),
+                    "the new daemon did not start; restored the previous version",
+                )
             } else {
                 let _ = fs::remove_file(&launcher);
-                let _ = service.rollback(None);
-            }
-            return Err(
-                error.context("daemon component activation failed; restored prior launcher")
-            );
+                (
+                    service.rollback(None),
+                    "the daemon did not start; removed the incomplete installation",
+                )
+            };
+            return Err(match rollback {
+                Ok(()) => error.context(outcome),
+                Err(rollback) => error.context(format!(
+                    "{outcome}, but the service could not be reset: {rollback:#}"
+                )),
+            });
         }
         record.current = Some(component_version);
         record.owners.insert(owner.into());

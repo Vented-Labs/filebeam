@@ -315,6 +315,7 @@ dependencies = [
  "filebeam-transfer-native",
  "flate2",
  "futures-util",
+ "gethostname",
  "hex",
  "png",
  "ratatui",

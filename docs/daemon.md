@@ -13,11 +13,20 @@ The daemon is a separate signed component published in the CLI release catalog
 for Linux and macOS. `beam service enable` and the desktop app's **Install
 device service** download it, verify the catalog signature and archive digest,
 and register a per-user service: a systemd user unit on Linux and a LaunchAgent
-on macOS. The CLI and the desktop app share one component and one service per
-profile. Upgrades drain the running daemon before switching the launcher and
-restore the previous launcher if the new one fails its health check. Removing
-one client keeps the service while the other still uses it; received files and
-profile data are always kept.
+on macOS. The service runs under your account and never needs sudo. The CLI
+and the desktop app share one component and one service per profile.
+
+Setup waits up to 20 seconds for the daemon to answer over its socket. Upgrades
+drain the running daemon before switching the launcher and restore the previous
+launcher if the new one fails this check; a failed first installation removes
+its service registration. Running `beam service enable` again repairs a stopped
+or failing service. Removing one client keeps the service while the other still
+uses it; received files and profile data are always kept.
+
+`beam service status` reports whether the service is running and exits with
+status 3 when it is not. On Linux, `journalctl --user -u filebeam-daemon -n 50`
+shows recent daemon output. Profiles other than `~/.filebeam` use a suffixed
+unit name, which Beam prints when the service fails.
 
 For development, run the daemon directly:
 
