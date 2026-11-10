@@ -59,7 +59,7 @@ struct FilebeamMark: View {
             let factor = size.height / MarkGeometry.height
             context.scaleBy(x: factor, y: factor)
             let seed = gradient[2], tip = gradient[4]
-            func lerp(_ a: Color, _ b: Color, _ t: Double) -> Color { a.mix(with: b, by: t) }
+            func lerp(_ a: Color, _ b: Color, _ t: Double) -> Color { a.blended(with: b, by: t) }
             context.fill(MarkGeometry.body, with: .color(seed))
             context.fill(MarkGeometry.fold, with: .linearGradient(Gradient(colors: [lerp(tip, .white, 0.12), lerp(tip, .white, 0.45)]), startPoint: CGPoint(x: 0, y: 91), endPoint: CGPoint(x: 81, y: 87)))
             context.fill(MarkGeometry.top, with: .linearGradient(Gradient(colors: [gradient[1], seed, tip]), startPoint: CGPoint(x: 8, y: 76), endPoint: CGPoint(x: 150, y: 5)))
@@ -162,7 +162,7 @@ struct AmbientBackground: View {
 
 extension Color {
     /// Blends two colours in sRGB; good enough for decorative gradients.
-    func mix(with other: Color, by amount: Double) -> Color {
+    func blended(with other: Color, by amount: Double) -> Color {
         let a = UIColor(self).resolvedComponents, b = UIColor(other).resolvedComponents
         let t = min(max(amount, 0), 1)
         return Color(.sRGB, red: a.0 + (b.0 - a.0) * t, green: a.1 + (b.1 - a.1) * t, blue: a.2 + (b.2 - a.2) * t, opacity: a.3 + (b.3 - a.3) * t)
