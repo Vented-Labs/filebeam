@@ -20,6 +20,7 @@ struct AuthView: View {
     @State private var remember = true
     @State private var invitationLink: String?
     @State private var resetLink: String?
+    @State private var verificationLink: String?
     @State private var resetToken = ""
     @State private var emailLocked = false
 
@@ -133,10 +134,22 @@ struct AuthView: View {
     }
 
     private func signedIn() {
-        model.toast("Signed in", tone: .success)
         password = ""
         confirm = ""
+        if let link = verificationLink {
+            verificationLink = nil
+            verify(link: link)
+            return
+        }
+        model.toast("Signed in", tone: .success)
         model.replace(.account)
+    }
+
+    private func verify(link: String) {
+        run(after: { model.toast("Email verified", tone: .success); model.replace(.account) }) {
+            try await model.service.verifyEmail(link: link)
+            await model.refreshSession()
+        }
     }
 
     private func signIn() { run(after: signedIn) { try await model.login(identity: identity.trimmingCharacters(in: .whitespaces), password: password, remember: remember) } }
@@ -181,13 +194,15 @@ struct AuthView: View {
         }
         if let link = model.pendingVerificationLink {
             model.pendingVerificationLink = nil
-            mode = .verify
             if model.session != nil {
-                run(after: { model.toast("Email verified", tone: .success); model.replace(.account) }) {
-                    try await model.service.verifyEmail(link: link)
-                    await model.refreshSession()
-                }
-            } else { notice = "Sign in first, then open the verification link again." }
+                mode = .verify
+                verify(link: link)
+            } else {
+                // The link is kept for this screen and used as soon as the sign-in succeeds.
+                verificationLink = link
+                mode = .login
+                notice = "Sign in to finish verifying your email."
+            }
         }
     }
 }
