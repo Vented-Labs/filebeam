@@ -99,14 +99,14 @@ struct Emblem: View {
                     .overlay(FilebeamMark(height: size * 0.26))
                     .frame(width: cardWidth * 1.08, height: cardHeight * 1.08)
                     .shadow(color: theme.shadow, radius: 18, y: 8)
-                    .offset(y: -lift * 7 - drift * 2.5)
+                    .offset(y: -lift * 7 - CGFloat(drift) * 2.5)
                 // The seal sits on the front card's lower corner.
                 FbIcon(.lock, size: size * 0.11, tint: sealed ? theme.onAction : theme.textMuted)
                     .frame(width: size * 0.2, height: size * 0.2)
                     .background(sealed ? theme.action : theme.raised, in: Circle())
                     .overlay(Circle().strokeBorder(sealed ? theme.actionBorder : theme.controlBorder, lineWidth: 1))
                     .scaleEffect(sealed ? 1.15 : 1)
-                    .offset(x: cardWidth * 0.5, y: cardHeight * 0.44 - lift * 7 - drift * 2.5)
+                    .offset(x: cardWidth * 0.5, y: cardHeight * 0.44 - lift * 7 - CGFloat(drift) * 2.5)
             }
         }
         .frame(width: size * 1.35, height: size)
