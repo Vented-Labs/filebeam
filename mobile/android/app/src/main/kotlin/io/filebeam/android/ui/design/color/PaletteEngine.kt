@@ -385,6 +385,9 @@ internal object PaletteEngine {
             textMuted = opaque(r.onSurfaceVariant),
             textSubtle = opaque(r.onSurfaceVariant),
             progressTrack = opaque(r.highest),
+            disabledBorder = opaque(ColorMath.mix(r.onSurface, r.low, 0.14)),
+            disabledSurface = opaque(ColorMath.mix(r.onSurface, r.low, 0.08)),
+            disabledText = opaque(ColorMath.mix(r.onSurface, r.low, 0.42)),
             danger = StatusColors(opaque(r.error), opaque(ColorMath.mix(r.errorContainer, r.low, 0.5)), opaque(r.error)),
         )
     }

@@ -688,6 +688,13 @@ class TransferCoordinator(
     /** Verified files of a finished download, for saving or opening. */
     suspend fun outputs(id: String): List<File> = withContext(Dispatchers.IO) { runCatching { storage.verifiedOutputs(id) }.getOrDefault(emptyList()) }
 
+    /** Verified files kept for a saved transfer, looked up through its checkpoint. */
+    suspend fun savedOutputs(checkpointId: String): List<File> = withContext(Dispatchers.IO) {
+        runCatching {
+            association(checkpointId).load()?.optString("id")?.takeIf(String::isNotBlank)?.let(storage::verifiedOutputs) ?: emptyList()
+        }.getOrDefault(emptyList())
+    }
+
     /** Receiver sessions for a sent transfer; empty when the checkpoint has none or cannot be read. */
     suspend fun activity(checkpointId: String): List<io.filebeam.rust.TransferActivityRecord> = withContext(Dispatchers.IO) {
         runCatching { platformClient().transferActivity(checkpointId).records }.getOrDefault(emptyList())

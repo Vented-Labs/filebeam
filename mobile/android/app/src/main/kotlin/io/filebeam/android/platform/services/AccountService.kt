@@ -24,6 +24,9 @@ data class AccountSummary(
     val emailVerifiedAt: String? = null,
     val profileUrl: String? = null,
     val notificationChannel: String = "mail",
+    val name: String = "",
+    val email: String = "",
+    val usernameRoutingEnabled: Boolean = true,
 )
 data class InboxDownloadCredentials(val workingKey: ByteArray, val cookie: String)
 enum class KeyCustody { PASSWORD, SELF }
@@ -40,7 +43,13 @@ interface AccountService {
     suspend fun verifyStagedInbox(id: String, bundleId: ULong, password: String?): List<String> = error("Staged files are unavailable")
     suspend fun dismissStagedInbox(id: String) { error("Staged files are unavailable") }
     val state: StateFlow<ServiceState<AccountSummary>>
-    suspend fun signIn(instance: String, username: String, password: String)
+    suspend fun signIn(instance: String, username: String, password: String, remember: Boolean = true)
+    suspend fun inspectInvitation(instance: String, token: String): io.filebeam.rust.NativeInvitation = error("Invitations are unavailable")
+    suspend fun acceptInvitation(instance: String, token: String, username: String, name: String?, email: String, password: String) { error("Invitations are unavailable") }
+    /** Permanently deletes the signed-in account, then clears every local trace of the session. */
+    suspend fun deleteAccount(password: String) { error("Account deletion is unavailable") }
+    /** Re-reads the session, e.g. after the email address was verified elsewhere. */
+    suspend fun refresh() {}
     suspend fun signUp(instance: String, username: String, name: String?, email: String, password: String)
     suspend fun resume(instance: String)
     suspend fun signOut()
@@ -146,11 +155,35 @@ class NativeAccountService(
         withContext(Dispatchers.IO) { service.accountDismissStagedInbox(id) }
     }
 
-    override suspend fun signIn(instance: String, username: String, password: String) = withContext(Dispatchers.IO) {
+    override suspend fun signIn(instance: String, username: String, password: String, remember: Boolean) = withContext(Dispatchers.IO) {
         val origin = AccountSessionRegistry.normalizeOrigin(instance)
-        val session = sessions.service(origin).accountLogin(username, password, true)
+        val session = sessions.service(origin).accountLogin(username, password, remember)
         recoverPasswordCustody(origin, session.id, password)
         completeSession(origin, session)
+    }
+
+    override suspend fun inspectInvitation(instance: String, token: String) = withContext(Dispatchers.IO) {
+        sessions.service(AccountSessionRegistry.normalizeOrigin(instance)).accountInspectInvitation(token)
+    }
+
+    override suspend fun acceptInvitation(instance: String, token: String, username: String, name: String?, email: String, password: String) = withContext(Dispatchers.IO) {
+        val origin = AccountSessionRegistry.normalizeOrigin(instance)
+        val session = sessions.service(origin).accountAcceptInvitation(token, username, name?.takeIf(String::isNotBlank), email, password)
+        completeSession(origin, session)
+    }
+
+    override suspend fun deleteAccount(password: String): Unit = withContext(Dispatchers.IO) {
+        val account = requireAccount()
+        cancelAutomaticReceiving()
+        sessions.service(account.instance).accountDelete(password, "DELETE")
+        sessions.clear(account.instance)
+        sessionStore(account.instance).clear()
+        mutable.value = ServiceState.Loading
+    }
+
+    override suspend fun refresh(): Unit = withContext(Dispatchers.IO) {
+        val account = requireAccount()
+        completeSession(account.instance, sessions.service(account.instance).accountSession())
     }
 
     override suspend fun signUp(instance: String, username: String, name: String?, email: String, password: String) = withContext(Dispatchers.IO) {
@@ -310,7 +343,7 @@ class NativeAccountService(
         val cookie = sessions.service(origin).accountCookieContext()
         sessions.authenticated(origin, cookie)
         sessionStore(origin).save(JSONObject().put("cookie", cookie).put("user", session.id.toString()).put("username", session.username ?: session.name))
-        mutable.value = ServiceState.Ready(AccountSummary(session.id, session.username ?: session.name, origin, session.inboxEnabled, session.emailVerifiedAt, session.profileUrl, session.notificationChannel))
+        mutable.value = ServiceState.Ready(AccountSummary(session.id, session.username ?: session.name, origin, session.inboxEnabled, session.emailVerifiedAt, session.profileUrl, session.notificationChannel, session.name, session.email, session.usernameRoutingEnabled))
     }
     private fun keySituation(account: AccountSummary): AccountKeySituation {
         val situation = sessions.service(account.instance).accountKeySituation()

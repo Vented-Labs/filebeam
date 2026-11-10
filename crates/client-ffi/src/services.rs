@@ -106,6 +106,38 @@ pub struct InboxMetadata {
 }
 
 #[derive(Clone, uniffi::Record)]
+pub struct HistoryFilter {
+    pub status: Option<String>,
+    pub kind: Option<String>,
+    pub driver: Option<String>,
+}
+
+#[derive(Clone, uniffi::Record)]
+pub struct HistoryEntry {
+    pub id: String,
+    pub kind: String,
+    pub driver: String,
+    pub delivery: String,
+    pub status: String,
+    pub item_count: u64,
+    pub ciphertext_bytes: u64,
+    pub created_at: String,
+    pub expires_at: String,
+    pub removed_at: Option<String>,
+    pub retention_hours: u64,
+    pub maximum_retention_hours: u64,
+    pub burn_on_read: bool,
+    pub can_delete: bool,
+    pub can_extend: bool,
+}
+
+#[derive(Clone, uniffi::Record)]
+pub struct HistoryPage {
+    pub entries: Vec<HistoryEntry>,
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Clone, uniffi::Record)]
 pub struct InboxTransfer {
     pub id: String,
     pub ciphertext_bytes: u64,
@@ -942,6 +974,71 @@ impl NativeServices {
             .delete_inbox_item(&transfer_id)
             .map_err(operation)
     }
+    /// One page of the signed-in account's sent transfers. Filters are the
+    /// server's stable identifiers; filenames and keys are never part of history.
+    pub fn account_history(
+        &self,
+        filter: HistoryFilter,
+        cursor: Option<String>,
+        limit: u32,
+    ) -> Result<HistoryPage> {
+        let page = self
+            .inner
+            .history()
+            .list(
+                &filebeam_client_core::services::HistoryFilter {
+                    status: filter.status,
+                    kind: filter.kind,
+                    driver: filter.driver,
+                },
+                cursor.as_deref(),
+                limit,
+            )
+            .map_err(operation)?;
+        Ok(HistoryPage {
+            entries: page
+                .data
+                .into_iter()
+                .map(|entry| HistoryEntry {
+                    id: entry.id,
+                    kind: entry.kind,
+                    driver: entry.driver,
+                    delivery: entry.delivery,
+                    status: entry.status,
+                    item_count: entry.item_count,
+                    ciphertext_bytes: entry.ciphertext_bytes,
+                    created_at: entry.created_at,
+                    expires_at: entry.expires_at,
+                    removed_at: entry.removed_at,
+                    retention_hours: entry.retention_hours,
+                    maximum_retention_hours: entry.maximum_retention_hours,
+                    burn_on_read: entry.burn_on_read,
+                    can_delete: entry.can_delete,
+                    can_extend: entry.can_extend,
+                })
+                .collect(),
+            next_cursor: page.next_cursor,
+        })
+    }
+
+    /// Removes a sent transfer for everyone.
+    pub fn account_history_delete(&self, transfer_id: String) -> Result<()> {
+        self.inner.history().delete(&transfer_id).map_err(operation)
+    }
+
+    /// Sets a longer total retention and returns the new expiry timestamp.
+    pub fn account_history_extend(
+        &self,
+        transfer_id: String,
+        retention_hours: u64,
+    ) -> Result<String> {
+        self.inner
+            .history()
+            .extend(&transfer_id, retention_hours)
+            .map(|update| update.expires_at)
+            .map_err(operation)
+    }
+
     pub fn account_policy_json(&self) -> Result<String> {
         self.inner
             .account()

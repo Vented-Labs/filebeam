@@ -85,6 +85,12 @@ private fun RouteContent(route: Route) {
     when (route) {
         Route.Home -> Home()
         Route.Settings -> io.filebeam.android.ui.feature.settings.SettingsScreen()
+        is Route.Auth -> io.filebeam.android.ui.feature.account.AuthScreen(route.mode)
+        Route.Account -> io.filebeam.android.ui.feature.account.AccountScreen()
+        Route.SecureInbox -> io.filebeam.android.ui.feature.account.SecureInboxScreen()
+        Route.Devices -> io.filebeam.android.ui.feature.account.DevicesScreen()
+        Route.History -> io.filebeam.android.ui.feature.transfers.HistoryScreen()
+        Route.Storage -> io.filebeam.android.ui.feature.settings.StorageScreen()
         else -> Placeholder(route)
     }
 }
@@ -108,6 +114,7 @@ private fun Home() {
                 when (tab) {
                     Tab.Send -> SendScreen()
                     Tab.Receive -> io.filebeam.android.ui.feature.receive.ReceiveScreen()
+                    Tab.Transfers -> io.filebeam.android.ui.feature.transfers.TransfersScreen()
                     else -> PlaceholderTab(tab)
                 }
             }
