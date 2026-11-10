@@ -8,8 +8,7 @@ use filebeam_client_config::{
 };
 use filebeam_client_updater::{Options, Product, Updater};
 use gpui::{
-    AnyElement, Context, IntoElement, ParentElement, Styled, Window, div, prelude::FluentBuilder,
-    px,
+    AnyElement, Context, IntoElement, ParentElement, Styled, div, prelude::FluentBuilder, px,
 };
 
 use super::{
@@ -108,66 +107,37 @@ impl SettingsPanel {
         }
     }
 
-    fn set_notifications(&mut self, enabled: bool, window: &mut Window, cx: &mut Context<Self>) {
+    fn set_notifications(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.notifications = enabled;
         cx.emit(SettingsEvent::Notifications(enabled));
-        self.persist(
-            Area::Desktop,
-            false,
-            window.window_handle(),
-            cx,
-            move |config| {
-                config.desktop.notifications = enabled;
-            },
-        );
+        self.persist(Area::Desktop, false, cx, move |config| {
+            config.desktop.notifications = enabled;
+        });
     }
 
-    fn set_background_transfers(
-        &mut self,
-        enabled: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn set_background_transfers(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.background_transfers = enabled;
         cx.emit(SettingsEvent::BackgroundTransfers(enabled));
-        self.persist(
-            Area::Desktop,
-            false,
-            window.window_handle(),
-            cx,
-            move |config| {
-                config.desktop.background_transfers = enabled;
-            },
-        );
+        self.persist(Area::Desktop, false, cx, move |config| {
+            config.desktop.background_transfers = enabled;
+        });
     }
 
-    fn set_auto_update(&mut self, enabled: bool, window: &mut Window, cx: &mut Context<Self>) {
+    fn set_auto_update(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.auto_update = enabled;
-        self.persist(
-            Area::Updates,
-            false,
-            window.window_handle(),
-            cx,
-            move |config| {
-                config.updates.auto_update = enabled;
-            },
-        );
+        self.persist(Area::Updates, false, cx, move |config| {
+            config.updates.auto_update = enabled;
+        });
     }
 
-    fn set_relay_only(&mut self, enabled: bool, window: &mut Window, cx: &mut Context<Self>) {
+    fn set_relay_only(&mut self, enabled: bool, cx: &mut Context<Self>) {
         self.relay_only = enabled;
-        self.persist(
-            Area::Network,
-            true,
-            window.window_handle(),
-            cx,
-            move |config| {
-                config.webrtc.relay_only = enabled;
-            },
-        );
+        self.persist(Area::Network, true, cx, move |config| {
+            config.webrtc.relay_only = enabled;
+        });
     }
 
-    pub(super) fn save_limits(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn save_limits(&mut self, cx: &mut Context<Self>) {
         if self.waiting("reload settings") {
             return;
         }
@@ -175,16 +145,10 @@ impl SettingsPanel {
         let concurrency = parse_concurrency(self.concurrency.read(cx).value().as_ref());
         match (memory, concurrency) {
             (Ok(memory), Ok(concurrency)) => {
-                self.persist(
-                    Area::Network,
-                    true,
-                    window.window_handle(),
-                    cx,
-                    move |config| {
-                        config.transfers.memory_limit_mib = memory;
-                        config.transfers.max_concurrency = concurrency;
-                    },
-                );
+                self.persist(Area::Network, true, cx, move |config| {
+                    config.transfers.memory_limit_mib = memory;
+                    config.transfers.max_concurrency = concurrency;
+                });
             }
             (Err(problem), _) | (_, Err(problem)) => {
                 self.say(Area::Network, Tone::Danger, problem, cx);
@@ -338,10 +302,10 @@ impl SettingsPanel {
                             "System notifications are not available here.".to_owned()
                         })
                         .disabled(!self.notifications_available)
-                        .on_toggle(move |on, window, cx| {
+                        .on_toggle(move |on, _, cx| {
                             let on = *on;
                             let _ = notify.update(cx, |this, cx| {
-                                this.set_notifications(on, window, cx);
+                                this.set_notifications(on, cx);
                             });
                         }),
                     )
@@ -360,10 +324,10 @@ impl SettingsPanel {
                             "Needs a system tray, which this desktop does not provide.".to_owned()
                         })
                         .disabled(!tray)
-                        .on_toggle(move |on, window, cx| {
+                        .on_toggle(move |on, _, cx| {
                             let on = *on;
                             let _ = background.update(cx, |this, cx| {
-                                this.set_background_transfers(on, window, cx);
+                                this.set_background_transfers(on, cx);
                             });
                         }),
                     ),
@@ -385,10 +349,10 @@ impl SettingsPanel {
                         .description(
                             "Signed releases are downloaded and applied at the next start.",
                         )
-                        .on_toggle(move |on, window, cx| {
+                        .on_toggle(move |on, _, cx| {
                             let on = *on;
                             let _ = updates.update(cx, |this, cx| {
-                                this.set_auto_update(on, window, cx);
+                                this.set_auto_update(on, cx);
                             });
                         }),
                     )
@@ -470,10 +434,10 @@ impl SettingsPanel {
                             "A direct connection shows your network address to the other \
                                  person. Relaying hides it and can be slower.",
                         )
-                        .on_toggle(move |on, window, cx| {
+                        .on_toggle(move |on, _, cx| {
                             let on = *on;
                             let _ = relay.update(cx, |this, cx| {
-                                this.set_relay_only(on, window, cx);
+                                this.set_relay_only(on, cx);
                             });
                         }),
                     ),
@@ -542,9 +506,7 @@ impl SettingsPanel {
                             button::primary("save-transfers")
                                 .label("Save limits")
                                 .loading(saving)
-                                .on_click(
-                                    cx.listener(|this, _, window, cx| this.save_limits(window, cx)),
-                                ),
+                                .on_click(cx.listener(|this, _, _, cx| this.save_limits(cx))),
                         ),
                     ),
             )

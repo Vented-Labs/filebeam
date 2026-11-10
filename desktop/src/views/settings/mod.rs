@@ -13,8 +13,8 @@ use filebeam_client_config::{
     Theme as ConfigTheme,
 };
 use gpui::{
-    AnyElement, AnyWindowHandle, AppContext, ClipboardItem, Context, Entity, EventEmitter,
-    IntoElement, ParentElement, Render, ScrollHandle, Styled, Window, div, px,
+    AnyElement, AppContext, ClipboardItem, Context, Entity, EventEmitter, IntoElement,
+    ParentElement, Render, ScrollHandle, Styled, Window, div, px,
 };
 use gpui_component::input::{InputEvent, InputState};
 
@@ -285,9 +285,9 @@ impl SettingsPanel {
             cx.subscribe_in(
                 input,
                 window,
-                |this, _, event: &InputEvent, window, cx| match event {
+                |this, _, event: &InputEvent, _, cx| match event {
                     InputEvent::Change => this.clear_notice(Area::Network, cx),
-                    InputEvent::PressEnter { .. } => this.save_limits(window, cx),
+                    InputEvent::PressEnter { .. } => this.save_limits(cx),
                     _ => {}
                 },
             )
@@ -355,11 +355,6 @@ impl SettingsPanel {
         self.presence = Some(presence);
         self.notifications_available = notifications_available;
         cx.notify();
-    }
-
-    /// Whether closing the window may leave transfers running in the background.
-    pub fn background_transfers(&self) -> bool {
-        self.background_transfers
     }
 
     fn snapshot(&self, cx: &Context<Self>) -> Arc<DesktopSnapshot> {
@@ -506,19 +501,12 @@ impl SettingsPanel {
 
     /// Writes a change to the shared configuration off the UI thread, then asks the
     /// service to load it when `reload` is set.
-    fn persist<F>(
-        &mut self,
-        area: Area,
-        reload: bool,
-        window: AnyWindowHandle,
-        cx: &mut Context<Self>,
-        change: F,
-    ) where
+    fn persist<F>(&mut self, area: Area, reload: bool, cx: &mut Context<Self>, change: F)
+    where
         F: FnOnce(&mut Config) + Send + 'static,
     {
         let home = config_home(&self.home);
         let executor = cx.background_executor().clone();
-        let _ = window;
         cx.spawn(async move |this, cx| {
             let result = executor
                 .spawn(async move { Config::update(home, change) })

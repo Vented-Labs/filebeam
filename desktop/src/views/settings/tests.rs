@@ -171,7 +171,6 @@ fn switches_tell_the_shell_and_reach_the_shared_configuration(cx: &mut TestAppCo
                 true,
                 cx,
             );
-            assert!(!panel.background_transfers() || panel.background_transfers);
         });
         window.render_frame(cx);
         window.click("notifications", cx);
@@ -204,9 +203,7 @@ fn limits_save_together_and_ask_the_service_to_reload(cx: &mut TestAppContext) {
         (panel.memory_limit.clone(), panel.concurrency.clone())
     });
     set(cx, window, &memory, "12");
-    testing::in_window(cx, window, |window, cx| {
-        panel.update(cx, |panel, cx| panel.save_limits(window, cx));
-    });
+    panel.update(cx, |panel, cx| panel.save_limits(cx));
     cx.run_until_parked();
     assert!(
         commands.try_recv().is_err(),
@@ -215,9 +212,7 @@ fn limits_save_together_and_ask_the_service_to_reload(cx: &mut TestAppContext) {
 
     set(cx, window, &memory, "1024");
     set(cx, window, &concurrency, "3");
-    testing::in_window(cx, window, |window, cx| {
-        panel.update(cx, |panel, cx| panel.save_limits(window, cx));
-    });
+    panel.update(cx, |panel, cx| panel.save_limits(cx));
     cx.run_until_parked();
     assert!(matches!(
         commands.try_recv(),
