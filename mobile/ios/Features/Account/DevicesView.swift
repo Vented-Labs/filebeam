@@ -37,7 +37,7 @@ struct DevicesView: View {
             error = nil
             do { registry = try await model.service.devices(instance: model.instance) } catch { self.error = readableMessage(error) }
         }
-        .onChange(of: model.session == nil) { _, signedOut in if signedOut { model.replace(.auth(.login)) } }
+        .onChange(of: model.session == nil, initial: true) { _, signedOut in if signedOut { model.replace(.auth(.login)) } }
         .sheet(item: $renaming) { device in RenameSheet(device: device) { revision += 1 } }
         .sheet(item: $revoking) { device in PasswordConfirmSheet(title: "Revoke \(device.displayName)?", body: "This device loses access immediately. Enter your password to confirm.", confirmLabel: "Revoke") { password in
             try await model.service.revokeDevice(instance: model.instance, deviceID: device.id, currentPassword: password)

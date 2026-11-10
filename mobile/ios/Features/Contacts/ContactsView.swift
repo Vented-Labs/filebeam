@@ -118,7 +118,7 @@ struct ContactsView: View {
             }
             SectionLabel("Receiving defaults")
             VStack(spacing: Space.md) {
-                let policy = receivingPolicies.first { $0.0 == directory?.settings.receivingPolicy }?.1 ?? "Receiving defaults"
+                let policy = receivingPolicies.first { $0.0 == directory?.settings.receivingPolicy }?.1 ?? "Choose who can send"
                 FbButton(policy + (directory?.settings.autoDownloadFriends == true ? " · auto-download on" : ""), kind: .secondary, trailingIcon: defaultsOpen ? .chevronUp : .chevronDown) { withMotion(Motion.spatial) { defaultsOpen.toggle() } }
                 if defaultsOpen {
                     ReceivingDefaultsPanel(directory: directory) { policy, auto in
@@ -133,7 +133,7 @@ struct ContactsView: View {
             if model.policy?.usernameRoutingEnabled == false { Notice("New username inbox setup is unavailable on this instance.", tone: .warning) }
         }
         .task { await load() }
-        .onChange(of: model.session == nil) { _, signedOut in if signedOut { model.replace(.auth(.login)) } }
+        .onChange(of: model.session == nil, initial: true) { _, signedOut in if signedOut { model.replace(.auth(.login)) } }
         .sheet(item: $preferences) { friend in PreferencesSheet(friend: directory?.contacts.first { $0.id == friend.id } ?? friend) { canSend, auto in act(friend.username, "preferences", "Preferences saved", canSend: canSend, autoDownload: auto) } }
     }
 

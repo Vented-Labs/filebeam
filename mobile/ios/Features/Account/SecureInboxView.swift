@@ -62,7 +62,7 @@ struct SecureInboxView: View {
             }
         }
         .task(id: "\(session?.id ?? 0)-\(revision)") { await load() }
-        .onChange(of: model.session == nil) { _, signedOut in if signedOut { model.replace(.auth(.login)) } }
+        .onChange(of: model.session == nil, initial: true) { _, signedOut in if signedOut { model.replace(.auth(.login)) } }
         .sheet(isPresented: $wizard) { KeyWizard(situation: situation) { custody, password, acknowledged in
             try await setupKey(custody: custody, password: password, acknowledged: acknowledged)
         } }

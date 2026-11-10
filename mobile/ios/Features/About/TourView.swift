@@ -13,7 +13,7 @@ struct TourView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.theme) private var theme
     @Environment(\.dismiss) private var dismiss
-    @State private var page = 0
+    @State private var page = UserDefaults.standard.integer(forKey: "filebeam.tourPage")
 
     private var chapters: [Chapter] {
         [
@@ -95,9 +95,9 @@ private struct Art: View {
             }
         }
         case 3: Beam(from: .icon(.user), to: .icon(.users))
-        case 4: Tile(icon: .shield) {
+        case 4: Tile(icon: .shield, width: 300) {
             VStack(alignment: .leading, spacing: Space.sm) {
-                StatusPill("Server sees: sizes, timing, expiry", tone: .neutral)
+                StatusPill("Server sees: sizes and timing", tone: .neutral, icon: .eye)
                 StatusPill("Never: names, contents, keys", tone: .success, icon: .lock)
             }
         }
@@ -113,6 +113,7 @@ private enum EndpointIcon { case icon(Icon), customHTTP, customWebRTC }
 private struct Tile<Content: View>: View {
     @Environment(\.theme) private var theme
     let icon: Icon
+    var width: CGFloat = 240
     @ViewBuilder let content: () -> Content
     var body: some View {
         VStack(alignment: .leading, spacing: Space.lg) {
@@ -123,7 +124,7 @@ private struct Tile<Content: View>: View {
             content()
         }
         .padding(Space.xl)
-        .frame(width: 240)
+        .frame(width: width)
         .background(LinearGradient(colors: [theme.cardFront, theme.cardFrontEnd], startPoint: .topLeading, endPoint: .bottomTrailing), in: Shapes.panel)
         .overlay(Shapes.panel.strokeBorder(theme.controlBorder.opacity(0.6), lineWidth: 1))
     }

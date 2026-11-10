@@ -89,6 +89,7 @@ extension AppShell {
         }
         switch UserDefaults.standard.string(forKey: "filebeam.fixture") {
         case "queue":
+            model.send.files.sources.removeAll()
             model.send.addSources([
                 FileSource(name: "holiday-photos.zip", location: "/dev/null", sizeBytes: 48_300_000),
                 FileSource(name: "quarterly-report.pdf", location: "/dev/null", sizeBytes: 2_400_000),

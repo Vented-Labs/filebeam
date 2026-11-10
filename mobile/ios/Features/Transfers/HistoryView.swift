@@ -75,7 +75,7 @@ struct HistoryView: View {
         .motion(Motion.spatial, value: entries.map(\.id))
         .task(id: "\(status ?? "")|\(kind ?? "")|\(driver ?? "")|\(revision)") { await load() }
         .sheet(item: $extending) { ExtendSheet(entry: $0) { revision += 1 } }
-        .onChange(of: model.session == nil) { _, signedOut in if signedOut { model.replace(.auth(.login)) } }
+        .onChange(of: model.session == nil, initial: true) { _, signedOut in if signedOut { model.replace(.auth(.login)) } }
     }
 
     private var filter: HistoryFilter { HistoryFilter(status: status, kind: kind, driver: driver) }

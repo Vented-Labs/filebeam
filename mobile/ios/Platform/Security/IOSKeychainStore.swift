@@ -4,6 +4,16 @@ import Security
 
 public enum IOSKeychainStoreError: Error { case unavailable(OSStatus), invalidData, checkpointKeyMissing }
 
+extension IOSKeychainStoreError: LocalizedError {
+    public var errorDescription: String? {
+        switch self {
+        case let .unavailable(status): "The keychain is unavailable (status \(status))."
+        case .invalidData: "Saved keychain data could not be read."
+        case .checkpointKeyMissing: "The recovery key for saved transfers is missing."
+        }
+    }
+}
+
 /// Device-only custody for native state. Catalog and draft keys are available after first
 /// unlock for background recovery; cookies require an unlocked device and never synchronize.
 public final class IOSKeychainStore: NativeSecretStorageRemoving, @unchecked Sendable {
