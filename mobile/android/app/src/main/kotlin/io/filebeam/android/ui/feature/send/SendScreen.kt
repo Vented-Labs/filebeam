@@ -111,6 +111,10 @@ fun SendScreen(model: SendViewModel = viewModel()) {
     // Files and text shared into the app land here once.
     LaunchedEffect(incoming) {
         app.claim(Incoming.Files::class.java)?.let { model.addFiles(it.uris, emptyMap(), fileLimits.maximumFileCount, duplicateMessage, limitMessage) }
+        app.claim(Incoming.Recipient::class.java)?.let {
+            model.setMode(SendMode.Files)
+            model.chooseRecipient(it.username)
+        }
         app.claim(Incoming.Text::class.java)?.let { shared ->
             model.setMode(SendMode.Notes)
             model.updateNote { it.copy(body = if (it.body.isEmpty()) shared.text else it.body + "\n" + shared.text) }

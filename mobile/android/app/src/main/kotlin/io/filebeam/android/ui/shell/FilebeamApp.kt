@@ -89,6 +89,8 @@ private fun RouteContent(route: Route) {
         Route.Account -> io.filebeam.android.ui.feature.account.AccountScreen()
         Route.SecureInbox -> io.filebeam.android.ui.feature.account.SecureInboxScreen()
         Route.Devices -> io.filebeam.android.ui.feature.account.DevicesScreen()
+        Route.Contacts -> io.filebeam.android.ui.feature.contacts.ContactsScreen()
+        is Route.Recipient -> io.filebeam.android.ui.feature.contacts.RecipientScreen(route.username)
         Route.History -> io.filebeam.android.ui.feature.transfers.HistoryScreen()
         Route.Storage -> io.filebeam.android.ui.feature.settings.StorageScreen()
         else -> Placeholder(route)
@@ -114,8 +116,8 @@ private fun Home() {
                 when (tab) {
                     Tab.Send -> SendScreen()
                     Tab.Receive -> io.filebeam.android.ui.feature.receive.ReceiveScreen()
+                    Tab.Inbox -> io.filebeam.android.ui.feature.inbox.InboxScreen()
                     Tab.Transfers -> io.filebeam.android.ui.feature.transfers.TransfersScreen()
-                    else -> PlaceholderTab(tab)
                 }
             }
         }

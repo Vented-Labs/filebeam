@@ -533,4 +533,95 @@
         <item quantity="one">%1$d file</item>
         <item quantity="other">%1$d files</item>
     </plurals>
+
+    <!-- Inbox -->
+    <string name="confirm">Confirm</string>
+    <string name="inbox_subtitle">Received files stay encrypted until you unlock them. Filenames are never included in notifications.</string>
+    <string name="inbox_gate_title">Sign in to see your inbox</string>
+    <string name="inbox_gate_body">Friends and people with your profile link can send files straight to your account.</string>
+    <string name="inbox_disabled">Your secure inbox is not accepting transfers.</string>
+    <string name="inbox_set_up">Set up</string>
+    <string name="inbox_empty_title">No incoming files yet</string>
+    <string name="inbox_empty_body">Files sent to your username appear here.</string>
+    <string name="inbox_turbo_in_progress">Turbo upload in progress</string>
+    <string name="inbox_received">received %1$s</string>
+    <string name="inbox_open">Unlock and download</string>
+    <string name="inbox_delete_question">Permanently delete?</string>
+    <string name="inbox_delete_files">Delete files</string>
+    <string name="inbox_deleted">Delivery deleted</string>
+    <string name="inbox_staging_section">On this device</string>
+    <string name="inbox_auto_stage">Receive automatically on this device</string>
+    <string name="inbox_auto_stage_description">Encrypted deliveries are fetched in the background and stay locked until you open them.</string>
+    <string name="inbox_staged_ready">Encrypted and ready to unlock</string>
+    <string name="inbox_staged_waiting">Waiting to be fetched</string>
+    <string name="inbox_staged_remove">Remove local ciphertext</string>
+    <string name="inbox_manage_friends">Manage friend permissions</string>
+    <string name="inbox_receiving_settings">Receiving settings</string>
+    <string name="inbox_unlock_title">Unlock received files</string>
+    <string name="inbox_unlock_body">Your receiving key opens this delivery on this device. The secret is not sent anywhere.</string>
+    <string name="inbox_unlock_staged_body">Unlock the files already fetched to this device and verify them.</string>
+    <string name="inbox_key_password">Key password</string>
+    <string name="inbox_key_password_hint">Leave empty if this device already holds your key.</string>
+    <string name="inbox_unlock_footer">For a key you keep yourself, import it under Secure inbox first.</string>
+
+    <!-- Friends -->
+    <string name="contacts_add_label">Add a friend</string>
+    <string name="contacts_add">Send friend request</string>
+    <string name="contacts_request_sent">Request sent to \@%1$s</string>
+    <string name="contacts_already_friends">You are already friends with this account.</string>
+    <string name="contacts_already_incoming">This account has already requested to be your friend.</string>
+    <string name="contacts_already_outgoing">A request to this account is already pending.</string>
+    <string name="contacts_tab_friends">Friends %1$d</string>
+    <string name="contacts_tab_requests">Requests</string>
+    <string name="contacts_tab_requests_incoming">%1$d incoming</string>
+    <string name="contacts_tab_blocked">Blocked %1$d</string>
+    <string name="contacts_search">Find a friend</string>
+    <string name="contacts_empty_title">Add your first friend</string>
+    <string name="contacts_empty_body">Friends can send files straight to each other\'s encrypted inbox.</string>
+    <string name="contacts_no_match">No matching friends</string>
+    <string name="contacts_requests_empty">Friend requests will appear here</string>
+    <string name="contacts_blocked_empty">No blocked accounts</string>
+    <string name="contacts_badge_receiving_off">Receiving off</string>
+    <string name="contacts_badge_custom">Custom preferences</string>
+    <string name="contacts_blocked_badge">Blocked</string>
+    <string name="contacts_pending">Pending</string>
+    <string name="contacts_incoming">Incoming</string>
+    <string name="contacts_sent">Sent</string>
+    <string name="contacts_send_files">Send files</string>
+    <string name="contacts_preferences">Receiving preferences</string>
+    <string name="contacts_copy_profile">Copy profile link</string>
+    <string name="contacts_remove">Remove friend</string>
+    <string name="contacts_block">Block account</string>
+    <string name="contacts_unblock">Unblock</string>
+    <string name="contacts_accept">Accept</string>
+    <string name="contacts_decline">Decline</string>
+    <string name="contacts_cancel_request">Cancel request</string>
+    <string name="contacts_confirm_remove">Remove \@%1$s?</string>
+    <string name="contacts_confirm_block">Block \@%1$s?</string>
+    <string name="contacts_confirm_unblock">Unblock \@%1$s?</string>
+    <string name="contacts_removed_done">Removed \@%1$s</string>
+    <string name="contacts_blocked_done">Blocked \@%1$s</string>
+    <string name="contacts_unblocked_done">Unblocked \@%1$s</string>
+    <string name="contacts_accepted_done">You and \@%1$s are now friends</string>
+    <string name="contacts_declined_done">Declined \@%1$s</string>
+    <string name="contacts_cancelled_done">Cancelled the request to \@%1$s</string>
+    <string name="contacts_auto_on">auto-download on</string>
+    <string name="contacts_preferences_title">Preferences for \@%1$s</string>
+    <string name="contacts_preferences_saved">Preferences saved</string>
+    <string name="contacts_can_send">Can send me files</string>
+    <string name="contacts_auto_download">Automatic download</string>
+    <string name="contacts_use_default">Use account default</string>
+    <string name="contacts_allow">Allow</string>
+    <string name="contacts_disallow">Don\'t allow</string>
+    <string name="contacts_effective">Currently: %1$s</string>
+    <string name="contacts_reset">Reset to defaults</string>
+
+    <!-- Recipient -->
+    <string name="recipient_title">\@%1$s</string>
+    <string name="recipient_heading">Send files to \@%1$s</string>
+    <string name="recipient_body">Files are encrypted for their account before upload. Only they can open them.</string>
+    <string name="recipient_fingerprint">Recipient key fingerprint</string>
+    <string name="recipient_unavailable_title">This inbox is not available</string>
+    <string name="recipient_unavailable_body">The account may not accept files from you, or the link is wrong.</string>
+    <string name="recipient_stored_unavailable">Stored transfers are unavailable on this instance.</string>
 </resources>

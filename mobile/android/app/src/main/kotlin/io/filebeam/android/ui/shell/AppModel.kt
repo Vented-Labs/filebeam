@@ -34,6 +34,9 @@ sealed interface Incoming {
     data class Text(val text: String) : Incoming
     data class TransferLink(val link: String) : Incoming
     data class Invitation(val token: String) : Incoming
+
+    /** A username to deliver the next transfer to. */
+    data class Recipient(val username: String) : Incoming
     data class VerifyEmail(val link: String) : Incoming
     data class ResetPassword(val token: String, val email: String?) : Incoming
 }
