@@ -1,7 +1,21 @@
-//! Development-only deterministic snapshots for native Studio visual capture.
+//! Development-only synthetic snapshots for native visual capture. Timestamps are
+//! placed relative to now so that relative labels read as they would in use.
 //! This module is compiled only with `--features visual-test`.
 
-use crate::model::*;
+use crate::{model::*, ui::format};
+
+/// An RFC 3339 timestamp `hours` from now; negative values are in the past.
+fn at(hours: i64) -> String {
+    let instant = format::now() + hours * 3600;
+    let (year, month, day) = format::civil_from_days(instant.div_euclid(86_400));
+    let seconds = instant.rem_euclid(86_400);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        seconds / 3600,
+        seconds % 3600 / 60,
+        seconds % 60
+    )
+}
 
 #[derive(Clone, Copy)]
 pub struct Scenario {
@@ -212,6 +226,56 @@ pub const SCENARIOS: &[Scenario] = &[
         theme: "dark",
     },
     Scenario {
+        id: "inbox-no-key",
+        destination: "inbox",
+        theme: "dark",
+    },
+    Scenario {
+        id: "inbox-locked-refused",
+        destination: "inbox",
+        theme: "dark",
+    },
+    Scenario {
+        id: "inbox-selected",
+        destination: "inbox",
+        theme: "dark",
+    },
+    Scenario {
+        id: "inbox-download-started",
+        destination: "inbox",
+        theme: "dark",
+    },
+    Scenario {
+        id: "history-signed-out",
+        destination: "history",
+        theme: "dark",
+    },
+    Scenario {
+        id: "history-empty",
+        destination: "history",
+        theme: "dark",
+    },
+    Scenario {
+        id: "history-loading",
+        destination: "history",
+        theme: "dark",
+    },
+    Scenario {
+        id: "history-populated",
+        destination: "history",
+        theme: "dark",
+    },
+    Scenario {
+        id: "history-selected",
+        destination: "history",
+        theme: "dark",
+    },
+    Scenario {
+        id: "history-failed",
+        destination: "history",
+        theme: "dark",
+    },
+    Scenario {
         id: "account-profile",
         destination: "account",
         theme: "dark",
@@ -418,55 +482,76 @@ pub fn snapshot(id: &str) -> Option<DesktopSnapshot> {
             });
         }
         "transfers-scroll-end" => snapshot.jobs = scroll_jobs(),
-        "inbox-locked" => {
-            snapshot.account.authenticated = true;
-            snapshot.account.key_custody = KeyCustody::Locked {
-                version: 2,
-                fingerprint: "ABCD 1234".into(),
-                custody_mode: "password".into(),
-            };
-            snapshot
-                .inbox
-                .push(inbox("in-3", 0, 1, "2026-09-18T00:00:00Z"));
-        }
-        "inbox-populated" | "inbox-many-scroll-end" => {
+        "inbox-locked" | "inbox-locked-refused" => {
             snapshot.account = account(
                 true,
-                KeyCustody::Configured {
+                KeyCustody::Locked {
                     version: 2,
                     fingerprint: "ABCD 1234".into(),
-                    custody_mode: "self".into(),
+                    custody_mode: "password".into(),
                 },
             );
+        }
+        "inbox-no-key" => snapshot.account = account(true, KeyCustody::Unknown),
+        "inbox-empty" => snapshot.account = account(true, configured_key()),
+        "inbox-populated"
+        | "inbox-selected"
+        | "inbox-download-started"
+        | "inbox-many-scroll-end" => {
+            snapshot.account = account(true, configured_key());
             snapshot.inbox = if scenario.id == "inbox-many-scroll-end" {
-                (1..=40)
+                (1..=30)
                     .map(|index| {
                         inbox(
-                            &format!("in-{index}"),
+                            &format!("01JD8Q4XK7M2N9P3R5T6V8{index:04}"),
                             index * 2_097_152,
                             (index % 3) + 1,
-                            &format!("2026-09-{index:02}T10:36:00Z"),
+                            -(index as i64) * 5,
                         )
                     })
                     .collect()
             } else {
+                let mut first = inbox("01JD8Q4XK7M2N9P3R5T6V8W0A1", 72_351_744, 3, -2);
+                first.item_ids = vec!["item-01".into(), "item-02".into(), "item-03".into()];
                 vec![
-                    inbox("in-1", 72_351_744, 2, "2026-09-18T10:24:00Z"),
-                    inbox("in-2", 2_936_012, 1, "2026-09-18T09:36:00Z"),
-                    inbox("in-3", 0, 1, "2026-09-18T00:00:00Z"),
-                    inbox("in-4", 2_164, 1, "2026-09-17T10:36:00Z"),
+                    first,
+                    inbox("01JD8Q4XK7M2N9P3R5T6V8W0B2", 2_936_012, 1, -5),
+                    inbox("01JD8Q4XK7M2N9P3R5T6V8W0C3", 418_204_160, 12, -26),
+                    inbox("01JD8Q4XK7M2N9P3R5T6V8W0D4", 2_164, 1, -75),
                 ]
             };
+            if scenario.id != "inbox-many-scroll-end" {
+                snapshot.staged_inbox = vec![
+                    filebeam_client_core::services::inbox_receiver::StagedInbox {
+                        id: "01JD8Q4XK7M2N9P3R5T6V8W0B2".into(),
+                        bytes: 2_936_012,
+                        state: "staged-locked".into(),
+                        key_bundle_id: 2,
+                    },
+                    filebeam_client_core::services::inbox_receiver::StagedInbox {
+                        id: "01JD8Q4XK7M2N9P3R5T6V8W0C3".into(),
+                        bytes: 418_204_160,
+                        state: "downloading".into(),
+                        key_bundle_id: 2,
+                    },
+                ];
+            }
+        }
+        "history-empty" | "history-loading" | "history-failed" => {
+            snapshot.account = account(true, configured_key());
+            snapshot.history.revision = 1;
+            if scenario.id == "history-failed" {
+                snapshot.history.error = Some("native account request returned 503".into());
+            }
+        }
+        "history-populated" | "history-selected" => {
+            snapshot.account = account(true, configured_key());
+            snapshot.history.revision = 1;
+            snapshot.history.page.next_cursor = Some("older".into());
+            snapshot.history.page.data = history_entries();
         }
         "account-profile" | "account-scroll-end" | "account-key-wizard" | "account-recovery" => {
-            snapshot.account = account(
-                true,
-                KeyCustody::Configured {
-                    version: 2,
-                    fingerprint: "ABCD 1234".into(),
-                    custody_mode: "self".into(),
-                },
-            );
+            snapshot.account = account(true, configured_key());
         }
         "settings-light" | "settings-dark" | "settings-scroll-end" => {
             snapshot.settings = SettingsSnapshot {
@@ -529,6 +614,58 @@ fn account(authenticated: bool, key_custody: KeyCustody) -> AccountSnapshot {
         key_custody,
     }
 }
+fn configured_key() -> KeyCustody {
+    KeyCustody::Configured {
+        version: 2,
+        fingerprint: "ABCD 1234".into(),
+        custody_mode: "self".into(),
+    }
+}
+
+fn history_entries() -> Vec<filebeam_client_core::services::HistoryEntry> {
+    let entry = |index: u64, kind: &str, driver: &str, status: &str, items: u64, bytes: u64| {
+        let open = matches!(status, "available" | "live" | "pending");
+        // Open entries were shared within the last day; closed ones are older.
+        let created = if open {
+            -(index as i64) * 3
+        } else {
+            -(index as i64) * 30
+        };
+        filebeam_client_core::services::HistoryEntry {
+            id: format!("01JD8Q4XK7M2N9P3R5T6V8H{index:03}"),
+            kind: kind.into(),
+            driver: driver.into(),
+            delivery: if index % 3 == 0 { "inbox" } else { "link" }.into(),
+            status: status.into(),
+            item_count: items,
+            ciphertext_bytes: bytes,
+            declared_ciphertext_bytes: bytes,
+            created_at: at(created),
+            completed_at: Some(at(created)),
+            published_at: None,
+            expires_at: at(created + 24),
+            removed_at: (!open).then(|| at(created + 24)),
+            retention_hours: 24,
+            maximum_retention_hours: 168,
+            maximum_expires_at: Some(at(created + 168)),
+            burn_on_read: status == "burned",
+            can_delete: open,
+            can_extend: status == "available",
+        }
+    };
+    vec![
+        entry(1, "files", "http", "available", 3, 342_884_352),
+        entry(2, "note", "http", "available", 1, 1_946),
+        entry(3, "files", "webrtc", "live", 1, 858_993_459),
+        entry(4, "files", "http", "pending", 12, 96_468_992),
+        entry(5, "note", "http", "burned", 1, 812),
+        entry(6, "files", "http", "expired", 2, 3_758_080),
+        entry(7, "files", "webrtc", "ended", 1, 192_937_984),
+        entry(8, "files", "http", "deleting", 5, 26_214_400),
+        entry(9, "files", "http", "deleted", 1, 482_344_960),
+    ]
+}
+
 fn error(code: ClientErrorCode, detail: &str) -> ClientError {
     ClientError {
         code,
@@ -544,13 +681,14 @@ fn prompt(kind: PromptKind) -> PendingPrompt {
         directory: None,
     }
 }
-fn inbox(id: &str, ciphertext_bytes: u64, item_count: u64, completed_at: &str) -> InboxItem {
+/// A delivery received `received` hours from now (negative) and kept for a week.
+fn inbox(id: &str, ciphertext_bytes: u64, item_count: u64, received: i64) -> InboxItem {
     InboxItem {
         id: id.into(),
         ciphertext_bytes,
         item_count,
-        completed_at: completed_at.into(),
-        expires_at: "2026-09-25T10:36:00Z".into(),
+        completed_at: at(received),
+        expires_at: at(received + 168),
         item_ids: vec!["item-01".into()],
     }
 }

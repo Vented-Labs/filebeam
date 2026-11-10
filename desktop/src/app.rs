@@ -398,9 +398,25 @@ fn run_with_instance_at(
                             scroll_visual_target(window, "account-page-scroll", cx);
                         });
                     }
-                    Ok("inbox-many-scroll-end") => window.on_next_frame(|window, cx| {
-                        scroll_visual_target(window, "inbox-list-scroll", cx);
-                    }),
+                    Ok(scenario) if scenario.starts_with("inbox-") => {
+                        shell.update(cx, |shell, cx| {
+                            shell
+                                .inbox
+                                .update(cx, |inbox, cx| inbox.prepare_for_capture(scenario, cx));
+                        });
+                        if scenario == "inbox-many-scroll-end" {
+                            window.on_next_frame(|window, cx| {
+                                scroll_visual_target(window, "inbox-list-scroll", cx);
+                            });
+                        }
+                    }
+                    Ok(scenario) if scenario.starts_with("history-") => {
+                        shell.update(cx, |shell, cx| {
+                            shell.history.update(cx, |history, cx| {
+                                history.prepare_for_capture(scenario, cx)
+                            });
+                        });
+                    }
                     _ => {}
                 }
                 #[cfg(feature = "visual-test")]

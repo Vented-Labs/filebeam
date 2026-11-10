@@ -26,6 +26,7 @@ use crate::{
         ClientCommand, DesktopSnapshot, DirectoryMode, JobSnapshot, PendingPrompt, PromptAnswer,
         PromptKind, ReceiveKind, ReceivePreview, TransferDirection, TransferState, VerifiedResult,
     },
+    request::Mark,
     theme::{
         self, Palette,
         tokens::{geometry, radius},
@@ -51,8 +52,7 @@ struct Inspecting {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Starting {
     operation_id: String,
-    after_operation: usize,
-    after_message: u64,
+    since: Mark,
 }
 
 /// Native receive form and its local presentation state.
@@ -197,21 +197,13 @@ impl ReceivePanel {
         }
 
         if let Some(starting) = self.starting.clone() {
-            let accepted = snapshot
-                .operations
-                .iter()
-                .skip(starting.after_operation)
-                .any(|operation| operation.operation == "select receive items");
-            let refused = snapshot.messages.iter().find(|message| {
-                message.id > starting.after_message
-                    && matches!(
-                        message.operation.as_str(),
-                        "select receive items" | "start prepared receive"
-                    )
-            });
-            if let Some(message) = refused {
+            let accepted = starting.since.completed(snapshot, "select receive items");
+            let refused = ["select receive items", "start prepared receive"]
+                .into_iter()
+                .find_map(|operation| starting.since.failure(snapshot, operation));
+            if let Some(detail) = refused {
                 self.starting = None;
-                self.error = Some(format::readable_error(&message.error.detail));
+                self.error = Some(format::readable_error(&detail));
             } else if accepted {
                 self.starting = None;
                 if let Err(error) = self.client.dispatch(ClientCommand::StartPreparedReceive {
@@ -323,8 +315,7 @@ impl ReceivePanel {
                 self.error = None;
                 self.starting = Some(Starting {
                     operation_id,
-                    after_operation: snapshot.operations.len(),
-                    after_message: snapshot.messages.last().map_or(0, |message| message.id),
+                    since: Mark::now(&snapshot),
                 });
             }
             Err(error) => self.error = Some(format::readable_error(&error.to_string())),
@@ -1606,8 +1597,8 @@ mod tests {
         assert!(commands.try_recv().is_err(), "start waits for acceptance");
 
         snapshot.operations.push(OperationStatus {
+            id: 1,
             operation: "select receive items".into(),
-            detail: "completed".into(),
         });
         handle
             .update(cx, |panel, _, cx| {

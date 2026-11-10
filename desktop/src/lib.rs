@@ -11,6 +11,8 @@ pub mod model;
 #[cfg(not(feature = "headless-acceptance"))]
 pub mod platform;
 #[cfg(not(feature = "headless-acceptance"))]
+pub mod request;
+#[cfg(not(feature = "headless-acceptance"))]
 pub mod shell;
 #[cfg(all(test, not(feature = "headless-acceptance")))]
 mod testing;

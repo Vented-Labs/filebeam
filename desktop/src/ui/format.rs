@@ -29,6 +29,15 @@ pub fn plural(count: u64, singular: &str) -> String {
     }
 }
 
+/// A count with an irregular plural, e.g. "2 deliveries".
+pub fn count(count: u64, singular: &str, plural: &str) -> String {
+    if count == 1 {
+        format!("1 {singular}")
+    } else {
+        format!("{count} {plural}")
+    }
+}
+
 /// "1 hour", "3 days", "1 week": retention reads as a duration, never as raw hours.
 pub fn retention(hours: u64) -> String {
     if hours > 0 && hours % 8760 == 0 {
@@ -52,7 +61,7 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
     era * 146_097 + day_of_era - 719_468
 }
 
-fn civil_from_days(days: i64) -> (i64, i64, i64) {
+pub(crate) fn civil_from_days(days: i64) -> (i64, i64, i64) {
     let shifted = days + 719_468;
     let era = shifted.div_euclid(146_097);
     let day_of_era = shifted.rem_euclid(146_097);
@@ -156,6 +165,17 @@ pub fn relative(value: &str) -> String {
     parse_instant(value).map_or_else(|| value.to_owned(), |instant| relative_to(instant, now()))
 }
 
+/// An expiry as a label and a time: ("Expires", "in 3 days") until it passes, then
+/// ("Expired", "2 days ago").
+pub fn expiry(value: &str) -> (&'static str, String) {
+    let now = now();
+    match parse_instant(value) {
+        Some(instant) if instant <= now => ("Expired", relative_to(instant, now)),
+        Some(instant) => ("Expires", relative_to(instant, now)),
+        None => ("Expires", value.to_owned()),
+    }
+}
+
 /// "Sep 18, 2026, 10:24 UTC". The pinned toolchain has no time-zone database, so
 /// absolute times are labelled as UTC rather than guessed as local.
 pub fn absolute(value: &str) -> String {
@@ -204,6 +224,10 @@ pub fn readable_error(raw: &str) -> String {
         Some(429) => return "Too many attempts. Wait a moment and try again.".into(),
         Some(500..) => return "The server had a problem. Try again shortly.".into(),
         _ => {}
+    }
+    // The service withholds any failure that could quote a secret.
+    if lowered.contains("sensitive detail was withheld") {
+        return "That did not work. Check what you entered and try again.".into();
     }
     if lowered.contains("error sending request")
         || lowered.contains("dns")
@@ -373,6 +397,11 @@ mod tests {
         );
         assert_eq!(readable_error("  "), "Something went wrong. Try again.");
         assert_eq!(failure_title("login"), "Could not sign in");
+        assert_eq!(count(1, "delivery", "deliveries"), "1 delivery");
+        assert_eq!(count(4, "delivery", "deliveries"), "4 deliveries");
+        assert_eq!(expiry("1999-01-01T00:00:00Z").0, "Expired");
+        assert_eq!(expiry("2999-01-01T00:00:00Z").0, "Expires");
+        assert_eq!(expiry("soon"), ("Expires", "soon".to_owned()));
         assert_eq!(failure_title("revoke link"), "Could not revoke the link");
         assert_eq!(
             abbreviated("01JD8Q4XK7M2N9P3R5T6V8W0YZ", 8, 4),

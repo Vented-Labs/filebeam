@@ -371,7 +371,7 @@ impl SettingsPanel {
                 .find(|item| item.operation == operation)
         {
             self.pending_operation = None;
-            self.status = Some(format!("{}: {}", completion.operation, completion.detail));
+            self.status = Some(format!("{}: completed", completion.operation));
         } else if let Some(operation) = self.pending_operation
             && self
                 .snapshot

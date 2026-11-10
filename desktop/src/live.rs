@@ -296,6 +296,9 @@ pub fn fingerprint(snapshot: &DesktopSnapshot) -> u64 {
         message.id.hash(h);
     }
     snapshot.operations.len().hash(h);
+    if let Some(operation) = snapshot.operations.last() {
+        operation.id.hash(h);
+    }
 
     if let Some(invitation) = &snapshot.invitation {
         invitation.token.hash(h);
@@ -431,9 +434,13 @@ mod tests {
 
         let mut operation = DesktopSnapshot::default();
         operation.operations.push(crate::model::OperationStatus {
+            id: 1,
             operation: "login".into(),
-            detail: "completed".into(),
         });
-        assert_ne!(fingerprint(&operation), base);
+        let first = fingerprint(&operation);
+        assert_ne!(first, base);
+        // The log is trimmed at capacity, so its length alone can stand still.
+        operation.operations[0].id = 2;
+        assert_ne!(fingerprint(&operation), first);
     }
 }

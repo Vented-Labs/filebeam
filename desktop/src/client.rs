@@ -130,6 +130,7 @@ struct Worker {
     prepared_receives: Arc<Mutex<HashMap<String, PreparedReceive>>>,
     journal: DesktopJournal,
     next_message_id: u64,
+    next_operation_id: u64,
     /// Failed link-management jobs already reported as a message.
     reported_management_failures: std::collections::HashSet<JobId>,
     inbox_receiver: Option<(Control, thread::JoinHandle<()>)>,
@@ -231,6 +232,7 @@ impl Worker {
             prepared_receives: Arc::new(Mutex::new(HashMap::new())),
             journal,
             next_message_id: 0,
+            next_operation_id: 0,
             reported_management_failures: std::collections::HashSet::new(),
             inbox_receiver: None,
             account_id: std::cell::Cell::new(0),
@@ -1922,15 +1924,22 @@ impl Worker {
     }
     fn refresh_inbox(&mut self) -> Result<()> {
         let inbox = self.service()?.account().inbox()?;
-        lock(&self.snapshot).inbox = inbox
+        let mut snapshot = lock(&self.snapshot);
+        // A delivery's parts never change, so an inspected one keeps them.
+        let mut inspected: HashMap<String, Vec<String>> = snapshot
+            .inbox
+            .drain(..)
+            .map(|item| (item.id, item.item_ids))
+            .collect();
+        snapshot.inbox = inbox
             .into_iter()
             .map(|item| InboxItem {
+                item_ids: inspected.remove(&item.id).unwrap_or_default(),
                 id: item.id,
                 ciphertext_bytes: item.ciphertext_bytes,
                 item_count: item.item_count,
                 completed_at: item.completed_at,
                 expires_at: item.expires_at,
-                item_ids: Vec::new(),
             })
             .collect();
         Ok(())
@@ -2144,9 +2153,17 @@ impl Worker {
     fn set_account(&self, session: filebeam_client_core::services::AccountSession) {
         self.account_id.set(session.id);
         let mut snapshot = lock(&self.snapshot);
-        if snapshot.account.email.as_deref() != Some(session.email.as_str()) {
+        let same_account = snapshot.account.email.as_deref() == Some(session.email.as_str());
+        if !same_account {
             snapshot.history = HistorySnapshot::default();
         }
+        // The key state is refreshed on its own; refreshing a session must not
+        // briefly report that the account has no key.
+        let key_custody = if same_account {
+            std::mem::take(&mut snapshot.account.key_custody)
+        } else {
+            KeyCustody::Unknown
+        };
         snapshot.account = AccountSnapshot {
             authenticated: true,
             email: Some(session.email),
@@ -2159,7 +2176,7 @@ impl Worker {
             } else {
                 NotificationChannel::Database
             }),
-            key_custody: KeyCustody::Unknown,
+            key_custody,
         };
     }
     fn publish(&mut self) {
@@ -2341,12 +2358,17 @@ impl Worker {
         let mut snapshot = lock(&self.snapshot);
         record_message(&mut snapshot, &mut self.next_message_id, operation, error);
     }
-    fn complete(&self, operation: &str) {
+    fn complete(&mut self, operation: &str) {
         if operation != "command" {
-            lock(&self.snapshot).operations.push(OperationStatus {
+            self.next_operation_id += 1;
+            let mut snapshot = lock(&self.snapshot);
+            snapshot.operations.push(OperationStatus {
+                id: self.next_operation_id,
                 operation: operation.into(),
-                detail: "completed".into(),
             });
+            if snapshot.operations.len() > MESSAGE_HISTORY_CAPACITY {
+                snapshot.operations.remove(0);
+            }
         }
     }
 }

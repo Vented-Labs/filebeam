@@ -35,12 +35,8 @@ use crate::{
         self, MotionExt, TextExt, brand, dialog, feedback, format, motion, progress::progress, text,
     },
     views::{
-        account::{AccountPanel, InboxPanel},
-        history::HistoryPanel,
-        receive::ReceivePanel,
-        send::SendPanel,
-        settings::SettingsPanel,
-        transfers::TransfersPanel,
+        account::AccountPanel, history::HistoryPanel, inbox::InboxPanel, receive::ReceivePanel,
+        send::SendPanel, settings::SettingsPanel, transfers::TransfersPanel,
     },
 };
 
@@ -128,6 +124,33 @@ impl Destination {
             Self::History => "clock",
             Self::Settings => "settings",
             Self::Account => "user",
+        }
+    }
+
+    /// Whether this page reports the failure of `operation` in place, so it does
+    /// not also need a toast while the page is open.
+    fn presents(self, operation: &str) -> bool {
+        match self {
+            Self::Send => matches!(operation, "share" | "note"),
+            Self::Receive => matches!(
+                operation,
+                "inspect receive" | "select receive items" | "start prepared receive"
+            ),
+            Self::Inbox => matches!(
+                operation,
+                "refresh inbox"
+                    | "inspect inbox"
+                    | "receive inbox"
+                    | "delete inbox item"
+                    | "save staged inbox"
+                    | "remove local staging"
+                    | "unlock receiving key"
+            ),
+            Self::History => matches!(
+                operation,
+                "load history" | "delete history transfer" | "extend history transfer"
+            ),
+            Self::Transfers | Self::Settings | Self::Account => false,
         }
     }
 
@@ -268,8 +291,8 @@ impl DesktopShell {
         let send = cx.new(|cx| SendPanel::new(live.clone(), window, cx));
         let receive = cx.new(|cx| ReceivePanel::new(live.clone(), home.clone(), window, cx));
         let transfers = cx.new(|cx| TransfersPanel::new(live.clone(), window, cx));
-        let inbox = cx.new(|cx| InboxPanel::new(client.clone(), window, cx));
-        let history = cx.new(|cx| HistoryPanel::new(client.clone(), window, cx));
+        let inbox = cx.new(|cx| InboxPanel::new(live.clone(), window, cx));
+        let history = cx.new(|cx| HistoryPanel::new(live.clone(), window, cx));
         let account = cx.new(|cx| AccountPanel::new(client.clone(), window, cx));
         let settings = cx.new(|cx| SettingsPanel::new(client.clone(), home, window, cx));
         // The tray and notification adapters exist before the settings page asks
@@ -379,6 +402,9 @@ impl DesktopShell {
         for message in
             crate::toast::take_operational_messages(&mut self.seen_message_ids, &snapshot.messages)
         {
+            if self.destination.presents(&message.operation) {
+                continue;
+            }
             crate::toast::error(
                 format::failure_title(&message.operation),
                 format::readable_error(&message.error.detail),
@@ -477,19 +503,17 @@ impl DesktopShell {
             );
     }
 
+    /// Opens a page. Pages that list account data load it again as they open, and
+    /// track that request themselves so a failure shows where it happened.
     pub fn select(&mut self, destination: Destination, cx: &mut Context<Self>) {
         self.destination = destination;
-        let command = match destination {
-            Destination::Inbox => Some(ClientCommand::RefreshInbox),
-            Destination::History => Some(ClientCommand::RefreshHistory {
-                filter: self.client.snapshot().history.filter,
-                cursor: None,
-            }),
-            Destination::Account => Some(ClientCommand::Refresh),
-            _ => None,
-        };
-        if let Some(command) = command {
-            let _ = self.client.dispatch(command);
+        match destination {
+            Destination::Inbox => self.inbox.update(cx, |inbox, cx| inbox.refresh(cx)),
+            Destination::History => self.history.update(cx, |history, cx| history.refresh(cx)),
+            Destination::Account => {
+                let _ = self.client.dispatch(ClientCommand::Refresh);
+            }
+            _ => {}
         }
         cx.notify();
     }

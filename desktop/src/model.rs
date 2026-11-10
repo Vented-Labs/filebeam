@@ -373,10 +373,12 @@ pub struct ClientMessage {
     pub operation: String,
     pub error: ClientError,
 }
+/// A command the service finished without an error.
 #[derive(Clone)]
 pub struct OperationStatus {
+    /// Increases with every completion, so a view can tell a new one from an old one.
+    pub id: u64,
     pub operation: String,
-    pub detail: String,
 }
 #[derive(Clone, PartialEq, Eq)]
 pub struct ClientError {
@@ -625,6 +627,7 @@ impl ClientCommand {
             Self::ExportReceivingKey { .. } => "export receiving key",
             Self::ConfirmReceivingKeyBackup { .. } => "confirm receiving-key backup",
             Self::ReceiveInbox { .. } => "receive inbox",
+            Self::RefreshInbox => "refresh inbox",
             Self::InspectReceive { .. } => "inspect receive",
             Self::SelectReceiveItems { .. } => "select receive items",
             Self::StartPreparedReceive { .. } => "start prepared receive",
