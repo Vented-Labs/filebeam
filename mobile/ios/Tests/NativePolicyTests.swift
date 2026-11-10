@@ -24,6 +24,21 @@ final class NativePolicyTests: XCTestCase {
         XCTAssertEqual(policy.drivers["http"]?.maximumFileCount, .finite(0))
         XCTAssertEqual(policy.drivers["http"]?.maximumNoteBytes, .finite(4096))
         XCTAssertEqual(policy.drivers["webrtc"]?.maximumTransferBytes, .unknown)
+        XCTAssertEqual(policy.branding.name, "Filebeam")
+        XCTAssertNil(policy.branding.primaryColor)
+    }
+
+    func testDecodesBrandingAndInstanceInformation() throws {
+        let policy = try NativePolicyDecoder.decode(branded, instance: instance)
+        XCTAssertEqual(policy.branding.name, "Acme Beam")
+        XCTAssertEqual(policy.branding.primaryColor, 0x3d78d8)
+        XCTAssertEqual(policy.branding.version, "1.4.0")
+        XCTAssertTrue(policy.branding.changelogEnabled)
+        XCTAssertTrue(policy.branding.deviceRendezvousEnabled)
+        XCTAssertEqual(policy.branding.copyright, "2026 Acme")
+        XCTAssertEqual(policy.branding.githubURL, "https://github.com/acme/beam")
+        XCTAssertEqual(policy.branding.communityLinks.map(\.name), ["Discord", "Forum"])
+        XCTAssertEqual(policy.fileRetentionChoices(), [6, 24])
     }
 
     func testRejectsUnsupportedDriversAndInvalidEngineBounds() {
@@ -34,6 +49,10 @@ final class NativePolicyTests: XCTestCase {
 
     private let fixture = """
     {"account":{"registrationEnabled":true,"usernameRoutingEnabled":false},"transfer":{"anonymousUploadsEnabled":false,"defaultDriver":"http","enabledDrivers":["http", "webrtc"],"chunkBytes":1024,"limits":{"http":{"maximum_transfer_bytes":null,"maximum_file_count":0,"maximum_note_bytes":4096},"webrtc":{"maximum_file_count":2,"maximum_note_bytes":null}},"retention":{"files":{"defaultHours":24,"options":[6,24]},"notes":{"defaultHours":72,"options":[1,72]}}}}
+    """
+
+    private let branded = """
+    {"instance":{"name":"Acme Beam","url":"https://example.test","version":"1.4.0","changelogEnabled":true},"branding":{"primaryColor":"#3d78d8","copyright":"2026 Acme","githubUrl":"https://github.com/acme/beam","communityLinks":[{"type":"discord","url":"https://discord.gg/x"},{"name":"forum","url":"https://forum.example"}]},"account":{"registrationEnabled":true,"usernameRoutingEnabled":true,"deviceRendezvousEnabled":true},"transfer":{"anonymousUploadsEnabled":true,"defaultDriver":"http","enabledDrivers":["http", "webrtc"],"chunkBytes":1024,"limits":{"http":{"maximum_transfer_bytes":null,"maximum_file_count":0,"maximum_note_bytes":4096},"webrtc":{"maximum_file_count":2,"maximum_note_bytes":null}},"retention":{"files":{"defaultHours":24,"options":[6,24]},"notes":{"defaultHours":72,"options":[1,72]}}}}
     """
 }
 

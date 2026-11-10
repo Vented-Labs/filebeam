@@ -2,203 +2,285 @@ import SwiftUI
 import FilebeamDomain
 
 struct ReceiveView: View {
-    @Bindable var model: AppModel
-    @FocusState private var inputFocused: Bool
+    @Environment(AppModel.self) private var model
+    @Environment(\.theme) private var theme
+    @State private var reporting = false
+    @State private var exporting: [URL]?
+    @State private var previewing: URL?
+
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    Text("Receive a transfer").font(.title2.bold())
-                    Text("Paste the complete link, including its key. A separately shared key or password can be entered when requested.").foregroundStyle(.secondary)
-                    TextField("Transfer link or ID", text: $model.receiveInput, axis: .vertical).textInputAutocapitalization(.never).autocorrectionDisabled().textContentType(.URL).accessibilityIdentifier("receive-input").focused($inputFocused).onChange(of: model.receiveInput) { _, _ in model.receiveError = nil }
-                    PasteButton(payloadType: String.self) { strings in if let string = strings.first { model.receiveInput = string } }.buttonStyle(.bordered)
-                    if let error = model.receiveError { InlineNotice(text: error) }
-                    if let job = model.receiveJob { ReceiveProgress(snapshot: job) }
-                    if let job = model.receiveJob, let note = model.receivedAttachments[job.id] { AttachedNoteView(note: note) }
-                    PrimaryActionButton(title: "Download and verify", disabled: model.receiveInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) { Task { await model.inspectAndReceive() } }
-                }.frame(maxWidth: 640).padding()
-            }.navigationTitle("Receive")
-            .toolbar {
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button("Done") { inputFocused = false }.accessibilityIdentifier("receive-input-done")
+        let receive = model.receive
+        let stage = receive.stage
+        TabScreen {
+            VStack(alignment: .leading, spacing: Space.lg) {
+                switch stage {
+                case .idle: LinkEntry()
+                case .inspecting: WorkingPanel("Loading encrypted transfer", body: "Asking the instance what this link points to.")
+                case let .unlocking(phase): WorkingPanel(phase.label, body: "Checking the key and reading the encrypted file list.")
+                case let .needKey(error): KeyStep(error: error)
+                case let .needPassword(error): PasswordStep(error: error)
+                case let .needConsent(peer):
+                    StepPanel(customIcon: .webrtcP2p, title: "Connect directly?", body: "Live transfers connect your device to the sender. Each side may see the other's network address.") {
+                        if let peer { Text(peer).fbText(.codeSmall, color: theme.textMuted) }
+                        Notice("Turn on relay-only live transfers in Settings to hide your address.", tone: .info)
+                        FbButton("Allow and connect") { Task { await receive.submitConsent(true) } }
+                        FbButton("Not now", kind: .quiet) { Task { await receive.submitConsent(false) } }
+                    }
+                case let .noteLocked(burnOnRead):
+                    StepPanel(.note, title: "Secure note", body: "The note is decrypted on this device when you open it.") {
+                        if burnOnRead { Notice("This note burns after reading. Decrypting it removes it for everyone.", tone: .warning, icon: .trash) }
+                        FbButton("Decrypt note", icon: .unlock) { Task { await receive.decryptNote() } }
+                        FbButton("Cancel", kind: .quiet) { receive.reset() }
+                    }
+                case let .files(items): FilesReady(items: items)
+                case let .downloading(items, selection): DownloadProgress(count: selection?.count ?? items.count)
+                case let .saved(files): SavedFiles(files: files, onSave: { exporting = [$0] }, onSaveAll: { exporting = files }, onPreview: { previewing = $0 })
+                case let .note(note, burnPending): NoteResult(note: note, burnPending: burnPending)
+                case let .unavailable(message): Unavailable(message: message)
+                }
+                if stage.showsFooterActions {
+                    if case .files = stage, !receive.input.isEmpty {
+                        CliCard(link: receive.input, available: !receive.live && receive.input.contains("#"), reason: receive.live ? "Live transfers are received in the app or the browser." : "This transfer is not currently available for CLI download.")
+                    }
+                    HStack(spacing: Space.md) {
+                        FbButton("Open another", kind: .secondary, icon: .link) { receive.reset() }
+                        FbButton("Report", kind: .quiet, icon: .alert) { reporting = true }
+                    }
                 }
             }
+            .id(stage.kind)
+            .transition(.asymmetric(insertion: .opacity.combined(with: .move(edge: .bottom)).combined(with: .scale(scale: 0.98)), removal: .opacity))
         }
-        .onChange(of: model.selectedTab) { _, tab in if tab != .receive { inputFocused = false } }
-        .sheet(isPresented: Binding(get: { model.pendingNoteInspection != nil }, set: { if !$0 { model.pendingNoteInspection = nil; model.pendingNoteInput = nil; model.pendingNoteInstance = nil } })) {
-            if let inspection = model.pendingNoteInspection { NoteReceiveSheet(model: model, inspection: inspection) }
+        .motion(Motion.enter, value: stage.kind)
+        .privacySensitive(stage.isSensitive)
+        .sheet(isPresented: $reporting, onDismiss: { receive.clearReport() }) { ReportSheet() }
+        .sheet(item: Binding(get: { exporting.map(ExportItems.init) }, set: { if $0 == nil { exporting = nil } })) { item in
+            DocumentExportSheet(urls: item.urls) { result in
+                exporting = nil
+                if case let .success(destinations) = result, let jobID = receive.jobID {
+                    Task { await model.recordExport(jobID: jobID, paths: destinations.map(\.path)); model.toast("Saved", tone: .success) }
+                } else if case let .failure(error) = result { model.fail(error) }
+            }
+            .ignoresSafeArea()
         }
-        .sheet(item: $model.pendingReceiveRoute) { route in ReceiveConfirmationSheet(model: model, route: route) }
+        .sheet(item: Binding(get: { previewing.map(ExportItems.init) }, set: { if $0 == nil { previewing = nil } })) { item in
+            NativePreviewSheet(url: item.urls[0]).ignoresSafeArea()
+        }
+        .task(id: model.pendingReceiveLink) {
+            guard let link = model.pendingReceiveLink else { return }
+            model.pendingReceiveLink = nil
+            receive.open(link)
+        }
     }
 }
 
-struct ReceiveConfirmationSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    @Bindable var model: AppModel
-    let route: ReceiveRouteConfirmation
-    var body: some View { NavigationStack { VStack(alignment: .leading, spacing: 16) { Text(route.isForeignInstance ? "Transfer from another instance" : "Ready to receive").font(.title2.bold()); Text(route.isForeignInstance ? "This link uses \(route.instance.origin). Your default instance will not change." : "The selected instance is \(route.instance.origin).").foregroundStyle(.secondary); Label(route.inspection.kind == .note ? "Encrypted note" : "Encrypted files", systemImage: route.inspection.kind == .note ? "note.text" : "doc"); Text(route.input).font(.footnote.monospaced()).textSelection(.enabled); Spacer() }.padding().navigationTitle("Receive transfer").toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { model.pendingReceiveRoute = nil; dismiss() } }; ToolbarItem(placement: .confirmationAction) { Button("Download and verify") { Task { await model.beginConfirmedReceive(); if model.pendingReceiveRoute == nil { dismiss() } } } } } } }
+private struct ExportItems: Identifiable {
+    let urls: [URL]
+    init(_ urls: [URL]) { self.urls = urls }
+    init(_ url: URL) { urls = [url] }
+    var id: String { urls.map(\.path).joined() }
 }
 
-struct NoteReceiveSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    @Bindable var model: AppModel
-    let inspection: NoteInspection
+private extension ReceiveStage {
+    var showsFooterActions: Bool {
+        switch self { case .files, .saved, .note, .noteLocked: true; default: false }
+    }
+    var isSensitive: Bool {
+        switch self { case .note, .needKey, .needPassword: true; default: false }
+    }
+}
+
+private struct LinkEntry: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.theme) private var theme
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        @Bindable var receive = model.receive
+        ScreenHeader("Receive a transfer", subtitle: "Paste a Filebeam link or ID. Files are decrypted on this device.").staggered(0)
+        Panel {
+            VStack(spacing: Space.lg) {
+                FbTextField($receive.input, label: "Transfer link or ID", placeholder: "https://…", icon: .link, keyboard: .URL, contentType: .URL, submitLabel: .go, onSubmit: { receive.open() })
+                    .focused($focused)
+                    .accessibilityIdentifier("receive-input")
+                FbButton("Open transfer", icon: .unlock, enabled: !receive.input.isBlank) { focused = false; receive.open() }
+                FbButton("Paste from clipboard", kind: .secondary, icon: .paste) {
+                    if let clip = Clipboard.paste(), !clip.isBlank { receive.input = clip; receive.open(clip) } else { model.toast("The clipboard is empty.") }
+                }
+            }
+            .padding(Space.lg)
+        }
+        .staggered(1)
+        HStack(spacing: Space.sm) {
+            FbIcon(.shield, size: 16)
+            Text("Decrypted on this device, never on the server.").fbText(.caption, color: theme.textMuted)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, Space.sm)
+        .staggered(2)
+    }
+}
+
+private struct KeyStep: View {
+    @Environment(AppModel.self) private var model
+    let error: Bool
     @State private var key = ""
+    var body: some View {
+        StepPanel(.key, title: "Enter the decryption key", body: "This link does not include its key. The sender shared it separately.") {
+            FbTextField($key, label: "Generated key", placeholder: "v1.…", error: error ? "Invalid decryption key. Enter the key the sender shared." : nil, monospaced: true, keyboard: .asciiCapable, submitLabel: .go, onSubmit: { Task { await model.receive.submitKey(key) } })
+            FbButton("Continue", enabled: !key.isBlank) { Task { await model.receive.submitKey(key) } }
+            FbButton("Cancel", kind: .quiet) { model.receive.reset() }
+        }
+    }
+}
+
+private struct PasswordStep: View {
+    @Environment(AppModel.self) private var model
+    let error: Bool
     @State private var password = ""
-    @State private var burnAcknowledged = false
     var body: some View {
-        NavigationStack {
-            Form {
-                Section("Encrypted note") {
-                    LabeledContent("Delivery", value: inspection.transport == .http ? "HTTP" : "WebRTC")
-                    Text("The note content remains unavailable until it is decrypted.").foregroundStyle(.secondary)
-                }
-                Section("Unlock") {
-                    SecureField("Decryption key (if shared separately)", text: $key).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    if inspection.passwordRequired { SecureField("Transfer password", text: $password) }
-                }
-                if inspection.burnOnRead { Section("One-time access") { Toggle("I understand opening this note may consume it", isOn: $burnAcknowledged); Text("This does not prevent a recipient keeping a copy.").font(.footnote).foregroundStyle(.secondary) } }
-                if let error = model.receiveError { InlineNotice(text: error) }
-            }.navigationTitle("Receive note").toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { key = ""; password = ""; dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Download and verify") { Task { await model.receiveNote(separateKey: key.nilIfEmpty, password: password.nilIfEmpty, burnAcknowledged: burnAcknowledged); key = ""; password = ""; if model.pendingNoteInspection == nil { dismiss() } } }.disabled(inspection.burnOnRead && !burnAcknowledged) }
+        StepPanel(.lock, title: "Password required", body: "The sender protected this transfer with a password.") {
+            PasswordField($password, label: "Password", error: error ? "That password did not unlock the transfer." : nil, submitLabel: .go, onSubmit: { Task { await model.receive.submitPassword(password) } })
+            FbButton("Unlock", icon: .unlock, enabled: !password.isEmpty) { Task { await model.receive.submitPassword(password) } }
+            HStack(spacing: Space.md) {
+                FbButton("Change key", kind: .quiet) { model.receive.changeKey() }
+                FbButton("Cancel", kind: .quiet) { model.receive.reset() }
             }
         }
     }
 }
 
-struct ReceiveProgress: View {
-    let snapshot: TransferSnapshot
+private struct FilesReady: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.theme) private var theme
+    let items: [TransferSelectionItem]
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(phaseTitle(snapshot.phase)).font(.headline)
-            if let total = snapshot.totalBytes, total > 0 { ProgressView(value: Double(snapshot.completedBytes), total: Double(total)); Text("\(snapshot.completedBytes.filebeamBytes) of \(total.filebeamBytes)").font(.footnote).foregroundStyle(.secondary) }
-            if snapshot.phase == .verifiedAwaitingExport { Label("Verified on this device", systemImage: "checkmark.seal.fill").foregroundStyle(.green) }
+        let receive = model.receive
+        let total = items.reduce(0) { $0 + $1.size }
+        ScreenHeader(items.count == 1 ? "1 file ready to download" : "\(items.count) files ready to download", subtitle: formatBytes(total) + (receive.live ? " · Live transfer: the sender must stay connected" : ""))
+        if let note = receive.attachedNote { AttachedNoteCard(note: note) }
+        ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+            ItemRow(name: item.name, detail: formatBytes(item.size)) {
+                if items.count > 1 { IconAction(.download, "Download \(item.name)", tint: theme.accentText) { Task { await receive.download([item.id]) } } }
+            }
+            .staggered(min(index, 8))
         }
-        .padding()
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Transfer status")
-        .accessibilityValue(accessibilityValue)
-    }
-    private func phaseTitle(_ phase: TransferPhase) -> String { phase.rawValue.replacingOccurrences(of: "([A-Z])", with: " $1", options: .regularExpression).capitalized }
-    private var accessibilityValue: String {
-        guard let total = snapshot.totalBytes, total > 0 else { return phaseTitle(snapshot.phase) }
-        let percent = Int((Double(snapshot.completedBytes) / Double(total) * 100).rounded())
-        let milestone = min(100, (percent / 25) * 25)
-        return "\(phaseTitle(snapshot.phase)), \(milestone) percent"
+        FbButton(items.count > 1 ? "Download all" : "Download", icon: .download) { Task { await receive.download(nil) } }
+        Text("Your download progress is shared anonymously with the sender.").fbText(.caption, color: theme.textSubtle).multilineTextAlignment(.center).frame(maxWidth: .infinity)
     }
 }
 
-struct VerifiedNoteView: View {
-    let note: VerifiedNote
-    @State private var copied = false
-    @State private var share = false
-    @State private var exportDocument: ExportDocument?
+private struct DownloadProgress: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.theme) private var theme
+    let count: Int
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Label("Verified on this device", systemImage: "checkmark.seal.fill").foregroundStyle(.green)
-                if let title = note.title, !title.isEmpty { Text(title).font(.title2.bold()) }
-                Text(note.text).font(note.language == .plain ? .body : .system(.body, design: .monospaced)).textSelection(.enabled)
+        let receive = model.receive
+        let snapshot = receive.snapshot
+        Panel {
+            VStack(spacing: Space.lg) {
+                Emblem(engaged: true, size: 108)
+                Text((snapshot?.phase ?? .receiving).label).fbText(.headline).multilineTextAlignment(.center).id(snapshot?.phase).transition(.opacity)
+                Text(count == 1 ? "Downloading 1 file" : "Downloading \(count) files").fbText(.small, color: theme.textMuted)
                 HStack {
-                    Button(copied ? "Copied" : "Copy note") { UIPasteboard.general.string = note.text; copied = true; Task { try? await Task.sleep(for: .seconds(2)); copied = false } }.frame(minWidth: 100, alignment: .leading)
-                    Button("Share note") { share = true }
-                    Button("Save as note file") { makeExportFile() }
+                    Spinner(size: 16)
+                    Text(receive.live ? "Live transfer: the sender must stay connected" : "Every file is verified before it is saved").fbText(.caption, color: theme.textMuted).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading).padding(.leading, Space.sm)
+                    if let fraction = snapshot?.fraction { Text(progressLabel(fraction)).fbText(.numeric, color: theme.textMuted) }
                 }
-                Text("Choose a folder in Files to save an optional note copy. Sharing does not change its verified state.").font(.footnote).foregroundStyle(.secondary)
+                SmoothProgress(snapshot?.fraction)
+                FbButton("Cancel", kind: .danger) { Task { await receive.cancelDownload() } }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding()
+            .frame(maxWidth: .infinity)
+            .padding(Space.xl)
         }
-        .sheet(isPresented: $share) { NativeShareSheet(items: [note.text]) }
-        .sheet(item: $exportDocument) { document in DocumentExportSheet(urls: [document.url]) { _ in exportDocument = nil } }
-        .navigationTitle("Encrypted note")
-    }
-    private func makeExportFile() {
-        let filename = (note.title?.nilIfEmpty ?? "filebeam-note").replacingOccurrences(of: "/", with: "-")
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(filename).txt")
-        try? Data(note.text.utf8).write(to: url, options: .atomic)
-        exportDocument = ExportDocument(url: url)
     }
 }
 
-struct AttachedNoteView: View {
-    let note: AttachedNoteDraft
-    @State private var exportDocument: ExportDocument?
-    @State private var exportDirectory: URL?
-    @State private var exportError: String?
+private struct SavedFiles: View {
+    @Environment(AppModel.self) private var model
+    let files: [URL]
+    let onSave: (URL) -> Void
+    let onSaveAll: () -> Void
+    let onPreview: (URL) -> Void
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(note.title.isEmpty ? "Attached note" : note.title).font(.headline)
-            Text(note.language.rawValue).font(.caption).foregroundStyle(.secondary)
-            Text(note.text).font(note.language == .plain ? .body : .system(.body, design: .monospaced)).textSelection(.enabled)
-            HStack {
-                Button("Copy note") { UIPasteboard.general.string = note.text }
-                Button("Save note") {
-                    do {
-                        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-                        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-                        exportDirectory = directory
-                        let url = directory.appendingPathComponent("attached-note.txt")
-                        try Data(note.text.utf8).write(to: url, options: [.atomic, .completeFileProtection])
-                        exportDocument = ExportDocument(url: url)
-                    } catch { cleanupExport(); exportError = error.localizedDescription }
+        ScreenHeader("Download completed", subtitle: "Verified and kept privately in Filebeam until you save it.")
+        if let note = model.receive.attachedNote { AttachedNoteCard(note: note) }
+        ForEach(Array(files.enumerated()), id: \.element) { index, file in
+            Button { onPreview(file) } label: {
+                ItemRow(name: file.lastPathComponent, detail: formatBytes(UInt64(max(0, (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)))) {
+                    FbButton("Save", kind: .secondary, icon: .download, height: 40, fill: false) { onSave(file) }
                 }
             }
-            if let exportError { InlineNotice(text: exportError) }
+            .buttonStyle(.plain)
+            .accessibilityHint("Preview")
+            .staggered(min(index, 8))
         }
-        .sheet(item: $exportDocument, onDismiss: { cleanupExport() }) { document in DocumentExportSheet(urls: [document.url]) { _ in cleanupExport() } }
-    }
-    private func cleanupExport() {
-        if let directory = exportDirectory { try? FileManager.default.removeItem(at: directory) }
-        exportDirectory = nil
-        exportDocument = nil
+        if files.isEmpty { Notice("The verified files are no longer available on this device.", tone: .warning) }
+        else if files.count > 1 { FbButton("Save all to Files", icon: .download, action: onSaveAll) }
+        StatusPill("Integrity verified", tone: .success, icon: .shield)
     }
 }
 
-struct PromptSheet: View {
-    @Environment(\.dismiss) private var dismiss
-    @Bindable var model: AppModel
-    let context: PromptContext
-    @State private var value = ""
-    @State private var showValue = false
-    @State private var selectedItemIDs = Set<String>()
-    @State private var choosingDirectory = false
-    @State private var submitting = false
+private struct NoteResult: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.theme) private var theme
+    let note: VerifiedNote
+    let burnPending: Bool
+    @State private var exporting: URL?
+
     var body: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 16) {
-                Text(context.prompt.message ?? detail).foregroundStyle(.secondary)
-                if context.prompt.kind == .filesSelection { List(context.prompt.selectionItems) { item in Toggle(isOn: Binding(get: { selectedItemIDs.contains(item.id) }, set: { selected in if selected { selectedItemIDs.insert(item.id) } else { selectedItemIDs.remove(item.id) } })) { VStack(alignment: .leading) { Text(item.name); Text(item.size.filebeamBytes).font(.footnote).foregroundStyle(.secondary) } } }.listStyle(.plain) }
-                else if context.prompt.kind == .directoryChoice { Button(value.isEmpty ? "Choose folder" : URL(fileURLWithPath: value).lastPathComponent) { choosingDirectory = true }.buttonStyle(.bordered); if !value.isEmpty { Text(value).font(.footnote.monospaced()).textSelection(.enabled) } }
-                else if context.prompt.kind == .peerConsent { Text("Allow a direct peer connection for this transfer?").font(.body) }
-                else if context.prompt.kind == .shareReady { Text("The encrypted share is ready. Continue to return to the transfer.").foregroundStyle(.secondary) }
-                else { Group { if showValue { TextField(title, text: $value) } else { SecureField(title, text: $value) } }.textInputAutocapitalization(.never).autocorrectionDisabled(); Button(showValue ? "Hide" : "Show") { showValue.toggle() }.buttonStyle(.bordered) }
-                Spacer()
-            }.padding().navigationTitle(title).toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button(context.prompt.kind == .peerConsent ? "Deny" : "Cancel") { if context.prompt.kind == .peerConsent { Task { if await model.respond(context: context, allowed: false) { dismiss() } } } else { Task { await model.dismissPrompt(context); dismiss() } } }.disabled(submitting) }
-                ToolbarItem(placement: .confirmationAction) { Button(context.prompt.kind == .peerConsent ? "Allow" : "Continue") { submit() }.disabled(submitting || requiresValue && value.isEmpty || (context.prompt.kind == .filesSelection && selectedItemIDs.isEmpty)) }
+        ScreenHeader(note.title?.nilIfEmpty ?? "Secure note")
+        if note.consumed { Notice("This note was removed after this read.", tone: .warning, icon: .trash) }
+        if burnPending {
+            Notice("The note was read but could not be removed yet.", tone: .danger) {
+                FbButton("Retry removal", kind: .secondary, height: 40, fill: false) { Task { await model.receive.retryBurn() } }
             }
         }
-        .sheet(isPresented: $choosingDirectory) { NativeDocumentPicker(allowsFolders: true) { urls in if let url = urls.first { value = url.path }; choosingDirectory = false } }
-        .onAppear { if context.prompt.kind == .filesSelection { selectedItemIDs = Set(context.prompt.selectionItems.map(\.id)) } }
-    }
-    private var title: String { switch context.prompt.kind { case .decryptionKey: return "Enter decryption key"; case .password: return "Enter transfer password"; case .peerConsent: return "Direct connection"; case .directoryChoice: return "Choose a folder"; case .filesSelection: return "Choose files"; case .shareReady: return "Share ready" } }
-    private var detail: String { context.prompt.kind == .peerConsent ? "A direct peer connection may reveal your network address to the other participant." : "This value is used only to unlock this transfer." }
-    private var requiresValue: Bool { ![.peerConsent, .shareReady].contains(context.prompt.kind) }
-    private func submit() {
-        let response = context.prompt.kind == .filesSelection ? String(data: (try? JSONEncoder().encode(Array(selectedItemIDs).sorted())) ?? Data("[]".utf8), encoding: .utf8) ?? "[]" : value
-        submitting = true
-        Task {
-            if await model.respond(context: context, value: response) {
-                value = ""
-                dismiss()
+        CodeEditor(note.text, language: note.language.rawValue, minHeight: 120, maxHeight: 520)
+        HStack(spacing: Space.md) {
+            FbButton("Copy", icon: .copy) {
+                Clipboard.copySensitive(note.text)
+                model.toast("Copied", tone: .success)
             }
-            submitting = false
+            FbButton("Save", kind: .secondary, icon: .download) {
+                let name = ((note.title?.nilIfEmpty ?? "note").replacingOccurrences(of: "/", with: "-")) + "." + note.language.fileExtension
+                let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true).appendingPathComponent(name)
+                do {
+                    try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try Data(note.text.utf8).write(to: url, options: [.atomic, .completeFileProtection])
+                    exporting = url
+                } catch { model.fail(error) }
+            }
+        }
+        .sheet(item: Binding(get: { exporting.map(ExportItems.init) }, set: { if $0 == nil { exporting = nil } })) { item in
+            DocumentExportSheet(urls: item.urls) { result in
+                try? FileManager.default.removeItem(at: item.urls[0].deletingLastPathComponent())
+                exporting = nil
+                if case .success = result { model.toast("Saved", tone: .success) }
+            }
+            .ignoresSafeArea()
         }
     }
 }
 
-private extension String { var nilIfEmpty: String? { isEmpty ? nil : self } }
+private struct Unavailable: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.theme) private var theme
+    let message: String?
+    var body: some View {
+        Panel {
+            VStack(spacing: Space.lg) {
+                FbIcon(.alert, size: 30, tint: theme.danger.ink)
+                    .frame(width: 72, height: 72)
+                    .background(theme.danger.surface, in: Shapes.panel)
+                    .overlay(Shapes.panel.strokeBorder(theme.danger.border.opacity(0.5), lineWidth: 1))
+                Text("Transfer unavailable").fbText(.headline).multilineTextAlignment(.center)
+                Text(message.map(readableMessage) ?? "It may have expired, been deleted, or the link may be incomplete.").fbText(.small, color: theme.textMuted).multilineTextAlignment(.center)
+                FbButton("Try another link", kind: .secondary, icon: .link) { model.receive.reset() }
+                FbButton("Start a new transfer", icon: .upload) { model.receive.reset(); model.select(.send) }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(Space.xxl)
+        }
+    }
+}

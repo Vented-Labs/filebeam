@@ -1,6 +1,46 @@
 # Filebeam iOS
 
-`Filebeam` targets iOS 17+ on iPhone and iPad. Application screens are SwiftUI, with native system integrations for Files, sharing, previews, and Keychain. The five destinations are Send, Receive, Transfers, Inbox, and Settings. `Platform/Rust` adapts the shared UniFFI engine; `Platform/Background` executes Rust-prepared ciphertext requests through background URLSession. `ShareExtension` is a distinct target.
+`Filebeam` targets iOS 17+ on iPhone and iPad. Screens are SwiftUI with native system
+integrations for Files, sharing, previews and Keychain. The four destinations in the floating
+navigation bar are Send, Receive, Transfers and Inbox; the account, settings, appearance and
+about screens stack above them. `Platform/Rust` adapts the shared UniFFI engine;
+`Platform/Background` executes Rust-prepared ciphertext requests through background URLSession.
+`ShareExtension` is a distinct target.
+
+## Design system
+
+`DesignSystem/` holds the theme, type scale, motion and haptic tokens and every reusable
+component. Colours come from `Packages/FilebeamTheme`, a platform-independent palette engine
+that reproduces the web theme generator (`backend/app/Support/Theming`): the Filebeam presets,
+the connected instance's brand colour and any custom colour derive the same OKLCH roles as the
+web, and `swift test --package-path Packages/FilebeamTheme` checks them against the shared
+golden fixture. The same package carries the note syntax highlighter used by the editor.
+
+Text uses the system font through Dynamic Type text styles. Icons are SF Symbols, with the two
+transport glyphs kept as original Filebeam artwork in `DesignSystem/CustomIcons.generated.swift`.
+
+## Features
+
+- **Send**: files, folders and shared content over stored HTTP or live WebRTC, with Turbo
+  Transfer, optional password, retention, a separate decryption key, ZIP packaging, an
+  attached note, and delivery to a friend's encrypted inbox.
+- **Notes**: a syntax-highlighting editor for nine languages, with password, retention, burn
+  on read, and stored or live delivery.
+- **Receive**: unlock a link with its key and password, list the files before downloading,
+  download one file or all, read notes, and report a transfer.
+- **Transfers**: running and saved transfers with pause, resume and removal, account history
+  with extend and delete, and storage usage.
+- **Account**: sign in, registration, recovery, email verification and invitations through
+  universal links; secure inbox setup with either key custody mode; friends and receiving
+  preferences; registered devices; account deletion.
+- **Appearance**: system, light and dark themes with the Filebeam presets, the instance colour
+  or a custom colour. Changes spread from the touch point in a circular reveal.
+- **About**: a features tour, the instance's changelog rendered natively, CLI install commands
+  and open-source licences.
+
+Password-custody inbox keys are unlocked once at sign-in and kept in the device Keychain, so
+deliveries open without re-entering the account password. Screens that show keys, passwords or
+decrypted notes are marked privacy sensitive.
 
 ## Build
 

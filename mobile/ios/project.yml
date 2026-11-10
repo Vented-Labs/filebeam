@@ -13,6 +13,7 @@ settings:
 packages:
   FilebeamCore: { path: Packages/FilebeamCore }
   FilebeamDomain: { path: Packages/FilebeamDomain }
+  FilebeamTheme: { path: Packages/FilebeamTheme }
 targets:
   Filebeam:
     type: application
@@ -39,6 +40,7 @@ targets:
     dependencies:
       - package: FilebeamCore
       - package: FilebeamDomain
+      - package: FilebeamTheme
       - target: ShareExtension
         embed: true
   ShareExtension:
@@ -56,7 +58,7 @@ targets:
     sources: [Tests]
     settings:
       base: { GENERATE_INFOPLIST_FILE: YES }
-    dependencies: [{ target: Filebeam }, { package: FilebeamDomain }, { package: FilebeamCore }]
+    dependencies: [{ target: Filebeam }, { package: FilebeamDomain }, { package: FilebeamCore }, { package: FilebeamTheme }]
   FilebeamUITests:
     type: bundle.ui-testing
     platform: iOS

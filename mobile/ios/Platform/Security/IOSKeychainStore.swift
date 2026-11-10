@@ -40,6 +40,14 @@ public final class IOSKeychainStore: NativeSecretStorageRemoving, @unchecked Sen
         else { try delete(name: name) }
     }
 
+    /// A small device-only secret such as a remembered inbox private key. Requires an unlocked device.
+    public func loadSecret(_ name: String) throws -> Data? { try read(name: "secret.\(name)") }
+    public func saveSecret(_ name: String, _ data: Data?) throws {
+        lock.lock(); defer { lock.unlock() }
+        if let data { try upsert(data, name: "secret.\(name)", accessibility: kSecAttrAccessibleWhenUnlockedThisDeviceOnly) }
+        else { try delete(name: "secret.\(name)") }
+    }
+
     /// Generic local-data custody key, used for encrypted drafts and sensitive local records.
     public func encryptKey(_ context: String, protectedRecordExists: Bool = false) throws -> SymmetricKey {
         SymmetricKey(data: try key(named: "data.\(context)", accessibility: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly, requiresExisting: protectedRecordExists))
