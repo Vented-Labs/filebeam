@@ -123,7 +123,7 @@ struct Emblem: View {
             .overlay(FbIcon(icon, size: size * 0.2, tint: theme.textMuted.opacity(0.7)))
             .frame(width: width, height: height)
             .rotationEffect(.degrees(rotation * fan), anchor: .bottom)
-            .offset(x: shift * fan, y: 6 - lift * 5 + drift * phase * 2)
+            .offset(x: shift * fan, y: 6 - lift * 5 + CGFloat(drift * phase * 2))
     }
 }
 
