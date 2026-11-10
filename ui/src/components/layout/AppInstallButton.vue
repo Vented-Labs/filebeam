@@ -60,4 +60,11 @@ function restoreFocus(event: Event): void {
         display: none;
     }
 }
+/* Touch-first devices drop the entry once the page knows the device; this keeps it
+   from showing on them before then. */
+@media (hover: none) and (pointer: coarse) {
+    .app-install-entry {
+        display: none;
+    }
+}
 </style>
