@@ -388,15 +388,27 @@ fn run_with_instance_at(
                     Ok("settings-scroll-end") => window.on_next_frame(|window, cx| {
                         scroll_visual_target(window, "settings-scroll", cx);
                     }),
-                    Ok("account-scroll-end") => {
-                        shell.update(cx, |shell, cx| {
-                            shell.account.update(cx, |account, cx| {
-                                account.apply_visual_scenario("account-profile", window, cx);
-                            });
+                    Ok(scenario) if scenario.starts_with("account-") => {
+                        let account = shell.read(cx).account.clone();
+                        account.update(cx, |account, cx| {
+                            account.prepare_for_capture(scenario, window, cx);
                         });
-                        window.on_next_frame(|window, cx| {
-                            scroll_visual_target(window, "account-page-scroll", cx);
-                        });
+                        match scenario {
+                            "account-scroll-end" => window.on_next_frame(|window, cx| {
+                                scroll_visual_target(window, "account-page-scroll", cx);
+                            }),
+                            "account-report" => window.on_next_frame(move |window, cx| {
+                                account.update(cx, |account, cx| {
+                                    account.open_report_for_capture(window, cx);
+                                });
+                            }),
+                            "account-delete" => window.on_next_frame(move |window, cx| {
+                                account.update(cx, |account, cx| {
+                                    account.open_delete_for_capture(window, cx);
+                                });
+                            }),
+                            _ => {}
+                        }
                     }
                     Ok(scenario) if scenario.starts_with("inbox-") => {
                         shell.update(cx, |shell, cx| {

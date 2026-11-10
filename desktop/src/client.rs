@@ -492,16 +492,21 @@ impl Worker {
                 self.service()?.account().verify_email_link(&link)
             }
             ClientCommand::SetInboxEnabled(enabled) => {
-                self.service()?.account().set_inbox_enabled(enabled)
+                self.service()?.account().set_inbox_enabled(enabled)?;
+                lock(&self.snapshot).account.inbox_enabled = enabled;
+                Ok(())
             }
-            ClientCommand::SetNotificationChannel(channel) => self
-                .service()?
-                .account()
-                .set_notification_channel(if channel == NotificationChannel::Mail {
-                    "mail"
-                } else {
-                    "database"
-                }),
+            ClientCommand::SetNotificationChannel(channel) => {
+                self.service()?.account().set_notification_channel(
+                    if channel == NotificationChannel::Mail {
+                        "mail"
+                    } else {
+                        "database"
+                    },
+                )?;
+                lock(&self.snapshot).account.notification_channel = Some(channel);
+                Ok(())
+            }
             ClientCommand::DeleteInboxItem { id } => {
                 self.service()?.account().delete_inbox_item(&id)
             }
@@ -528,11 +533,13 @@ impl Worker {
             ClientCommand::DeleteAccount {
                 current_password,
                 confirmation,
-            } => self
-                .service()?
-                .account()
-                .delete_account(&Zeroizing::new(current_password), &confirmation)
-                .map(|_| ()),
+            } => {
+                self.service()?
+                    .account()
+                    .delete_account(&Zeroizing::new(current_password), &confirmation)?;
+                // The account is gone; nothing saved for it may outlive it.
+                self.forget_session()
+            }
             ClientCommand::Shutdown { wait_ms } => {
                 if let Some((control, _)) = self.inbox_receiver.take() {
                     control.cancel();
@@ -2076,6 +2083,9 @@ impl Worker {
         self.service = Some(service);
         self.set_account(session);
         self.refresh_policy();
+        // Without this the account reads as having no receiving key until the
+        // next full refresh.
+        let _ = self.refresh_key_custody();
         let _ = self.refresh_contacts();
         self.start_inbox_receiver()?;
         Ok(())
@@ -2097,6 +2107,8 @@ impl Worker {
             &email,
             &Zeroizing::new(password),
         )?;
+        // A new account stays signed in across restarts, as a sign-in does.
+        self.state.save_session(&service)?;
         self.service = Some(service);
         self.set_account(session);
         self.refresh_policy();
@@ -2139,13 +2151,27 @@ impl Worker {
         if let Some((control, _)) = self.inbox_receiver.take() {
             control.cancel();
         }
-        self.service()?.account().logout()?;
+        match self.service()?.account().logout() {
+            Ok(()) => {}
+            // The server already ended this session; finish signing out here.
+            Err(error) if is_auth_error(&error) => {}
+            Err(error) => return Err(error),
+        }
+        self.forget_session()
+    }
+    /// Drops the saved session and everything shown for the signed-in account.
+    fn forget_session(&mut self) -> Result<()> {
+        self.account_id.set(0);
+        if let Some((control, _)) = self.inbox_receiver.take() {
+            control.cancel();
+        }
         self.state.clear_session()?;
         self.service = None;
         let mut snapshot = lock(&self.snapshot);
         snapshot.history = HistorySnapshot::default();
         snapshot.account = AccountSnapshot::default();
         snapshot.contacts = None;
+        snapshot.inbox.clear();
         snapshot.auto_receiving = false;
         snapshot.staged_inbox.clear();
         Ok(())

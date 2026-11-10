@@ -195,6 +195,16 @@ pub fn absolute(value: &str) -> String {
     )
 }
 
+/// The HTTP status a failed request ended with, when the failure names one.
+pub fn status_code(raw: &str) -> Option<u16> {
+    let lowered = raw.to_lowercase();
+    lowered.find("returned ").and_then(|index| {
+        lowered[index + 9..]
+            .get(..3)
+            .and_then(|digits| digits.parse::<u16>().ok())
+    })
+}
+
 /// Turns a failure from the transfer core into a sentence a person can act on. Core
 /// errors can end in an HTTP status or a transport phrase; those never reach the
 /// screen raw.
@@ -207,12 +217,7 @@ pub fn readable_error(raw: &str) -> String {
         return "Something went wrong. Try again.".into();
     }
     let lowered = text.to_lowercase();
-    let status = lowered.find("returned ").and_then(|index| {
-        lowered[index + 9..]
-            .get(..3)
-            .and_then(|digits| digits.parse::<u16>().ok())
-    });
-    match status {
+    match status_code(text) {
         Some(401 | 419) => return "Your session ended. Sign in again.".into(),
         Some(403) => return "This account is not allowed to do that.".into(),
         Some(404) => {
@@ -397,6 +402,11 @@ mod tests {
         );
         assert_eq!(readable_error("  "), "Something went wrong. Try again.");
         assert_eq!(failure_title("login"), "Could not sign in");
+        assert_eq!(
+            status_code("native login returned 422 Unprocessable"),
+            Some(422)
+        );
+        assert_eq!(status_code("connection reset"), None);
         assert_eq!(count(1, "delivery", "deliveries"), "1 delivery");
         assert_eq!(count(4, "delivery", "deliveries"), "4 deliveries");
         assert_eq!(expiry("1999-01-01T00:00:00Z").0, "Expired");

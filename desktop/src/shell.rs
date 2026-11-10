@@ -21,7 +21,7 @@ use crate::{
     assets::icon,
     client::DesktopClient,
     live::Live,
-    model::{ClientCommand, DesktopSnapshot, TransferState},
+    model::{DesktopSnapshot, TransferState},
     platform::{
         ingress::{self, InstanceOwner},
         notifications::NotificationService,
@@ -293,7 +293,7 @@ impl DesktopShell {
         let transfers = cx.new(|cx| TransfersPanel::new(live.clone(), window, cx));
         let inbox = cx.new(|cx| InboxPanel::new(live.clone(), window, cx));
         let history = cx.new(|cx| HistoryPanel::new(live.clone(), window, cx));
-        let account = cx.new(|cx| AccountPanel::new(client.clone(), window, cx));
+        let account = cx.new(|cx| AccountPanel::new(live.clone(), window, cx));
         let settings = cx.new(|cx| SettingsPanel::new(client.clone(), home, window, cx));
         // The tray and notification adapters exist before the settings page asks
         // whether they can be offered.
@@ -510,9 +510,7 @@ impl DesktopShell {
         match destination {
             Destination::Inbox => self.inbox.update(cx, |inbox, cx| inbox.refresh(cx)),
             Destination::History => self.history.update(cx, |history, cx| history.refresh(cx)),
-            Destination::Account => {
-                let _ = self.client.dispatch(ClientCommand::Refresh);
-            }
+            Destination::Account => self.account.update(cx, |account, cx| account.refresh(cx)),
             _ => {}
         }
         cx.notify();

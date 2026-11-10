@@ -276,27 +276,72 @@ pub const SCENARIOS: &[Scenario] = &[
         theme: "dark",
     },
     Scenario {
-        id: "account-profile",
-        destination: "account",
-        theme: "dark",
-    },
-    Scenario {
-        id: "account-scroll-end",
-        destination: "account",
-        theme: "dark",
-    },
-    Scenario {
-        id: "account-key-wizard",
-        destination: "account",
-        theme: "dark",
-    },
-    Scenario {
         id: "account-auth",
         destination: "account",
         theme: "dark",
     },
     Scenario {
+        id: "account-register",
+        destination: "account",
+        theme: "dark",
+    },
+    Scenario {
         id: "account-recovery",
+        destination: "account",
+        theme: "dark",
+    },
+    Scenario {
+        id: "account-auth-refused",
+        destination: "account",
+        theme: "dark",
+    },
+    Scenario {
+        id: "account-report",
+        destination: "account",
+        theme: "dark",
+    },
+    Scenario {
+        id: "account-profile",
+        destination: "account",
+        theme: "dark",
+    },
+    Scenario {
+        id: "account-profile-unverified",
+        destination: "account",
+        theme: "dark",
+    },
+    Scenario {
+        id: "account-receiving",
+        destination: "account",
+        theme: "dark",
+    },
+    Scenario {
+        id: "account-key",
+        destination: "account",
+        theme: "dark",
+    },
+    Scenario {
+        id: "account-key-new",
+        destination: "account",
+        theme: "dark",
+    },
+    Scenario {
+        id: "account-key-backup",
+        destination: "account",
+        theme: "dark",
+    },
+    Scenario {
+        id: "account-key-locked",
+        destination: "account",
+        theme: "dark",
+    },
+    Scenario {
+        id: "account-contacts",
+        destination: "account",
+        theme: "dark",
+    },
+    Scenario {
+        id: "account-delete",
         destination: "account",
         theme: "dark",
     },
@@ -550,8 +595,37 @@ pub fn snapshot(id: &str) -> Option<DesktopSnapshot> {
             snapshot.history.page.next_cursor = Some("older".into());
             snapshot.history.page.data = history_entries();
         }
-        "account-profile" | "account-scroll-end" | "account-key-wizard" | "account-recovery" => {
+        "account-profile"
+        | "account-receiving"
+        | "account-key"
+        | "account-contacts"
+        | "account-delete" => {
             snapshot.account = account(true, configured_key());
+            snapshot.contacts = Some(contacts());
+            snapshot.auto_receiving = true;
+        }
+        "account-profile-unverified" | "account-key-new" => {
+            snapshot.account = account(true, KeyCustody::Unknown);
+            snapshot.account.email_verified = scenario.id == "account-key-new";
+        }
+        "account-key-backup" => {
+            snapshot.account = account(
+                true,
+                KeyCustody::PendingBackup {
+                    generation_id: "generation-fixture".into(),
+                    fingerprint: "ABCD 1234 EF56 7890".into(),
+                },
+            );
+        }
+        "account-key-locked" => {
+            snapshot.account = account(
+                true,
+                KeyCustody::Locked {
+                    version: 2,
+                    fingerprint: "ABCD 1234 EF56 7890".into(),
+                    custody_mode: "password".into(),
+                },
+            );
         }
         "settings-light" | "settings-dark" | "settings-scroll-end" => {
             snapshot.settings = SettingsSnapshot {
@@ -617,8 +691,46 @@ fn account(authenticated: bool, key_custody: KeyCustody) -> AccountSnapshot {
 fn configured_key() -> KeyCustody {
     KeyCustody::Configured {
         version: 2,
-        fingerprint: "ABCD 1234".into(),
-        custody_mode: "self".into(),
+        fingerprint: "ABCD 1234 EF56 7890".into(),
+        custody_mode: "password".into(),
+    }
+}
+
+fn contacts() -> filebeam_client_core::services::Contacts {
+    use filebeam_client_core::services::{
+        Contact, ContactIdentity, Contacts, ReceivingDefaults, contacts::EffectiveReceiving,
+    };
+    let contact =
+        |id: u64, username: &str, name: &str, status: &str, automatic: Option<bool>| Contact {
+            id,
+            username: username.into(),
+            name: name.into(),
+            status: status.into(),
+            can_send: None,
+            auto_download: automatic,
+            effective: EffectiveReceiving {
+                can_send: true,
+                auto_download: automatic.unwrap_or(true),
+            },
+        };
+    Contacts {
+        settings: ReceivingDefaults {
+            receiving_policy: "friends".into(),
+            auto_download_friends: true,
+            revision: 4,
+        },
+        contacts: vec![
+            contact(2, "ada", "Ada Okafor", "incoming", None),
+            contact(3, "edsger", "Edsger Lindqvist", "outgoing", None),
+            contact(4, "grace", "Grace Tanaka", "accepted", Some(false)),
+            contact(5, "linus", "Linus Moreau", "accepted", None),
+            contact(6, "margaret", "Margaret Adeyemi", "accepted", None),
+        ],
+        blocked: vec![ContactIdentity {
+            id: 7,
+            username: "mallory".into(),
+            name: "Mallory".into(),
+        }],
     }
 }
 
