@@ -145,7 +145,7 @@ stop_applications() {
     done
     # Caddy's control endpoint drains HTTP without its SIGTERM warning banner.
     if [ -n "$web_pid" ] && kill -0 "$web_pid" 2>/dev/null; then
-        run_filebeam /usr/local/bin/frankenphp stop --address 127.0.0.1:2019 >/dev/null 2>&1 || kill -TERM "$web_pid" 2>/dev/null || true
+        run_filebeam /usr/local/bin/frankenphp stop --address unix//run/filebeam/caddy/admin.sock >/dev/null 2>&1 || kill -TERM "$web_pid" 2>/dev/null || true
     fi
     for pid in $app_pids; do
         while kill -0 "$pid" 2>/dev/null && [ "$(date +%s)" -lt "$deadline" ]; do sleep 1; done
@@ -294,9 +294,10 @@ start_applications() {
             # HTTP health/redirect listener must not participate in TLS automation.
             /usr/local/bin/php -r '
 $path = "/run/filebeam/caddy.json";
+$listener = ":".(getenv("FILEBEAM_HTTP_PORT") ?: "8080");
 $config = json_decode(file_get_contents($path), flags: JSON_THROW_ON_ERROR);
 foreach ($config->apps->http->servers as $server) {
-    if (in_array(":8080", $server->listen, true)) {
+    if (in_array($listener, $server->listen, true)) {
         $server->automatic_https ??= new stdClass;
         $server->automatic_https->disable = true;
     }
@@ -305,6 +306,8 @@ file_put_contents($path, json_encode($config, JSON_THROW_ON_ERROR | JSON_UNESCAP
 '
             if [ "$(id -u)" = 0 ]; then chown -h root:filebeam /run/filebeam/caddy.json; fi
             chmod 0640 /run/filebeam/caddy.json
+            # A forcibly stopped server can leave its control socket behind.
+            rm -f /run/filebeam/caddy/admin.sock
             spawn_app web /usr/local/bin/frankenphp run --config /run/filebeam/caddy.json
             ;;
     esac

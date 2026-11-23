@@ -155,6 +155,7 @@ run_variant() {
         if [[ $current_variant == light ]]; then
             FILEBEAM_IMAGE="$current_image" bash "$root/tests/docker/tls.sh"
             FILEBEAM_IMAGE="$current_image" bash "$root/tests/docker/services.sh"
+            FILEBEAM_IMAGE="$current_image" bash "$root/tests/docker/network.sh"
         fi
     fi
     verify_omnibus

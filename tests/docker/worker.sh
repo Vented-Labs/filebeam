@@ -73,7 +73,7 @@ wait_healthy() {
 wait_worker_mode() {
     local deadline=$((SECONDS + 60)) active_config=''
     while ((SECONDS < deadline)); do
-        active_config=$(docker exec "$container" curl --silent --show-error http://127.0.0.1:2019/config/ 2>/dev/null || true)
+        active_config=$(docker exec "$container" curl --silent --show-error --unix-socket /run/filebeam/caddy/admin.sock http://localhost/config/ 2>/dev/null || true)
         [[ $active_config == *'"file_name":"/opt/filebeam/backend/public/frankenphp-worker.php","num":1'* ]] && return 0
         sleep 1
     done

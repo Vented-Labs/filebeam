@@ -197,7 +197,7 @@ PHP
 wait_installed_worker() {
     local name=$1 first_pid='' second_pid='' deadline=$((SECONDS + 60))
     while ((SECONDS < deadline)); do
-        if docker exec "$name" sh -ec 'curl -fsS --max-time 5 http://127.0.0.1:2019/config/ | grep -Fq "/opt/filebeam/backend/public/frankenphp-worker.php"' 2>/dev/null; then
+        if docker exec "$name" sh -ec 'curl -fsS --max-time 5 --unix-socket /run/filebeam/caddy/admin.sock http://localhost/config/ | grep -Fq "/opt/filebeam/backend/public/frankenphp-worker.php"' 2>/dev/null; then
             first_pid=$(docker exec "$name" pgrep -o -f 'frankenphp.*run')
             sleep 3
             second_pid=$(docker exec "$name" pgrep -o -f 'frankenphp.*run')

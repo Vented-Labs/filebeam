@@ -9,6 +9,8 @@ https_protocols='h1 h2'
 name=${FILEBEAM_SERVER_NAME:-}
 bootstrap=${FILEBEAM_BOOTSTRAP_ON_START:-false}
 shutdown_timeout=${FILEBEAM_SHUTDOWN_TIMEOUT:-90}
+http_port=${FILEBEAM_HTTP_PORT:-8080}
+https_port=${FILEBEAM_HTTPS_PORT:-8443}
 
 run_filebeam() {
     if [ "$(id -u)" = 0 ]; then
@@ -16,6 +18,15 @@ run_filebeam() {
     else
         "$@"
     fi
+}
+
+validate_port() {
+    case "$2" in
+        ''|[1-9]*[!0-9]*|[!1-9]*) ;;
+        *) [ "${#2}" -le 5 ] && [ "$2" -ge 1024 ] && [ "$2" -le 65535 ] && return 0 ;;
+    esac
+    printf '%s must be an integer from 1024 to 65535.\n' "$1" >&2
+    exit 64
 }
 
 validate_paths() {
@@ -46,6 +57,8 @@ if [ -z "$name" ] && [ -n "${APP_URL:-}" ]; then
 fi
 case "$bootstrap" in true|false) ;; *) printf '%s\n' 'FILEBEAM_BOOTSTRAP_ON_START must be true or false.' >&2; exit 64 ;; esac
 case "$http3" in true|false) ;; *) printf '%s\n' 'FILEBEAM_HTTP3 must be true or false.' >&2; exit 64 ;; esac
+validate_port FILEBEAM_HTTP_PORT "$http_port"
+validate_port FILEBEAM_HTTPS_PORT "$https_port"
 case "$shutdown_timeout" in ''|*[!0-9]*) printf '%s\n' 'FILEBEAM_SHUTDOWN_TIMEOUT must be an integer from 1 to 300.' >&2; exit 64 ;; esac
 if [ "$shutdown_timeout" -lt 1 ] || [ "$shutdown_timeout" -gt 300 ]; then
     printf '%s\n' 'FILEBEAM_SHUTDOWN_TIMEOUT must be an integer from 1 to 300.' >&2
@@ -69,10 +82,14 @@ case "$tls" in
             }
             echo rtrim($url, "/");
         ' "$name" "${APP_URL:-}")
+        if [ "$http_port" = "$https_port" ]; then
+            printf '%s\n' 'FILEBEAM_HTTP_PORT and FILEBEAM_HTTPS_PORT must differ.' >&2
+            exit 64
+        fi
         auto_https='    auto_https disable_redirects'
         [ "$tls" = certificate ] && auto_https='    auto_https off'
         redirect="
-http://:8080 {
+http://:$http_port {
     route {
         @health path /up
         handle @health {
@@ -94,17 +111,21 @@ if [ "$tls" = certificate ]; then
         exit 64
     fi
 fi
-validate_paths "$data/app/framework/cache/data" "$data/app/framework/sessions" "$data/app/framework/views" "$data/app/logs" "$data/config" "$data/database" "$data/caddy" /run/filebeam/cache /run/filebeam/views /tmp
+validate_paths "$data/app/framework/cache/data" "$data/app/framework/sessions" "$data/app/framework/views" "$data/app/logs" "$data/config" "$data/database" "$data/caddy" /run/filebeam/cache /run/filebeam/views /run/filebeam/caddy /tmp
 if [ "${FILEBEAM_VARIANT:-light}" = omnibus ]; then
     validate_paths "$data/postgresql/18/docker" "$data/valkey" /run/filebeam/postgresql /run/filebeam/valkey
 fi
-mkdir -p "$data/app/framework/cache/data" "$data/app/framework/sessions" "$data/app/framework/views" "$data/app/logs" "$data/config" "$data/database" "$data/caddy" /run/filebeam/cache /run/filebeam/views /tmp
+mkdir -p "$data/app/framework/cache/data" "$data/app/framework/sessions" "$data/app/framework/views" "$data/app/logs" "$data/config" "$data/database" "$data/caddy" /run/filebeam/cache /run/filebeam/views /run/filebeam/caddy /tmp
+# Caddy's control API is a unix socket so no TCP port is shared with other
+# processes in the same network namespace.
+chmod 0700 /run/filebeam/caddy
+rm -f /run/filebeam/caddy/admin.sock
 [ "$(id -u)" = 0 ] && chmod 1777 /tmp
 
 if [ "$(id -u)" = 0 ]; then
     chown -h root:root /run/filebeam
     chmod 0755 /run/filebeam
-    chown -h filebeam:filebeam "$data/app" "$data/app/framework" "$data/app/framework/cache" "$data/app/framework/cache/data" "$data/app/framework/sessions" "$data/app/framework/views" "$data/app/logs" "$data/config" "$data/database" "$data/caddy" /run/filebeam/cache /run/filebeam/views
+    chown -h filebeam:filebeam "$data/app" "$data/app/framework" "$data/app/framework/cache" "$data/app/framework/cache/data" "$data/app/framework/sessions" "$data/app/framework/views" "$data/app/logs" "$data/config" "$data/database" "$data/caddy" /run/filebeam/cache /run/filebeam/views /run/filebeam/caddy
     if mountpoint -q /storage; then validate_paths /storage; chown -h filebeam:filebeam /storage; fi
     if [ "${FILEBEAM_VARIANT:-light}" = omnibus ]; then
         mkdir -p "$data/postgresql/18/docker" "$data/valkey" /run/filebeam/postgresql /run/filebeam/valkey
@@ -119,8 +140,8 @@ if [ "$bootstrap" = true ]; then
     unset FILEBEAM_SETUP_TOKEN FILEBEAM_SETUP_TOKEN_FILE
 fi
 
-site="https://$name:8443"
-[ "$tls" = proxy ] && site=':8080'
+site="https://$name:$https_port"
+[ "$tls" = proxy ] && site=":$http_port"
 # Setup uses ordinary request PHP. The supervisor swaps this fragment for the
 # persistent Octane worker only after the installer has completed.
 validate_paths /run/filebeam/php-server.caddy /run/filebeam/worker.caddy /run/filebeam/tls.caddy /run/filebeam/Caddyfile
@@ -148,7 +169,7 @@ tls_server_name=${name:-localhost}
 tls_server_name=${tls_server_name#\[}
 tls_server_name=${tls_server_name%\]}
 export FILEBEAM_AUTO_HTTPS="$auto_https" FILEBEAM_HTTP_REDIRECT="$redirect" FILEBEAM_SITE="$site" FILEBEAM_CADDY_STORAGE="$data/caddy" FILEBEAM_TLS_SERVER_NAME="$tls_server_name" FILEBEAM_SHUTDOWN_TIMEOUT="$shutdown_timeout"
-export FILEBEAM_HTTPS_PROTOCOLS="$https_protocols"
+export FILEBEAM_HTTPS_PROTOCOLS="$https_protocols" FILEBEAM_HTTP_PORT="$http_port" FILEBEAM_HTTPS_PORT="$https_port"
 cp /etc/filebeam/Caddyfile /run/filebeam/Caddyfile
 /usr/local/bin/frankenphp fmt --overwrite /run/filebeam/Caddyfile
 exec "$@"

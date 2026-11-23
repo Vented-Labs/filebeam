@@ -11,6 +11,8 @@ variant=${FILEBEAM_VARIANT:-light}
 data=${FILEBEAM_DATA_DIR:-/data}
 environment="$data/config/.env"
 host=${FILEBEAM_SERVER_NAME:-localhost}
+http_port=${FILEBEAM_HTTP_PORT:-8080}
+https_port=${FILEBEAM_HTTPS_PORT:-8443}
 . /run/filebeam/app.env 2>/dev/null || true
 app_php() {
     if [ "$(id -u)" = 0 ]; then
@@ -30,7 +32,7 @@ elif [ -z "${FILEBEAM_SERVER_NAME:-}" ] && [ -f "$environment" ]; then
 fi
 
 if [ "$role" = all ] || [ "$role" = web ]; then
-    curl --silent --show-error --max-time 5 -H "Host: $host" -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/up | grep -qx 200
+    curl --silent --show-error --max-time 5 -H "Host: $host" -o /dev/null -w '%{http_code}' "http://127.0.0.1:$http_port/up" | grep -qx 200
     if [ "${FILEBEAM_TLS:-proxy}" = auto ] || [ "${FILEBEAM_TLS:-proxy}" = certificate ]; then
         ca=/etc/ssl/certs/ca-certificates.crt
         local_ca="$data/caddy/pki/authorities/local/root.crt"
@@ -46,7 +48,7 @@ if [ "$role" = all ] || [ "$role" = web ]; then
                 mv "$temporary" "$ca"
             fi
         fi
-        curl --silent --show-error --max-time 5 --cacert "$ca" --resolve "$host:8443:127.0.0.1" -o /dev/null -w '%{http_code}' "https://$host:8443/up" | grep -qx 200
+        curl --silent --show-error --max-time 5 --cacert "$ca" --resolve "$host:$https_port:127.0.0.1" -o /dev/null -w '%{http_code}' "https://$host:$https_port/up" | grep -qx 200
     fi
 fi
 if [ "$variant" = omnibus ] && [ "$role" = all ]; then
