@@ -41,6 +41,8 @@ Choose a TLS mode:
 - `FILEBEAM_TLS=certificate`: direct HTTPS on container port 8443 using mounted PEM files at `FILEBEAM_TLS_CERT_FILE` and `FILEBEAM_TLS_KEY_FILE`. Include intermediate certificates in the certificate file. Both files must be readable by UID/GID `10001:10001`. Replace the mounted files and restart the container to renew them.
 - `FILEBEAM_TLS=auto`: direct HTTPS on container port 8443 with Caddy-managed certificates. Public certificate issuance requires DNS and ACME challenge traffic on external ports 80/443 to reach Caddy's corresponding container listeners. High published ports alone do not satisfy ACME challenges.
 
+Container port numbers below are defaults. Set `FILEBEAM_HTTP_PORT` (default `8080`) and `FILEBEAM_HTTPS_PORT` (default `8443`) to move the HTTP and HTTPS listeners, for example when several containers share one network namespace. Both accept `1024`–`65535`; in direct TLS modes they must differ. The container refuses to start with an invalid value. These variables change only the listeners inside the container, so update port mappings and health probes to match; `APP_URL` still names the public URL.
+
 For direct HTTPS, set `APP_URL` to the root HTTPS URL users reach, including any non-default published port. Its hostname must match `FILEBEAM_SERVER_NAME` when that variable is supplied. HTTP on container port 8080 serves `/up` and redirects other requests to the complete `APP_URL`. The HTTP listener need not be published when using a supplied certificate.
 
 ### Optional HTTP/3
@@ -74,7 +76,7 @@ docker logs <container>
 
 Read the installation token from the supervisor logs, configure the trusted proxy address or CIDR, restart the container, and complete setup through that proxy. Treat the token and initial logs as sensitive.
 
-The health check verifies HTTP and, in direct TLS modes, HTTPS with certificate validation. Supplied certificates are added to its trust bundle; set `FILEBEAM_TLS_CA_FILE` to a separate PEM CA bundle when needed. It also checks the selected role, database, cache, and scheduler state as applicable. Caddy's control API is loopback-only at `127.0.0.1:2019`, is not a public service, and logs only control errors; normal shutdown warnings are suppressed.
+The health check verifies HTTP and, in direct TLS modes, HTTPS with certificate validation. Supplied certificates are added to its trust bundle; set `FILEBEAM_TLS_CA_FILE` to a separate PEM CA bundle when needed. It also checks the selected role, database, cache, and scheduler state as applicable. Caddy's control API listens only on the private unix socket `/run/filebeam/caddy/admin.sock`, binds no TCP port, and logs only control errors; normal shutdown warnings are suppressed.
 
 ## Resource Controls
 

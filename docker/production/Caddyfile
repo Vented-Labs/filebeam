@@ -1,13 +1,13 @@
 {
-    admin 127.0.0.1:2019
+    admin unix//run/filebeam/caddy/admin.sock|0600
     skip_install_trust
     persist_config off
     # IP-address clients omit SNI; select the configured site's certificate.
     default_sni {$FILEBEAM_TLS_SERVER_NAME:localhost}
     grace_period {$FILEBEAM_SHUTDOWN_TIMEOUT:90}s
     {$FILEBEAM_AUTO_HTTPS}
-    http_port 8080
-    https_port 8443
+    http_port {$FILEBEAM_HTTP_PORT}
+    https_port {$FILEBEAM_HTTPS_PORT}
     # Caddy labels even successful /stop requests as warnings. Keep control-API
     # errors, while leaving HTTP/PHP warnings and errors at their normal levels.
     log {
@@ -17,10 +17,10 @@
         include admin.api
         level ERROR
     }
-    servers :8080 {
+    servers :{$FILEBEAM_HTTP_PORT} {
         protocols h1
     }
-    servers :8443 {
+    servers :{$FILEBEAM_HTTPS_PORT} {
         protocols {$FILEBEAM_HTTPS_PROTOCOLS:h1 h2}
     }
     frankenphp {

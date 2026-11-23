@@ -18,7 +18,7 @@ wait_worker_ready() {
 
     while ((SECONDS < startup_deadline)); do
         # Capture the whole response: piping curl to grep -q can close the pipe early.
-        if config=$(docker exec "$container" curl --silent --fail --max-time 5 http://127.0.0.1:2019/config/); then
+        if config=$(docker exec "$container" curl --silent --fail --max-time 5 --unix-socket /run/filebeam/caddy/admin.sock http://localhost/config/); then
             [[ $config == *'/opt/filebeam/backend/public/frankenphp-worker.php'* ]] && config_ready=true || config_ready=false
         else
             config_ready=false

@@ -81,7 +81,7 @@
     },
     "composerResolved": {
         "count": 181,
-        "sha256": "42450457a30c83c9fb2b14aa4641d79597f894ba8262b70e0d559e1f92cb017c",
+        "sha256": "d4135da10185a4e60cce3cd08c5afad0ea5b33fd1638477ce494c0f2d2bccc31",
         "exceptions": {
             "blade-ui-kit/blade-heroicons": "2.7.0"
         }

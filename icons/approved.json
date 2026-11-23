@@ -111,7 +111,19 @@
             "variant": "null",
             "note": "iconsax@0.1.1 serializes this Twotone artwork under a null key; the checker requires the Twotone opacity group."
         },
-        "tag": "tag"
+        "tag": "tag",
+        "align-start": "textalign-justifyleft",
+        "align-center": "textalign-center",
+        "align-end": "textalign-justifyright",
+        "align-justify": "textalign-justifycenter",
+        "minus": "minus",
+        "paragraph": "paragraphspacing",
+        "smallcaps": "smallcaps",
+        "firstline": "firstline",
+        "eraser": "eraser",
+        "table-add": "grid-add",
+        "table-delete": "grid-eraser",
+        "table-edit": "grid-edit"
     },
     "customIcons": {
         "http-server": {
