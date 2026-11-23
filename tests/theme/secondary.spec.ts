@@ -24,7 +24,10 @@ test('Filament keeps neutral gray and readable primary roles for cool and warm i
             await page.getByRole('button', { name: 'Save settings', exact: true }).click();
             await expect(page.locator('#filebeam-theme')).toHaveAttribute('data-primary', seed);
             for (const mode of ['light', 'dark']) {
-                await page.evaluate((mode) => localStorage.setItem('filament:theme:mode', mode), mode);
+                await page.evaluate(
+                    (mode) => localStorage.setItem('filament:theme:mode', mode),
+                    mode,
+                );
                 await page.reload();
                 await expect(page.locator('html')).toHaveAttribute('data-fb-theme', mode);
                 await page.evaluate(() => document.fonts.ready);
@@ -76,7 +79,10 @@ test('Filament keeps neutral gray and readable primary roles for cool and warm i
                     reducedMotion: 'reduce',
                 });
                 try {
-                    await guest.addInitScript((mode) => localStorage.setItem('filament:theme:mode', mode), mode);
+                    await guest.addInitScript(
+                        (mode) => localStorage.setItem('filament:theme:mode', mode),
+                        mode,
+                    );
                     const login = await guest.newPage();
                     await login.goto('/admin/login');
                     await login.evaluate(() => document.fonts.ready);
