@@ -44,12 +44,12 @@ test('admin login defaults to dark and respects saved theme choices', async ({ p
     ]);
     expect(contrastRatio(foreground, background)).toBeGreaterThanOrEqual(4.5);
 
-    await page.evaluate(() => localStorage.setItem('filament:theme:mode', 'light'));
+    await page.evaluate(() => localStorage.setItem('theme', 'light'));
     await page.reload();
     await expect(page.locator('html')).not.toHaveClass(/dark/);
     await expect(page.locator('.fi-logo-light')).toBeVisible();
 
-    await page.evaluate(() => localStorage.setItem('filament:theme:mode', 'dark'));
+    await page.evaluate(() => localStorage.setItem('theme', 'dark'));
     await page.reload();
     await expect(page.locator('html')).toHaveClass(/dark/);
 });

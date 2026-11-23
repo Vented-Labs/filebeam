@@ -98,7 +98,7 @@ test('defaults the admin panel to dark while retaining persisted light and dark 
     $this->get('/admin/login')
         ->assertOk()
         ->assertSee('class="fi"', false)
-        ->assertSee("localStorage.getItem('filament:theme:mode')", false)
+        ->assertSee("localStorage.getItem('theme')", false)
         ->assertSee("?? 'dark'", false)
         ->assertSee('brand/filebeam-logo-header-on-light.svg', false)
         ->assertSee('brand/filebeam-logo-header.svg', false)
