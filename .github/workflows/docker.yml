@@ -37,12 +37,12 @@ jobs:
             arch: arm64
             runner: blacksmith-4vcpu-ubuntu-2404-arm
     steps:
-      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
+      - uses: useblacksmith/checkout@75c49b6ed30ce59336e9252425796cfcfac155f8 # v1
         with:
           persist-credentials: false
           dissociate: true
       - name: Set up cached production builder
-        uses: useblacksmith/setup-docker-builder@19215110ab936351210feebdfa5b440b4493e184 # v2
+        uses: useblacksmith/setup-docker-builder@9657a6e02ca6445e6d6ce5ffaf370f4828dea50d # v2
         with:
           # Same workload key in CI and Release; architectures have separate disks.
           cache-key: docker/production/Dockerfile

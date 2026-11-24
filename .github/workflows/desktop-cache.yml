@@ -54,7 +54,7 @@ jobs:
       FILEBEAM_DESKTOP_BUILD_ONLY: ${{ matrix.target == 'x86_64-apple-darwin' && '1' || '0' }}
       FILEBEAM_BINARY_SUFFIX: ${{ matrix.target == 'x86_64-pc-windows-msvc' && '.exe' || '' }}
     steps:
-      - uses: useblacksmith/checkout@25227e61ff9dafe400e22fa487b673eac4e4409a # v1
+      - uses: useblacksmith/checkout@75c49b6ed30ce59336e9252425796cfcfac155f8 # v1
         with:
           persist-credentials: false
           dissociate: true
